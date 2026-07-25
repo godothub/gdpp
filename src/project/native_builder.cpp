@@ -11,6 +11,7 @@
 #include <iomanip>
 #include <iterator>
 #include <optional>
+#include <set>
 #include <sstream>
 #include <string_view>
 #include <system_error>
@@ -51,6 +52,77 @@ std::optional<std::string> read_file(const std::filesystem::path& path) {
     if (!input)
         return std::nullopt;
     return std::string{std::istreambuf_iterator<char>{input}, std::istreambuf_iterator<char>{}};
+}
+
+std::vector<std::string> quoted_include_names(std::string_view contents) {
+    std::vector<std::string> result;
+    std::size_t line_begin = 0;
+    while (line_begin < contents.size()) {
+        const auto line_end = contents.find('\n', line_begin);
+        const auto line = contents.substr(line_begin, line_end == std::string_view::npos
+                                                          ? contents.size() - line_begin
+                                                          : line_end - line_begin);
+        auto offset = line.find_first_not_of(" \t");
+        if (offset != std::string_view::npos && line[offset] == '#') {
+            offset = line.find_first_not_of(" \t", offset + 1);
+            constexpr std::string_view directive{"include"};
+            if (offset != std::string_view::npos &&
+                line.substr(offset, directive.size()) == directive) {
+                offset = line.find_first_not_of(" \t", offset + directive.size());
+                if (offset != std::string_view::npos && line[offset] == '"') {
+                    const auto end = line.find('"', offset + 1);
+                    if (end != std::string_view::npos && end != offset + 1)
+                        result.emplace_back(line.substr(offset + 1, end - offset - 1));
+                }
+            }
+        }
+        if (line_end == std::string_view::npos)
+            break;
+        line_begin = line_end + 1;
+    }
+    return result;
+}
+
+std::filesystem::path
+resolve_quoted_include(const std::filesystem::path& including_file, std::string_view name,
+                       const std::vector<std::filesystem::path>& include_directories) {
+    const auto relative = path_from_utf8(name);
+    std::vector<std::filesystem::path> candidates{including_file.parent_path() / relative};
+    for (const auto& directory : include_directories)
+        candidates.push_back(directory / relative);
+    std::error_code error;
+    for (auto& candidate : candidates) {
+        candidate = candidate.lexically_normal();
+        if (std::filesystem::is_regular_file(candidate, error))
+            return candidate;
+        error.clear();
+    }
+    // Preserve an unresolved quoted include as an input. Its missing timestamp forces the
+    // translation unit through the compiler, which then emits the authoritative diagnostic
+    // instead of reusing a stale object built before the dependency disappeared.
+    return candidates.front().lexically_normal();
+}
+
+void append_translation_unit_inputs(const std::filesystem::path& source,
+                                    const std::vector<std::filesystem::path>& include_directories,
+                                    std::vector<std::filesystem::path>& inputs) {
+    std::vector<std::filesystem::path> pending{source.lexically_normal()};
+    std::set<std::filesystem::path> visited;
+    while (!pending.empty()) {
+        auto current = std::move(pending.back());
+        pending.pop_back();
+        if (!visited.insert(current).second)
+            continue;
+        inputs.push_back(current);
+        const auto contents = read_file(current);
+        if (!contents)
+            continue;
+        for (const auto& name : quoted_include_names(*contents)) {
+            auto dependency = resolve_quoted_include(current, name, include_directories);
+            if (visited.find(dependency) == visited.end())
+                pending.push_back(std::move(dependency));
+        }
+    }
 }
 
 std::optional<BridgeBuildInputs> read_bridge_lock(const std::filesystem::path& path,
@@ -1263,7 +1335,7 @@ NativeBuildPlan NativeBuilder::plan(const NativeBuildOptions& options) const {
         binary_directory / native_library_name(options.profile, options.platform,
                                                options.architecture, options.web_thread_mode);
 
-    std::vector<std::filesystem::path> compile_inputs{
+    std::vector<std::filesystem::path> common_compile_inputs{
         build_configuration,
         sdk_manifest_path(options),
         options.sdk_root / "include/gdpp/runtime/variant_ops.hpp",
@@ -1271,20 +1343,21 @@ NativeBuildPlan NativeBuilder::plan(const NativeBuildOptions& options) const {
         options.sdk_root / "include/gdpp/numeric/integer_semantics.hpp",
     };
     if (has_attached_runtime) {
-        compile_inputs.push_back(options.sdk_root / "include/gdpp/runtime/attached_script.hpp");
-        compile_inputs.insert(compile_inputs.end(), attached_runtime_sources.begin(),
-                              attached_runtime_sources.end());
+        common_compile_inputs.push_back(options.sdk_root /
+                                        "include/gdpp/runtime/attached_script.hpp");
+        common_compile_inputs.insert(common_compile_inputs.end(), attached_runtime_sources.begin(),
+                                     attached_runtime_sources.end());
     }
     const auto bridge_lock = options.project_output_directory / "bridge.lock";
     if (std::filesystem::is_regular_file(bridge_lock))
-        compile_inputs.push_back(bridge_lock);
-    compile_inputs.insert(compile_inputs.end(), bridge_inputs->manifests.begin(),
-                          bridge_inputs->manifests.end());
+        common_compile_inputs.push_back(bridge_lock);
+    common_compile_inputs.insert(common_compile_inputs.end(), bridge_inputs->manifests.begin(),
+                                 bridge_inputs->manifests.end());
     for (const auto& include : bridge_inputs->include_directories) {
         for (std::filesystem::recursive_directory_iterator iterator{include, error}, end;
              !error && iterator != end; iterator.increment(error)) {
             if (iterator->is_regular_file())
-                compile_inputs.push_back(iterator->path());
+                common_compile_inputs.push_back(iterator->path());
         }
         if (error) {
             result.diagnostics.push_back("cannot inspect third-party bridge headers in '" +
@@ -1292,14 +1365,10 @@ NativeBuildPlan NativeBuilder::plan(const NativeBuildOptions& options) const {
             return result;
         }
     }
-    std::sort(compile_inputs.begin(), compile_inputs.end());
-    compile_inputs.erase(std::unique(compile_inputs.begin(), compile_inputs.end()),
-                         compile_inputs.end());
-    for (std::filesystem::directory_iterator iterator{generated, error}, end;
-         !error && iterator != end; iterator.increment(error)) {
-        if (iterator->is_regular_file() && iterator->path().extension() == ".hpp")
-            compile_inputs.push_back(iterator->path());
-    }
+    std::sort(common_compile_inputs.begin(), common_compile_inputs.end());
+    common_compile_inputs.erase(
+        std::unique(common_compile_inputs.begin(), common_compile_inputs.end()),
+        common_compile_inputs.end());
 
     if (options.platform == NativePlatform::ios) {
         const auto deployment_target =
@@ -1339,8 +1408,8 @@ NativeBuildPlan NativeBuilder::plan(const NativeBuildOptions& options) const {
             for (const auto& source : sources) {
                 const auto object = slice_objects / (safe_stem(source) + ".o");
                 objects.push_back(object);
-                auto inputs = compile_inputs;
-                inputs.push_back(source);
+                auto inputs = common_compile_inputs;
+                append_translation_unit_inputs(source, includes, inputs);
                 if (*build_configuration_changed || older_than(object, inputs)) {
                     result.commands.push_back(
                         ios_compile_command(options, slice, source, object, includes));
@@ -1426,8 +1495,8 @@ NativeBuildPlan NativeBuilder::plan(const NativeBuildOptions& options) const {
         const auto object =
             objects_directory / (safe_stem(source) + object_extension(options.platform));
         objects.push_back(object);
-        auto inputs = compile_inputs;
-        inputs.push_back(source);
+        auto inputs = common_compile_inputs;
+        append_translation_unit_inputs(source, includes, inputs);
         if (*build_configuration_changed || older_than(object, inputs)) {
             result.commands.push_back(compile_command(options, source, object, includes));
             compiled = true;
