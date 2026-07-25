@@ -44,6 +44,26 @@ func _verify_export_runtime() -> void:
         _fail("export did not preserve the provider lifecycle callback")
         return
 
+    var onready_probe: Variant = get_node("OnreadyProbe")
+    if onready_probe == null or not onready_probe.initialized():
+        _fail("attached onready-only script did not receive implicit ready initialization")
+        return
+
+    var inherited_onready_probe: Variant = get_node("InheritedOnreadyProbe")
+    if inherited_onready_probe == null or not inherited_onready_probe.initialized():
+        _fail("attached onready initialization did not run base-first before explicit ready")
+        return
+
+    var inner_onready_probe: Variant = get_node("InnerOnreadyProbe")
+    if inner_onready_probe == null or not inner_onready_probe.verify_inner_onready():
+        _fail("attached internal class did not receive implicit ready initialization")
+        return
+
+    var message_dispatch_probe: Variant = get_node("MessageDispatchProbe")
+    if message_dispatch_probe == null or not message_dispatch_probe.dispatch_burst(128):
+        _fail("binary message dispatch did not preserve onready arrays, callables, or signals")
+        return
+
     var data := load("res://vendor_data.tres")
     if data == null or not data.is_class(&"VendorResource"):
         _fail("export changed the provider-owned Resource type")

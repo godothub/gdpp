@@ -1,8 +1,12 @@
-[gd_scene load_steps=5 format=3]
+[gd_scene load_steps=9 format=3]
 
 [ext_resource type="Script" path="res://export_main.gd" id="1_script"]
 [ext_resource type="Shader" path="res://runtime_shader.gdshader" id="2_shader"]
 [ext_resource type="Material" path="res://prebound_shader_material.tres" id="3_material"]
+[ext_resource type="Script" path="res://onready_probe.gd" id="4_onready"]
+[ext_resource type="Script" path="res://onready_inheritance_probe.gd" id="5_onready_inheritance"]
+[ext_resource type="Script" path="res://inner_onready_probe.gd" id="6_inner_onready"]
+[ext_resource type="Script" path="res://message_dispatch_probe.gd" id="7_message_dispatch"]
 
 [sub_resource type="ShaderMaterial" id="ShaderMaterial_inline"]
 shader = ExtResource("2_shader")
@@ -19,3 +23,25 @@ material = SubResource("ShaderMaterial_inline")
 
 [node name="PreboundExternalShader" type="TextureRect" parent="."]
 material = ExtResource("3_material")
+
+[node name="OnreadyProbe" type="Node" parent="."]
+script = ExtResource("4_onready")
+
+[node name="Marker" type="Node" parent="OnreadyProbe"]
+
+[node name="InheritedOnreadyProbe" type="Node" parent="."]
+script = ExtResource("5_onready_inheritance")
+
+[node name="BaseMarker" type="Node" parent="InheritedOnreadyProbe"]
+
+[node name="DerivedMarker" type="Node" parent="InheritedOnreadyProbe"]
+
+[node name="InnerOnreadyProbe" type="Node" parent="."]
+script = ExtResource("6_inner_onready")
+
+[node name="MessageDispatchProbe" type="Node" parent="."]
+script = ExtResource("7_message_dispatch")
+
+[node name="Item0" type="Node" parent="MessageDispatchProbe"]
+
+[node name="Item1" type="Node" parent="MessageDispatchProbe"]
