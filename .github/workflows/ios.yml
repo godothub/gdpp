@@ -139,7 +139,7 @@ jobs:
           grep -q 'GDPP_AOT_SUMMARY scenes=' "$root/export.log"
           diagnostics="$root/import-export-diagnostics.log"
           forbidden_diagnostics="$root/forbidden-diagnostics.log"
-          grep -E '(^| )ERROR:|SCRIPT ERROR:|WARNING:|Unable to open' \
+          grep -Eh '(^| )ERROR:|SCRIPT ERROR:|WARNING:|Unable to open' \
             "$root/import.log" "$root/export.log" > "$diagnostics" || true
           # Godot 4.6.2's official iOS exporter queries this removed optional
           # setting while extracting its own Xcode template. Keep the exception
