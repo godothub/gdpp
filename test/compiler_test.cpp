@@ -2230,13 +2230,66 @@ TEST_CASE("compiler preserves typed subscript and builtin component scalar seman
 
     REQUIRE(result.success);
     REQUIRE(result.unit.source.find("_gdpp_subscript_container_") != std::string::npos);
-    REQUIRE(result.unit.source.find("static_cast<int64_t>(gdpp::runtime::to_variant(values[") !=
-            std::string::npos);
+    REQUIRE(result.unit.source.find("gdpp::runtime::checked_array_get("
+                                    "_gdpp_subscript_target_") != std::string::npos);
     REQUIRE(result.unit.source.find("static_cast<int64_t>(values[") == std::string::npos);
-    REQUIRE(result.unit.source.find("static_cast<int64_t>(_gdpp_subscript_container_") !=
-            std::string::npos);
+    REQUIRE(result.unit.source.find("gdpp::runtime::checked_array_get("
+                                    "_gdpp_subscript_container_") != std::string::npos);
+    REQUIRE(result.unit.source.find("gdpp::runtime::checked_array_set("
+                                    "_gdpp_subscript_container_") != std::string::npos);
+    REQUIRE(result.unit.source.find("gdpp::runtime::checked_packed_array_get("
+                                    "_gdpp_subscript_container_") != std::string::npos);
+    REQUIRE(result.unit.source.find("gdpp::runtime::checked_packed_array_set("
+                                    "_gdpp_subscript_container_") != std::string::npos);
     REQUIRE(result.unit.source.find("static_cast<double>(vector.x)") != std::string::npos);
     REQUIRE(result.unit.source.find("gdpp::runtime::binary") == std::string::npos);
+}
+
+TEST_CASE("compiler contains invalid native sequence indexes instead of dereferencing them") {
+    const gdpp::Compiler compiler;
+    const auto result = compiler.compile(
+        "checked_subscripts.gd",
+        "func read(values: Array[String], bytes: PackedByteArray, index: int) -> String:\n"
+        "    values[index] = \"changed\"\n"
+        "    bytes[index] = 7\n"
+        "    return values[index] + str(bytes[index])\n");
+
+    REQUIRE(result.success);
+    REQUIRE(result.unit.source.find("gdpp::runtime::checked_array_get("
+                                    "_gdpp_subscript_target_") != std::string::npos);
+    REQUIRE(result.unit.source.find("gdpp::runtime::checked_array_set(") != std::string::npos);
+    REQUIRE(result.unit.source.find("gdpp::runtime::checked_packed_array_get("
+                                    "_gdpp_subscript_target_") != std::string::npos);
+    REQUIRE(result.unit.source.find("gdpp::runtime::checked_packed_array_set(") !=
+            std::string::npos);
+    REQUIRE(result.unit.source.find("values[index]") == std::string::npos);
+    REQUIRE(result.unit.source.find("bytes.native()[index]") == std::string::npos);
+}
+
+TEST_CASE("compiler sequences checked subscript receivers before indexes") {
+    const gdpp::Compiler compiler;
+    const auto result = compiler.compile(
+        "ordered_subscripts.gd",
+        "func values() -> Array[int]:\n"
+        "    return [7]\n"
+        "func index() -> int:\n"
+        "    return 0\n"
+        "func read() -> int:\n"
+        "    return values()[index()]\n");
+
+    REQUIRE(result.success);
+    const auto target = result.unit.source.find("auto &&_gdpp_subscript_target_");
+    const auto receiver = result.unit.source.find("values()", target);
+    const auto index_temporary = result.unit.source.find("const auto _gdpp_subscript_index_", target);
+    const auto index = result.unit.source.find("index()", index_temporary);
+    const auto read = result.unit.source.find("gdpp::runtime::checked_array_get("
+                                              "_gdpp_subscript_target_",
+                                              index);
+    REQUIRE(target != std::string::npos);
+    REQUIRE(receiver > target);
+    REQUIRE(index_temporary > receiver);
+    REQUIRE(index > index_temporary);
+    REQUIRE(read > index);
 }
 
 TEST_CASE("compiler preallocates Array literals and evaluates elements in source order") {
