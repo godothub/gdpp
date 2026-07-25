@@ -24,6 +24,7 @@
 - Add post-assembly release gates on macOS and Windows that install the final `gdpp-mac.zip` and `gdpp-win.zip` into clean customer projects, import with official Godot 4.7.1, perform AOT exports with official templates, run the packaged games, audit PCK source stripping and exactly-once project libraries, and block readiness or publication on any diagnostic or immutable-state violation.
 - Make both macOS deployment-target audits consume complete `otool` output before matching load commands, preserving Universal 2 and macOS 11 enforcement without `pipefail` misclassifying a successful export and runtime as a broken-pipe failure.
 - Classify Godot 4.6.2's exact upstream iOS-template warning for the removed optional `application/boot_splash/fullsize` setting without changing customer projects; the Xcode export gate still collects every diagnostic and fails closed on any other warning or error.
+- Warm the official editor through a bounded frame loop before import-only desktop package gates, then audit the warm-up log alongside import, export, and runtime logs; this avoids Godot 4.7.1's first-scan auto-quit shutdown race without retrying failed commands or weakening diagnostic enforcement.
 
 ## 1.7.8
 
