@@ -1192,10 +1192,13 @@ TEST_CASE("compiler initializes onready fields immediately before ready") {
     REQUIRE(result.success);
     REQUIRE(result.unit.header.find("godot::Label* node_label{}") != std::string::npos);
     const auto initialization = result.unit.source.find("node_label =");
-    const auto user_body = result.unit.source.find("node_label->set_text");
+    const auto user_body = result.unit.source.find("->set_text");
     REQUIRE(initialization != std::string::npos);
     REQUIRE(user_body != std::string::npos);
     REQUIRE(initialization < user_body);
+    REQUIRE(result.unit.source.find(
+                "Cannot assign member 'text' on a null or freed object at hud.gd:5") !=
+            std::string::npos);
     REQUIRE(result.unit.source.find("ADD_GROUP(\"Nodes\", \"node_\")") != std::string::npos);
     REQUIRE(result.unit.source.find("D_METHOD(\"_ready\"") == std::string::npos);
 }
@@ -3698,6 +3701,37 @@ TEST_CASE("generated object property reads reject null and freed receivers") {
     REQUIRE(result.unit.source.find(
                 "Cannot access member 'name' on a null or freed object at safe_property.gd:6") !=
             std::string::npos);
+}
+
+TEST_CASE("generated object property writes reject null and freed receivers") {
+    const gdpp::Compiler compiler;
+    const auto result =
+        compiler.compile("safe_property_write.gd",
+                         "extends Node\n"
+                         "class Probe extends RefCounted:\n"
+                         "    var score: int:\n"
+                         "        get:\n"
+                         "            return 1\n"
+                         "        set(value):\n"
+                         "            pass\n"
+                         "func assign(node: Node, probe: Probe, sprite: Sprite2D) -> void:\n"
+                         "    node.name = \"updated\"\n"
+                         "    probe.score = 7\n"
+                         "    sprite.position.x = 4.0\n"
+                         "func assign_and_return(node: Node) -> int:\n"
+                         "    node.name = \"returned\"\n"
+                         "    return 1\n");
+
+    REQUIRE(result.success);
+    REQUIRE(result.unit.source.find("_gdpp_property_receiver_") != std::string::npos);
+    REQUIRE(result.unit.source.find("Cannot assign member 'name' on a null or freed object at "
+                                    "safe_property_write.gd:9") != std::string::npos);
+    REQUIRE(result.unit.source.find("gdpp::runtime::set_named(_gdpp_attached_property_target_") !=
+            std::string::npos);
+    REQUIRE(result.unit.source.find("Cannot assign member 'position' on a null or freed object at "
+                                    "safe_property_write.gd:11") != std::string::npos);
+    REQUIRE(result.unit.source.find("ERR_FAIL_EDMSG") != std::string::npos);
+    REQUIRE(result.unit.source.find("ERR_FAIL_V_EDMSG") != std::string::npos);
 }
 
 TEST_CASE("semantic flow narrows short-circuit logical operands") {
