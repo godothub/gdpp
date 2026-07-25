@@ -24,7 +24,9 @@ TEST_CASE("compiler generates bindable GDExtension C++") {
     REQUIRE(result.unit.header.find("GDCLASS(GDPPNative_Counter, godot::Node)") !=
             std::string::npos);
     REQUIRE(result.unit.source.find("ClassDB::bind_method") != std::string::npos);
-    REQUIRE(result.unit.source.find("value = ([&]() -> int64_t") != std::string::npos);
+    REQUIRE(result.unit.source.find("value = ([&]() { const auto _gdpp_property_current_") !=
+            std::string::npos);
+    REQUIRE(result.unit.source.find("const auto _gdpp_property_right_") != std::string::npos);
     REQUIRE(result.unit.source.find("gdpp::integer::add(") != std::string::npos);
     REQUIRE(result.unit.source.find("ADD_SIGNAL") != std::string::npos);
 }
@@ -2276,40 +2278,37 @@ TEST_CASE("compiler contains invalid native sequence indexes instead of derefere
 TEST_CASE("compiler compares every static Godot object representation by Variant identity") {
     const gdpp::Compiler compiler;
     const auto result = compiler.compile(
-        "object_identity.gd",
-        "func same_ref(left: RefCounted, right: RefCounted) -> bool:\n"
-        "    return left == right\n"
-        "func different_node(left: Node, right: Node) -> bool:\n"
-        "    return left != right\n");
+        "object_identity.gd", "func same_ref(left: RefCounted, right: RefCounted) -> bool:\n"
+                              "    return left == right\n"
+                              "func different_node(left: Node, right: Node) -> bool:\n"
+                              "    return left != right\n");
 
     REQUIRE(result.success);
-    const auto first =
-        result.unit.source.find("gdpp::runtime::binary(godot::Variant::OP_EQUAL");
+    const auto first = result.unit.source.find("gdpp::runtime::binary(godot::Variant::OP_EQUAL");
     REQUIRE(first != std::string::npos);
-    const auto second = result.unit.source.find("gdpp::runtime::binary(godot::Variant::OP_EQUAL",
-                                                first + 1);
+    const auto second =
+        result.unit.source.find("gdpp::runtime::binary(godot::Variant::OP_EQUAL", first + 1);
     REQUIRE(second != std::string::npos);
-    REQUIRE(result.unit.source.find("gdpp::runtime::binary(godot::Variant::OP_EQUAL",
-                                    second + 1) == std::string::npos);
+    REQUIRE(result.unit.source.find("gdpp::runtime::binary(godot::Variant::OP_EQUAL", second + 1) ==
+            std::string::npos);
     REQUIRE(result.unit.source.find("_gdpp_binary_left_") != std::string::npos);
     REQUIRE(result.unit.source.find("_gdpp_binary_right_") != std::string::npos);
 }
 
 TEST_CASE("compiler sequences checked subscript receivers before indexes") {
     const gdpp::Compiler compiler;
-    const auto result = compiler.compile(
-        "ordered_subscripts.gd",
-        "func values() -> Array[int]:\n"
-        "    return [7]\n"
-        "func index() -> int:\n"
-        "    return 0\n"
-        "func read() -> int:\n"
-        "    return values()[index()]\n");
+    const auto result = compiler.compile("ordered_subscripts.gd", "func values() -> Array[int]:\n"
+                                                                  "    return [7]\n"
+                                                                  "func index() -> int:\n"
+                                                                  "    return 0\n"
+                                                                  "func read() -> int:\n"
+                                                                  "    return values()[index()]\n");
 
     REQUIRE(result.success);
     const auto target = result.unit.source.find("auto &&_gdpp_subscript_target_");
     const auto receiver = result.unit.source.find("values()", target);
-    const auto index_temporary = result.unit.source.find("const auto _gdpp_subscript_index_", target);
+    const auto index_temporary =
+        result.unit.source.find("const auto _gdpp_subscript_index_", target);
     const auto index = result.unit.source.find("index()", index_temporary);
     const auto read = result.unit.source.find("gdpp::runtime::checked_array_get("
                                               "_gdpp_subscript_target_",
@@ -2700,8 +2699,7 @@ TEST_CASE("compiler applies Material ABI across every shader-capable property fa
     REQUIRE(result.success);
     REQUIRE(result.unit.source.find("cast_to<godot::CanvasItemMaterial>") == std::string::npos);
     REQUIRE(result.unit.source.find("cast_to<godot::FogMaterial>") == std::string::npos);
-    REQUIRE(result.unit.source.find("cast_to<godot::PanoramaSkyMaterial>") ==
-            std::string::npos);
+    REQUIRE(result.unit.source.find("cast_to<godot::PanoramaSkyMaterial>") == std::string::npos);
     REQUIRE(result.unit.source.find("set_process_material(godot::Ref<godot::Material>") !=
             std::string::npos);
     REQUIRE(result.unit.source.find("set_material(godot::Ref<godot::Material>") !=
@@ -3734,6 +3732,79 @@ TEST_CASE("generated object property writes reject null and freed receivers") {
     REQUIRE(result.unit.source.find("ERR_FAIL_V_EDMSG") != std::string::npos);
 }
 
+TEST_CASE("compound property writes evaluate receivers current values and right sides once") {
+    const gdpp::Compiler compiler;
+    const auto result = compiler.compile("compound_receiver_order.gd",
+                                         "extends Node\n"
+                                         "class Probe extends RefCounted:\n"
+                                         "    var score: int = 0\n"
+                                         "func take_node() -> Node:\n"
+                                         "    return self\n"
+                                         "func take_sprite() -> Sprite2D:\n"
+                                         "    return null\n"
+                                         "func take_probe() -> Probe:\n"
+                                         "    return Probe.new()\n"
+                                         "func next_delta() -> int:\n"
+                                         "    return 1\n"
+                                         "func apply() -> void:\n"
+                                         "    take_node().process_priority += next_delta()\n"
+                                         "    take_sprite().position.x += float(next_delta())\n"
+                                         "    take_probe().score += next_delta()\n");
+
+    REQUIRE(result.success);
+    const auto begin = result.unit.source.find("void GDPPNative_CompoundReceiverOrder::apply()");
+    const auto end = result.unit.source.find(
+        "void GDPPNative_CompoundReceiverOrder::_gdpp_variant_call_take_node", begin);
+    REQUIRE(begin != std::string::npos);
+    REQUIRE(end != std::string::npos);
+    const std::string_view body{result.unit.source.data() + begin, end - begin};
+    const auto occurrences = [&](const std::string_view needle) {
+        std::size_t count = 0;
+        for (std::size_t offset = body.find(needle); offset != std::string_view::npos;
+             offset = body.find(needle, offset + needle.size())) {
+            ++count;
+        }
+        return count;
+    };
+
+    REQUIRE_EQ(occurrences("take_node()"), std::size_t{1});
+    REQUIRE_EQ(occurrences("take_sprite()"), std::size_t{1});
+    REQUIRE_EQ(occurrences("take_probe()"), std::size_t{1});
+    REQUIRE_EQ(occurrences("next_delta()"), std::size_t{3});
+    REQUIRE_EQ(occurrences("const auto _gdpp_property_current_"), std::size_t{3});
+    REQUIRE_EQ(occurrences("const auto _gdpp_property_right_"), std::size_t{3});
+    REQUIRE_EQ(occurrences("->get_process_priority()"), std::size_t{1});
+    REQUIRE_EQ(occurrences("->set_process_priority("), std::size_t{1});
+    REQUIRE_EQ(occurrences("->get_position()"), std::size_t{1});
+    REQUIRE_EQ(occurrences("->set_position("), std::size_t{1});
+    REQUIRE_EQ(occurrences("gdpp::runtime::get_named("), std::size_t{1});
+    REQUIRE_EQ(occurrences("gdpp::runtime::set_named("), std::size_t{1});
+
+    const auto node_receiver = body.find("take_node()");
+    const auto node_current = body.find("const auto _gdpp_property_current_", node_receiver);
+    const auto node_read = body.find("->get_process_priority()", node_current);
+    const auto node_right = body.find("const auto _gdpp_property_right_", node_read);
+    const auto first_right = body.find("next_delta()", node_right);
+    const auto node_write = body.find("->set_process_priority(", first_right);
+    REQUIRE(node_receiver < node_current);
+    REQUIRE(node_current < node_read);
+    REQUIRE(node_read < node_right);
+    REQUIRE(node_right < first_right);
+    REQUIRE(first_right < node_write);
+
+    const auto sprite_receiver = body.find("take_sprite()");
+    const auto position_read = body.find("->get_position()", sprite_receiver);
+    const auto position_current = body.find("const auto _gdpp_property_current_", position_read);
+    const auto position_right = body.find("const auto _gdpp_property_right_", position_current);
+    const auto second_right = body.find("next_delta()", position_right);
+    const auto position_write = body.find("->set_position(", second_right);
+    REQUIRE(sprite_receiver < position_read);
+    REQUIRE(position_read < position_current);
+    REQUIRE(position_current < position_right);
+    REQUIRE(position_right < second_right);
+    REQUIRE(second_right < position_write);
+}
+
 TEST_CASE("semantic flow narrows short-circuit logical operands") {
     const gdpp::Compiler compiler;
     const auto result =
@@ -4189,7 +4260,10 @@ TEST_CASE("Godot API inheritance resolves native methods properties and builtin 
     REQUIRE(result.unit.header.find("#include <godot_cpp/variant/vector2.hpp>") !=
             std::string::npos);
     REQUIRE(result.unit.header.find("godot::Vector2 delta") != std::string::npos);
-    REQUIRE(result.unit.source.find("set_position((get_position() + delta))") != std::string::npos);
+    REQUIRE(result.unit.source.find("set_position(([&]() { const auto _gdpp_property_current_") !=
+            std::string::npos);
+    REQUIRE(result.unit.source.find("= get_position(); const auto _gdpp_property_right_") !=
+            std::string::npos);
     REQUIRE(result.unit.source.find("queue_redraw()") != std::string::npos);
     REQUIRE(result.unit.source.find(".length()") != std::string::npos);
     REQUIRE(result.unit.source.find("_gdpp_call_receiver_") != std::string::npos);
