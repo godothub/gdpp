@@ -45,3 +45,7 @@ script = ExtResource("7_message_dispatch")
 [node name="Item0" type="Node" parent="MessageDispatchProbe"]
 
 [node name="Item1" type="Node" parent="MessageDispatchProbe"]
+
+[connection signal="child_ping" from="." to="." method="_on_child_ping"]
+[connection signal="vendor_contract" from="." to="." method="_on_vendor_contract"]
+[connection signal="vendor_ping" from="." to="." method="_on_vendor_ping"]

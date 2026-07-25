@@ -6,6 +6,7 @@ const CONTAINER_VALUE := preload("res://z_container_value.gd")
 const INNER_DATA := preload("res://inner_data.gd")
 const NETWORK_IMAGE := preload("res://network_image.gd")
 const RUNTIME_SHADER := preload("res://runtime_shader.gdshader")
+const ATTACHED_SCENE := preload("res://attached_scene.tscn")
 
 var _network_server: TCPServer
 var _network_peer: StreamPeerTCP
@@ -18,6 +19,9 @@ var _shader_material: ShaderMaterial
 var _shader_process_ticks := 0
 var _script_items: Array[ContainerItem] = []
 var _script_lookup: Dictionary[String, ContainerItem] = {}
+var _child_ping_value := -1
+var _vendor_ping_value := -1
+var _vendor_contract_seen := false
 
 
 class ContainerItem extends RefCounted:
@@ -42,6 +46,44 @@ func _verify_export_runtime() -> void:
         return
     if get_ready_notifications() != 1:
         _fail("export did not preserve the provider lifecycle callback")
+        return
+    if (
+        initialized != 1
+        or not ready_seen
+        or enter_tree_count != 1
+        or ready_notification_count != 1
+        or exit_tree_count != 0
+    ):
+        _fail("attached lifecycle callbacks were missing, repeated, or out of phase")
+        return
+    if _child_ping_value != bonus or _vendor_ping_value != bonus:
+        _fail("script or provider ready signals were not connected before lifecycle dispatch")
+        return
+
+    var lifecycle_probe: Variant = ATTACHED_SCENE.instantiate()
+    add_child(lifecycle_probe)
+    if (
+        lifecycle_probe.initialized != 1
+        or not lifecycle_probe.ready_seen
+        or lifecycle_probe.enter_tree_count != 1
+        or lifecycle_probe.ready_notification_count != 1
+        or lifecycle_probe.exit_tree_count != 0
+    ):
+        _fail("runtime-created attached node did not enter and become ready exactly once")
+        return
+    remove_child(lifecycle_probe)
+    if lifecycle_probe.exit_tree_count != 1:
+        _fail("runtime-created attached node did not receive exactly one exit-tree callback")
+        return
+    lifecycle_probe.queue_free()
+
+    var contract_result: Variant = verify_vendor_contract(
+        "provider-payload",
+        [3, 5],
+        {"left": 7, "right": 11},
+    )
+    if contract_result != "provider-payload" or not _vendor_contract_seen:
+        _fail("provider signal or typed container roundtrip changed across attachment")
         return
 
     var onready_probe: Variant = get_node("OnreadyProbe")
@@ -280,6 +322,27 @@ func _process(_delta: float) -> void:
         return
     if Time.get_ticks_msec() >= _network_deadline_msec:
         _fail("loopback network image request timed out")
+
+
+func _on_child_ping(value: int) -> void:
+    _child_ping_value = value
+
+
+func _on_vendor_ping(value: int) -> void:
+    _vendor_ping_value = value
+
+
+func _on_vendor_contract(
+    values: Array[int],
+    weights: Dictionary[String, int],
+) -> void:
+    _vendor_contract_seen = (
+        values == [3, 5]
+        and weights == {"left": 7, "right": 11}
+        and values.get_typed_builtin() == TYPE_INT
+        and weights.get_typed_key_builtin() == TYPE_STRING
+        and weights.get_typed_value_builtin() == TYPE_INT
+    )
 
 
 func _fail(message: String) -> void:

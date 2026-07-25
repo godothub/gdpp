@@ -8,15 +8,32 @@ signal child_ping(value: int)
 @export var bonus: int = 7
 var initialized: int = 0
 var ready_seen: bool = false
+var enter_tree_count := 0
+var ready_notification_count := 0
+var exit_tree_count := 0
 
 
 func _init() -> void:
     initialized += 1
 
 
+func _enter_tree() -> void:
+    enter_tree_count += 1
+
+
 func _ready() -> void:
     ready_seen = true
     child_ping.emit(bonus)
+    super.emit_vendor_ping(bonus)
+
+
+func _exit_tree() -> void:
+    exit_tree_count += 1
+
+
+func _notification(what: int) -> void:
+    if what == NOTIFICATION_READY:
+        ready_notification_count += 1
 
 
 func compute(value: int) -> int:
