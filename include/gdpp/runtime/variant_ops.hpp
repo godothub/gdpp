@@ -315,6 +315,53 @@ void set_named(godot::Variant& target, const godot::StringName& name, const godo
 
 [[nodiscard]] godot::Variant get_key(const godot::Variant& target, const godot::Variant& key);
 void set_key(godot::Variant& target, const godot::Variant& key, const godot::Variant& value);
+void report_index_out_of_bounds(const char* container, std::int64_t index, std::int64_t size);
+
+[[nodiscard]] inline godot::Variant checked_array_get(const godot::Array& target,
+                                                      std::int64_t index) {
+    const auto size = target.size();
+    const auto normalized = index < 0 ? index + size : index;
+    if (normalized < 0 || normalized >= size) {
+        report_index_out_of_bounds("Array", index, size);
+        return {};
+    }
+    return target[normalized];
+}
+
+inline void checked_array_set(godot::Array& target, std::int64_t index,
+                              const godot::Variant& value) {
+    const auto size = target.size();
+    const auto normalized = index < 0 ? index + size : index;
+    if (normalized < 0 || normalized >= size) {
+        report_index_out_of_bounds("Array", index, size);
+        return;
+    }
+    target[normalized] = value;
+}
+
+template <typename PackedArray>
+[[nodiscard]] godot::Variant checked_packed_array_get(const SharedPackedArray<PackedArray>& target,
+                                                      std::int64_t index) {
+    const auto size = target.native().size();
+    const auto normalized = index < 0 ? index + size : index;
+    if (normalized < 0 || normalized >= size) {
+        report_index_out_of_bounds("PackedArray", index, size);
+        return {};
+    }
+    return to_variant(target.native()[normalized]);
+}
+
+template <typename PackedArray, typename Value>
+void checked_packed_array_set(SharedPackedArray<PackedArray>& target, std::int64_t index,
+                              Value&& value) {
+    const auto size = target.native().size();
+    const auto normalized = index < 0 ? index + size : index;
+    if (normalized < 0 || normalized >= size) {
+        report_index_out_of_bounds("PackedArray", index, size);
+        return;
+    }
+    target.native()[normalized] = std::forward<Value>(value);
+}
 
 [[nodiscard]] bool iter_init(const godot::Variant& iterable, godot::Variant& iterator);
 [[nodiscard]] bool iter_next(const godot::Variant& iterable, godot::Variant& iterator);

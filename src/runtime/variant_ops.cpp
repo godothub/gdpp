@@ -879,6 +879,13 @@ void set_key(godot::Variant& target, const godot::Variant& key, const godot::Var
         report_invalid_key("write");
 }
 
+void report_index_out_of_bounds(const char* container, const std::int64_t index,
+                                const std::int64_t size) {
+    godot::UtilityFunctions::push_error(
+        godot::String{"GDPP: "} + container + " index " + godot::String::num_int64(index) +
+        " is out of bounds for size " + godot::String::num_int64(size));
+}
+
 bool iter_init(const godot::Variant& iterable, godot::Variant& iterator) {
     bool valid = false;
     const bool available = iterable.iter_init(iterator, valid);
