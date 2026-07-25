@@ -5773,6 +5773,9 @@ void CodeGenerator::emit_attached_descriptor_definition(
                           "gdpp::runtime::default_argument());\n";
         }
         source << "        descriptor.methods.push_back(std::move(method));\n"
+               << "        descriptor.method_dispatches.push_back({"
+               << godot_string_name(function.name) << ", &" << native_name << "::"
+               << method_callback_name(function) << "});\n"
                << "    }\n";
     }
     for (const auto& signal : signals) {

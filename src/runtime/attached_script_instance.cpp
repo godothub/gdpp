@@ -114,22 +114,41 @@ const godot::MethodInfo* find_method(const AttachedScriptDescriptor& descriptor,
     return found == descriptor.methods.end() ? nullptr : &*found;
 }
 
+const AttachedScriptMethodDispatch*
+find_method_dispatch(const AttachedScriptInstance* instance, const godot::StringName& name) {
+    const auto found = std::find_if(
+        instance->descriptor.method_dispatches.begin(),
+        instance->descriptor.method_dispatches.end(),
+        [&](const auto& item) { return item.name == name; });
+    return found == instance->descriptor.method_dispatches.end() ? nullptr : &*found;
+}
+
 bool has_signal(const AttachedScriptInstance* instance, const godot::StringName& name) {
     return std::any_of(instance->descriptor.signals.begin(), instance->descriptor.signals.end(),
                        [&](const auto& item) { return item.name == name; });
 }
 
-godot::Variant call_behavior(AttachedScriptInstance* instance, const godot::StringName& method,
+godot::Variant call_behavior(AttachedScriptInstance* instance,
+                             const AttachedScriptMethodDispatch* dispatch,
                              const godot::Variant** arguments, std::int64_t argument_count,
                              GDExtensionCallError& error) {
-    if (instance->behavior.is_null()) {
+    if (instance->behavior.is_null() || !dispatch || !dispatch->call) {
         error.error = GDEXTENSION_CALL_ERROR_INVALID_METHOD;
         return {};
     }
-    godot::Variant target{instance->behavior.ptr()};
     godot::Variant result;
-    target.callp(method, arguments, static_cast<int>(argument_count), result, error);
+    dispatch->call(
+        nullptr, instance->behavior.ptr(),
+        reinterpret_cast<const GDExtensionConstVariantPtr*>(arguments), argument_count,
+        result._native_ptr(), &error);
     return result;
+}
+
+godot::Variant call_behavior(AttachedScriptInstance* instance, const godot::StringName& method,
+                             const godot::Variant** arguments, std::int64_t argument_count,
+                             GDExtensionCallError& error) {
+    return call_behavior(instance, find_method_dispatch(instance, method), arguments,
+                         argument_count, error);
 }
 
 GDExtensionVariantPtr copy_variant(const godot::Variant& value) {
@@ -389,7 +408,8 @@ void instance_call(AttachedScriptInstance* instance, const godot::StringName* me
     // declared _ready() and repeat it when request_ready() causes another ready notification.
     if (*method == godot::StringName{"_ready"} && instance->behavior.is_valid())
         instance->behavior->_gdpp_initialize_onready();
-    if (!find_method(instance, *method)) {
+    const auto* dispatch = find_method_dispatch(instance, *method);
+    if (!dispatch) {
         error->error = GDEXTENSION_CALL_ERROR_INVALID_METHOD;
         return;
     }
@@ -397,7 +417,7 @@ void instance_call(AttachedScriptInstance* instance, const godot::StringName* me
         error->error = GDEXTENSION_CALL_ERROR_INVALID_METHOD;
         return;
     }
-    *result = call_behavior(instance, *method, arguments, argument_count, *error);
+    *result = call_behavior(instance, dispatch, arguments, argument_count, *error);
 }
 
 void instance_notification(AttachedScriptInstance* instance, std::int32_t what,

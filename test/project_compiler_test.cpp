@@ -209,6 +209,9 @@ TEST_CASE("attached descriptors defer every script constant until Godot requests
     REQUIRE(descriptor.find("gdpp::runtime::load_resource(") == std::string::npos);
     REQUIRE(descriptor.find("get_tree(") == std::string::npos);
     REQUIRE(descriptor.find("_gdpp_preload_resources(") == std::string::npos);
+    REQUIRE(descriptor.find(
+                "descriptor.method_dispatches.push_back({"
+                "godot::StringName(\"scene_resource\"), &") != std::string::npos);
     const auto registration = read_text(options.output_directory / "register_types.cpp");
     REQUIRE(registration.find("::_gdpp_preload_resources();") == std::string::npos);
     REQUIRE(registration.find("gdpp_engine") == std::string::npos);

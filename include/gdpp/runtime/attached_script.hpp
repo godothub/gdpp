@@ -16,6 +16,8 @@
 #include <godot_cpp/variant/typed_dictionary.hpp>
 #include <godot_cpp/variant/variant.hpp>
 
+#include <gdextension_interface.h>
+
 #include <array>
 #include <cstdint>
 #include <optional>
@@ -81,6 +83,15 @@ struct AttachedScriptDeferredConstant {
     AttachedConstantResolver resolver{nullptr};
 };
 
+// ScriptInstance has already resolved a customer method before entering the attached runtime.
+// Retain the generated, validating method entry point beside its reflected MethodInfo so callbacks
+// do not wrap the behavior in a Variant and repeat ClassDB method lookup on every signal,
+// lifecycle, Callable, animation, or timer dispatch.
+struct AttachedScriptMethodDispatch {
+    godot::StringName name;
+    GDExtensionClassMethodCall call{nullptr};
+};
+
 struct AttachedScriptDescriptor {
     AttachedScriptDescriptor() = default;
     AttachedScriptDescriptor(const AttachedScriptDescriptor&) = default;
@@ -97,6 +108,7 @@ struct AttachedScriptDescriptor {
     AttachedBehaviorFactory factory{nullptr};
     std::vector<AttachedScriptProperty> properties;
     std::vector<godot::MethodInfo> methods;
+    std::vector<AttachedScriptMethodDispatch> method_dispatches;
     std::vector<godot::MethodInfo> signals;
     godot::Dictionary constants;
     std::vector<AttachedScriptDeferredConstant> deferred_constants;

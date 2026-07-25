@@ -26,6 +26,7 @@ AttachedScriptDescriptor::operator=(const AttachedScriptDescriptor& other) {
     factory = other.factory;
     properties = other.properties;
     methods = other.methods;
+    method_dispatches = other.method_dispatches;
     signals = other.signals;
     assign_dictionary(constants, other.constants);
     deferred_constants = other.deferred_constants;
@@ -48,6 +49,7 @@ AttachedScriptDescriptor& AttachedScriptDescriptor::operator=(AttachedScriptDesc
     factory = other.factory;
     properties = std::move(other.properties);
     methods = std::move(other.methods);
+    method_dispatches = std::move(other.method_dispatches);
     signals = std::move(other.signals);
     assign_dictionary(constants, other.constants);
     deferred_constants = std::move(other.deferred_constants);
@@ -142,6 +144,11 @@ bool same_deferred_constant(const AttachedScriptDeferredConstant& left,
     return left.name == right.name && left.resolver == right.resolver;
 }
 
+bool same_method_dispatch(const AttachedScriptMethodDispatch& left,
+                          const AttachedScriptMethodDispatch& right) {
+    return left.name == right.name && left.call == right.call;
+}
+
 template <typename Items, typename Equal>
 bool same_ordered_items(const Items& left, const Items& right, Equal&& equal) {
     if (left.size() != right.size())
@@ -163,6 +170,8 @@ bool same_identity(const AttachedScriptDescriptor& left, const AttachedScriptDes
            left.editor_metadata_only == right.editor_metadata_only &&
            same_ordered_items(left.properties, right.properties, same_property) &&
            same_ordered_items(left.methods, right.methods, same_method_info) &&
+           same_ordered_items(left.method_dispatches, right.method_dispatches,
+                              same_method_dispatch) &&
            same_ordered_items(left.signals, right.signals, same_method_info) &&
            same_variant(godot::Variant{left.constants}, godot::Variant{right.constants}) &&
            same_ordered_items(left.deferred_constants, right.deferred_constants,
@@ -253,6 +262,29 @@ bool register_attached_script(AttachedScriptDescriptor descriptor, godot::String
             descriptor.methods, [](const godot::MethodInfo& item) { return item.name; },
             &duplicate)) {
         set_error(error, "duplicate attached script method: " + duplicate);
+        return false;
+    }
+    if (!names_are_unique(
+            descriptor.method_dispatches,
+            [](const AttachedScriptMethodDispatch& item) { return item.name; }, &duplicate)) {
+        set_error(error, "duplicate attached script method dispatch: " + duplicate);
+        return false;
+    }
+    if (!descriptor.editor_metadata_only) {
+        if (descriptor.method_dispatches.size() != descriptor.methods.size()) {
+            set_error(error, "attached script method dispatch count does not match reflection");
+            return false;
+        }
+        for (std::size_t index = 0; index < descriptor.methods.size(); ++index) {
+            if (descriptor.method_dispatches[index].name != descriptor.methods[index].name ||
+                !descriptor.method_dispatches[index].call) {
+                set_error(error, "attached script method dispatch does not match reflection: " +
+                                     godot::String{descriptor.methods[index].name});
+                return false;
+            }
+        }
+    } else if (!descriptor.method_dispatches.empty()) {
+        set_error(error, "editor-only attached metadata must not contain runtime method dispatch");
         return false;
     }
     if (!names_are_unique(
@@ -432,6 +464,8 @@ std::optional<AttachedScriptDescriptor> resolve_attached_script(const godot::Str
                       [](const AttachedScriptProperty& item) { return item.info.name; });
         append_unique(resolved.methods, base->second.methods,
                       [](const godot::MethodInfo& item) { return item.name; });
+        append_unique(resolved.method_dispatches, base->second.method_dispatches,
+                      [](const AttachedScriptMethodDispatch& item) { return item.name; });
         append_unique(resolved.signals, base->second.signals,
                       [](const godot::MethodInfo& item) { return item.name; });
         const godot::Array constant_names = base->second.constants.keys();
