@@ -3028,8 +3028,8 @@ std::string CodeGenerator::emit_expression(const ir::Expression& expression) con
         }
         const auto& left_type = expression.operands.at(0)->type;
         const auto& right_type = expression.operands.at(1)->type;
-        if ((operation == "==" || operation == "!=") &&
-            left_type.kind == TypeKind::object && right_type.kind == TypeKind::object) {
+        if ((operation == "==" || operation == "!=") && left_type.kind == TypeKind::object &&
+            right_type.kind == TypeKind::object) {
             // Attached RefCounted scripts store typed values as Ref<T>, while `self` is the
             // provider-owned Object*. Direct C++ comparison is ill-formed even when both values
             // identify the same Godot object. Variant equality is Godot's canonical identity
@@ -5015,39 +5015,48 @@ std::string CodeGenerator::emit_statement(const ir::Statement& statement,
             result += prefix + "}\n";
             return result;
         }
-        std::string value = emit_expression(*statement.expression);
-        if (statement.operation != "=") {
-            const auto operation = statement.operation.substr(0, statement.operation.size() - 1);
-            const auto integer_target =
-                target.type.kind == TypeKind::integer || target.type.kind == TypeKind::enumeration;
-            const auto integer_value = statement.expression->type.kind == TypeKind::integer ||
-                                       statement.expression->type.kind == TypeKind::enumeration;
-            if (integer_target && statement.expression->type.is_dynamic()) {
-                value = emit_conversion(target.type, statement.expression->type, std::move(value));
-                value = emit_integer_operation(operation, emit_expression(*statement.condition),
-                                               std::move(value), target.type);
-            } else if (integer_target && integer_value) {
-                value = emit_integer_operation(operation, emit_expression(*statement.condition),
-                                               std::move(value), target.type);
-            } else if (!target.type.is_dynamic() && target.type.is_numeric() &&
-                       statement.expression->type.is_dynamic()) {
-                value = emit_conversion(target.type, statement.expression->type, std::move(value));
-                value = "(" + emit_expression(*statement.condition) + " " + operation + " " +
-                        value + ")";
-            } else if (statement.condition->type.is_dynamic() ||
-                       statement.expression->type.is_dynamic()) {
-                value = "gdpp::runtime::binary(godot::Variant::" + variant_operator(operation) +
-                        ", " + emit_expression(*statement.condition) + ", " + value + ")";
-            } else {
-                value = "(" + emit_expression(*statement.condition) + " " + operation + " " +
-                        value + ")";
+        const auto assignment_value = [&](std::string current, const Type& destination) {
+            std::string value = emit_expression(*statement.expression);
+            Type source = statement.expression->type;
+            if (statement.operation != "=") {
+                const auto suffix = std::to_string(temporary_counter_++);
+                const auto current_name = "_gdpp_property_current_" + suffix;
+                const auto right_name = "_gdpp_property_right_" + suffix;
+                const auto current_expression = std::move(current);
+                const auto right_expression = std::move(value);
+                const auto operation =
+                    statement.operation.substr(0, statement.operation.size() - 1);
+                const auto integer_target = target.type.kind == TypeKind::integer ||
+                                            target.type.kind == TypeKind::enumeration;
+                const auto integer_value = statement.expression->type.kind == TypeKind::integer ||
+                                           statement.expression->type.kind == TypeKind::enumeration;
+                if (integer_target && statement.expression->type.is_dynamic()) {
+                    value = emit_conversion(target.type, statement.expression->type, right_name);
+                    value = emit_integer_operation(operation, current_name, std::move(value),
+                                                   target.type);
+                } else if (integer_target && integer_value) {
+                    value =
+                        emit_integer_operation(operation, current_name, right_name, target.type);
+                } else if (!target.type.is_dynamic() && target.type.is_numeric() &&
+                           statement.expression->type.is_dynamic()) {
+                    value = emit_conversion(target.type, statement.expression->type, right_name);
+                    value = "(" + current_name + " " + operation + " " + value + ")";
+                } else if (target.type.is_dynamic() || statement.expression->type.is_dynamic()) {
+                    value = "gdpp::runtime::binary(godot::Variant::" + variant_operator(operation) +
+                            ", " + current_name + ", " + right_name + ")";
+                } else {
+                    value = "(" + current_name + " " + operation + " " + right_name + ")";
+                }
+                source = target.type.is_dynamic() || statement.expression->type.is_dynamic()
+                             ? Type{TypeKind::variant, "Variant"}
+                             : target.type;
+                value = emit_conversion(destination, source, std::move(value));
+                return "([&]() { const auto " + current_name + " = " + current_expression +
+                       "; const auto " + right_name + " = " + right_expression + "; return " +
+                       value + "; }())";
             }
-        }
-        const auto assigned_source_type =
-            statement.operation == "=" ? statement.expression->type
-            : target.type.is_dynamic() || statement.expression->type.is_dynamic()
-                ? Type{TypeKind::variant, "Variant"}
-                : target.type;
+            return emit_conversion(destination, source, std::move(value));
+        };
         if (target.resolution == ir::ResolutionKind::script_runtime_static_field) {
             const auto* owner = script_symbols_
                                     ? script_symbols_->find_native_class(target.resolved_owner)
@@ -5059,11 +5068,10 @@ std::string CodeGenerator::emit_statement(const ir::Statement& statement,
                                    target.span);
                 return prefix + "/* unavailable runtime static field */;\n";
             }
-            value = emit_conversion(member->type, assigned_source_type, std::move(value));
+            auto value = assignment_value(emit_expression(target), member->type);
             return prefix + "if (!gdpp::runtime::is_editor_hint()) " + target.resolved_owner +
                    "::" + target.setter + "(" + value + ");\n";
         }
-        value = emit_conversion(target.assignment_type, assigned_source_type, std::move(value));
         if (target.resolution == ir::ResolutionKind::godot_property && target.direct_access &&
             target.kind == ir::ExpressionKind::member) {
             std::vector<const ir::Expression*> direct_chain;
@@ -5114,6 +5122,14 @@ std::string CodeGenerator::emit_statement(const ir::Statement& statement,
                     assignment_object = emit_direct_builtin_member(
                         member->resolved_owner, std::move(assignment_object), member->value);
                 }
+                auto current_value = root_name;
+                for (std::size_t chain_index = direct_chain.size(); chain_index > 0;
+                     --chain_index) {
+                    const auto* member = direct_chain[chain_index - 1];
+                    current_value = emit_direct_builtin_member(
+                        member->resolved_owner, std::move(current_value), member->value);
+                }
+                auto value = assignment_value(std::move(current_value), target.assignment_type);
                 result += index + ");\n" + nested_prefix +
                           emit_direct_builtin_assignment(direct_chain.front()->resolved_owner,
                                                          std::move(assignment_object),
@@ -5145,11 +5161,17 @@ std::string CodeGenerator::emit_statement(const ir::Statement& statement,
             }
             const auto& parent = *target.operands.at(0);
             if (parent.type.kind == TypeKind::builtin) {
-                return prefix +
-                       emit_direct_builtin_assignment(target.resolved_owner,
-                                                      emit_expression(parent), target.value,
+                const auto suffix = std::to_string(temporary_counter_++);
+                const auto receiver = "_gdpp_builtin_receiver_" + suffix;
+                const auto nested_prefix = indent(indentation + 1);
+                auto value = assignment_value(
+                    emit_direct_builtin_member(target.resolved_owner, receiver, target.value),
+                    target.assignment_type);
+                return prefix + "{\n" + nested_prefix + "auto &&" + receiver + " = " +
+                       emit_expression(parent) + ";\n" + nested_prefix +
+                       emit_direct_builtin_assignment(target.resolved_owner, receiver, target.value,
                                                       std::move(value)) +
-                       ";\n";
+                       ";\n" + prefix + "}\n";
             }
         }
         if (target.resolution == ir::ResolutionKind::script_property) {
@@ -5157,40 +5179,67 @@ std::string CodeGenerator::emit_statement(const ir::Statement& statement,
                 const auto& owner = *target.operands.at(0);
                 if (owner.type.kind == TypeKind::script_resource &&
                     !target.resolved_owner.empty()) {
+                    const auto current = statement.operation == "="
+                                             ? std::string{}
+                                             : target.resolved_owner + "::" + target.getter + "()";
+                    auto value = assignment_value(current, target.assignment_type);
                     return prefix + target.resolved_owner + "::" + target.setter + "(" + value +
                            ");\n";
                 }
                 if (owner.resolution == ir::ResolutionKind::script_type ||
                     owner.resolution == ir::ResolutionKind::inner_type) {
-                    return prefix + emit_expression(owner) + "::" + target.setter + "(" + value +
-                           ");\n";
+                    const auto owner_type = emit_expression(owner);
+                    const auto current = statement.operation == "="
+                                             ? std::string{}
+                                             : owner_type + "::" + target.getter + "()";
+                    auto value = assignment_value(current, target.assignment_type);
+                    return prefix + owner_type + "::" + target.setter + "(" + value + ");\n";
                 }
                 const bool explicit_self = attached_script_ &&
                                            owner.kind == ir::ExpressionKind::identifier &&
                                            owner.value == "self";
-                if (explicit_self)
+                if (explicit_self) {
+                    const auto current =
+                        statement.operation == "=" ? std::string{} : target.getter + "()";
+                    auto value = assignment_value(current, target.assignment_type);
                     return prefix + target.setter + "(" + value + ");\n";
+                }
                 if (!attached_script_source_path(owner.type, target.resolved_owner).empty()) {
                     const auto suffix = std::to_string(temporary_counter_++);
                     const auto object = "_gdpp_attached_property_target_" + suffix;
-                    return prefix + "{\n" + indent(indentation + 1) + "godot::Variant " + object +
+                    const auto nested_prefix = indent(indentation + 1);
+                    const auto current =
+                        statement.operation == "="
+                            ? std::string{}
+                            : emit_conversion(target.type, {TypeKind::variant, "Variant"},
+                                              "gdpp::runtime::get_named(" + object + ", " +
+                                                  godot_string_name(target.value) + ")");
+                    auto value = assignment_value(current, target.assignment_type);
+                    return prefix + "{\n" + nested_prefix + "godot::Variant " + object +
                            " = gdpp::runtime::to_variant(" + emit_expression(owner) + ");\n" +
-                           indent(indentation + 1) + "gdpp::runtime::set_named(" + object + ", " +
+                           nested_prefix + "gdpp::runtime::set_named(" + object + ", " +
                            godot_string_name(target.value) + ", gdpp::runtime::to_variant(" +
                            value + "));\n" + prefix + "}\n";
                 }
                 const auto object = emit_expression(owner);
                 const auto connector = owner.type.kind == TypeKind::object ? "->" : ".";
-                if (owner.type.kind != TypeKind::object)
-                    return prefix + object + connector + target.setter + "(" + value + ");\n";
                 const auto suffix = std::to_string(temporary_counter_++);
                 const auto receiver = "_gdpp_property_receiver_" + suffix;
                 const auto nested_prefix = indent(indentation + 1);
-                return prefix + "{\n" + nested_prefix + "auto &&" + receiver + " = " + object +
-                       ";\n" + checked_assignment_guard(receiver, target.value, indentation + 1) +
-                       nested_prefix + receiver + "->" + target.setter + "(" + value + ");\n" +
-                       prefix + "}\n";
+                const auto current = statement.operation == "="
+                                         ? std::string{}
+                                         : receiver + connector + target.getter + "()";
+                auto value = assignment_value(current, target.assignment_type);
+                std::string result =
+                    prefix + "{\n" + nested_prefix + "auto &&" + receiver + " = " + object + ";\n";
+                if (owner.type.kind == TypeKind::object)
+                    result += checked_assignment_guard(receiver, target.value, indentation + 1);
+                result += nested_prefix + receiver + connector + target.setter + "(" + value +
+                          ");\n" + prefix + "}\n";
+                return result;
             }
+            const auto current = statement.operation == "=" ? std::string{} : target.getter + "()";
+            auto value = assignment_value(current, target.assignment_type);
             return prefix + target.setter + "(" + value + ");\n";
         }
         if (target.resolution == ir::ResolutionKind::godot_property && !target.direct_access) {
@@ -5199,16 +5248,39 @@ std::string CodeGenerator::emit_statement(const ir::Statement& statement,
                 return prefix + "/* read-only property assignment */;\n";
             }
             if (target.kind == ir::ExpressionKind::identifier) {
-                std::string index;
+                std::string raw_index;
+                if (target.indexed_argument >= 0)
+                    raw_index = std::to_string(target.indexed_argument);
+                auto getter_index = raw_index;
                 const auto* setter = api_.find_method(target.resolved_owner, target.setter);
-                if (target.indexed_argument >= 0) {
-                    index = std::to_string(target.indexed_argument);
-                    if (setter) {
-                        if (const auto* argument = api_.argument(*setter, 0))
-                            index = emit_api_argument(argument->type, argument->meta,
-                                                      {TypeKind::integer, "int"}, std::move(index));
+                if (!getter_index.empty()) {
+                    if (const auto* getter =
+                            api_.find_method(target.resolved_owner, target.getter)) {
+                        if (const auto* argument = api_.argument(*getter, 0)) {
+                            getter_index = emit_api_argument(argument->type, argument->meta,
+                                                             {TypeKind::integer, "int"},
+                                                             std::move(getter_index));
+                        }
                     }
-                    index += ", ";
+                }
+                const auto receiver =
+                    attached_script_ ? godot_owner_expression() + "->" : std::string{};
+                const auto current =
+                    statement.operation == "="
+                        ? std::string{}
+                        : emit_api_return(target.type,
+                                          receiver + target.getter + "(" + getter_index + ")");
+                auto value = assignment_value(current, target.assignment_type);
+                auto setter_index = raw_index;
+                if (!setter_index.empty()) {
+                    if (setter) {
+                        if (const auto* argument = api_.argument(*setter, 0)) {
+                            setter_index = emit_api_argument(argument->type, argument->meta,
+                                                             {TypeKind::integer, "int"},
+                                                             std::move(setter_index));
+                        }
+                    }
+                    setter_index += ", ";
                 }
                 if (setter) {
                     const auto value_index = target.indexed_argument >= 0 ? 1U : 0U;
@@ -5217,9 +5289,7 @@ std::string CodeGenerator::emit_statement(const ir::Statement& statement,
                                                   target.assignment_type, std::move(value));
                     }
                 }
-                return prefix +
-                       (attached_script_ ? godot_owner_expression() + "->" : std::string{}) +
-                       target.setter + "(" + index + value + ");\n";
+                return prefix + receiver + target.setter + "(" + setter_index + value + ");\n";
             }
             if (target.kind == ir::ExpressionKind::member) {
                 const auto object = emit_expression(*target.operands.at(0));
@@ -5233,16 +5303,37 @@ std::string CodeGenerator::emit_statement(const ir::Statement& statement,
                     : receiver == "this" || target.operands.at(0)->type.kind == TypeKind::object
                         ? "->"
                         : ".";
-                std::string index;
+                std::string raw_index;
+                if (target.indexed_argument >= 0)
+                    raw_index = std::to_string(target.indexed_argument);
+                auto getter_index = raw_index;
                 const auto* setter = api_.find_method(target.resolved_owner, target.setter);
-                if (target.indexed_argument >= 0) {
-                    index = std::to_string(target.indexed_argument);
-                    if (setter) {
-                        if (const auto* argument = api_.argument(*setter, 0))
-                            index = emit_api_argument(argument->type, argument->meta,
-                                                      {TypeKind::integer, "int"}, std::move(index));
+                if (!getter_index.empty()) {
+                    if (const auto* getter =
+                            api_.find_method(target.resolved_owner, target.getter)) {
+                        if (const auto* argument = api_.argument(*getter, 0)) {
+                            getter_index = emit_api_argument(argument->type, argument->meta,
+                                                             {TypeKind::integer, "int"},
+                                                             std::move(getter_index));
+                        }
                     }
-                    index += ", ";
+                }
+                const auto current =
+                    statement.operation == "="
+                        ? std::string{}
+                        : emit_api_return(target.type, receiver + connector + target.getter + "(" +
+                                                           getter_index + ")");
+                auto value = assignment_value(current, target.assignment_type);
+                auto setter_index = raw_index;
+                if (!setter_index.empty()) {
+                    if (setter) {
+                        if (const auto* argument = api_.argument(*setter, 0)) {
+                            setter_index = emit_api_argument(argument->type, argument->meta,
+                                                             {TypeKind::integer, "int"},
+                                                             std::move(setter_index));
+                        }
+                    }
+                    setter_index += ", ";
                 }
                 if (setter) {
                     const auto value_index = target.indexed_argument >= 0 ? 1U : 0U;
@@ -5252,15 +5343,16 @@ std::string CodeGenerator::emit_statement(const ir::Statement& statement,
                     }
                 }
                 if (!checked_object)
-                    return prefix + receiver + connector + target.setter + "(" + index + value +
-                           ");\n";
+                    return prefix + receiver + connector + target.setter + "(" + setter_index +
+                           value + ");\n";
                 const auto nested_prefix = indent(indentation + 1);
                 return prefix + "{\n" + nested_prefix + "auto &&" + receiver + " = " + object +
                        ";\n" + checked_assignment_guard(receiver, target.value, indentation + 1) +
-                       nested_prefix + receiver + connector + target.setter + "(" + index + value +
-                       ");\n" + prefix + "}\n";
+                       nested_prefix + receiver + connector + target.setter + "(" + setter_index +
+                       value + ");\n" + prefix + "}\n";
             }
         }
+        auto value = assignment_value(emit_expression(target), target.assignment_type);
         return prefix +
                emit_storage_assignment(target.type, emit_expression(target), std::move(value)) +
                ";\n";
@@ -6221,8 +6313,7 @@ void CodeGenerator::emit_inner_class_definition(const ir::Class& declaration,
            << "    if (reversed) " << base_cpp << "::_gdpp_dispatch_notification(what, true);\n";
     if (notification != declaration.functions.end())
         source << "    " << function_native_name(*notification) << "(what);\n";
-    source << "    if (!reversed) " << base_cpp
-           << "::_gdpp_dispatch_notification(what, false);\n"
+    source << "    if (!reversed) " << base_cpp << "::_gdpp_dispatch_notification(what, false);\n"
            << "}\n\n";
     in_function_body_ = false;
     for (const auto& field : declaration.fields) {
@@ -7050,7 +7141,8 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
         header << "    " << unit.class_name << "();\n"
                << "    void _gdpp_initialize_instance() override;\n"
                << "    void _gdpp_initialize_onready() override;\n"
-               << "    void _gdpp_dispatch_notification(std::int32_t what, bool reversed) override;\n\n";
+               << "    void _gdpp_dispatch_notification(std::int32_t what, bool reversed) "
+                  "override;\n\n";
     } else if (initializer != module.functions.end()) {
         const auto required =
             std::count_if(initializer->parameters.begin(), initializer->parameters.end(),
