@@ -1,3 +1,13 @@
+## 1.7.10
+
+- Match GDScript's independent implicit-ready lifecycle for attached scripts: initialize `@onready` fields base-to-derived before normal `_ready` dispatch, including scripts without a user `_ready`, inherited callbacks, internal classes, and repeated `request_ready()` cycles.
+- Keep implicit-ready initialization separate from reflected user methods and place every lifecycle hook in the compiler-reserved `_gdpp_` namespace, so customer methods cannot collide with runtime initialization and a derived script with `@onready` fields cannot shadow a real inherited `_ready` callback.
+- Route statically typed `Array` and every `PackedArray` subscript read, write, and compound assignment through negative-index-aware bounds checks while preserving receiver-before-index evaluation; invalid message data now emits a bounded script diagnostic instead of dereferencing native storage and terminating the process.
+- Preserve a strong, correctly typed `RefCounted` reference when attached-script `self` crosses a typed native call boundary, covering nested message objects and generated protocol models without unsafe owner conversion.
+- Advance the packaged runtime ABI to 12 so an older or partially copied SDK is rejected during export preflight instead of linking lifecycle-incompatible generated code.
+- Add exported-runtime coverage for packed binary message headers, nested dispatch dictionaries, `Callable` handlers, signals, `@onready` scene arrays, inherited and internal ready lifecycles, and 128-message bursts.
+- Give every Godot integration test an isolated build-tree log and serialize tests that share editor user data, preventing concurrent engine log rotation from being misclassified as a GDPP runtime crash.
+
 ## 1.7.9
 
 - Replace the Node.js 20-based `ilammy/msvc-dev-cmd` dependency with a repository-owned, zero-dependency Node.js 24 Action that discovers Visual Studio through `vswhere`, initializes the supported MSVC x64 toolchain, exports only changed environment variables, preserves values containing `=`, deduplicates Windows tool paths, and fails closed on incomplete or mismatched toolchain state.
