@@ -2230,17 +2230,19 @@ std::string CodeGenerator::emit_api_return(const Type& target, std::string value
 }
 
 std::string CodeGenerator::emit_subscript_read(const Type& container, const Type& result,
-                                               std::string value) const {
-    if ((container.kind == TypeKind::array || container.kind == TypeKind::dictionary) &&
-        !result.is_dynamic()) {
-        return emit_conversion(result, {TypeKind::variant, "Variant"}, std::move(value));
+                                               std::string target, std::string index) const {
+    std::string value;
+    if (container.kind == TypeKind::array) {
+        value = "gdpp::runtime::checked_array_get(" + target + ", " + index + ")";
+    } else if (container.is_packed_array()) {
+        value = "gdpp::runtime::checked_packed_array_get(" + target + ", " + index + ")";
+    } else if (container.kind == TypeKind::dictionary) {
+        value = target + "[" + index + "]";
+    } else {
+        value = "gdpp::runtime::get_key(gdpp::runtime::to_variant(" + target +
+                "), gdpp::runtime::to_variant(" + index + "))";
     }
-    if (container.kind == TypeKind::string) {
-        return "godot::String::chr(static_cast<int64_t>(" + value + "))";
-    }
-    if (container.is_packed_array())
-        return emit_api_return(result, std::move(value));
-    return value;
+    return emit_conversion(result, {TypeKind::variant, "Variant"}, std::move(value));
 }
 
 std::string CodeGenerator::emit_subscript_store(const Type& container, std::string value) const {
@@ -3986,7 +3988,7 @@ std::string CodeGenerator::emit_expression(const ir::Expression& expression) con
                                          ? "()"
                                          : ""));
     }
-    case ir::ExpressionKind::subscript:
+    case ir::ExpressionKind::subscript: {
         if (expression.operands.at(0)->type.is_dynamic() ||
             expression.operands.at(0)->type.kind == TypeKind::object) {
             const auto suffix = std::to_string(temporary_counter_++);
@@ -3998,11 +4000,16 @@ std::string CodeGenerator::emit_expression(const ir::Expression& expression) con
                    emit_expression(*expression.operands.at(1)) +
                    "); return gdpp::runtime::get_key(" + target_name + ", " + key_name + "); }())";
         }
-        return emit_subscript_read(
-            expression.operands.at(0)->type, expression.type,
-            emit_expression(*expression.operands.at(0)) +
-                (expression.operands.at(0)->type.is_packed_array() ? ".native()[" : "[") +
-                emit_expression(*expression.operands.at(1)) + "]");
+        const auto suffix = std::to_string(temporary_counter_++);
+        const auto target_name = "_gdpp_subscript_target_" + suffix;
+        const auto index_name = "_gdpp_subscript_index_" + suffix;
+        return "([&]() { auto &&" + target_name + " = " +
+               emit_expression(*expression.operands.at(0)) + "; const auto " + index_name + " = " +
+               emit_expression(*expression.operands.at(1)) + "; return " +
+               emit_subscript_read(expression.operands.at(0)->type, expression.type, target_name,
+                                   index_name) +
+               "; }())";
+    }
     case ir::ExpressionKind::array_literal: {
         const auto descriptor = describe_container_type(expression.type);
         const auto runtime_typed = descriptor && descriptor->has_runtime_constraint();
@@ -4902,7 +4909,10 @@ std::string CodeGenerator::emit_statement(const ir::Statement& statement,
             return emit_dynamic_assignment(statement, indentation);
         if (target.kind == ir::ExpressionKind::subscript &&
             (target.operands.at(0)->type.is_dynamic() ||
-             target.operands.at(0)->type.kind == TypeKind::object)) {
+             target.operands.at(0)->type.kind == TypeKind::object ||
+             (target.operands.at(0)->type.kind == TypeKind::builtin &&
+              !target.operands.at(0)->type.is_packed_array()) ||
+             target.operands.at(0)->type.kind == TypeKind::string)) {
             return emit_dynamic_assignment(statement, indentation);
         }
         if (target.kind == ir::ExpressionKind::subscript) {
@@ -4918,14 +4928,10 @@ std::string CodeGenerator::emit_statement(const ir::Statement& statement,
             std::string assigned;
             if (statement.operation != "=") {
                 const auto current_name = "_gdpp_subscript_current_" + suffix;
-                result +=
-                    nested_prefix + "const auto " + current_name + " = " +
-                    emit_subscript_read(
-                        target.operands.at(0)->type, target.type,
-                        container_name +
-                            (target.operands.at(0)->type.is_packed_array() ? ".native()[" : "[") +
-                            index_name + "]") +
-                    ";\n";
+                result += nested_prefix + "const auto " + current_name + " = " +
+                          emit_subscript_read(target.operands.at(0)->type, target.type,
+                                              container_name, index_name) +
+                          ";\n";
                 result += nested_prefix + "const auto " + value_name + " = " +
                           emit_expression(*statement.expression) + ";\n";
                 const auto operation =
@@ -4955,9 +4961,17 @@ std::string CodeGenerator::emit_statement(const ir::Statement& statement,
                     : target.type;
             assigned = emit_conversion(target.type, assigned_source_type, std::move(assigned));
             assigned = emit_subscript_store(target.operands.at(0)->type, std::move(assigned));
-            result += nested_prefix + container_name +
-                      (target.operands.at(0)->type.is_packed_array() ? ".native()[" : "[") +
-                      index_name + "] = " + assigned + ";\n" + prefix + "}\n";
+            if (target.operands.at(0)->type.kind == TypeKind::array) {
+                result += nested_prefix + "gdpp::runtime::checked_array_set(" + container_name +
+                          ", " + index_name + ", gdpp::runtime::to_variant(" + assigned + "));\n";
+            } else if (target.operands.at(0)->type.is_packed_array()) {
+                result += nested_prefix + "gdpp::runtime::checked_packed_array_set(" +
+                          container_name + ", " + index_name + ", " + assigned + ");\n";
+            } else {
+                result +=
+                    nested_prefix + container_name + "[" + index_name + "] = " + assigned + ";\n";
+            }
+            result += prefix + "}\n";
             return result;
         }
         std::string value = emit_expression(*statement.expression);
