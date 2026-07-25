@@ -100,25 +100,41 @@ jobs:
             exit 1
           fi
 
-          python3 - "$runtime" "$root/runtime.log" <<'PY'
+          python3 - "$runtime" "$root/runtime.log" "$root/coroutine-loop.log" <<'PY'
           from pathlib import Path
           import subprocess
           import sys
 
-          executable, log_path = sys.argv[1:]
-          result = subprocess.run(
-              [executable, "--headless", "--quit-after", "2"],
-              stdout=subprocess.PIPE,
-              stderr=subprocess.STDOUT,
-              text=True,
-              timeout=30,
-              check=False,
+          executable, runtime_log, coroutine_log = sys.argv[1:]
+          cases = (
+              (["--headless", "--quit-after", "2"], runtime_log),
+              (
+                  [
+                      "--headless",
+                      "--audio-driver",
+                      "Dummy",
+                      "--",
+                      "--gdpp-coroutine-loop",
+                  ],
+                  coroutine_log,
+              ),
           )
-          Path(log_path).write_text(result.stdout, encoding="utf-8")
-          print(result.stdout, end="")
-          raise SystemExit(result.returncode)
+          for arguments, log_path in cases:
+              result = subprocess.run(
+                  [executable, *arguments],
+                  stdout=subprocess.PIPE,
+                  stderr=subprocess.STDOUT,
+                  text=True,
+                  timeout=30,
+                  check=False,
+              )
+              Path(log_path).write_text(result.stdout, encoding="utf-8")
+              print(result.stdout, end="")
+              if result.returncode:
+                  raise SystemExit(result.returncode)
           PY
           grep -q '^GDPP_EXPORTED_PROPERTIES_OK$' "$root/runtime.log"
+          grep -q '^GDPP_COROUTINE_LOOP_OK$' "$root/coroutine-loop.log"
           grep -q 'GDPP_AOT_SUMMARY scenes=' "$root/export.log"
 
           test "$(find "$output_root" -type f -name '*.pck' | wc -l)" -eq 1
@@ -138,7 +154,7 @@ jobs:
 
           if grep -E -q '(^| )ERROR:|SCRIPT ERROR:|Parse Error:|WARNING:|Unable to open' \
               "$root/warmup.log" "$root/import.log" "$root/export.log" \
-              "$root/runtime.log" "$root/pck-audit.log"; then
+              "$root/runtime.log" "$root/coroutine-loop.log" "$root/pck-audit.log"; then
             echo 'Installed release package emitted a forbidden diagnostic.'
             exit 1
           fi
