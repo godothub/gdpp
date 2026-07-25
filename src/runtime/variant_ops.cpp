@@ -255,6 +255,17 @@ void report_invalid_key(const char* operation) {
                                         " failed");
 }
 
+bool reject_invalid_object_target(const godot::Variant& target, const char* operation,
+                                  const godot::StringName* member = nullptr) {
+    if (target.get_type() != godot::Variant::OBJECT || target.get_validated_object())
+        return false;
+    auto message = godot::String{"GDPP: cannot "} + operation;
+    if (member)
+        message += godot::String{" '"} + godot::String{*member} + "'";
+    godot::UtilityFunctions::push_error(message + " on a null or freed dynamic object");
+    return true;
+}
+
 } // namespace
 
 godot::Variant default_argument() { return default_argument_marker(); }
@@ -793,6 +804,8 @@ void bind_variant_method(const godot::StringName& class_name, const godot::Metho
 
 godot::Variant call_dynamic_impl(godot::Variant& target, const godot::StringName& method,
                                  const godot::Variant** arguments, std::size_t argument_count) {
+    if (reject_invalid_object_target(target, "call", &method))
+        return {};
     static const godot::StringName get_script_method{"get_script"};
     static const godot::StringName set_script_method{"set_script"};
     if (argument_count == 0 && method == get_script_method &&
@@ -833,6 +846,8 @@ godot::Variant call_dynamic_impl(godot::Variant& target, const godot::StringName
 }
 
 godot::Variant get_named(const godot::Variant& target, const godot::StringName& name) {
+    if (reject_invalid_object_target(target, "read property", &name))
+        return {};
     // GDScript defines `dictionary.identifier` as keyed Dictionary access, including
     // dictionaries returned through Variant boundaries such as JSON.parse() and HTTP APIs.
     // Variant::get_named() only covers built-in/object properties and rejects Dictionary,
@@ -851,6 +866,8 @@ godot::Variant get_named(const godot::Variant& target, const godot::StringName& 
 }
 
 void set_named(godot::Variant& target, const godot::StringName& name, const godot::Variant& value) {
+    if (reject_invalid_object_target(target, "write property", &name))
+        return;
     if (target.get_type() == godot::Variant::DICTIONARY) {
         auto dictionary = static_cast<godot::Dictionary>(target);
         dictionary[godot::Variant(name)] = value;
@@ -863,6 +880,8 @@ void set_named(godot::Variant& target, const godot::StringName& name, const godo
 }
 
 godot::Variant get_key(const godot::Variant& target, const godot::Variant& key) {
+    if (reject_invalid_object_target(target, "read key"))
+        return {};
     bool valid = false;
     auto result = target.get(key, &valid);
     if (!valid) {
@@ -873,6 +892,8 @@ godot::Variant get_key(const godot::Variant& target, const godot::Variant& key) 
 }
 
 void set_key(godot::Variant& target, const godot::Variant& key, const godot::Variant& value) {
+    if (reject_invalid_object_target(target, "write key"))
+        return;
     bool valid = false;
     target.set(key, value, &valid);
     if (!valid)
@@ -891,6 +912,8 @@ void report_index_out_of_bounds(const char* container, const char* operation,
 }
 
 bool iter_init(const godot::Variant& iterable, godot::Variant& iterator) {
+    if (reject_invalid_object_target(iterable, "start iteration"))
+        return false;
     bool valid = false;
     const bool available = iterable.iter_init(iterator, valid);
     if (!valid)
@@ -899,6 +922,8 @@ bool iter_init(const godot::Variant& iterable, godot::Variant& iterator) {
 }
 
 bool iter_next(const godot::Variant& iterable, godot::Variant& iterator) {
+    if (reject_invalid_object_target(iterable, "advance iteration"))
+        return false;
     bool valid = false;
     const bool available = iterable.iter_next(iterator, valid);
     if (!valid)
@@ -907,6 +932,8 @@ bool iter_next(const godot::Variant& iterable, godot::Variant& iterator) {
 }
 
 godot::Variant iter_get(const godot::Variant& iterable, const godot::Variant& iterator) {
+    if (reject_invalid_object_target(iterable, "read iterator value"))
+        return {};
     bool valid = false;
     auto value = iterable.iter_get(iterator, valid);
     if (!valid) {
