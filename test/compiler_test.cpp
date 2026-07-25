@@ -1605,6 +1605,39 @@ TEST_CASE("compiler lowers short-circuit conditional and loop-condition awaits t
     REQUIRE(loop_condition.unit.source.find("_gdpp_async_cell_") != std::string::npos);
 }
 
+TEST_CASE("compiler shares suspended while condition state with loop body mutations") {
+    const gdpp::Compiler compiler;
+    const auto result = compiler.compile(
+        "await_batch_loop.gd", "extends Node\n"
+                               "func fill(limit: int) -> void:\n"
+                               "    var added: int = 0\n"
+                               "    while added < limit:\n"
+                               "        var batch: int = min(200, limit - added)\n"
+                               "        for index in range(batch):\n"
+                               "            added += 1\n"
+                               "        await get_tree().process_frame\n"
+                               "    print(added)\n");
+
+    REQUIRE(result.success);
+    const auto declaration = result.unit.source.find("std::make_shared<int64_t>(added)");
+    REQUIRE(declaration != std::string::npos);
+    const auto cell_begin = result.unit.source.rfind("_gdpp_async_cell_", declaration);
+    REQUIRE(cell_begin != std::string::npos);
+    const auto cell_end = result.unit.source.find(' ', cell_begin);
+    REQUIRE(cell_end != std::string::npos);
+    const auto cell = result.unit.source.substr(cell_begin, cell_end - cell_begin);
+    const auto loop_condition = result.unit.source.find("if (!(", declaration);
+    REQUIRE(loop_condition != std::string::npos);
+    const auto loop_condition_end = result.unit.source.find(")) {", loop_condition);
+    REQUIRE(loop_condition_end != std::string::npos);
+    const auto condition =
+        result.unit.source.substr(loop_condition, loop_condition_end - loop_condition);
+    REQUIRE(condition.find("(*" + cell + ")") != std::string::npos);
+    REQUIRE(condition.find("added") == std::string::npos);
+    const auto increment = result.unit.source.find("(*" + cell + ") =", loop_condition_end);
+    REQUIRE(increment != std::string::npos);
+}
+
 TEST_CASE("compiler lowers async iterator break and continue without a reference cycle") {
     const gdpp::Compiler compiler;
     const auto result = compiler.compile("await_for_control.gd", "signal selected\n"
