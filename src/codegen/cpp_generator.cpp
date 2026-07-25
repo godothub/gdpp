@@ -3785,8 +3785,12 @@ std::string CodeGenerator::emit_expression(const ir::Expression& expression) con
             const auto native_type = cpp_type(argument.type);
             if (argument.kind == ir::ExpressionKind::identifier && argument.value == "self" &&
                 native_type.rfind("godot::Ref<", 0) == 0) {
-                result += "const " + native_type + " " + temporary + " = " +
-                          self_object_expression() + "; ";
+                const auto object_type =
+                    native_type.substr(std::string{"godot::Ref<"}.size(),
+                                       native_type.size() - std::string{"godot::Ref<"}.size() - 1);
+                result += "const " + native_type + " " + temporary + " = " + native_type +
+                          "(godot::Object::cast_to<" + object_type + ">(" +
+                          self_object_expression() + ")); ";
             } else {
                 result += "const auto " + temporary + " = " + emit_expression(argument) + "; ";
             }

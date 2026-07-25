@@ -2137,6 +2137,38 @@ TEST_CASE("attached internal classes dispatch self locally and other instances t
     REQUIRE(source.find("typed->_gdpp_set_value(") != std::string::npos);
 }
 
+TEST_CASE("attached ref-counted self arguments retain a typed strong reference") {
+    const auto root = fixture_root("project-attached-ref-self-argument");
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
+    write_text(root / "base.gd", "extends RefCounted\n"
+                                 "class_name AttachedRefBase\n"
+                                 "func consume(value: AttachedRefBase) -> bool:\n"
+                                 "    return value == self\n");
+    write_text(root / "records.gd", "extends Node\n"
+                                    "class Record extends AttachedRefBase:\n"
+                                    "    func verify() -> bool:\n"
+                                    "        return consume(self)\n");
+    const auto options = project_options(root);
+
+    const auto result = gdpp::ProjectCompiler{}.compile(options);
+
+    REQUIRE(result.success);
+    const auto script =
+        std::find_if(result.scripts.begin(), result.scripts.end(), [](const auto& candidate) {
+            return candidate.relative_path == std::filesystem::path{"records.gd"};
+        });
+    REQUIRE(script != result.scripts.end());
+    const auto source =
+        read_text(options.output_directory / "generated" / script->source_file_name);
+    REQUIRE(source.find("godot::Ref<godot::RefCounted>(godot::Object::cast_to<godot::RefCounted>("
+                        "owner()))") != std::string::npos);
+    REQUIRE(source.find("godot::Ref<godot::RefCounted> _gdpp_call_argument_") != std::string::npos);
+    REQUIRE(source.find("godot::Ref<godot::RefCounted> _gdpp_call_argument_") <
+            source.find("godot::Ref<godot::RefCounted>(godot::Object::cast_to<"
+                        "godot::RefCounted>(owner()))"));
+}
+
 TEST_CASE("attached script self calls use native virtual dispatch without bypassing peer scripts") {
     const auto root = fixture_root("project-attached-self-dispatch");
     std::error_code error;
