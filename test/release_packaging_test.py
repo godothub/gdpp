@@ -457,7 +457,7 @@ class ReleasePackagingTest(unittest.TestCase):
             SOURCE_ROOT / ".github/workflows/ios.yml"
         ).read_text(encoding="utf-8")
         self.assertIn(
-            "grep -E '(^| )ERROR:|SCRIPT ERROR:|WARNING:|Unable to open'",
+            "grep -Eh '(^| )ERROR:|SCRIPT ERROR:|WARNING:|Unable to open'",
             workflow,
         )
         self.assertIn(
