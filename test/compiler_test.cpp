@@ -2249,6 +2249,8 @@ TEST_CASE("compiler preserves typed subscript and builtin component scalar seman
                                     "_gdpp_subscript_container_") != std::string::npos);
     REQUIRE(result.unit.source.find("gdpp::runtime::checked_packed_array_set("
                                     "_gdpp_subscript_container_") != std::string::npos);
+    REQUIRE(result.unit.source.find(
+                "to_variant(gdpp::runtime::checked_packed_array_get(") == std::string::npos);
     REQUIRE(result.unit.source.find("static_cast<double>(vector.x)") != std::string::npos);
     REQUIRE(result.unit.source.find("gdpp::runtime::binary") == std::string::npos);
 }

@@ -2247,6 +2247,7 @@ std::string CodeGenerator::emit_subscript_read(const Type& container, const Type
     } else if (container.is_packed_array()) {
         value = "gdpp::runtime::checked_packed_array_get(" + target + ", " + index +
                 source_location + ")";
+        return emit_conversion(result, result, std::move(value));
     } else if (container.kind == TypeKind::dictionary) {
         value = target + "[" + index + "]";
     } else {
