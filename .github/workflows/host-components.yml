@@ -120,6 +120,8 @@ jobs:
             project_library="$root/libgdpp.release.linux.x86_64.so"
           fi
 
+          "$GODOT" --headless --editor --path example --quit-after 120 \
+            2>&1 | tee "$root/warmup.log"
           "$GODOT" --headless --editor --path example --import \
             2>&1 | tee "$root/import.log"
           python3 tools/verify_export_immutability.py snapshot \
@@ -163,7 +165,8 @@ jobs:
           grep -q '^GDPP_EXPORTED_PROPERTIES_OK$' "$root/runtime.log"
           grep -q 'GDPP_AOT_SUMMARY scenes=' "$root/export.log"
           if grep -E -q '(^| )ERROR:|SCRIPT ERROR:|Parse Error:|WARNING:|Unable to open' \
-              "$root/import.log" "$root/export.log" "$root/runtime.log"; then
+              "$root/warmup.log" "$root/import.log" "$root/export.log" \
+              "$root/runtime.log"; then
             echo 'Official host desktop export emitted a forbidden diagnostic.'
             exit 1
           fi

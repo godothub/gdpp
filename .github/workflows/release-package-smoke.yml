@@ -76,6 +76,8 @@ jobs:
             project_library="$output_root/gdpp.release.windows.x86_64.dll"
           fi
 
+          "$GODOT" --headless --editor --path "$project" --quit-after 120 \
+            2>&1 | tee "$root/warmup.log"
           "$GODOT" --headless --editor --path "$project" --import \
             2>&1 | tee "$root/import.log"
           python3 tools/verify_export_immutability.py snapshot \
@@ -135,8 +137,8 @@ jobs:
           grep -q '^PCK_AUDIT_PROJECT_LIBRARIES=1$' "$root/pck-audit.log"
 
           if grep -E -q '(^| )ERROR:|SCRIPT ERROR:|Parse Error:|WARNING:|Unable to open' \
-              "$root/import.log" "$root/export.log" "$root/runtime.log" \
-              "$root/pck-audit.log"; then
+              "$root/warmup.log" "$root/import.log" "$root/export.log" \
+              "$root/runtime.log" "$root/pck-audit.log"; then
             echo 'Installed release package emitted a forbidden diagnostic.'
             exit 1
           fi
