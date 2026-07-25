@@ -91,6 +91,9 @@ func _on_greeted(name: String) -> void:
 
 func _on_ready() -> void:
     var matrix_args := OS.get_cmdline_user_args()
+    if matrix_args.has("--gdpp-coroutine-loop"):
+        _run_coroutine_loop_contract()
+        return
     if matrix_args.has("--gdpp-matrix-startup"):
         print("GDPP_MATRIX_STARTUP_OK")
         get_tree().quit(0)
@@ -146,6 +149,24 @@ func _on_ready() -> void:
     else:
         print("GDPP_EXPORTED_PROPERTIES_INVALID")
         _publish_web_smoke_status("invalid")
+
+
+func _run_coroutine_loop_contract() -> void:
+    # Mirrors production object-pool warmup: a loop-carried counter is mutated by a nested batch
+    # loop and must be observed by the outer condition after every frame suspension.
+    var target: int = 4996
+    var added: int = 0
+    while added < target:
+        var batch: int = min(200, target - added)
+        for _index in range(batch):
+            added += 1
+        await get_tree().process_frame
+    if added != target:
+        push_error("GDPP_COROUTINE_LOOP_INVALID")
+        get_tree().quit(2)
+        return
+    print("GDPP_COROUTINE_LOOP_OK")
+    get_tree().quit(0)
 
 
 func _publish_web_smoke_status(status: String) -> void:
