@@ -4121,7 +4121,7 @@ std::string CodeGenerator::emit_expression(const ir::Expression& expression) con
         result += ", [=](const auto &" + arguments + ") mutable -> godot::Variant {\n";
         for (std::size_t index = 0; index < lambda.parameters.size(); ++index) {
             const auto& parameter = lambda.parameters[index];
-            result += "    " + cpp_type(parameter.type) + " " +
+            result += "    [[maybe_unused]] " + cpp_type(parameter.type) + " " +
                       sanitize_identifier(parameter.name) + " = ";
             const auto converted = emit_conversion(parameter.type, {TypeKind::variant, "Variant"},
                                                    arguments + "[" + std::to_string(index) + "]");
@@ -4135,7 +4135,7 @@ std::string CodeGenerator::emit_expression(const ir::Expression& expression) con
         }
         if (lambda.rest_parameter) {
             const auto rest_name = sanitize_identifier(lambda.rest_parameter->name);
-            result += "    godot::Array " + rest_name + ";\n";
+            result += "    [[maybe_unused]] godot::Array " + rest_name + ";\n";
             result += "    " + rest_name + ".resize(" + arguments + ".size() > " +
                       std::to_string(lambda.parameters.size()) + " ? " + arguments + ".size() - " +
                       std::to_string(lambda.parameters.size()) + " : 0);\n";
@@ -4416,7 +4416,7 @@ std::string CodeGenerator::emit_async_match_branch(
     result += prefix + "if (" + condition + ") {\n";
     const auto content_indent = indentation + 1;
     for (const auto& binding : bindings) {
-        result += indent(content_indent) + cpp_type(binding.type) + " " +
+        result += indent(content_indent) + "[[maybe_unused]] " + cpp_type(binding.type) + " " +
                   sanitize_identifier(binding.name) + " = " +
                   emit_conversion(binding.type, {TypeKind::variant, "Variant"}, binding.slot) +
                   ";\n";
@@ -4536,8 +4536,10 @@ std::string CodeGenerator::emit_async_statements(
                       ");\n";
             result += prefix + "auto " + resume_name + " = [=](const godot::Array &" + result_name +
                       ") mutable {\n";
+            result += indent(indentation + 1) + "static_cast<void>(" + result_name + ");\n";
             if (statement.kind == ir::StatementKind::await_variable) {
-                result += indent(indentation + 1) + cpp_type(statement.declared_type) + " " +
+                result += indent(indentation + 1) + "[[maybe_unused]] " +
+                          cpp_type(statement.declared_type) + " " +
                           sanitize_identifier(statement.name) + " = " +
                           emit_conversion(statement.declared_type, {TypeKind::variant, "Variant"},
                                           "gdpp::runtime::await_result(" + result_name + ")") +
@@ -4680,7 +4682,7 @@ std::string CodeGenerator::emit_async_statements(
                                             loop_control);
             result +=
                 async_return(indentation + 3, true) + indent(indentation + 2) + "}\n" +
-                indent(indentation + 2) +
+                indent(indentation + 2) + "[[maybe_unused]] " +
                 (statement.declared_type.is_dynamic() ? std::string{"godot::Variant"}
                                                       : cpp_type(statement.declared_type)) +
                 " " + sanitize_identifier(statement.name) + " = " +
@@ -4911,7 +4913,7 @@ std::string CodeGenerator::emit_statement(const ir::Statement& statement,
             diagnostics_.error("GDS3006", "nested await reached code generation", statement.span);
             return prefix + "/* invalid nested await */;\n";
         }
-        return prefix + (statement.is_constant ? "const " : "") +
+        return prefix + "[[maybe_unused]] " + (statement.is_constant ? "const " : "") +
                cpp_type(statement.declared_type) + " " + sanitize_identifier(statement.name) +
                " = " +
                emit_conversion(statement.declared_type, statement.expression->type,
@@ -4929,7 +4931,7 @@ std::string CodeGenerator::emit_statement(const ir::Statement& statement,
         return result + prefix + "#endif\n";
     }
     case ir::StatementKind::variable:
-        return prefix + (statement.is_constant ? "const " : "") +
+        return prefix + "[[maybe_unused]] " + (statement.is_constant ? "const " : "") +
                (statement.expression && statement.expression->kind == ir::ExpressionKind::lambda
                     ? std::string{"auto"}
                     : cpp_type(statement.declared_type)) +
@@ -5417,7 +5419,7 @@ std::string CodeGenerator::emit_statement(const ir::Statement& statement,
             const auto content_indent = indentation + 2;
             for (const auto& binding : bindings) {
                 result +=
-                    indent(content_indent) + cpp_type(binding.type) + " " +
+                    indent(content_indent) + "[[maybe_unused]] " + cpp_type(binding.type) + " " +
                     sanitize_identifier(binding.name) + " = " +
                     emit_conversion(binding.type, {TypeKind::variant, "Variant"}, binding.slot) +
                     ";\n";
@@ -5488,7 +5490,7 @@ std::string CodeGenerator::emit_statement(const ir::Statement& statement,
                 nested_prefix + "for (int64_t " + value + " = " + start + "; " + step +
                 " != 0 && (" + step + " > 0 ? " + value + " < " + stop + " : " + value + " > " +
                 stop + "); " + value + " = gdpp::integer::range_advance(" + value + ", " + step +
-                ", " + stop + ")) {\n" + body_prefix +
+                ", " + stop + ")) {\n" + body_prefix + "[[maybe_unused]] " +
                 (statement.declared_type.is_dynamic() ? std::string{"godot::Variant"}
                                                       : cpp_type(statement.declared_type)) +
                 " " + sanitize_identifier(statement.name) + " = " +
@@ -5522,7 +5524,7 @@ std::string CodeGenerator::emit_statement(const ir::Statement& statement,
                 prefix + "{\n" + nested_prefix + "const double " + limit + " = " +
                 emit_expression(*statement.condition) + ";\n" + nested_prefix + "for (double " +
                 value + " = 0.0; " + value + " < " + limit + "; " + value + " += 1.0) {\n" +
-                body_prefix +
+                body_prefix + "[[maybe_unused]] " +
                 (statement.declared_type.is_dynamic() ? std::string{"godot::Variant"}
                                                       : cpp_type(statement.declared_type)) +
                 " " + sanitize_identifier(statement.name) + " = " +
@@ -5547,7 +5549,7 @@ std::string CodeGenerator::emit_statement(const ir::Statement& statement,
                 prefix + "{\n" + nested_prefix + "const auto " + bounds + " = " +
                 emit_expression(*statement.condition) + ";\n" + nested_prefix + "for (" + scalar +
                 " " + value + " = " + bounds + ".x; " + value + " < " + bounds + ".y; ++" + value +
-                ") {\n" + body_prefix +
+                ") {\n" + body_prefix + "[[maybe_unused]] " +
                 (statement.declared_type.is_dynamic() ? std::string{"godot::Variant"}
                                                       : cpp_type(statement.declared_type)) +
                 " " + sanitize_identifier(statement.name) + " = " +
@@ -5580,7 +5582,7 @@ std::string CodeGenerator::emit_statement(const ir::Statement& statement,
                 (integral
                      ? " = gdpp::integer::range_advance(" + value + ", " + step + ", " + stop + ")"
                      : " += " + step) +
-                ") {\n" + body_prefix +
+                ") {\n" + body_prefix + "[[maybe_unused]] " +
                 (statement.declared_type.is_dynamic() ? std::string{"godot::Variant"}
                                                       : cpp_type(statement.declared_type)) +
                 " " + sanitize_identifier(statement.name) + " = " +
@@ -5600,6 +5602,7 @@ std::string CodeGenerator::emit_statement(const ir::Statement& statement,
                 emit_expression(*statement.condition) + ";\n" + nested_prefix + "for (int64_t " +
                 index_name + " = 0; " + index_name + " < " + iterable_name +
                 ".native().size(); ++" + index_name + ") {\n" + body_prefix +
+                "[[maybe_unused]] " +
                 (statement.declared_type.is_dynamic() ? std::string{"godot::Variant"}
                                                       : cpp_type(statement.declared_type)) +
                 " " + sanitize_identifier(statement.name) + " = " +
@@ -5622,7 +5625,7 @@ std::string CodeGenerator::emit_statement(const ir::Statement& statement,
                 emit_expression(*statement.condition) + ";\n" + nested_prefix + "const int64_t " +
                 size_name + " = " + iterable_name + ".length();\n" + nested_prefix +
                 "for (int64_t " + index_name + " = 0; " + index_name + " < " + size_name + "; ++" +
-                index_name + ") {\n" + body_prefix +
+                index_name + ") {\n" + body_prefix + "[[maybe_unused]] " +
                 (statement.declared_type.is_dynamic() ? std::string{"godot::Variant"}
                                                       : cpp_type(statement.declared_type)) +
                 " " + sanitize_identifier(statement.name) + " = " +
@@ -5643,7 +5646,7 @@ std::string CodeGenerator::emit_statement(const ir::Statement& statement,
                 prefix + "{\n" + nested_prefix + "auto &&" + iterable_name + " = " +
                 emit_expression(*statement.condition) + ";\n" + nested_prefix + "for (int64_t " +
                 index_name + " = 0; " + index_name + " < " + iterable_name + ".size(); ++" +
-                index_name + ") {\n" + body_prefix +
+                index_name + ") {\n" + body_prefix + "[[maybe_unused]] " +
                 (statement.declared_type.is_dynamic() ? std::string{"godot::Variant"}
                                                       : cpp_type(statement.declared_type)) +
                 " " + sanitize_identifier(statement.name) + " = " +
@@ -5670,7 +5673,7 @@ std::string CodeGenerator::emit_statement(const ir::Statement& statement,
                 "for (bool " + available_name + " = gdpp::runtime::iter_init(" + iterable_name +
                 ", " + iterator_name + "); " + available_name + "; " + available_name +
                 " = gdpp::runtime::iter_next(" + iterable_name + ", " + iterator_name + ")) {\n" +
-                body_prefix +
+                body_prefix + "[[maybe_unused]] " +
                 (statement.declared_type.is_dynamic() ? std::string{"godot::Variant"}
                                                       : cpp_type(statement.declared_type)) +
                 " " + sanitize_identifier(statement.name) + " = " +
@@ -6480,7 +6483,7 @@ void CodeGenerator::emit_inner_class_definition(const ir::Class& declaration,
                    << (field.is_static ? "_gdpp_static_" + name + "_storage()" : name) << ";\n";
         }
         source << "}\n\nvoid " << native_name << "::_gdpp_set_" << name << '('
-               << cpp_type(field.type) << ' '
+               << "[[maybe_unused]] " << cpp_type(field.type) << ' '
                << (field.setter && field.setter->method.empty()
                        ? sanitize_identifier(field.setter->parameter)
                        : "value")
@@ -6517,7 +6520,7 @@ void CodeGenerator::emit_inner_class_definition(const ir::Class& declaration,
             for (std::size_t index = 0; index < engine_virtual->maximum_arguments; ++index) {
                 if (index != 0)
                     source << ", ";
-                source << virtual_parameter_type(*engine_virtual, index)
+                source << "[[maybe_unused]] " << virtual_parameter_type(*engine_virtual, index)
                        << " _gdpp_engine_argument_" << index;
             }
             source << ')';
@@ -6571,12 +6574,14 @@ void CodeGenerator::emit_inner_class_definition(const ir::Class& declaration,
             if (index != 0)
                 source << ", ";
             const auto& parameter = function.parameters[index];
-            source << parameter_native_type(parameter) << ' ' << parameter_native_name(parameter);
+            source << "[[maybe_unused]] " << parameter_native_type(parameter) << ' '
+                   << parameter_native_name(parameter);
         }
         if (function.rest_parameter) {
             if (!function.parameters.empty())
                 source << ", ";
-            source << "godot::Array " << sanitize_identifier(function.rest_parameter->name);
+            source << "[[maybe_unused]] godot::Array "
+                   << sanitize_identifier(function.rest_parameter->name);
         }
         source << ')';
         source << " {\n";
@@ -7850,7 +7855,8 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
                                           ? sanitize_identifier(variable.setter->parameter)
                                           : "value";
         source << "}\n\nvoid " << unit.class_name << "::_gdpp_set_" << name << '('
-               << cpp_type(variable.type) << ' ' << setter_parameter << ") {\n";
+               << "[[maybe_unused]] " << cpp_type(variable.type) << ' ' << setter_parameter
+               << ") {\n";
         if (variable.is_static && has_static_initialization)
             source << "    _gdpp_ensure_static_initialized();\n";
         if (variable.setter) {
@@ -7887,7 +7893,7 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
             for (std::size_t index = 0; index < engine_virtual->maximum_arguments; ++index) {
                 if (index != 0)
                     source << ", ";
-                source << virtual_parameter_type(*engine_virtual, index)
+                source << "[[maybe_unused]] " << virtual_parameter_type(*engine_virtual, index)
                        << " _gdpp_engine_argument_" << index;
             }
             source << ')';
@@ -7948,14 +7954,16 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
             if (index != 0)
                 source << ", ";
             const auto& parameter = function.parameters[index];
-            source << (parameter.default_value ? parameter_native_type(parameter)
+            source << "[[maybe_unused]] "
+                   << (parameter.default_value ? parameter_native_type(parameter)
                                                : function_parameter_type(function, index))
                    << ' ' << parameter_native_name(parameter);
         }
         if (function.rest_parameter) {
             if (!function.parameters.empty())
                 source << ", ";
-            source << "godot::Array " << sanitize_identifier(function.rest_parameter->name);
+            source << "[[maybe_unused]] godot::Array "
+                   << sanitize_identifier(function.rest_parameter->name);
         }
         source << ')';
         source << " {\n";
