@@ -63,7 +63,7 @@ RUNTIME_FIELDS = {
 COMMON_FIELDS = {
     "distribution_binding": "template_release",
     "distribution_optimization": "Release",
-    "gdpp_version": "1.7.9",
+    "gdpp_version": "1.7.10",
     "cxx_standard": "17",
     "exceptions": "disabled",
     **RUNTIME_FIELDS,
@@ -96,7 +96,7 @@ def create_host_component(root: Path, component_host: str) -> Path:
     addon = root / f"gdpp-host-{component_host}" / "addons/gdpp"
     for relative in package_release.STATIC_ADDON_FILES:
         write(addon / relative)
-    write(addon / "plugin.cfg", '[plugin]\nversion="1.7.9"\n')
+    write(addon / "plugin.cfg", '[plugin]\nversion="1.7.10"\n')
     write(addon / "gdpp.gdextension", '[configuration]\ncompatibility_minimum = "4.4"\n')
     write(addon / "binary" / host.compiler_library, f"compiler-{component_host}")
     write(addon / "binary" / host.fallback_library, f"fallback-{component_host}")
@@ -227,7 +227,7 @@ class ReleasePackagingTest(unittest.TestCase):
             self.temporary / f"release-{host}",
             host,
         )
-        self.assertEqual(version, "1.7.9")
+        self.assertEqual(version, "1.7.10")
         return stage, archive_name
 
     def test_three_packages_contain_all_versions_and_only_supported_targets(self) -> None:
