@@ -54,7 +54,7 @@ RUNTIME_CONTENT = {
     ),
 }
 RUNTIME_FIELDS = {
-    "runtime_abi": "11",
+    "runtime_abi": "12",
     **{
         field: hashlib.sha256(content.encode("utf-8")).hexdigest()
         for field, (_, content) in RUNTIME_CONTENT.items()
@@ -360,7 +360,7 @@ class ReleasePackagingTest(unittest.TestCase):
         manifest = self.components / "gdpp-android-arm64-godot-4.7/sdk.manifest"
         manifest.write_text(
             manifest.read_text(encoding="utf-8").replace(
-                "runtime_abi 11", "runtime_abi 12"
+                "runtime_abi 12", "runtime_abi 13"
             ),
             encoding="utf-8",
         )
