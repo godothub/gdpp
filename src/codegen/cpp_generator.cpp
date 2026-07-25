@@ -4657,8 +4657,13 @@ std::string CodeGenerator::emit_async_statements(
             const auto loop = "_gdpp_async_loop_" + suffix;
             const auto weak_loop = "_gdpp_async_weak_loop_" + suffix;
             const auto keep_alive = "_gdpp_async_keep_loop_" + suffix;
-            result += prefix + "{\n" + lift_async_loop_locals(statement, indentation + 1) +
-                      indent(indentation + 1) + "const auto " + iterable +
+            // Install loop-carried storage overrides before emitting any expression that can
+            // reference those locals. Keeping the mutating lift call in an operator+ chain leaves
+            // its evaluation order relative to emit_expression unspecified, which can make the
+            // iterator and body capture different storage.
+            result += prefix + "{\n";
+            result += lift_async_loop_locals(statement, indentation + 1);
+            result += indent(indentation + 1) + "const auto " + iterable +
                       " = std::make_shared<godot::Variant>(" +
                       emit_expression(*statement.condition) + ");\n" + indent(indentation + 1) +
                       "const auto " + iterator + " = std::make_shared<godot::Variant>();\n" +
@@ -4704,8 +4709,11 @@ std::string CodeGenerator::emit_async_statements(
             const auto loop = "_gdpp_async_loop_" + suffix;
             const auto weak_loop = "_gdpp_async_weak_loop_" + suffix;
             const auto keep_alive = "_gdpp_async_keep_loop_" + suffix;
-            result += prefix + "{\n" + lift_async_loop_locals(statement, indentation + 1) +
-                      indent(indentation + 1) + "const auto " + loop +
+            // The condition is reevaluated by the loop callback after every suspension, so it
+            // must read the same shared cells that assignments in the body update.
+            result += prefix + "{\n";
+            result += lift_async_loop_locals(statement, indentation + 1);
+            result += indent(indentation + 1) + "const auto " + loop +
                       " = std::make_shared<std::function<void()>>();\n" + indent(indentation + 1) +
                       "const std::weak_ptr<std::function<void()>> " + weak_loop + " = " + loop +
                       ";\n" + indent(indentation + 1) + "*" + loop + " = [=]() mutable {\n" +
