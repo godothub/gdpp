@@ -181,6 +181,89 @@ def validate_packed_subscript_contract(errors: list[str]) -> None:
             f"{header.relative_to(ROOT)}: statically typed PackedArray reads must not round-trip "
             "through Variant"
         )
+    generator = SOURCE_ROOT / "codegen" / "cpp_generator.cpp"
+    generator_source = generator.read_text(encoding="utf-8")
+    packed_branch_start = generator_source.find(
+        "} else if (container.is_packed_array()) {", generator_source.find("emit_subscript_read")
+    )
+    dictionary_branch_start = generator_source.find(
+        "} else if (container.kind == TypeKind::dictionary)", packed_branch_start
+    )
+    packed_branch = generator_source[packed_branch_start:dictionary_branch_start]
+    if (
+        packed_branch_start < 0
+        or dictionary_branch_start < 0
+        or "return emit_conversion(result, result, std::move(value));" not in packed_branch
+    ):
+        errors.append(
+            f"{generator.relative_to(ROOT)}: generated PackedArray reads must retain their "
+            "native element type after bounds validation"
+        )
+
+
+def validate_local_signal_contract(errors: list[str]) -> None:
+    header = PUBLIC_ROOT / "runtime" / "variant_ops.hpp"
+    runtime = SOURCE_ROOT / "runtime" / "variant_ops.cpp"
+    generator = SOURCE_ROOT / "codegen" / "cpp_generator.cpp"
+    contracts = {
+        header: (
+            "emit_local_signal_variants",
+            "emit_local_signal(godot::Object* owner, const godot::Variant& signal_name",
+        ),
+        runtime: (
+            "classdb_get_method_bind(",
+            "object_method_bind_call(",
+        ),
+        generator: (
+            "static const godot::Variant ",
+            '"gdpp::runtime::emit_local_signal("',
+        ),
+    }
+    for path, required in contracts.items():
+        source = path.read_text(encoding="utf-8")
+        for contract in required:
+            if contract not in source:
+                errors.append(
+                    f"{path.relative_to(ROOT)}: missing local-signal hot-path contract "
+                    f"{contract!r}"
+                )
+
+
+def validate_attached_method_dispatch_contract(errors: list[str]) -> None:
+    header = PUBLIC_ROOT / "runtime" / "attached_script.hpp"
+    registry = SOURCE_ROOT / "runtime" / "attached_script_registry.cpp"
+    instance = SOURCE_ROOT / "runtime" / "attached_script_instance.cpp"
+    generator = SOURCE_ROOT / "codegen" / "cpp_generator.cpp"
+    contracts = {
+        header: (
+            "struct AttachedScriptMethodDispatch",
+            "GDExtensionClassMethodCall call",
+            "std::vector<AttachedScriptMethodDispatch> method_dispatches",
+        ),
+        registry: (
+            "descriptor.method_dispatches.size() != descriptor.methods.size()",
+            "append_unique(resolved.method_dispatches",
+        ),
+        instance: (
+            "find_method_dispatch(",
+            "dispatch->call(",
+        ),
+        generator: ("descriptor.method_dispatches.push_back({",),
+    }
+    for path, required in contracts.items():
+        source = path.read_text(encoding="utf-8")
+        for contract in required:
+            if contract not in source:
+                errors.append(
+                    f"{path.relative_to(ROOT)}: missing attached-method direct-dispatch "
+                    f"contract {contract!r}"
+                )
+    instance_source = instance.read_text(encoding="utf-8")
+    if "target.callp(method" in instance_source:
+        errors.append(
+            f"{instance.relative_to(ROOT)}: attached callbacks must not repeat ClassDB dispatch "
+            "through a temporary behavior Variant"
+        )
 
 
 def validate_performance_contract(errors: list[str]) -> None:
@@ -211,6 +294,8 @@ def main() -> int:
     validate_generated_variant_boundaries(errors)
     validate_packed_conversion_contract(errors)
     validate_packed_subscript_contract(errors)
+    validate_local_signal_contract(errors)
+    validate_attached_method_dispatch_contract(errors)
     validate_performance_contract(errors)
     if errors:
         print("GDPP architecture validation failed:", file=sys.stderr)
