@@ -7161,13 +7161,11 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
             header << " = 0";
         header << ";\n";
     }
-    if (has_onready_fields && ready == module.functions.end()) {
+    if (!attached_script && has_onready_fields && ready == module.functions.end()) {
         header << "    virtual void _ready()";
-        if (!attached_script) {
-            const auto* method = api_.find_method(godot_base_type, "_ready");
-            if (method && method->is_virtual)
-                header << " override";
-        }
+        const auto* method = api_.find_method(godot_base_type, "_ready");
+        if (method && method->is_virtual)
+            header << " override";
         header << ";\n";
     }
     header << "};\n";

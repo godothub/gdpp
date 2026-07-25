@@ -844,6 +844,7 @@ TEST_CASE("attached scripts keep onready initialization independent from user re
     REQUIRE(header.find("void initialize_onready()") != std::string::npos);
     REQUIRE(header.find("void dispatch_notification(int64_t _what)") != std::string::npos);
     REQUIRE(header.find("_gdpp_variant_call__ready") == std::string::npos);
+    REQUIRE(header.find("virtual void _ready()") == std::string::npos);
     REQUIRE(source.find("godot::StringName(\"_ready\")") == std::string::npos);
     REQUIRE(source.find("void " + native_class + "::_ready()") == std::string::npos);
     const auto initializer =
@@ -902,6 +903,9 @@ TEST_CASE("attached onready initialization follows inheritance and internal clas
     REQUIRE(child_marker > inherited_initializer);
     REQUIRE(child_source.find("void " + child_class + "::_ready()") == std::string::npos);
     REQUIRE(child_source.find("_gdpp_variant_call__ready") == std::string::npos);
+    const auto child_header =
+        read_text(options.output_directory / "generated" / child_script->header_file_name);
+    REQUIRE(child_header.find("virtual void _ready()") == std::string::npos);
 
     const auto inner_script =
         std::find_if(result.scripts.begin(), result.scripts.end(), [](const auto& script) {
