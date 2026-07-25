@@ -2274,6 +2274,15 @@ TEST_CASE("attached ref-counted self arguments retain a typed strong reference")
     REQUIRE(source.find("godot::Ref<godot::RefCounted> _gdpp_call_argument_") <
             source.find("godot::Ref<godot::RefCounted>(godot::Object::cast_to<"
                         "godot::RefCounted>(owner()))"));
+    const auto base_script =
+        std::find_if(result.scripts.begin(), result.scripts.end(), [](const auto& candidate) {
+            return candidate.relative_path == std::filesystem::path{"base.gd"};
+        });
+    REQUIRE(base_script != result.scripts.end());
+    const auto base_source =
+        read_text(options.output_directory / "generated" / base_script->source_file_name);
+    REQUIRE(base_source.find("gdpp::runtime::binary(godot::Variant::OP_EQUAL") !=
+            std::string::npos);
 }
 
 TEST_CASE("attached script self calls use native virtual dispatch without bypassing peer scripts") {

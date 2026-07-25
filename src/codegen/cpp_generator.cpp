@@ -3029,6 +3029,19 @@ std::string CodeGenerator::emit_expression(const ir::Expression& expression) con
         const auto& left_type = expression.operands.at(0)->type;
         const auto& right_type = expression.operands.at(1)->type;
         if ((operation == "==" || operation == "!=") &&
+            left_type.kind == TypeKind::object && right_type.kind == TypeKind::object) {
+            // Attached RefCounted scripts store typed values as Ref<T>, while `self` is the
+            // provider-owned Object*. Direct C++ comparison is ill-formed even when both values
+            // identify the same Godot object. Variant equality is Godot's canonical identity
+            // boundary and also handles engine Object pointers, Ref values, and freed instances.
+            return emit_ordered_operands([&](const std::string& left, const std::string& right) {
+                const auto equality =
+                    "static_cast<bool>(gdpp::runtime::binary(godot::Variant::OP_EQUAL, " + left +
+                    ", " + right + "))";
+                return operation == "==" ? equality : "!(" + equality + ")";
+            });
+        }
+        if ((operation == "==" || operation == "!=") &&
             ((left_type.kind == TypeKind::object && right_type.kind == TypeKind::nil) ||
              (left_type.kind == TypeKind::nil && right_type.kind == TypeKind::object))) {
             const auto& object = left_type.kind == TypeKind::object ? *expression.operands.at(0)

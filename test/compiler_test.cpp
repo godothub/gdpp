@@ -2270,6 +2270,28 @@ TEST_CASE("compiler contains invalid native sequence indexes instead of derefere
     REQUIRE(result.unit.source.find("_gdpp_source_path, 4, 32") != std::string::npos);
 }
 
+TEST_CASE("compiler compares every static Godot object representation by Variant identity") {
+    const gdpp::Compiler compiler;
+    const auto result = compiler.compile(
+        "object_identity.gd",
+        "func same_ref(left: RefCounted, right: RefCounted) -> bool:\n"
+        "    return left == right\n"
+        "func different_node(left: Node, right: Node) -> bool:\n"
+        "    return left != right\n");
+
+    REQUIRE(result.success);
+    const auto first =
+        result.unit.source.find("gdpp::runtime::binary(godot::Variant::OP_EQUAL");
+    REQUIRE(first != std::string::npos);
+    const auto second = result.unit.source.find("gdpp::runtime::binary(godot::Variant::OP_EQUAL",
+                                                first + 1);
+    REQUIRE(second != std::string::npos);
+    REQUIRE(result.unit.source.find("gdpp::runtime::binary(godot::Variant::OP_EQUAL",
+                                    second + 1) == std::string::npos);
+    REQUIRE(result.unit.source.find("_gdpp_binary_left_") != std::string::npos);
+    REQUIRE(result.unit.source.find("_gdpp_binary_right_") != std::string::npos);
+}
+
 TEST_CASE("compiler sequences checked subscript receivers before indexes") {
     const gdpp::Compiler compiler;
     const auto result = compiler.compile(
