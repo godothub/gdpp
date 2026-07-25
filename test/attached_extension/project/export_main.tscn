@@ -46,6 +46,12 @@ script = ExtResource("7_message_dispatch")
 
 [node name="Item1" type="Node" parent="MessageDispatchProbe"]
 
+[node name="GiftCount" type="Label" parent="MessageDispatchProbe"]
+
+[node name="KuaishouGift" type="Sprite2D" parent="MessageDispatchProbe"]
+
+[node name="DouyinGift" type="Sprite2D" parent="MessageDispatchProbe"]
+
 [connection signal="child_ping" from="." to="." method="_on_child_ping"]
 [connection signal="vendor_contract" from="." to="." method="_on_vendor_contract"]
 [connection signal="vendor_ping" from="." to="." method="_on_vendor_ping"]

@@ -103,7 +103,9 @@ func _verify_export_runtime() -> void:
 
     var message_dispatch_probe: Variant = get_node("MessageDispatchProbe")
     if message_dispatch_probe == null or not message_dispatch_probe.dispatch_burst(128):
-        _fail("binary message dispatch did not preserve onready arrays, callables, or signals")
+        _fail(
+            "gift message simulation did not preserve framing, parsing, dispatch, or UI updates",
+        )
         return
 
     var data := load("res://vendor_data.tres")
