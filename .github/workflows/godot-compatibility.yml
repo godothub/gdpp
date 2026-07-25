@@ -201,9 +201,14 @@ jobs:
           timeout 15s "$output/aot/gdpp-runtime.x86_64" --headless --quit-after 2 \
             2>&1 | tee "$output/gdpp-aot-runtime.log"
           grep -q '^GDPP_EXPORTED_PROPERTIES_OK$' "$output/gdpp-aot-runtime.log"
+          timeout 30s "$output/aot/gdpp-runtime.x86_64" \
+            --headless --audio-driver Dummy -- --gdpp-coroutine-loop \
+            2>&1 | tee "$output/gdpp-aot-coroutine-loop.log"
+          grep -q '^GDPP_COROUTINE_LOOP_OK$' "$output/gdpp-aot-coroutine-loop.log"
           grep -q 'GDPP_AOT_SUMMARY scenes=' "$output/gdpp-aot-export.log"
           if grep -E -q '(^| )ERROR:|SCRIPT ERROR:|WARNING:|Unable to open' \
-              "$output/gdpp-aot-export.log" "$output/gdpp-aot-runtime.log"; then
+              "$output/gdpp-aot-export.log" "$output/gdpp-aot-runtime.log" \
+              "$output/gdpp-aot-coroutine-loop.log"; then
             echo 'AOT export or runtime emitted a forbidden diagnostic.'
             exit 1
           fi
