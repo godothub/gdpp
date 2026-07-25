@@ -3580,18 +3580,18 @@ std::string CodeGenerator::emit_expression(const ir::Expression& expression) con
             if (local_signal) {
                 const auto suffix = std::to_string(temporary_counter_++);
                 const auto signal_name = "_gdpp_signal_name_" + suffix;
-                std::string result = "([&]() { static const godot::StringName " + signal_name +
+                std::string result = "([&]() { static const godot::Variant " + signal_name +
                                      " = " + godot_string_name(signal.value) + "; ";
                 for (std::size_t index = 1; index < expression.operands.size(); ++index) {
                     result += "const auto _gdpp_signal_argument_" + suffix + "_" +
                               std::to_string(index - 1) + " = " +
                               emit_expression(*expression.operands[index]) + "; ";
                 }
-                result += self_object_expression() + "->emit_signal(" + signal_name;
+                result += "gdpp::runtime::emit_local_signal(" + self_object_expression() + ", " +
+                          signal_name;
                 for (std::size_t index = 1; index < expression.operands.size(); ++index) {
-                    result +=
-                        ", gdpp::runtime::variant_constructor_argument(_gdpp_signal_argument_" +
-                        suffix + "_" + std::to_string(index - 1) + ")";
+                    result += ", _gdpp_signal_argument_" + suffix + "_" +
+                              std::to_string(index - 1);
                 }
                 return result + "); }())";
             }

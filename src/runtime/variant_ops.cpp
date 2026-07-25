@@ -37,6 +37,23 @@ class CoroutineState final {
     bool exposed{false};
 };
 
+void emit_local_signal_variants(godot::Object* owner, const godot::Variant** arguments,
+                                const std::int64_t argument_count) {
+    static const godot::StringName method_name{"emit_signal"};
+    static GDExtensionMethodBindPtr method_bind =
+        godot::gdextension_interface::classdb_get_method_bind(
+            godot::Object::get_class_static()._native_ptr(), method_name._native_ptr(),
+            4047867050);
+    ERR_FAIL_NULL_MSG(owner, "GDPP: cannot emit a local signal on a null object.");
+    ERR_FAIL_NULL_MSG(method_bind, "GDPP: cannot resolve Object.emit_signal.");
+
+    GDExtensionCallError error{};
+    godot::Variant result;
+    godot::gdextension_interface::object_method_bind_call(
+        method_bind, owner->_owner, reinterpret_cast<GDExtensionConstVariantPtr*>(arguments),
+        argument_count, result._native_ptr(), &error);
+}
+
 namespace {
 
 std::atomic<std::uint64_t>& coroutine_counter() {

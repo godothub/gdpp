@@ -105,9 +105,10 @@ TEST_CASE("compiler centralizes packed values at every generated Variant boundar
     REQUIRE(result.success);
     REQUIRE(result.unit.source.find("] = gdpp::runtime::to_variant(_gdpp_call_argument_") !=
             std::string::npos);
-    REQUIRE(result.unit.source.find("emit_signal(_gdpp_signal_name_") != std::string::npos);
     REQUIRE(result.unit.source.find(
-                ", gdpp::runtime::variant_constructor_argument(_gdpp_signal_argument_") !=
+                "static const godot::Variant _gdpp_signal_name_") != std::string::npos);
+    REQUIRE(result.unit.source.find(
+                "gdpp::runtime::emit_local_signal(this, _gdpp_signal_name_") !=
             std::string::npos);
     REQUIRE(result.unit.source.find(".call(gdpp::runtime::variant_constructor_argument("
                                     "_gdpp_callable_argument_") != std::string::npos);
@@ -1057,9 +1058,11 @@ TEST_CASE("compiler emits local signals through their owner without temporary Si
                                                            "    self.pulse.emit(value + 2)\n");
 
     REQUIRE(result.success);
-    REQUIRE(result.unit.source.find("static const godot::StringName _gdpp_signal_name_") !=
+    REQUIRE(result.unit.source.find("static const godot::Variant _gdpp_signal_name_") !=
             std::string::npos);
-    REQUIRE(result.unit.source.find("this->emit_signal(_gdpp_signal_name_") != std::string::npos);
+    REQUIRE(result.unit.source.find(
+                "gdpp::runtime::emit_local_signal(this, _gdpp_signal_name_") !=
+            std::string::npos);
     REQUIRE(result.unit.source.find("godot::Signal(this, godot::StringName(\"pulse\")).emit") ==
             std::string::npos);
 }

@@ -76,6 +76,27 @@ void compound_assign(godot::Variant& target, godot::Variant::Operator operation,
                      const godot::Variant& value);
 void compound_assign_integer(godot::Variant& target, godot::Variant::Operator operation,
                              std::int64_t value);
+
+// Local script signals already have a statically known owner and name. The generated
+// godot-cpp Object::emit_signal wrapper reconstructs both the immutable signal-name Variant and
+// every argument Variant on each emission. Keep the public MethodBind behavior, but allow
+// generated code to cache the name per call site and construct each changing argument exactly
+// once. Arbitrary external Signal values intentionally remain on godot::Signal::emit().
+void emit_local_signal_variants(godot::Object* owner, const godot::Variant** arguments,
+                                std::int64_t argument_count);
+
+template <typename... Arguments>
+void emit_local_signal(godot::Object* owner, const godot::Variant& signal_name,
+                       Arguments&&... arguments) {
+    std::array<godot::Variant, sizeof...(Arguments)> values{
+        {to_variant(std::forward<Arguments>(arguments))...}};
+    std::array<const godot::Variant*, 1 + sizeof...(Arguments)> pointers{};
+    pointers[0] = &signal_name;
+    for (std::size_t index = 0; index < values.size(); ++index)
+        pointers[index + 1] = &values[index];
+    emit_local_signal_variants(owner, pointers.data(),
+                               static_cast<std::int64_t>(pointers.size()));
+}
 // godot-cpp 4.x generated built-in copy operators do not guard exact self-assignment. Dictionary
 // additionally cannot be move-assigned safely because its move operator constructs over the live
 // opaque handle without destroying it. Generated reference-backed storage writes use these
