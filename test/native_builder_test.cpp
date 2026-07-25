@@ -497,6 +497,67 @@ TEST_CASE("native builder creates release macOS commands and reuses fresh object
     REQUIRE_EQ(toolchain_change.commands.size(), std::size_t{4});
 }
 
+TEST_CASE("native builder recompiles only translation units affected by a generated header") {
+    const auto root = make_sdk_fixture("native-builder-precise-objects",
+                                       "libgodot-cpp.macos.template_release.arm64.a");
+    const auto generated = root / "project/generated";
+    write_input(generated / "example.gd.cpp", "#include \"example.gd.hpp\"\n");
+    write_input(generated / "example.gd.hpp", "#pragma once\n#include \"shared.hpp\"\n");
+    write_input(generated / "shared.hpp", "#pragma once\n");
+    write_input(generated / "other.gd.cpp", "#include \"other.gd.hpp\"\n");
+    write_input(generated / "other.gd.hpp", "#pragma once\n");
+    write_input(root / "project/register_types.cpp",
+                "#include \"example.gd.hpp\"\n#include \"other.gd.hpp\"\n");
+
+    gdpp::NativeBuildOptions options;
+    options.project_output_directory = root / "project";
+    options.binary_output_directory = root / "addons/gdpp/binary";
+    options.sdk_root = root / "sdk";
+    options.compiler_executable = "clang++";
+    options.platform = gdpp::NativePlatform::macos;
+    options.architecture = "arm64";
+    const gdpp::NativeBuilder builder;
+    const auto initial = builder.plan(options);
+    REQUIRE(initial.success);
+    REQUIRE_EQ(initial.commands.size(), std::size_t{5});
+
+    const auto objects = root / "project/native-direct/4.4/macos/arm64/release/objects";
+    const auto fresh = std::filesystem::file_time_type::clock::now() + std::chrono::seconds{5};
+    for (const auto& name :
+         {"example_gd_cpp.o", "other_gd_cpp.o", "register_types_cpp.o", "variant_ops_cpp.o"}) {
+        write_input(objects / name);
+        std::filesystem::last_write_time(objects / name, fresh);
+    }
+    write_input(initial.output_library);
+    std::filesystem::last_write_time(initial.output_library, fresh + std::chrono::seconds{1});
+    std::filesystem::last_write_time(generated / "shared.hpp", fresh + std::chrono::seconds{2});
+
+    const auto changed = builder.plan(options);
+
+    REQUIRE(changed.success);
+    REQUIRE_EQ(changed.commands.size(), std::size_t{3});
+    REQUIRE(contains_path(changed.commands[0].arguments, generated / "example.gd.cpp"));
+    REQUIRE(contains_path(changed.commands[1].arguments, root / "project/register_types.cpp"));
+    REQUIRE(!contains_path(changed.commands[0].arguments, generated / "other.gd.cpp"));
+    REQUIRE(
+        !contains_path(changed.commands[1].arguments, root / "sdk/src/runtime/variant_ops.cpp"));
+    REQUIRE(contains(changed.commands.back().arguments, "-dynamiclib"));
+
+    std::filesystem::last_write_time(objects / "example_gd_cpp.o", fresh + std::chrono::seconds{3});
+    std::filesystem::last_write_time(objects / "register_types_cpp.o",
+                                     fresh + std::chrono::seconds{3});
+    std::filesystem::last_write_time(initial.output_library, fresh + std::chrono::seconds{3});
+    std::filesystem::last_write_time(generated / "other.gd.cpp", fresh + std::chrono::seconds{4});
+
+    const auto implementation_changed = builder.plan(options);
+
+    REQUIRE(implementation_changed.success);
+    REQUIRE_EQ(implementation_changed.commands.size(), std::size_t{2});
+    REQUIRE(contains_path(implementation_changed.commands.front().arguments,
+                          generated / "other.gd.cpp"));
+    REQUIRE(contains(implementation_changed.commands.back().arguments, "-dynamiclib"));
+}
+
 TEST_CASE("native builder relinks without recompiling when a static library changes") {
     const auto root = make_sdk_fixture("native-builder-link-only-change",
                                        "libgodot-cpp.macos.template_release.arm64.a");
