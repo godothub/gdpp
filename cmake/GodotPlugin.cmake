@@ -704,6 +704,8 @@ configure_file(
     COPYONLY
 )
 if(GDPP_BUILD_TESTS AND EXISTS "${GDPP_GODOT_EXECUTABLE}")
+    set(GDPP_GODOT_TEST_LOG_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/godot-test-logs")
+    file(MAKE_DIRECTORY "${GDPP_GODOT_TEST_LOG_DIRECTORY}")
     add_test(
         NAME gdpp.godot.reset_extension_registry
         COMMAND "${CMAKE_COMMAND}"
@@ -729,6 +731,7 @@ if(GDPP_BUILD_TESTS AND EXISTS "${GDPP_GODOT_EXECUTABLE}")
     add_test(
         NAME gdpp.godot.service
         COMMAND "${GDPP_GODOT_EXECUTABLE}" --headless --path "${GDPP_EXAMPLE_DIRECTORY}"
+                --log-file "${GDPP_GODOT_TEST_LOG_DIRECTORY}/service.log"
                 --script addons/gdpp/build/service_smoke.gd
     )
     set_tests_properties(
@@ -736,11 +739,13 @@ if(GDPP_BUILD_TESTS AND EXISTS "${GDPP_GODOT_EXECUTABLE}")
         PROPERTIES
             PASS_REGULAR_EXPRESSION "GDPP_SMOKE_OK"
             FIXTURES_REQUIRED gdpp_clean_extension_registry
+            RESOURCE_LOCK gdpp_godot_user_data
             TIMEOUT 60
     )
     add_test(
         NAME gdpp.godot.toolchain_execution
         COMMAND "${GDPP_GODOT_EXECUTABLE}" --headless --path "${GDPP_EXAMPLE_DIRECTORY}"
+                --log-file "${GDPP_GODOT_TEST_LOG_DIRECTORY}/toolchain-execution.log"
                 --script addons/gdpp/build/toolchain_execution.gd
     )
     set_tests_properties(
@@ -748,11 +753,13 @@ if(GDPP_BUILD_TESTS AND EXISTS "${GDPP_GODOT_EXECUTABLE}")
         PROPERTIES
             PASS_REGULAR_EXPRESSION "GDPP_TOOLCHAIN_EXECUTION_OK"
             FIXTURES_REQUIRED gdpp_clean_extension_registry
+            RESOURCE_LOCK gdpp_godot_user_data
             TIMEOUT 60
     )
     add_test(
         NAME gdpp.godot.build_progress_model
         COMMAND "${GDPP_GODOT_EXECUTABLE}" --headless --path "${GDPP_EXAMPLE_DIRECTORY}"
+                --log-file "${GDPP_GODOT_TEST_LOG_DIRECTORY}/build-progress-model.log"
                 --script addons/gdpp/build/build_progress_model.gd
     )
     set_tests_properties(
@@ -760,11 +767,13 @@ if(GDPP_BUILD_TESTS AND EXISTS "${GDPP_GODOT_EXECUTABLE}")
         PROPERTIES
             PASS_REGULAR_EXPRESSION "GDPP_BUILD_PROGRESS_MODEL_OK"
             FIXTURES_REQUIRED gdpp_clean_extension_registry
+            RESOURCE_LOCK gdpp_godot_user_data
             TIMEOUT 60
     )
     add_test(
         NAME gdpp.godot.direct_export_build
         COMMAND "${GDPP_GODOT_EXECUTABLE}" --headless --path "${GDPP_EXAMPLE_DIRECTORY}"
+                --log-file "${GDPP_GODOT_TEST_LOG_DIRECTORY}/direct-export-build.log"
                 --script addons/gdpp/build/direct_export_build.gd
     )
     set_tests_properties(
@@ -772,6 +781,7 @@ if(GDPP_BUILD_TESTS AND EXISTS "${GDPP_GODOT_EXECUTABLE}")
         PROPERTIES
             PASS_REGULAR_EXPRESSION "GDPP_DIRECT_EXPORT_BUILD_OK"
             FIXTURES_REQUIRED gdpp_clean_extension_registry
+            RESOURCE_LOCK gdpp_godot_user_data
             TIMEOUT 600
     )
 endif()
