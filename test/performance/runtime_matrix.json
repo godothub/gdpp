@@ -5,25 +5,25 @@
     "relative_float_tolerance": 1e-9
   },
   "startup": {
-    "maximum_aot_regression_percent": 25.0
+    "maximum_aot_regression_percent": 10.0
   },
   "frame": {
-    "maximum_aot_workload_regression_percent": 25.0
+    "maximum_aot_workload_regression_percent": 10.0
   },
   "cases": {
-    "numeric_typed": {"maximum_aot_regression_percent": 20.0},
-    "branch_typed": {"maximum_aot_regression_percent": 20.0},
-    "array_typed": {"maximum_aot_regression_percent": 25.0},
-    "packed_array": {"maximum_aot_regression_percent": 25.0},
-    "dictionary": {"maximum_aot_regression_percent": 30.0},
-    "builtin_vector": {"maximum_aot_regression_percent": 20.0},
-    "object_property": {"maximum_aot_regression_percent": 25.0},
-    "string_ops": {"maximum_aot_regression_percent": 30.0},
-    "method_calls": {"maximum_aot_regression_percent": 25.0},
-    "callable": {"maximum_aot_regression_percent": 30.0},
-    "variant_ops": {"maximum_aot_regression_percent": 30.0},
-    "signal_emit": {"maximum_aot_regression_percent": 30.0},
-    "allocation": {"maximum_aot_regression_percent": 30.0}
+    "numeric_typed": {"maximum_aot_regression_percent": 10.0},
+    "branch_typed": {"maximum_aot_regression_percent": 10.0},
+    "array_typed": {"maximum_aot_regression_percent": 10.0},
+    "packed_array": {"maximum_aot_regression_percent": 10.0},
+    "dictionary": {"maximum_aot_regression_percent": 10.0},
+    "builtin_vector": {"maximum_aot_regression_percent": 10.0},
+    "object_property": {"maximum_aot_regression_percent": 10.0},
+    "string_ops": {"maximum_aot_regression_percent": 10.0},
+    "method_calls": {"maximum_aot_regression_percent": 10.0},
+    "callable": {"maximum_aot_regression_percent": 10.0},
+    "variant_ops": {"maximum_aot_regression_percent": 10.0},
+    "signal_emit": {"maximum_aot_regression_percent": 10.0},
+    "allocation": {"maximum_aot_regression_percent": 10.0}
   },
   "forbidden_log_patterns": [
     "SCRIPT ERROR:",
