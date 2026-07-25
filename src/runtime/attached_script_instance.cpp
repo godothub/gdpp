@@ -384,6 +384,11 @@ GDExtensionInt instance_method_argument_count(AttachedScriptInstance* instance,
 void instance_call(AttachedScriptInstance* instance, const godot::StringName* method,
                    const godot::Variant** arguments, GDExtensionInt argument_count,
                    godot::Variant* result, GDExtensionCallError* error) {
+    // GDScript runs every @implicit_ready() initializer from the base script to the most-derived
+    // script before dispatching _ready(). Keep that lifecycle independent of whether the customer
+    // declared _ready() and repeat it when request_ready() causes another ready notification.
+    if (*method == godot::StringName{"_ready"} && instance->behavior.is_valid())
+        instance->behavior->_gdpp_initialize_onready();
     if (!find_method(instance, *method)) {
         error->error = GDEXTENSION_CALL_ERROR_INVALID_METHOD;
         return;
@@ -398,7 +403,7 @@ void instance_call(AttachedScriptInstance* instance, const godot::StringName* me
 void instance_notification(AttachedScriptInstance* instance, std::int32_t what,
                            GDExtensionBool reversed) {
     if (instance->behavior.is_valid())
-        instance->behavior->dispatch_notification(what, reversed);
+        instance->behavior->_gdpp_dispatch_notification(what, reversed);
 }
 
 void instance_to_string(AttachedScriptInstance* instance, GDExtensionBool* valid,
@@ -500,7 +505,7 @@ void* AttachedCompiledScript::_instance_create(godot::Object* object) const {
         return godot::gdextension_interface::script_instance_create3(&script_instance_info(),
                                                                      instance);
 
-    behavior->initialize_instance();
+    behavior->_gdpp_initialize_instance();
 
     if (find_method(instance, "_init")) {
         const godot::Array empty_arguments;

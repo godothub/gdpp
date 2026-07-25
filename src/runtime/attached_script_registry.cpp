@@ -197,9 +197,11 @@ void AttachedScriptBehavior::detach_owner() { owner_ = nullptr; }
 
 godot::Object* AttachedScriptBehavior::owner() const { return owner_; }
 
-void AttachedScriptBehavior::initialize_instance() {}
+void AttachedScriptBehavior::_gdpp_initialize_instance() {}
 
-void AttachedScriptBehavior::dispatch_notification(std::int32_t, bool) {}
+void AttachedScriptBehavior::_gdpp_initialize_onready() {}
+
+void AttachedScriptBehavior::_gdpp_dispatch_notification(std::int32_t, bool) {}
 
 void AttachedScriptBehavior::_bind_methods() {}
 

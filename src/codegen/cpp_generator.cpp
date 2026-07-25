@@ -5760,8 +5760,9 @@ void CodeGenerator::emit_inner_class_declaration(const ir::Class& declaration,
            << "    inline static constexpr const char *_gdpp_source_path = "
            << escaped_string("res://" + current_source_path_ + "::" + source_name) << ";\n"
            << "    " << native_name << "();\n"
-           << "    void initialize_instance() override;\n"
-           << "    void dispatch_notification(std::int32_t what, bool reversed) override;\n";
+           << "    void _gdpp_initialize_instance() override;\n"
+           << "    void _gdpp_initialize_onready() override;\n"
+           << "    void _gdpp_dispatch_notification(std::int32_t what, bool reversed) override;\n";
     for (const auto& enumeration : declaration.enums) {
         if (enumeration.name.empty()) {
             for (const auto& entry : enumeration.entries)
@@ -6132,11 +6133,23 @@ void CodeGenerator::emit_inner_class_definition(const ir::Class& declaration,
     if (std::any_of(declaration.fields.begin(), declaration.fields.end(), cached_preload_field))
         source << "    _gdpp_preload_resources();\n";
     source << "}\n\n"
-           << "void " << native_name << "::initialize_instance() {\n"
-           << "    " << base_cpp << "::initialize_instance();\n";
+           << "void " << native_name << "::_gdpp_initialize_instance() {\n"
+           << "    " << base_cpp << "::_gdpp_initialize_instance();\n";
     if (needs_editor_hint)
         source << "    const bool gdpp_editor_hint = gdpp::runtime::is_editor_hint();\n";
     emit_instance_initializers();
+    source << "}\n\n"
+           << "void " << native_name << "::_gdpp_initialize_onready() {\n"
+           << "    " << base_cpp << "::_gdpp_initialize_onready();\n";
+    for (const auto& field : declaration.fields) {
+        if (field.onready && field.initializer) {
+            source << "    "
+                   << emit_storage_assignment(field.type, sanitize_identifier(field.name),
+                                              emit_conversion(field.type, field.initializer->type,
+                                                              emit_expression(*field.initializer)))
+                   << ";\n";
+        }
+    }
     source << "}\n\n";
 
     const auto notification =
@@ -6145,11 +6158,12 @@ void CodeGenerator::emit_inner_class_definition(const ir::Class& declaration,
                          return !function.is_static && function.name == "_notification";
                      });
     source << "void " << native_name
-           << "::dispatch_notification(std::int32_t what, bool reversed) {\n"
-           << "    if (reversed) " << base_cpp << "::dispatch_notification(what, true);\n";
+           << "::_gdpp_dispatch_notification(std::int32_t what, bool reversed) {\n"
+           << "    if (reversed) " << base_cpp << "::_gdpp_dispatch_notification(what, true);\n";
     if (notification != declaration.functions.end())
         source << "    " << function_native_name(*notification) << "(what);\n";
-    source << "    if (!reversed) " << base_cpp << "::dispatch_notification(what, false);\n"
+    source << "    if (!reversed) " << base_cpp
+           << "::_gdpp_dispatch_notification(what, false);\n"
            << "}\n\n";
     in_function_body_ = false;
     for (const auto& field : declaration.fields) {
@@ -6975,8 +6989,9 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
         header << '\n';
     if (attached_script) {
         header << "    " << unit.class_name << "();\n"
-               << "    void initialize_instance() override;\n"
-               << "    void dispatch_notification(std::int32_t what, bool reversed) override;\n\n";
+               << "    void _gdpp_initialize_instance() override;\n"
+               << "    void _gdpp_initialize_onready() override;\n"
+               << "    void _gdpp_dispatch_notification(std::int32_t what, bool reversed) override;\n\n";
     } else if (initializer != module.functions.end()) {
         const auto required =
             std::count_if(initializer->parameters.begin(), initializer->parameters.end(),
@@ -7374,13 +7389,26 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
             source << "    _gdpp_ensure_static_initialized();\n";
         if (std::any_of(module.fields.begin(), module.fields.end(), cached_preload_field))
             source << "    _gdpp_preload_resources();\n";
-        source << "}\n\nvoid " << unit.class_name << "::initialize_instance() {\n";
+        source << "}\n\nvoid " << unit.class_name << "::_gdpp_initialize_instance() {\n";
         if (!native_base_class.empty())
-            source << "    " << native_base_class << "::initialize_instance();\n";
+            source << "    " << native_base_class << "::_gdpp_initialize_instance();\n";
         if (needs_editor_hint)
             source << "    const bool gdpp_editor_hint = gdpp::runtime::is_editor_hint();\n";
         emit_autoload_registration();
         emit_instance_initializers();
+        source << "}\n\n"
+               << "void " << unit.class_name << "::_gdpp_initialize_onready() {\n"
+               << "    " << base_cpp << "::_gdpp_initialize_onready();\n";
+        for (const auto& field : module.fields) {
+            if (field.onready && field.initializer) {
+                source << "    "
+                       << emit_storage_assignment(
+                              field.type, sanitize_identifier(field.name),
+                              emit_conversion(field.type, field.initializer->type,
+                                              emit_expression(*field.initializer)))
+                       << ";\n";
+            }
+        }
         source << "}\n\n";
 
         const auto notification = std::find_if(
@@ -7388,17 +7416,17 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
                 return !function.is_static && function.name == "_notification";
             });
         source << "void " << unit.class_name
-               << "::dispatch_notification(std::int32_t what, bool reversed) {\n"
+               << "::_gdpp_dispatch_notification(std::int32_t what, bool reversed) {\n"
                << "    static_cast<void>(what);\n"
                << "    static_cast<void>(reversed);\n";
         if (!native_base_class.empty())
             source << "    if (reversed) " << native_base_class
-                   << "::dispatch_notification(what, true);\n";
+                   << "::_gdpp_dispatch_notification(what, true);\n";
         if (notification != module.functions.end())
             source << "    " << function_native_name(*notification) << "(what);\n";
         if (!native_base_class.empty())
             source << "    if (!reversed) " << native_base_class
-                   << "::dispatch_notification(what, false);\n";
+                   << "::_gdpp_dispatch_notification(what, false);\n";
         source << "}\n\n";
         in_function_body_ = false;
     } else if (((has_instance_initializers || has_static_initialization || is_autoload ||
@@ -7766,7 +7794,7 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
             source << "    const auto " << current_coroutine_state_
                    << " = gdpp::runtime::begin_coroutine(" << self_object_expression() << ");\n";
         }
-        if (function.name == "_ready") {
+        if (function.name == "_ready" && !attached_script) {
             for (const auto& field : module.fields) {
                 if (field.onready && field.initializer) {
                     source << "    "
@@ -7811,7 +7839,7 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
                                                   function_native_name(function),
                                                   function_return_type(function));
     }
-    if (has_onready_fields && ready == module.functions.end()) {
+    if (!attached_script && has_onready_fields && ready == module.functions.end()) {
         current_return_type_ = {TypeKind::void_type, "void"};
         in_function_body_ = true;
         source << "void " << unit.class_name << "::_ready() {\n";

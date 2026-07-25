@@ -39,9 +39,11 @@ class AttachedScriptBehavior : public godot::RefCounted {
 
     // Generated classes override these hooks so initialization runs only after the external
     // owner is attached. This is required for field initializers that access self or native
-    // properties.
-    virtual void initialize_instance();
-    virtual void dispatch_notification(std::int32_t what, bool reversed);
+    // properties. Onready initialization is a separate lifecycle, matching GDScript's
+    // base-to-derived @implicit_ready() chain rather than relying on a user-declared _ready().
+    virtual void _gdpp_initialize_instance();
+    virtual void _gdpp_initialize_onready();
+    virtual void _gdpp_dispatch_notification(std::int32_t what, bool reversed);
 
   protected:
     static void _bind_methods();
