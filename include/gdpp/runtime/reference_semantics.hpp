@@ -116,6 +116,21 @@ template <typename Value> [[nodiscard]] decltype(auto) packed_native_argument(Va
         return std::forward<Value>(value);
 }
 
+// godot-cpp's vararg wrappers construct one Variant for each supplied argument. Pass ordinary
+// native values through so that construction happens exactly once, while exposing the retained
+// Variant storage for SharedPackedArray values whose native conversion is intentionally explicit.
+// This adapter is only for APIs that perform their own Variant construction; raw Variant
+// boundaries must continue to use to_variant().
+[[nodiscard]] inline godot::Variant variant_constructor_argument(std::nullptr_t) { return {}; }
+
+template <typename Value> [[nodiscard]] decltype(auto) variant_constructor_argument(Value&& value) {
+    using Stored = std::remove_cv_t<std::remove_reference_t<Value>>;
+    if constexpr (IsSharedPackedArray<Stored>::value)
+        return std::forward<Value>(value).variant();
+    else
+        return std::forward<Value>(value);
+}
+
 template <typename PackedArray>
 [[nodiscard]] SharedPackedArray<PackedArray>
 packed_array_storage(const godot::Variant& value) {

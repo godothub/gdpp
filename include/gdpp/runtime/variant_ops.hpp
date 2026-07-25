@@ -331,6 +331,19 @@ void report_index_out_of_bounds(const char* container, const char* operation, st
     return target[normalized];
 }
 
+template <typename Value>
+[[nodiscard]] Value checked_typed_array_get(const godot::Array& target, std::int64_t index,
+                                            const char* source_path, std::int64_t line,
+                                            std::int64_t column) {
+    const auto size = target.size();
+    const auto normalized = index < 0 ? index + size : index;
+    if (normalized < 0 || normalized >= size) {
+        report_index_out_of_bounds("Array", "read", index, size, source_path, line, column);
+        return {};
+    }
+    return godot::VariantCaster<Value>::cast(target[normalized]);
+}
+
 inline void checked_array_set(godot::Array& target, std::int64_t index,
                               const godot::Variant& value, const char* source_path,
                               std::int64_t line, std::int64_t column) {
@@ -344,16 +357,23 @@ inline void checked_array_set(godot::Array& target, std::int64_t index,
 }
 
 template <typename PackedArray>
-[[nodiscard]] godot::Variant checked_packed_array_get(const SharedPackedArray<PackedArray>& target,
-                                                      std::int64_t index, const char* source_path,
-                                                      std::int64_t line, std::int64_t column) {
+using PackedArrayElement =
+    std::remove_cv_t<std::remove_reference_t<decltype(std::declval<const PackedArray&>()[0])>>;
+
+// A statically typed PackedArray subscript already has an authoritative native element type.
+// Returning that element directly keeps the bounds check while avoiding a Variant allocation and
+// conversion on every read in generated hot loops.
+template <typename PackedArray>
+[[nodiscard]] PackedArrayElement<PackedArray>
+checked_packed_array_get(const SharedPackedArray<PackedArray>& target, std::int64_t index,
+                         const char* source_path, std::int64_t line, std::int64_t column) {
     const auto size = target.native().size();
     const auto normalized = index < 0 ? index + size : index;
     if (normalized < 0 || normalized >= size) {
         report_index_out_of_bounds("PackedArray", "read", index, size, source_path, line, column);
         return {};
     }
-    return to_variant(target.native()[normalized]);
+    return target.native()[normalized];
 }
 
 template <typename PackedArray, typename Value>
