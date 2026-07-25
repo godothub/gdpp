@@ -39,7 +39,7 @@ C++”计为完整兼容，所有结论都应能由仓库中的测试、固定�
 | Godot 4.7 官方 parser 非法语料 | 76 / 76 被编译器拒绝，其中 60 个在 lexer/parser 阶段拒绝、16 个在后续语义阶段拒绝；接受、超时、崩溃与异常退出均阻断 CI | ✅ 固定提交、失败关闭 |
 | Godot 4.7 最新字面量差分 | 官方 GDS oracle、生成 C++ 编译、原生 GDExtension 加载与调用均通过；覆盖整数基数/边界、Godot 18 位浮点算法、INF/NAN/下溢、raw/三引号、控制/Unicode 转义与 U+FFFD | ✅ 本轮实机 |
 | Godot 4.7 Unicode/布局差分 | 使用官方 Unicode 17.0 XID 表；15 组多语言及组合字符 oracle 通过，emoji 起始、非法 UTF-8/NUL、混合缩进和游离 CR 失败关闭；生成 C++ 标识符纯 ASCII 且无碰撞 | ✅ 本轮实机 |
-| 最低系统构建契约 | Windows 10、macOS 11.0（arm64）、Ubuntu 22.04/glibc 2.35、Android 9/API 28、iOS 16.0；Web 无固定版本下限；编译参数、SDK schema 8 / runtime ABI 8 清单与 CI 使用同一基线，C++17、异常关闭、MSVC 19.x 与静态 CRT、Android `c++_shared` 和嵌套 CMake 工具链均失败关闭校验 | ✅ 规则与失败关闭测试 |
+| 最低系统构建契约 | Windows 10、macOS 11.0（Universal 2）、Ubuntu 22.04/glibc 2.35、Android 9/API 28、iOS 16.0；Web 无固定版本下限；编译参数、SDK schema 11 / runtime ABI 13 清单与 CI 使用同一基线，C++17、异常关闭、MSVC 19.x 与静态 CRT、Android `c++_shared` 和嵌套 CMake 工具链均失败关闭校验 | ✅ 规则与失败关闭测试 |
 | Godot 4.5.2 插件集成门禁 | macOS、Ubuntu 24.04、Windows 11 各 16 / 16；测试描述符按构建目录哈希与目标架构隔离，不读取其他构建树或发行目录陈旧库 | ✅ 本轮实机 |
 | 独立第三方 GDExtension 继承 | 供应商库与 GDPP 项目库完全独立；Godot 4.6.2 Universal 2 真实导出/运行通过，PCK 共 14 个文件、2 个场景、1 个资源、违规 0；Godot 4.7.1 独立加载与运行通过 | ✅ 本轮实机 |
 | RPC 原生运行门禁 | `@rpc` 的默认值、权限、本地调用、可靠性和通道贯通语义、HIR、C++17、Godot 4.4 ABI 编译及 Godot 4.5.2 运行时配置查询；`call_local` 原生端点经 `Node.rpc()` 实际执行并校验参数与字段副作用 | ✅ 本轮实机 |

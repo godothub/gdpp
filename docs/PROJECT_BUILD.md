@@ -114,7 +114,7 @@ SDK schema 11 固定：
 - C++17、异常关闭、编译器族和 MSVC 静态 CRT；
 - `debug,release` 两个可选项目 profile；
 - 唯一 `distribution_binding template_release` 与 Release 优化；
-- runtime ABI 11 及全部运行时头/源文件 SHA-256；
+- runtime ABI 13 及全部运行时头/源文件 SHA-256；
 - Android STL/API、iOS slices、Web 线程模式等目标契约。
 
 NativeBuilder 在创建第一条编译命令前验证整个清单。错误 SDK、旧 schema、混入 editor/debug

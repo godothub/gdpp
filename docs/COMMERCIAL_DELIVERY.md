@@ -40,7 +40,7 @@ compiler 动态库和客户目标 SDK 是两个隔离的 ABI 域：
 `template_release`，Debug 的脚本断言和诊断由 GDPP 编译定义保留。这样不会因 profile 增加
 几百 MiB 重复绑定，也不会在一次导出中把客户翻译单元编译两遍。
 
-SDK schema 11 和 runtime ABI 11 是强制契约。包清单记录版本、宿主、目标、最低系统与内容摘要；
+SDK schema 11 和 runtime ABI 13 是强制契约。包清单记录版本、宿主、目标、最低系统与内容摘要；
 SDK 清单进一步记录 C++17、异常模型、工具链/CRT、目标 profile、唯一分发绑定、移动/Web ABI
 字段和所有 runtime 文件摘要。任一字段缺失或不一致都在客户编译前失败。
 
