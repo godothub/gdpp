@@ -315,25 +315,29 @@ void set_named(godot::Variant& target, const godot::StringName& name, const godo
 
 [[nodiscard]] godot::Variant get_key(const godot::Variant& target, const godot::Variant& key);
 void set_key(godot::Variant& target, const godot::Variant& key, const godot::Variant& value);
-void report_index_out_of_bounds(const char* container, std::int64_t index, std::int64_t size);
+void report_index_out_of_bounds(const char* container, const char* operation, std::int64_t index,
+                                std::int64_t size, const char* source_path, std::int64_t line,
+                                std::int64_t column);
 
 [[nodiscard]] inline godot::Variant checked_array_get(const godot::Array& target,
-                                                      std::int64_t index) {
+                                                      std::int64_t index, const char* source_path,
+                                                      std::int64_t line, std::int64_t column) {
     const auto size = target.size();
     const auto normalized = index < 0 ? index + size : index;
     if (normalized < 0 || normalized >= size) {
-        report_index_out_of_bounds("Array", index, size);
+        report_index_out_of_bounds("Array", "read", index, size, source_path, line, column);
         return {};
     }
     return target[normalized];
 }
 
 inline void checked_array_set(godot::Array& target, std::int64_t index,
-                              const godot::Variant& value) {
+                              const godot::Variant& value, const char* source_path,
+                              std::int64_t line, std::int64_t column) {
     const auto size = target.size();
     const auto normalized = index < 0 ? index + size : index;
     if (normalized < 0 || normalized >= size) {
-        report_index_out_of_bounds("Array", index, size);
+        report_index_out_of_bounds("Array", "write", index, size, source_path, line, column);
         return;
     }
     target[normalized] = value;
@@ -341,11 +345,12 @@ inline void checked_array_set(godot::Array& target, std::int64_t index,
 
 template <typename PackedArray>
 [[nodiscard]] godot::Variant checked_packed_array_get(const SharedPackedArray<PackedArray>& target,
-                                                      std::int64_t index) {
+                                                      std::int64_t index, const char* source_path,
+                                                      std::int64_t line, std::int64_t column) {
     const auto size = target.native().size();
     const auto normalized = index < 0 ? index + size : index;
     if (normalized < 0 || normalized >= size) {
-        report_index_out_of_bounds("PackedArray", index, size);
+        report_index_out_of_bounds("PackedArray", "read", index, size, source_path, line, column);
         return {};
     }
     return to_variant(target.native()[normalized]);
@@ -353,11 +358,12 @@ template <typename PackedArray>
 
 template <typename PackedArray, typename Value>
 void checked_packed_array_set(SharedPackedArray<PackedArray>& target, std::int64_t index,
-                              Value&& value) {
+                              Value&& value, const char* source_path, std::int64_t line,
+                              std::int64_t column) {
     const auto size = target.native().size();
     const auto normalized = index < 0 ? index + size : index;
     if (normalized < 0 || normalized >= size) {
-        report_index_out_of_bounds("PackedArray", index, size);
+        report_index_out_of_bounds("PackedArray", "write", index, size, source_path, line, column);
         return;
     }
     target.native()[normalized] = std::forward<Value>(value);

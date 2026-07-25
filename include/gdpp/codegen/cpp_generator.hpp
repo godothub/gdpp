@@ -98,7 +98,8 @@ class CodeGenerator final {
                                                 std::string value) const;
     [[nodiscard]] std::string emit_api_return(const Type& target, std::string value) const;
     [[nodiscard]] std::string emit_subscript_read(const Type& container, const Type& result,
-                                                  std::string target, std::string index) const;
+                                                  std::string target, std::string index,
+                                                  SourceSpan span) const;
     [[nodiscard]] std::string emit_subscript_store(const Type& container, std::string value) const;
     [[nodiscard]] std::string emit_storage_assignment(const Type& target_type, std::string target,
                                                       std::string value) const;

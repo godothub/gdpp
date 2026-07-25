@@ -2230,12 +2230,16 @@ std::string CodeGenerator::emit_api_return(const Type& target, std::string value
 }
 
 std::string CodeGenerator::emit_subscript_read(const Type& container, const Type& result,
-                                               std::string target, std::string index) const {
+                                               std::string target, std::string index,
+                                               const SourceSpan span) const {
+    const auto source_location = ", _gdpp_source_path, " + std::to_string(span.begin.line) + ", " +
+                                 std::to_string(span.begin.column);
     std::string value;
     if (container.kind == TypeKind::array) {
-        value = "gdpp::runtime::checked_array_get(" + target + ", " + index + ")";
+        value = "gdpp::runtime::checked_array_get(" + target + ", " + index + source_location + ")";
     } else if (container.is_packed_array()) {
-        value = "gdpp::runtime::checked_packed_array_get(" + target + ", " + index + ")";
+        value = "gdpp::runtime::checked_packed_array_get(" + target + ", " + index +
+                source_location + ")";
     } else if (container.kind == TypeKind::dictionary) {
         value = target + "[" + index + "]";
     } else {
@@ -4011,7 +4015,7 @@ std::string CodeGenerator::emit_expression(const ir::Expression& expression) con
                emit_expression(*expression.operands.at(0)) + "; const auto " + index_name + " = " +
                emit_expression(*expression.operands.at(1)) + "; return " +
                emit_subscript_read(expression.operands.at(0)->type, expression.type, target_name,
-                                   index_name) +
+                                   index_name, expression.span) +
                "; }())";
     }
     case ir::ExpressionKind::array_literal: {
@@ -4934,7 +4938,7 @@ std::string CodeGenerator::emit_statement(const ir::Statement& statement,
                 const auto current_name = "_gdpp_subscript_current_" + suffix;
                 result += nested_prefix + "const auto " + current_name + " = " +
                           emit_subscript_read(target.operands.at(0)->type, target.type,
-                                              container_name, index_name) +
+                                              container_name, index_name, target.span) +
                           ";\n";
                 result += nested_prefix + "const auto " + value_name + " = " +
                           emit_expression(*statement.expression) + ";\n";
@@ -4967,10 +4971,14 @@ std::string CodeGenerator::emit_statement(const ir::Statement& statement,
             assigned = emit_subscript_store(target.operands.at(0)->type, std::move(assigned));
             if (target.operands.at(0)->type.kind == TypeKind::array) {
                 result += nested_prefix + "gdpp::runtime::checked_array_set(" + container_name +
-                          ", " + index_name + ", gdpp::runtime::to_variant(" + assigned + "));\n";
+                          ", " + index_name + ", gdpp::runtime::to_variant(" + assigned +
+                          "), _gdpp_source_path, " + std::to_string(target.span.begin.line) + ", " +
+                          std::to_string(target.span.begin.column) + ");\n";
             } else if (target.operands.at(0)->type.is_packed_array()) {
                 result += nested_prefix + "gdpp::runtime::checked_packed_array_set(" +
-                          container_name + ", " + index_name + ", " + assigned + ");\n";
+                          container_name + ", " + index_name + ", " + assigned +
+                          ", _gdpp_source_path, " + std::to_string(target.span.begin.line) + ", " +
+                          std::to_string(target.span.begin.column) + ");\n";
             } else {
                 result +=
                     nested_prefix + container_name + "[" + index_name + "] = " + assigned + ";\n";
