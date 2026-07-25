@@ -18,6 +18,10 @@
 - Advance the packaged runtime ABI to 13 so an older or partially copied SDK is rejected during export preflight instead of linking lifecycle- or signal-call-incompatible generated code.
 - Add exported-runtime coverage for packed binary message headers, nested dispatch dictionaries, `Callable` handlers, preconnected script and provider signals, typed provider containers, dynamically instantiated attached nodes, the `_init`/`_enter_tree`/`_notification`/`_ready`/`_exit_tree` lifecycle, inherited and internal ready behavior, and 128-message bursts.
 - Give every Godot integration test an isolated build-tree log and serialize tests that share editor user data, preventing concurrent engine log rotation from being misclassified as a GDPP runtime crash.
+- Install coroutine loop-carried storage before emitting asynchronous `while` conditions or `for` iterables, guaranteeing that conditions, bodies, and resumed continuations observe one native value after process-frame or signal suspension instead of leaving batched background work on a stale copy.
+- Preserve warning-clean C++ without deleting source-level bindings: unused method, setter, lambda and rest parameters, locals, iteration and match bindings, and await payloads now remain available with their exact GDScript lifetime and evaluation semantics.
+- Add a 4,996-item, 200-items-per-frame suspended batch-loop oracle to the Godot version matrix, exported desktop host gates, and installed release-package smoke tests, preventing stale coroutine state from returning through another compiler, SDK, or packaging path.
+- Validate the exported Windows runtime against loopback HTTP authentication, four JSON downloads, remote image decoding, WebSocket binary dispatch, both supported gift platforms, likes, hero triggers, score and group synchronization, repeated responses, a 97-packet gift burst, clean server close, short frames, truncated payloads, and malformed messages; every valid flow completes without a customer-source modification.
 
 ## 1.7.9
 
