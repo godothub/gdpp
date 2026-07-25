@@ -4921,6 +4921,22 @@ std::string CodeGenerator::emit_statement(const ir::Statement& statement,
                ";\n";
     case ir::StatementKind::assignment: {
         const auto& target = *statement.condition;
+        const auto checked_assignment_guard = [&](const std::string& receiver,
+                                                  const std::string& member,
+                                                  const std::size_t guard_indentation) {
+            const auto location =
+                current_source_path_ + ":" + std::to_string(target.span.begin.line);
+            const auto message = godot_string("Cannot assign member '" + member +
+                                              "' on a null or freed object at " + location);
+            const auto failure =
+                in_async_continuation_ || (!in_callable_lambda_ && !current_coroutine_abi_ &&
+                                           current_return_type_.kind == TypeKind::void_type)
+                    ? "ERR_FAIL_EDMSG(" + message + ");"
+                    : "ERR_FAIL_V_EDMSG({}, " + message + ");";
+            return indent(guard_indentation) +
+                   "if (!gdpp::runtime::is_instance_valid(gdpp::runtime::to_variant(" + receiver +
+                   "))) { " + failure + " }\n";
+        };
         if (target.resolution == ir::ResolutionKind::dynamic_property &&
             target.kind == ir::ExpressionKind::member && !target.operands.empty() &&
             target.operands.at(0)->type.kind == TypeKind::dictionary) {
@@ -5071,6 +5087,10 @@ std::string CodeGenerator::emit_statement(const ir::Statement& statement,
                               emit_expression(*root->operands.at(0)) + ";\n";
                     receiver = receiver_name;
                     connector = root->operands.at(0)->type.kind == TypeKind::object ? "->" : ".";
+                    if (root->operands.at(0)->type.kind == TypeKind::object) {
+                        result +=
+                            checked_assignment_guard(receiver_name, root->value, indentation + 1);
+                    }
                 } else if (attached_script_) {
                     receiver = godot_owner_expression();
                     connector = "->";
@@ -5161,7 +5181,15 @@ std::string CodeGenerator::emit_statement(const ir::Statement& statement,
                 }
                 const auto object = emit_expression(owner);
                 const auto connector = owner.type.kind == TypeKind::object ? "->" : ".";
-                return prefix + object + connector + target.setter + "(" + value + ");\n";
+                if (owner.type.kind != TypeKind::object)
+                    return prefix + object + connector + target.setter + "(" + value + ");\n";
+                const auto suffix = std::to_string(temporary_counter_++);
+                const auto receiver = "_gdpp_property_receiver_" + suffix;
+                const auto nested_prefix = indent(indentation + 1);
+                return prefix + "{\n" + nested_prefix + "auto &&" + receiver + " = " + object +
+                       ";\n" + checked_assignment_guard(receiver, target.value, indentation + 1) +
+                       nested_prefix + receiver + "->" + target.setter + "(" + value + ");\n" +
+                       prefix + "}\n";
             }
             return prefix + target.setter + "(" + value + ");\n";
         }
@@ -5186,8 +5214,7 @@ std::string CodeGenerator::emit_statement(const ir::Statement& statement,
                     const auto value_index = target.indexed_argument >= 0 ? 1U : 0U;
                     if (const auto* argument = api_.argument(*setter, value_index)) {
                         value = emit_api_argument(argument->type, argument->meta,
-                                                  target.assignment_type,
-                                                  std::move(value));
+                                                  target.assignment_type, std::move(value));
                     }
                 }
                 return prefix +
@@ -5196,9 +5223,14 @@ std::string CodeGenerator::emit_statement(const ir::Statement& statement,
             }
             if (target.kind == ir::ExpressionKind::member) {
                 const auto object = emit_expression(*target.operands.at(0));
+                const bool checked_object =
+                    target.operands.at(0)->type.kind == TypeKind::object &&
+                    target.operands.at(0)->resolution != ir::ResolutionKind::script_type;
+                const auto suffix = std::to_string(temporary_counter_++);
+                const auto receiver = checked_object ? "_gdpp_property_receiver_" + suffix : object;
                 const auto connector =
                     target.operands.at(0)->resolution == ir::ResolutionKind::script_type ? "::"
-                    : object == "this" || target.operands.at(0)->type.kind == TypeKind::object
+                    : receiver == "this" || target.operands.at(0)->type.kind == TypeKind::object
                         ? "->"
                         : ".";
                 std::string index;
@@ -5216,11 +5248,17 @@ std::string CodeGenerator::emit_statement(const ir::Statement& statement,
                     const auto value_index = target.indexed_argument >= 0 ? 1U : 0U;
                     if (const auto* argument = api_.argument(*setter, value_index)) {
                         value = emit_api_argument(argument->type, argument->meta,
-                                                  target.assignment_type,
-                                                  std::move(value));
+                                                  target.assignment_type, std::move(value));
                     }
                 }
-                return prefix + object + connector + target.setter + "(" + index + value + ");\n";
+                if (!checked_object)
+                    return prefix + receiver + connector + target.setter + "(" + index + value +
+                           ");\n";
+                const auto nested_prefix = indent(indentation + 1);
+                return prefix + "{\n" + nested_prefix + "auto &&" + receiver + " = " + object +
+                       ";\n" + checked_assignment_guard(receiver, target.value, indentation + 1) +
+                       nested_prefix + receiver + connector + target.setter + "(" + index + value +
+                       ");\n" + prefix + "}\n";
             }
         }
         return prefix +
