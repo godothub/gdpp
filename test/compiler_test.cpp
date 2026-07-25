@@ -997,7 +997,8 @@ TEST_CASE("compiler completes coroutine state inside structured await continuati
             std::string::npos);
     REQUIRE(result.unit.source.find("return;", cancelled_branch) != std::string::npos);
     REQUIRE(result.unit.source.find("mutable -> godot::Variant {\n"
-                                    "    godot::Variant value =") != std::string::npos);
+                                    "    [[maybe_unused]] godot::Variant value =") !=
+            std::string::npos);
     REQUIRE(result.unit.source.find("return gdpp::runtime::to_variant(([&]() -> bool") !=
             std::string::npos);
 }
@@ -1636,6 +1637,25 @@ TEST_CASE("compiler shares suspended while condition state with loop body mutati
     REQUIRE(condition.find("added") == std::string::npos);
     const auto increment = result.unit.source.find("(*" + cell + ") =", loop_condition_end);
     REQUIRE(increment != std::string::npos);
+}
+
+TEST_CASE("compiler keeps valid unused source bindings warning clean in native builds") {
+    const gdpp::Compiler compiler;
+    const auto result = compiler.compile(
+        "await_unused_bindings.gd", "extends Node\n"
+                                    "signal resumed\n"
+                                    "func run(_unused: int) -> void:\n"
+                                    "    var _local: int = 1\n"
+                                    "    var _callback := func(_value: int): pass\n"
+                                    "    for _index in range(2):\n"
+                                    "        await resumed\n");
+
+    REQUIRE(result.success);
+    REQUIRE(result.unit.source.find("[[maybe_unused]] int64_t _unused") != std::string::npos);
+    REQUIRE(result.unit.source.find("[[maybe_unused]] int64_t _local") != std::string::npos);
+    REQUIRE(result.unit.source.find("[[maybe_unused]] int64_t _value") != std::string::npos);
+    REQUIRE(result.unit.source.find("[[maybe_unused]] int64_t _index") != std::string::npos);
+    REQUIRE(result.unit.source.find("static_cast<void>(_gdpp_await_values_") != std::string::npos);
 }
 
 TEST_CASE("compiler lowers async iterator break and continue without a reference cycle") {
