@@ -2264,6 +2264,10 @@ TEST_CASE("compiler contains invalid native sequence indexes instead of derefere
             std::string::npos);
     REQUIRE(result.unit.source.find("values[index]") == std::string::npos);
     REQUIRE(result.unit.source.find("bytes.native()[index]") == std::string::npos);
+    REQUIRE(result.unit.source.find("_gdpp_source_path, 2, 5") != std::string::npos);
+    REQUIRE(result.unit.source.find("_gdpp_source_path, 3, 5") != std::string::npos);
+    REQUIRE(result.unit.source.find("_gdpp_source_path, 4, 12") != std::string::npos);
+    REQUIRE(result.unit.source.find("_gdpp_source_path, 4, 32") != std::string::npos);
 }
 
 TEST_CASE("compiler sequences checked subscript receivers before indexes") {
