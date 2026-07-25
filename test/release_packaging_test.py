@@ -420,6 +420,8 @@ class ReleasePackagingTest(unittest.TestCase):
         self.assertIn("PCK_AUDIT_VIOLATIONS=0", installed_smoke)
         self.assertIn("PCK_AUDIT_PROJECT_LIBRARIES=1", installed_smoke)
         for macos_gate in (host_components, installed_smoke):
+            self.assertIn("--quit-after 120", macos_gate)
+            self.assertIn('"$root/warmup.log"', macos_gate)
             self.assertIn(
                 'load_commands="$(otool -arch "$architecture" -l',
                 macos_gate,
