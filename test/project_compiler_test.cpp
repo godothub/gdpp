@@ -817,6 +817,113 @@ TEST_CASE("onready dependencies remain forward declarations and do not create he
     REQUIRE(header_b.find("class GDPPNative_HeaderA_") != std::string::npos);
 }
 
+TEST_CASE("attached scripts keep onready initialization independent from user ready methods") {
+    const auto root = fixture_root("project-attached-implicit-ready");
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
+    write_text(root / "panel.gd", "extends Node\n"
+                                  "@onready var label := get_node(\"Label\")\n"
+                                  "func initialize_instance() -> void:\n"
+                                  "    pass\n"
+                                  "func initialize_onready() -> void:\n"
+                                  "    pass\n"
+                                  "func dispatch_notification(_what: int) -> void:\n"
+                                  "    pass\n");
+    const auto options = project_options(root);
+
+    const auto result = gdpp::ProjectCompiler{}.compile(options);
+
+    REQUIRE(result.success);
+    REQUIRE_EQ(result.scripts.size(), std::size_t{1});
+    const auto& script = result.scripts.front();
+    const auto header = read_text(options.output_directory / "generated" / script.header_file_name);
+    const auto source = read_text(options.output_directory / "generated" / script.source_file_name);
+    const auto native_class = native_class_for(result, "panel.gd");
+    REQUIRE(header.find("void _gdpp_initialize_onready() override") != std::string::npos);
+    REQUIRE(header.find("void initialize_instance()") != std::string::npos);
+    REQUIRE(header.find("void initialize_onready()") != std::string::npos);
+    REQUIRE(header.find("void dispatch_notification(int64_t _what)") != std::string::npos);
+    REQUIRE(header.find("_gdpp_variant_call__ready") == std::string::npos);
+    REQUIRE(source.find("godot::StringName(\"_ready\")") == std::string::npos);
+    REQUIRE(source.find("void " + native_class + "::_ready()") == std::string::npos);
+    const auto initializer =
+        source.find("void " + native_class + "::_gdpp_initialize_onready() {");
+    const auto base_initializer =
+        source.find("gdpp::runtime::AttachedScriptBehavior::_gdpp_initialize_onready()",
+                    initializer);
+    const auto label_initializer = source.find("get_node<godot::Node>", initializer);
+    REQUIRE(initializer != std::string::npos);
+    REQUIRE(base_initializer > initializer);
+    REQUIRE(label_initializer > base_initializer);
+    const auto label_path = source.find("godot::String(\"Label\")", base_initializer);
+    REQUIRE(label_path > base_initializer);
+    REQUIRE(label_path < label_initializer);
+}
+
+TEST_CASE("attached onready initialization follows inheritance and internal class lifecycles") {
+    const auto root = fixture_root("project-attached-onready-inheritance");
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
+    write_text(root / "base.gd", "extends Node\n"
+                                 "@onready var base_marker := get_node(\"BaseMarker\")\n"
+                                 "func _ready() -> void:\n"
+                                 "    assert(base_marker != null)\n");
+    write_text(root / "child.gd", "extends \"res://base.gd\"\n"
+                                  "@onready var child_marker := get_node(\"ChildMarker\")\n");
+    write_text(root / "inner.gd", "extends Node\n"
+                                  "class InnerBase extends Node:\n"
+                                  "    @onready var base_marker := get_node(\"BaseMarker\")\n"
+                                  "class InnerChild extends InnerBase:\n"
+                                  "    @onready var child_marker := get_node(\"ChildMarker\")\n"
+                                  "    func _ready() -> void:\n"
+                                  "        assert(base_marker != null and child_marker != null)\n");
+    const auto options = project_options(root);
+
+    const auto result = gdpp::ProjectCompiler{}.compile(options);
+
+    REQUIRE(result.success);
+    const auto base_class = native_class_for(result, "base.gd");
+    const auto child_class = native_class_for(result, "child.gd");
+    const auto child_script =
+        std::find_if(result.scripts.begin(), result.scripts.end(), [](const auto& script) {
+            return script.relative_path.filename() == "child.gd";
+        });
+    REQUIRE(child_script != result.scripts.end());
+    const auto child_source =
+        read_text(options.output_directory / "generated" / child_script->source_file_name);
+    const auto child_initializer =
+        child_source.find("void " + child_class + "::_gdpp_initialize_onready() {");
+    const auto inherited_initializer =
+        child_source.find(base_class + "::_gdpp_initialize_onready()", child_initializer);
+    const auto child_marker =
+        child_source.find("godot::String(\"ChildMarker\")", child_initializer);
+    REQUIRE(child_initializer != std::string::npos);
+    REQUIRE(inherited_initializer > child_initializer);
+    REQUIRE(child_marker > inherited_initializer);
+    REQUIRE(child_source.find("void " + child_class + "::_ready()") == std::string::npos);
+    REQUIRE(child_source.find("_gdpp_variant_call__ready") == std::string::npos);
+
+    const auto inner_script =
+        std::find_if(result.scripts.begin(), result.scripts.end(), [](const auto& script) {
+            return script.relative_path.filename() == "inner.gd";
+        });
+    REQUIRE(inner_script != result.scripts.end());
+    REQUIRE_EQ(inner_script->inner_class_names.size(), std::size_t{2});
+    const auto inner_source =
+        read_text(options.output_directory / "generated" / inner_script->source_file_name);
+    const auto& inner_base = inner_script->inner_class_names[0];
+    const auto& inner_child = inner_script->inner_class_names[1];
+    REQUIRE(inner_source.find("void " + inner_base + "::_gdpp_initialize_onready() {") !=
+            std::string::npos);
+    const auto inner_child_initializer =
+        inner_source.find("void " + inner_child + "::_gdpp_initialize_onready() {");
+    REQUIRE(inner_child_initializer != std::string::npos);
+    REQUIRE(inner_source.find(inner_base + "::_gdpp_initialize_onready()",
+                              inner_child_initializer) > inner_child_initializer);
+    REQUIRE(inner_source.find("void " + inner_base + "::_ready()") == std::string::npos);
+    REQUIRE(inner_source.find(inner_base + "::_gdpp_variant_call__ready") == std::string::npos);
+}
+
 TEST_CASE("project target version changes build identity") {
     const auto root = fixture_root("project-version");
     std::error_code error;
