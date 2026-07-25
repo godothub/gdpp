@@ -2,10 +2,12 @@
 
 - Match GDScript's independent implicit-ready lifecycle for attached scripts: initialize `@onready` fields base-to-derived before normal `_ready` dispatch, including scripts without a user `_ready`, inherited callbacks, internal classes, and repeated `request_ready()` cycles.
 - Keep implicit-ready initialization separate from reflected user methods and place every lifecycle hook in the compiler-reserved `_gdpp_` namespace, so customer methods cannot collide with runtime initialization and a derived script with `@onready` fields cannot shadow a real inherited `_ready` callback.
+- Remove both the declaration and definition of synthesized `_ready` from onready-only attached classes, preventing unresolved virtual symbols during final customer-library linking.
 - Route statically typed `Array` and every `PackedArray` subscript read, write, and compound assignment through negative-index-aware bounds checks while preserving receiver-before-index evaluation; invalid message data now emits a bounded diagnostic with the original `.gd` path, line, column, and operation instead of dereferencing native storage and terminating the process.
 - Preserve a strong, correctly typed `RefCounted` reference when attached-script `self` crosses a typed native call boundary, covering nested message objects and generated protocol models without unsafe owner conversion.
+- Compare statically typed engine objects, `RefCounted` values, and provider-owned attached `self` through Godot Variant identity, avoiding ill-formed `Ref<T> == Object*` code in exported protocol and model classes.
 - Advance the packaged runtime ABI to 12 so an older or partially copied SDK is rejected during export preflight instead of linking lifecycle-incompatible generated code.
-- Add exported-runtime coverage for packed binary message headers, nested dispatch dictionaries, `Callable` handlers, signals, `@onready` scene arrays, inherited and internal ready lifecycles, and 128-message bursts.
+- Add exported-runtime coverage for packed binary message headers, nested dispatch dictionaries, `Callable` handlers, preconnected script and provider signals, typed provider containers, dynamically instantiated attached nodes, the `_init`/`_enter_tree`/`_notification`/`_ready`/`_exit_tree` lifecycle, inherited and internal ready behavior, and 128-message bursts.
 - Give every Godot integration test an isolated build-tree log and serialize tests that share editor user data, preventing concurrent engine log rotation from being misclassified as a GDPP runtime crash.
 
 ## 1.7.9
