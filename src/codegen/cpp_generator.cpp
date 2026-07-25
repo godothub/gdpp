@@ -2236,6 +2236,13 @@ std::string CodeGenerator::emit_subscript_read(const Type& container, const Type
                                  std::to_string(span.begin.column);
     std::string value;
     if (container.kind == TypeKind::array) {
+        const bool native_value = !result.is_dynamic() && result.kind != TypeKind::object &&
+                                  result.kind != TypeKind::script_resource;
+        if (native_value) {
+            value = "gdpp::runtime::checked_typed_array_get<" + cpp_type(result) + ">(" + target +
+                    ", " + index + source_location + ")";
+            return emit_conversion(result, result, std::move(value));
+        }
         value = "gdpp::runtime::checked_array_get(" + target + ", " + index + source_location + ")";
     } else if (container.is_packed_array()) {
         value = "gdpp::runtime::checked_packed_array_get(" + target + ", " + index +
@@ -3389,7 +3396,7 @@ std::string CodeGenerator::emit_expression(const ir::Expression& expression) con
                                              std::move(value));
                 }
                 if (godot_method->is_vararg)
-                    return "gdpp::runtime::to_variant(" + value + ")";
+                    return "gdpp::runtime::variant_constructor_argument(" + value + ")";
             }
             if (expression.call_contract &&
                 operand_index - 1 < expression.call_contract->parameters.size()) {
@@ -3489,7 +3496,8 @@ std::string CodeGenerator::emit_expression(const ir::Expression& expression) con
                                                              expression.operands[index]->type,
                                                              std::move(argument));
                             } else if (function->is_vararg) {
-                                argument = "gdpp::runtime::to_variant(" + argument + ")";
+                                argument =
+                                    "gdpp::runtime::variant_constructor_argument(" + argument + ")";
                             }
                         }
                     }
@@ -3523,7 +3531,8 @@ std::string CodeGenerator::emit_expression(const ir::Expression& expression) con
                                                          expression.operands[index]->type,
                                                          std::move(argument));
                         } else if (function->is_vararg) {
-                            argument = "gdpp::runtime::to_variant(" + argument + ")";
+                            argument =
+                                "gdpp::runtime::variant_constructor_argument(" + argument + ")";
                         }
                     }
                 }
@@ -3579,8 +3588,9 @@ std::string CodeGenerator::emit_expression(const ir::Expression& expression) con
                 }
                 result += self_object_expression() + "->emit_signal(" + signal_name;
                 for (std::size_t index = 1; index < expression.operands.size(); ++index) {
-                    result += ", gdpp::runtime::to_variant(_gdpp_signal_argument_" + suffix + "_" +
-                              std::to_string(index - 1) + ")";
+                    result +=
+                        ", gdpp::runtime::variant_constructor_argument(_gdpp_signal_argument_" +
+                        suffix + "_" + std::to_string(index - 1) + ")";
                 }
                 return result + "); }())";
             }
@@ -3601,8 +3611,9 @@ std::string CodeGenerator::emit_expression(const ir::Expression& expression) con
             for (std::size_t index = 1; index < expression.operands.size(); ++index) {
                 if (index > 1)
                     result += ", ";
-                result += "gdpp::runtime::to_variant(_gdpp_callable_argument_" + suffix + "_" +
-                          std::to_string(index - 1) + ")";
+                result += "gdpp::runtime::variant_constructor_argument("
+                          "_gdpp_callable_argument_" +
+                          suffix + "_" + std::to_string(index - 1) + ")";
             }
             return result + "); }())";
         }

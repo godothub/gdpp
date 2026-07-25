@@ -106,10 +106,11 @@ TEST_CASE("compiler centralizes packed values at every generated Variant boundar
     REQUIRE(result.unit.source.find("] = gdpp::runtime::to_variant(_gdpp_call_argument_") !=
             std::string::npos);
     REQUIRE(result.unit.source.find("emit_signal(_gdpp_signal_name_") != std::string::npos);
-    REQUIRE(result.unit.source.find(", gdpp::runtime::to_variant(_gdpp_signal_argument_") !=
+    REQUIRE(result.unit.source.find(
+                ", gdpp::runtime::variant_constructor_argument(_gdpp_signal_argument_") !=
             std::string::npos);
-    REQUIRE(result.unit.source.find(".call(gdpp::runtime::to_variant(_gdpp_callable_argument_") !=
-            std::string::npos);
+    REQUIRE(result.unit.source.find(".call(gdpp::runtime::variant_constructor_argument("
+                                    "_gdpp_callable_argument_") != std::string::npos);
     REQUIRE(result.unit.source.find("const godot::Variant _gdpp_dynamic_argument_") !=
             std::string::npos);
     REQUIRE(result.unit.source.find(" = gdpp::runtime::to_variant(bytes); "
@@ -124,12 +125,14 @@ TEST_CASE("compiler centralizes packed values at every generated Variant boundar
     REQUIRE(result.unit.source.find("godot::UtilityFunctions::print("
                                     "gdpp::runtime::to_variant(_gdpp_utility_argument_") !=
             std::string::npos);
-    REQUIRE(result.unit.source.find(", gdpp::runtime::to_variant(_gdpp_utility_argument_") !=
+    REQUIRE(result.unit.source.find(
+                ", gdpp::runtime::variant_constructor_argument(_gdpp_utility_argument_") !=
             std::string::npos);
     REQUIRE(result.unit.source.find("gdpp::runtime::packed_native_argument(_gdpp_call_argument_") !=
             std::string::npos);
     REQUIRE(result.unit.source.find("call(_gdpp_call_argument_") != std::string::npos);
-    REQUIRE(result.unit.source.find(", gdpp::runtime::to_variant(_gdpp_call_argument_") !=
+    REQUIRE(result.unit.source.find(
+                ", gdpp::runtime::variant_constructor_argument(_gdpp_call_argument_") !=
             std::string::npos);
     REQUIRE(result.unit.source.find("const auto _gdpp_array_value_") != std::string::npos);
     REQUIRE(result.unit.source.find(" = gdpp::runtime::to_variant(bytes); _gdpp_array_") !=
@@ -2235,10 +2238,10 @@ TEST_CASE("compiler preserves typed subscript and builtin component scalar seman
 
     REQUIRE(result.success);
     REQUIRE(result.unit.source.find("_gdpp_subscript_container_") != std::string::npos);
-    REQUIRE(result.unit.source.find("gdpp::runtime::checked_array_get("
+    REQUIRE(result.unit.source.find("gdpp::runtime::checked_typed_array_get<int64_t>("
                                     "_gdpp_subscript_target_") != std::string::npos);
     REQUIRE(result.unit.source.find("static_cast<int64_t>(values[") == std::string::npos);
-    REQUIRE(result.unit.source.find("gdpp::runtime::checked_array_get("
+    REQUIRE(result.unit.source.find("gdpp::runtime::checked_typed_array_get<int64_t>("
                                     "_gdpp_subscript_container_") != std::string::npos);
     REQUIRE(result.unit.source.find("gdpp::runtime::checked_array_set("
                                     "_gdpp_subscript_container_") != std::string::npos);
@@ -2260,7 +2263,7 @@ TEST_CASE("compiler contains invalid native sequence indexes instead of derefere
         "    return values[index] + str(bytes[index])\n");
 
     REQUIRE(result.success);
-    REQUIRE(result.unit.source.find("gdpp::runtime::checked_array_get("
+    REQUIRE(result.unit.source.find("gdpp::runtime::checked_typed_array_get<godot::String>("
                                     "_gdpp_subscript_target_") != std::string::npos);
     REQUIRE(result.unit.source.find("gdpp::runtime::checked_array_set(") != std::string::npos);
     REQUIRE(result.unit.source.find("gdpp::runtime::checked_packed_array_get("
