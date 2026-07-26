@@ -199,6 +199,77 @@ jobs:
             echo 'Official host desktop export emitted a forbidden diagnostic.'
             exit 1
           fi
+      - name: Export and run multi-peer attached RPC integration
+        shell: bash
+        env:
+          GODOT: ${{ steps.godot.outputs.executable }}
+        run: |
+          set -euo pipefail
+          fixture=build/release/attached-extension-project
+          root="$GITHUB_WORKSPACE/build/host-rpc-integration"
+          mkdir -p "$root" "$fixture/.godot"
+          cp "$fixture/extension_list.compiler.cfg" \
+            "$fixture/.godot/extension_list.cfg"
+
+          if [[ "$RUNNER_OS" == macOS ]]; then
+            preset='macOS Universal 2'
+            output="$root/GDPPAttached.app"
+            runtime="$output/Contents/MacOS/GDPP Attached Extension Integration"
+            project_library="$output/Contents/Frameworks/libgdpp.release.macos.universal.dylib"
+            vendor_library="$output/Contents/Frameworks/libgdpp_test_vendor.release.macos.universal.dylib"
+          elif [[ "$RUNNER_OS" == Windows ]]; then
+            preset='Windows x86_64'
+            output="$root/GDPPAttached.exe"
+            runtime="$output"
+            project_library="$root/gdpp.release.windows.x86_64.dll"
+            vendor_library="$root/gdpp_test_vendor.release.windows.x86_64.dll"
+          else
+            preset='Linux x86_64'
+            output="$root/GDPPAttached.x86_64"
+            runtime="$output"
+            project_library="$root/libgdpp.release.linux.x86_64.so"
+            vendor_library="$root/libgdpp_test_vendor.release.linux.x86_64.so"
+          fi
+
+          "$GODOT" --headless --editor --path "$fixture" --import \
+            2>&1 | tee "$root/import.log"
+          python3 tools/verify_export_immutability.py snapshot \
+            --project "$fixture" --state "$root/extension-state.json"
+          "$GODOT" --headless --editor --path "$fixture" \
+            --export-release "$preset" "$output" \
+            2>&1 | tee "$root/export.log"
+          python3 tools/verify_export_immutability.py verify \
+            --project "$fixture" --state "$root/extension-state.json"
+
+          test -f "$runtime"
+          test -f "$project_library"
+          test -f "$vendor_library"
+          python3 - "$runtime" "$root/runtime.log" <<'PY'
+          from pathlib import Path
+          import subprocess
+          import sys
+
+          executable, log_path = sys.argv[1:]
+          result = subprocess.run(
+              [executable, "--headless", "--audio-driver", "Dummy"],
+              stdout=subprocess.PIPE,
+              stderr=subprocess.STDOUT,
+              text=True,
+              timeout=45,
+              check=False,
+          )
+          Path(log_path).write_text(result.stdout, encoding="utf-8")
+          print(result.stdout, end="")
+          raise SystemExit(result.returncode)
+          PY
+          grep -q '^GDPP_RPC_RUNTIME_OK$' "$root/runtime.log"
+          grep -q '^GDPP_ATTACHED_EXPORT_RUNTIME_OK$' "$root/runtime.log"
+          grep -q 'GDPP_AOT_SUMMARY scenes=' "$root/export.log"
+          if grep -E -q '(^| )ERROR:|SCRIPT ERROR:|Parse Error:|WARNING:|Unable to open' \
+              "$root/import.log" "$root/export.log" "$root/runtime.log"; then
+            echo 'Multi-peer attached RPC integration emitted a forbidden diagnostic.'
+            exit 1
+          fi
       - name: Validate macOS Universal 2 and 11.0 minimum
         if: runner.os == 'macOS'
         shell: bash
