@@ -981,8 +981,7 @@ std::string generated_registration(const std::vector<CompiledProjectScript>& scr
     output << "}\n"
            << "} // namespace\n\n"
            << "extern \"C\" GDExtensionBool GDE_EXPORT\n"
-           << project_library_entry_symbol
-           << "(GDExtensionInterfaceGetProcAddress address,\n"
+           << project_library_entry_symbol << "(GDExtensionInterfaceGetProcAddress address,\n"
            << "                            GDExtensionClassLibraryPtr library,\n"
            << "                            GDExtensionInitialization* initialization) {\n"
            << "    godot::GDExtensionBinding::InitObject init{address, library, initialization};\n"
