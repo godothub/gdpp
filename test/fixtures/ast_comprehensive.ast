@@ -1,0 +1,469 @@
+GDPP_AST 1
+script base "Node" class "AstGolden" tool 1 @0:1:1-1858:75:1
+  annotations 2
+    annotation name "tool" @0:1:1-5:1:6
+      arguments 0
+    annotation name "icon" @6:2:1-29:2:24
+      arguments 1
+        literal kind string text "res://icon.svg" @12:2:7-28:2:23
+  variables 5
+    variable name "score" type "int" constant 0 static 0 infer 0 onready 0 @73:5:9-161:10:1
+      annotations 1
+        annotation name "export" @65:5:1-72:5:8
+          arguments 0
+      initializer
+        literal kind integer text "1" @90:5:26-91:5:27
+      getter 1
+        property_accessor parameter "" method "" @97:6:5-127:8:5
+          block 1
+            return_statement @110:7:9-122:7:21
+              annotations 0
+              value
+                identifier name "score" @117:7:16-122:7:21
+      setter 1
+        property_accessor parameter "value" method "" @127:8:5-161:10:1
+          block 1
+            assignment_statement operation "=" @147:9:9-160:9:22
+              annotations 0
+              target
+                identifier name "score" @147:9:9-152:9:14
+              value
+                identifier name "value" @155:9:17-160:9:22
+    variable name "label" type none constant 0 static 0 infer 0 onready 0 @161:10:1-207:10:47
+      annotations 0
+      initializer
+        none
+      getter 1
+        property_accessor parameter "" method "read_label" @172:10:12-188:10:28
+          block 0
+      setter 1
+        property_accessor parameter "" method "write_label" @190:10:30-207:10:47
+          block 0
+    variable name "shared" type none constant 0 static 1 infer 1 onready 0 @215:11:8-230:11:23
+      annotations 0
+      initializer
+        literal kind integer text "2" @229:11:22-230:11:23
+      getter 0
+      setter 0
+    variable name "LIMIT" type none constant 1 static 0 infer 1 onready 0 @231:12:1-247:12:17
+      annotations 0
+      initializer
+        literal kind integer text "3" @246:12:16-247:12:17
+      getter 0
+      setter 0
+    variable name "child" type none constant 0 static 0 infer 1 onready 1 @1838:74:10-1857:74:29
+      annotations 1
+        annotation name "onready" @1829:74:1-1837:74:9
+          arguments 0
+      initializer
+        node_reference path "$Child" @1851:74:23-1857:74:29
+      getter 0
+      setter 0
+  enums 2
+    enum name "State" @275:14:1-303:14:29
+      annotations 0
+      entries 2
+        enum_entry name "IDLE" @288:14:14-292:14:18
+          value
+            none
+        enum_entry name "RUN" @294:14:20-301:14:27
+          value
+            literal kind integer text "2" @300:14:26-301:14:27
+    enum name none @304:15:1-339:15:36
+      annotations 0
+      entries 1
+        enum_entry name "DEFAULT_STATE" @311:15:8-337:15:34
+          value
+            member name "IDLE" @327:15:24-337:15:34
+              receiver
+                identifier name "State" @327:15:24-332:15:29
+  signals 1
+    signal name "changed" @248:13:1-274:13:27
+      annotations 0
+      parameters 1
+        parameter name "value" type "int" infer 0 @263:13:16-273:13:26
+          default
+            none
+      rest_parameter 0
+  functions 2
+    function name "exercise" return "Variant" static 0 abstract 0 body 1 @663:32:1-1772:71:1
+      annotations 1
+        annotation name "rpc" @616:31:1-662:31:47
+          arguments 4
+            literal kind string text "authority" @621:31:6-632:31:17
+            literal kind string text "call_local" @634:31:19-646:31:31
+            literal kind string text "reliable" @648:31:33-658:31:43
+            literal kind integer text "2" @660:31:45-661:31:46
+      parameters 2
+        parameter name "value" type "Variant" infer 0 @677:32:15-691:32:29
+          default
+            none
+        parameter name "optional" type none infer 1 @693:32:31-706:32:44
+          default
+            literal kind integer text "1" @705:32:43-706:32:44
+      rest_parameter 1
+        parameter name "rest" type "Array" infer 0 @708:32:46-722:32:60
+          default
+            none
+      block 20
+        variable_statement name "inferred" type none infer 1 constant 0 @779:34:5-796:34:22
+          annotations 1
+            annotation name "warning_ignore" @740:33:5-774:33:39
+              arguments 1
+                literal kind string text "unused_variable" @756:33:21-773:33:38
+          initializer
+            literal kind integer text "1" @795:34:21-796:34:22
+        variable_statement name "local" type "int" infer 0 constant 1 @801:35:5-821:35:25
+          annotations 0
+          initializer
+            literal kind integer text "2" @820:35:24-821:35:25
+        variable_statement name "nil_value" type none infer 0 constant 0 @826:36:5-846:36:25
+          annotations 0
+          initializer
+            literal kind nil text "null" @842:36:21-846:36:25
+        variable_statement name "text" type none infer 0 constant 0 @851:37:5-868:37:22
+          annotations 0
+          initializer
+            literal kind string text "text" @862:37:16-868:37:22
+        variable_statement name "name" type none infer 0 constant 0 @873:38:5-891:38:23
+          annotations 0
+          initializer
+            literal kind string_name text "name" @884:38:16-891:38:23
+        variable_statement name "node_path" type none infer 0 constant 0 @896:39:5-925:39:34
+          annotations 0
+          initializer
+            literal kind node_path text "Root/Child" @912:39:21-925:39:34
+        variable_statement name "node" type none infer 0 constant 0 @930:40:5-952:40:27
+          annotations 0
+          initializer
+            node_reference path "$Root/Child" @941:40:16-952:40:27
+        variable_statement name "unique" type none infer 0 constant 0 @957:41:5-977:41:25
+          annotations 0
+          initializer
+            node_reference path "%Unique" @970:41:18-977:41:25
+        variable_statement name "values" type none infer 0 constant 0 @982:42:5-1015:42:38
+          annotations 0
+          initializer
+            array @995:42:18-1015:42:38
+              elements 4
+                literal kind boolean text "true" @996:42:19-1000:42:23
+                literal kind integer text "1" @1002:42:25-1003:42:26
+                literal kind floating text "2.5" @1005:42:28-1008:42:31
+                identifier name "text" @1010:42:33-1014:42:37
+        variable_statement name "mapping" type none infer 0 constant 0 @1020:43:5-1052:43:37
+          annotations 0
+          initializer
+            dictionary @1034:43:19-1052:43:37
+              entries 1
+                entry
+                  key
+                    literal kind string text "key" @1035:43:20-1040:43:25
+                  value
+                    subscript @1042:43:27-1051:43:36
+                      receiver
+                        identifier name "values" @1042:43:27-1048:43:33
+                      index
+                        literal kind integer text "0" @1049:43:34-1050:43:35
+        variable_statement name "callback" type none infer 1 constant 0 @1057:44:5-1164:46:5
+          annotations 0
+          initializer
+            lambda_value @1073:44:21-1164:46:5
+              lambda name "named" return "int" @1073:44:21-1164:46:5
+                parameters 1
+                  parameter name "input" type "int" infer 0 @1084:44:32-1098:44:46
+                    default
+                      literal kind integer text "1" @1097:44:45-1098:44:46
+                rest_parameter 1
+                  parameter name "parts" type "Array" infer 0 @1100:44:48-1115:44:63
+                    default
+                      none
+                block 1
+                  return_statement @1133:45:9-1159:45:35
+                    annotations 0
+                    value
+                      await @1140:45:16-1159:45:35
+                        operand
+                          call @1146:45:22-1159:45:35
+                            callee
+                              identifier name "helper" @1146:45:22-1152:45:28
+                            arguments 1
+                              identifier name "input" @1153:45:29-1158:45:34
+        assignment_statement operation "+=" @1164:46:5-1181:46:22
+          annotations 0
+          target
+            identifier name "inferred" @1164:46:5-1172:46:13
+          value
+            identifier name "local" @1176:46:17-1181:46:22
+        assignment_statement operation "=" @1186:47:5-1209:47:28
+          annotations 0
+          target
+            member name "key" @1186:47:5-1197:47:16
+              receiver
+                identifier name "mapping" @1186:47:5-1193:47:12
+          value
+            unary operation "-" @1200:47:19-1209:47:28
+              operand
+                identifier name "inferred" @1201:47:20-1209:47:28
+        assert_statement @1214:48:5-1242:48:33
+          annotations 0
+          condition
+            unary operation "not" @1221:48:12-1230:48:21
+              operand
+                literal kind boolean text "false" @1225:48:16-1230:48:21
+          message
+            literal kind string text "message" @1232:48:23-1241:48:32
+        expression_statement @1247:49:5-1263:49:21
+          annotations 0
+          expression
+            call @1247:49:5-1263:49:21
+              callee
+                identifier name "helper" @1247:49:5-1253:49:11
+              arguments 1
+                identifier name "inferred" @1254:49:12-1262:49:20
+        if_statement @1268:50:5-1387:56:5
+          annotations 0
+          condition
+            binary operation "==" @1271:50:8-1284:50:21
+              left
+                identifier name "value" @1271:50:8-1276:50:13
+              right
+                literal kind nil text "null" @1280:50:17-1284:50:21
+          when_true
+            block 1
+              pass_statement @1294:51:9-1298:51:13
+                annotations 0
+          when_false
+            block 1
+              if_statement @1303:52:5-1387:56:5
+                annotations 0
+                condition
+                  binary operation "is" @1308:52:10-1323:52:25
+                    left
+                      identifier name "value" @1308:52:10-1313:52:15
+                    right
+                      identifier name "String" @1317:52:19-1323:52:25
+                when_true
+                  block 1
+                    breakpoint_statement @1333:53:9-1343:53:19
+                      annotations 0
+                when_false
+                  block 1
+                    assignment_statement operation "=" @1362:55:9-1382:55:29
+                      annotations 0
+                      target
+                        identifier name "inferred" @1362:55:9-1370:55:17
+                      value
+                        unary operation "-" @1373:55:20-1382:55:29
+                          operand
+                            identifier name "inferred" @1374:55:21-1382:55:29
+        while_statement @1387:56:5-1464:60:5
+          annotations 0
+          condition
+            binary operation "<" @1393:56:11-1405:56:23
+              left
+                identifier name "inferred" @1393:56:11-1401:56:19
+              right
+                literal kind integer text "5" @1404:56:22-1405:56:23
+          block 3
+            assignment_statement operation "+=" @1415:57:9-1428:57:22
+              annotations 0
+              target
+                identifier name "inferred" @1415:57:9-1423:57:17
+              value
+                literal kind integer text "1" @1427:57:21-1428:57:22
+            continue_statement @1437:58:9-1445:58:17
+              annotations 0
+            break_statement @1454:59:9-1459:59:14
+              annotations 0
+        for_statement iterator "item" type "int" iterator_span @1468:60:9-1472:60:13 type_span @1474:60:15-1477:60:18 @1464:60:5-1518:62:5
+          annotations 0
+          iterable
+            array @1481:60:22-1487:60:28
+              elements 2
+                literal kind integer text "1" @1482:60:23-1483:60:24
+                literal kind integer text "2" @1485:60:26-1486:60:27
+          block 1
+            assignment_statement operation "+=" @1497:61:9-1513:61:25
+              annotations 0
+              target
+                identifier name "inferred" @1497:61:9-1505:61:17
+              value
+                identifier name "item" @1509:61:21-1513:61:25
+        match_statement @1518:62:5-1754:69:5
+          annotations 0
+          subject
+            array @1524:62:11-1537:62:24
+              elements 3
+                literal kind integer text "1" @1525:62:12-1526:62:13
+                identifier name "value" @1528:62:15-1533:62:20
+                literal kind integer text "3" @1535:62:22-1536:62:23
+          branches 3
+            match_branch @1547:63:9-1634:65:9
+              patterns 1
+                array_pattern @1547:63:9-1587:63:49
+                  keys 0
+                  elements 3
+                    value_pattern @1548:63:10-1549:63:11
+                      value
+                        literal kind integer text "1" @1548:63:10-1549:63:11
+                      keys 0
+                      elements 0
+                    dictionary_pattern @1551:63:13-1569:63:31
+                      keys 2
+                        literal kind string text "hp" @1552:63:14-1556:63:18
+                        none
+                      elements 2
+                        binding_pattern name "hp" @1558:63:20-1564:63:26
+                          keys 0
+                          elements 0
+                        rest_pattern @1566:63:28-1568:63:30
+                          keys 0
+                          elements 0
+                    array_pattern @1571:63:33-1586:63:48
+                      keys 0
+                      elements 2
+                        binding_pattern name "first" @1572:63:34-1581:63:43
+                          keys 0
+                          elements 0
+                        rest_pattern @1583:63:45-1585:63:47
+                          keys 0
+                          elements 0
+              guard
+                binary operation ">" @1593:63:55-1599:63:61
+                  left
+                    identifier name "hp" @1593:63:55-1595:63:57
+                  right
+                    literal kind integer text "0" @1598:63:60-1599:63:61
+              block 1
+                return_statement @1613:64:13-1625:64:25
+                  annotations 0
+                  value
+                    identifier name "first" @1620:64:20-1625:64:25
+            match_branch @1634:65:9-1675:67:9
+              patterns 2
+                value_pattern @1634:65:9-1635:65:10
+                  value
+                    literal kind integer text "0" @1634:65:9-1635:65:10
+                  keys 0
+                  elements 0
+                value_pattern @1637:65:12-1638:65:13
+                  value
+                    literal kind integer text "1" @1637:65:12-1638:65:13
+                  keys 0
+                  elements 0
+              guard
+                none
+              block 1
+                return_statement @1652:66:13-1666:66:27
+                  annotations 0
+                  value
+                    literal kind string text "small" @1659:66:20-1666:66:27
+            match_branch @1675:67:9-1754:69:5
+              patterns 1
+                wildcard_pattern @1675:67:9-1676:67:10
+                  keys 0
+                  elements 0
+              guard
+                none
+              block 1
+                return_statement @1690:68:13-1749:68:72
+                  annotations 0
+                  value
+                    conditional @1697:68:20-1749:68:72
+                      when_true
+                        call @1697:68:20-1720:68:43
+                          callee
+                            member name "call" @1697:68:20-1710:68:33
+                              receiver
+                                identifier name "callback" @1697:68:20-1705:68:28
+                          arguments 1
+                            identifier name "optional" @1711:68:34-1719:68:42
+                      condition
+                        identifier name "value" @1724:68:47-1729:68:52
+                      when_false
+                        subscript @1735:68:58-1749:68:72
+                          receiver
+                            identifier name "mapping" @1735:68:58-1742:68:65
+                          index
+                            literal kind string text "key" @1743:68:66-1748:68:71
+        return_statement @1754:69:5-1770:69:21
+          annotations 0
+          value
+            identifier name "nil_value" @1761:69:12-1770:69:21
+    function name "helper" return "int" static 1 abstract 0 body 1 @1779:71:8-1829:74:1
+      annotations 0
+      parameters 1
+        parameter name "input" type "int" infer 0 @1791:71:20-1801:71:30
+          default
+            none
+      rest_parameter 0
+      block 1
+        return_statement @1815:72:5-1827:72:17
+          annotations 0
+          value
+            identifier name "input" @1822:72:12-1827:72:17
+  classes 2
+    class name "Inner" base "RefCounted" @341:17:1-533:26:1
+      annotations 0
+      variables 1
+        variable name "enabled" type none constant 0 static 0 infer 1 onready 0 @385:18:13-404:18:32
+          annotations 1
+            annotation name "export" @377:18:5-384:18:12
+              arguments 0
+          initializer
+            literal kind boolean text "true" @400:18:28-404:18:32
+          getter 0
+          setter 0
+      enums 1
+        enum name "Mode" @409:19:5-428:19:24
+          annotations 0
+          entries 1
+            enum_entry name "FIRST" @421:19:17-426:19:22
+              value
+                none
+      signals 1
+        signal name "completed" @433:20:5-451:20:23
+          annotations 0
+          parameters 0
+          rest_parameter 0
+      functions 1
+        function name "ping" return "void" static 0 abstract 0 body 1 @456:21:5-494:23:5
+          annotations 0
+          parameters 0
+          rest_parameter 0
+          block 1
+            pass_statement @485:22:9-489:22:13
+              annotations 0
+      classes 1
+        class name "Nested" base none @494:23:5-533:26:1
+          annotations 0
+          variables 1
+            variable name "item" type none constant 0 static 0 infer 0 onready 0 @516:24:9-531:24:24
+              annotations 0
+              initializer
+                literal kind nil text "null" @527:24:20-531:24:24
+              getter 0
+              setter 0
+          enums 0
+          signals 0
+          functions 0
+          classes 0
+    class name "AbstractInner" base none @543:27:1-616:31:1
+      annotations 1
+        annotation name "abstract" @533:26:1-542:26:10
+          arguments 0
+      variables 0
+      enums 0
+      signals 0
+      functions 1
+        function name "execute" return "void" static 0 abstract 1 body 0 @582:29:5-614:29:37
+          annotations 1
+            annotation name "abstract" @568:28:5-577:28:14
+              arguments 0
+          parameters 1
+            parameter name "value" type "int" infer 0 @595:29:18-605:29:28
+              default
+                none
+          rest_parameter 0
+          block 0
+      classes 0

@@ -6,6 +6,7 @@ add_executable(
     constant_evaluator_test.cpp
     integer_semantics_test.cpp
     parser_test.cpp
+    ast_serializer_test.cpp
     flow_test.cpp
     type_test.cpp
     script_symbols_test.cpp
