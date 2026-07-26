@@ -1239,6 +1239,42 @@ TEST_CASE("project compiler resolves class and path inheritance in parent-first 
     REQUIRE(middle_position < child_position);
 }
 
+TEST_CASE("project compiler preserves Object free lifetime semantics for script classes") {
+    const auto root = fixture_root("project-script-free");
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
+    write_text(root / "disposable_node.gd", "extends Node\n"
+                                            "class_name DisposableNode\n");
+    write_text(root / "disposable_ref.gd", "extends RefCounted\n"
+                                           "class_name DisposableRef\n");
+    write_text(root / "consumer.gd", "extends Node\n"
+                                     "class_name ScriptFreeConsumer\n"
+                                     "func free_node() -> void:\n"
+                                     "    var value: DisposableNode = DisposableNode.new()\n"
+                                     "    value.free()\n"
+                                     "func reject_ref_counted() -> void:\n"
+                                     "    var value: DisposableRef = DisposableRef.new()\n"
+                                     "    value.free()\n");
+
+    const auto options = project_options(root);
+    const auto result = gdpp::ProjectCompiler{}.compile(options);
+
+    REQUIRE(result.success);
+    const auto consumer =
+        std::find_if(result.scripts.begin(), result.scripts.end(), [](const auto& script) {
+            return script.relative_path.filename() == "consumer.gd";
+        });
+    REQUIRE(consumer != result.scripts.end());
+    const auto source =
+        read_text(options.output_directory / "generated" / consumer->source_file_name);
+    const std::string lowering = "gdpp::runtime::free_object_at(gdpp::runtime::to_variant(value), "
+                                 "gdpp::runtime::ScriptSourceLocation{";
+    const auto first = source.find(lowering);
+    REQUIRE(first != std::string::npos);
+    REQUIRE(source.find(lowering, first + lowering.size()) != std::string::npos);
+    REQUIRE(source.find("memdelete(value)") == std::string::npos);
+}
+
 TEST_CASE("project compiler lowers super calls to the resolved native base") {
     const auto root = fixture_root("project-super-dispatch");
     std::error_code error;
