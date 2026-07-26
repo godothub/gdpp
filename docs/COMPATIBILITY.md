@@ -1,6 +1,6 @@
 # GDScript 兼容性
 
-本页描述 GDPP 1.7.10 能接受、生成、运行和交付的语言边界。总体状态和优先级见
+本页描述 GDPP 1.8.0 能接受、生成、运行和交付的语言边界。总体状态和优先级见
 [当前状态与功能缺口](STATUS.md)，平台证据见[平台验证报告](PLATFORM_TEST_REPORT.md)。
 
 ## 兼容模型
@@ -34,7 +34,7 @@ ClassDB 方法仍会在生成 C++ 前报错。
 |---|---|
 | Godot 4.7 官方合法 parser 语料 | 114 / 114 未被 lexer/parser 拒绝 |
 | Godot 4.7 官方非法 parser 语料 | 76 / 76 最终拒绝；接受、超时、崩溃均阻断 CI |
-| 固定编译器单元测试 | 488 / 488 |
+| 固定编译器单元测试 | 495 / 495 |
 | 恶意输入 | 非法 UTF-8、NUL、超深递归、超长链、诊断风暴和资源上限均失败关闭 |
 | Unicode | Unicode 17.0 XID、关键字 confusable 防护、稳定 ASCII C++ 标识符 |
 | 字面量 | 整数基数/边界、浮点非有限值、raw/三引号字符串和 Unicode 转义 |
@@ -82,10 +82,15 @@ lexer/parser 仍缺持续 coverage-guided fuzz、完整错误恢复和所有节�
 | `while`/`for` | 完成 | range、数学向量、String、Array、Dictionary、PackedArray 和对象迭代协议 |
 | `break`/`continue`/`return` | 完成 | 同步与异步循环恢复边 |
 | `assert` | 完成 | Debug 保留、Release 完全移除条件与消息求值 |
-| `breakpoint` | 未实现 | 没有 AST/MIR 节点和 Godot 调试器桥接 |
+| `breakpoint` | 完成 | Debug 进入 Godot 调试器并保留源码帧；Release 不生成调试插桩 |
 
 错误路径采用安全 runtime，目标是避免未定义行为和进程崩溃。除零、越界、失效对象和错误键读取
 等全部 VM 中止时序尚未认证，不能声称错误日志逐字节等同 GDScript。
+
+`breakpoint` 覆盖普通函数、访问器、静态函数、lambda、Attached 第三方 GDExtension 基类和
+协程恢复点。调试器可读取原始 `.gd` 路径、函数、当前行、按词法遮蔽后的当前帧局部变量，以及
+当前和继承脚本成员。它不等于完整的源码调试器：gutter 行断点、单步控制、所有父帧变量和原生
+崩溃符号反查仍在路线图中。
 
 ## Callable、lambda 与协程
 
