@@ -34,7 +34,7 @@ ClassDB 方法仍会在生成 C++ 前报错。
 |---|---|
 | Godot 4.7 官方合法 parser 语料 | 114 / 114 未被 lexer/parser 拒绝 |
 | Godot 4.7 官方非法 parser 语料 | 76 / 76 最终拒绝；接受、超时、崩溃均阻断 CI |
-| 固定编译器单元测试 | 495 / 495 |
+| 固定编译器单元测试 | 507 / 507 |
 | 恶意输入 | 非法 UTF-8、NUL、超深递归、超长链、诊断风暴和资源上限均失败关闭 |
 | Unicode | Unicode 17.0 XID、关键字 confusable 防护、稳定 ASCII C++ 标识符 |
 | 字面量 | 整数基数/边界、浮点非有限值、raw/三引号字符串和 Unicode 转义 |
@@ -50,7 +50,7 @@ lexer/parser 仍缺持续 coverage-guided fuzz、完整错误恢复和所有节�
 | 字段、常量、静态字段 | 完成 | `_static_init` 惰性执行；扩展卸载释放静态资源 |
 | 函数、默认参数、rest 参数 | 完成 | 默认值按调用时/常量时语义分类；typed rest 遵循目标 Godot 规则 |
 | 属性 getter/setter | 完成 | 内联和绑定访问器、背字段直接访问及 Inspector 元数据 |
-| Signal 声明与调用 | 主路径 | 声明、emit、方法引用、await 已覆盖；完整连接销毁竞争仍需压力验证 |
+| Signal 声明与调用 | 完成 | 声明、emit、await、发射期连接变更、一次性/延迟/引用计数连接和宿主销毁 |
 | enum/bitfield | 完成 | 命名/匿名、常量表达式、导出提示和第三方 ClassDB 枚举 |
 | `@abstract` | 完成 | 脚本/内部类/方法、跨脚本义务和动态分派 |
 | `@tool` | 完成 | 工具脚本与 runtime 脚本执行域隔离；编辑器专用脚本不能进入 runtime 图 |
@@ -96,17 +96,23 @@ lexer/parser 仍缺持续 coverage-guided fuzz、完整错误恢复和所有节�
 
 | 能力 | 状态 | 边界 |
 |---|---|---|
-| 脚本方法 Callable | 完成 | 实例/静态方法、默认参数、`.call()` 和 `.bind()` 主路径 |
-| lambda | 主路径 | 参数、默认值、返回类型、值捕获、宿主生命周期和 fire-and-forget await |
+| 脚本方法 Callable | 完成 | 实例/静态方法、默认参数、`.call()`、bind/unbind、有效性、相等性和 Signal 生命周期 |
+| lambda | 完成 | 创建时值快照、共享容器/Object 身份、嵌套/返回/递归闭包和每次调用独立局部帧 |
 | 实例协程 | 完成 | 同步立即值或每次调用独有完成 Signal；类型化返回、并发调用和跨脚本 await |
 | 结构化 await | 完成 | 赋值、参数、容器、短路、三元、循环、match、assert |
 | 大型恢复链 | 完成 | MIR 扁平状态机和共享帧路径，4996 项/每帧 200 项批处理运行 oracle |
-| 静态函数协程 | 未实现 | 真正挂起时失败关闭 |
-| 复杂 lambda 协程 | 未实现/主路径 | 递归 self-capture、完整带返回值 lambda 和复杂闭包生命周期未闭合 |
-| 异步引擎虚函数 | 失败关闭 | 外部调用者等待协议和全部 ABI 尚未定义 |
+| 静态函数协程 | 完成 | 无实例宿主的独立完成 owner、真正挂起、类型化返回和 Signal 恢复 |
+| lambda 协程 | 完成 | 类型化返回、捕获值、每次调用独立挂起状态及并发逆序恢复 |
+| 异步引擎虚函数 | 主路径 | `void` continuation 与受检立即返回已运行；外部调用者等待非立即返回值的全部 ABI 未闭合 |
 
 已知协程的返回值被消费时必须写 `await`；故意丢弃返回值的 detached 调用可以执行。协程身份进入
 项目公开 ABI 和精确增量失效，不能把同步旧对象误用于新协程实现。
+
+lambda 与 GDScript 一样在创建 Callable 时捕获当前局部值；标量在每次调用中获得独立工作副本，
+Array、Dictionary 与 Object 仍保持共享身份。因此递归通过捕获的共享 `Array[Callable]` 建立，
+而“先捕获未赋值 Callable、再把 lambda 赋给它”不会被 GDPP 特判成非 GDScript 的隐式自引用。
+真实 Godot 运行矩阵还覆盖两个线程同时调用同一个生成 Callable、延迟 one-shot 信号以及发射期间
+断开旧回调并连接新回调。
 
 ## 注解
 
