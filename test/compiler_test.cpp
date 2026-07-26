@@ -1025,9 +1025,10 @@ TEST_CASE("compiler gives dynamic conditional branches an unambiguous native com
                                            "    return value if enabled else 0.0\n");
 
     REQUIRE(result.success);
-    REQUIRE(result.unit.source.find(
-                "? gdpp::runtime::to_variant(value) : gdpp::runtime::to_variant(0.0)") !=
+    REQUIRE(result.unit.source.find("const bool _gdpp_conditional_condition_") !=
             std::string::npos);
+    REQUIRE(result.unit.source.find("gdpp::runtime::to_variant(value)") != std::string::npos);
+    REQUIRE(result.unit.source.find("gdpp::runtime::to_variant(0.0)") != std::string::npos);
 }
 
 TEST_CASE("compiler resolves forward constants before field initializers") {
@@ -1938,8 +1939,10 @@ TEST_CASE("compiler applies truthiness to typed containers with short circuiting
                                                "    return items && items.size()\n");
 
     REQUIRE(result.success);
-    REQUIRE(result.unit.source.find("(gdpp::runtime::to_variant(items)).booleanize() &&") !=
+    REQUIRE(result.unit.source.find("const bool _gdpp_logic_left_") != std::string::npos);
+    REQUIRE(result.unit.source.find("(gdpp::runtime::to_variant(items)).booleanize()") !=
             std::string::npos);
+    REQUIRE(result.unit.source.find("if (!_gdpp_logic_left_") != std::string::npos);
 }
 
 TEST_CASE("compiler applies zero-value truthiness to every Godot value family") {
@@ -4844,7 +4847,8 @@ TEST_CASE("dynamic logical operators short circuit and utility arguments keep so
 
     REQUIRE(result.success);
     REQUIRE(result.unit.source.find("_gdpp_logic_left_") != std::string::npos);
-    REQUIRE(result.unit.source.find("if (!static_cast<bool>") != std::string::npos);
+    REQUIRE(result.unit.source.find("if (!_gdpp_logic_left_") != std::string::npos);
+    REQUIRE(result.unit.source.find("_gdpp_logic_right_") != std::string::npos);
     const auto first = result.unit.source.find("_gdpp_utility_argument_", 0);
     REQUIRE(first != std::string::npos);
     const auto second = result.unit.source.find("_gdpp_utility_argument_", first + 1);
@@ -4910,6 +4914,10 @@ TEST_CASE("compiler contains fatal expression faults and preserves Godot assignm
         "    return values[4]\n"
         "func caller() -> int:\n"
         "    return marker(\"before\") + callee() + marker(\"after\")\n"
+        "func logical(values: Array) -> bool:\n"
+        "    return values[4] or marker(\"logical-right\")\n"
+        "func conditional(values: Array) -> int:\n"
+        "    return marker(\"selected\") if values[4] else marker(\"fallback\")\n"
         "func assign() -> void:\n"
         "    var values: Array[int] = [0]\n"
         "    target(values)[index()] = marker(\"rhs\")\n");
@@ -4933,6 +4941,24 @@ TEST_CASE("compiler contains fatal expression faults and preserves Godot assignm
     const auto callee_call = source.find("callee()", caller + 1);
     const auto caller_after = source.find("godot::String(\"after\")", callee_call);
     REQUIRE(callee_call < caller_after);
+
+    const auto logical = source.find("::logical(");
+    const auto logical_bounds = source.find("gdpp::runtime::checked_array_get", logical);
+    const auto logical_failure =
+        source.find("gdpp::runtime::script_function_failed()", logical_bounds);
+    const auto logical_right = source.find("godot::String(\"logical-right\")", logical_bounds);
+    REQUIRE(logical_bounds < logical_failure);
+    REQUIRE(logical_failure < logical_right);
+
+    const auto conditional = source.find("::conditional(");
+    const auto condition_bounds = source.find("gdpp::runtime::checked_array_get", conditional);
+    const auto condition_failure =
+        source.find("gdpp::runtime::script_function_failed()", condition_bounds);
+    const auto selected = source.find("godot::String(\"selected\")", condition_bounds);
+    const auto fallback = source.find("godot::String(\"fallback\")", condition_bounds);
+    REQUIRE(condition_bounds < condition_failure);
+    REQUIRE(condition_failure < selected);
+    REQUIRE(condition_failure < fallback);
 
     const auto assignment = source.find("::assign()");
     const auto target_call = source.find("target(", assignment + 1);

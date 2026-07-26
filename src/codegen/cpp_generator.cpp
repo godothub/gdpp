@@ -2917,13 +2917,22 @@ std::string CodeGenerator::emit_expression(const ir::Expression& expression) con
                            expression.span);
         return "godot::Variant()";
     case ir::ExpressionKind::binary: {
-        if ((expression.value == "and" || expression.value == "or") &&
-            !expression.operands.at(0)->type.is_dynamic() &&
-            !expression.operands.at(1)->type.is_dynamic()) {
-            auto left = emit_truthy(*expression.operands.at(0));
-            auto right = emit_truthy(*expression.operands.at(1));
-            return "(" + std::move(left) + (expression.value == "and" ? " && " : " || ") +
-                   std::move(right) + ")";
+        if (expression.value == "and" || expression.value == "or") {
+            const auto suffix = std::to_string(temporary_counter_++);
+            const auto left_name = "_gdpp_logic_left_" + suffix;
+            const auto right_name = "_gdpp_logic_right_" + suffix;
+            std::string result = "([&]() -> bool { const bool " + left_name + " = " +
+                                 emit_truthy(*expression.operands.at(0)) +
+                                 "; if (gdpp::runtime::script_function_failed()) return false; ";
+            if (expression.value == "and")
+                result += "if (!" + left_name + ") return false; ";
+            else
+                result += "if (" + left_name + ") return true; ";
+            result += "const bool " + right_name + " = " +
+                      emit_truthy(*expression.operands.at(1)) +
+                      "; if (gdpp::runtime::script_function_failed()) return false; return " +
+                      right_name + "; }())";
+            return result;
         }
         const auto emit_ordered_operands = [&](const auto& evaluate) {
             const auto suffix = std::to_string(temporary_counter_++);
@@ -3122,19 +3131,6 @@ std::string CodeGenerator::emit_expression(const ir::Expression& expression) con
                                 (right_type.kind == TypeKind::object &&
                                  script_symbols_->find_external(right_type.name)));
         if (left_type.is_dynamic() || right_type.is_dynamic() || external_operand) {
-            if (expression.value == "and" || expression.value == "or") {
-                const auto suffix = std::to_string(temporary_counter_++);
-                const auto left = "_gdpp_logic_left_" + suffix;
-                std::string result = "([&]() -> bool { const godot::Variant " + left + " = " +
-                                     "gdpp::runtime::to_variant(" +
-                                     emit_expression(*expression.operands.at(0)) + "); ";
-                if (expression.value == "and")
-                    result += "if (!static_cast<bool>(" + left + ")) return false; ";
-                else
-                    result += "if (static_cast<bool>(" + left + ")) return true; ";
-                return result + "return static_cast<bool>(gdpp::runtime::to_variant(" +
-                       emit_expression(*expression.operands.at(1)) + ")); }())";
-            }
             std::string runtime_function{"gdpp::runtime::binary"};
             if ((left_type.is_dynamic() && right_type.kind == TypeKind::integer) ||
                 (right_type.is_dynamic() && left_type.kind == TypeKind::integer)) {
@@ -3173,9 +3169,17 @@ std::string CodeGenerator::emit_expression(const ir::Expression& expression) con
                 return "gdpp::runtime::to_variant(" + value + ")";
             return emit_conversion(expression.type, branch.type, std::move(value));
         };
-        return "(" + emit_truthy(*expression.operands.at(1)) + " ? " +
-               emit_branch(*expression.operands.at(0)) + " : " +
-               emit_branch(*expression.operands.at(2)) + ")";
+        const auto suffix = std::to_string(temporary_counter_++);
+        const auto condition = "_gdpp_conditional_condition_" + suffix;
+        const auto value = "_gdpp_conditional_value_" + suffix;
+        return "([&]() -> " + cpp_type(expression.type) + " { const bool " + condition + " = " +
+               emit_truthy(*expression.operands.at(1)) +
+               "; if (gdpp::runtime::script_function_failed()) return {}; if (" + condition +
+               ") { const auto " + value + " = " + emit_branch(*expression.operands.at(0)) +
+               "; if (gdpp::runtime::script_function_failed()) return {}; return " + value +
+               "; } const auto " + value + " = " + emit_branch(*expression.operands.at(2)) +
+               "; if (gdpp::runtime::script_function_failed()) return {}; return " + value +
+               "; }())";
     }
     case ir::ExpressionKind::call: {
         const auto expression_failure_return =
