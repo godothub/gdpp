@@ -6195,6 +6195,33 @@ void CodeGenerator::emit_inner_class_definition(const ir::Class& declaration,
     current_inner_script_ = script_symbols_ && current_script_
                                 ? script_symbols_->find_inner(*current_script_, source_name)
                                 : nullptr;
+    if (script_symbols_ && current_inner_script_) {
+        std::unordered_set<std::string> debug_member_names;
+        for (const auto& [name, expression] : current_debug_members_) {
+            static_cast<void>(expression);
+            debug_member_names.insert(name);
+        }
+        const auto add_debug_members = [&](const auto& members) {
+            for (const auto& member : members) {
+                if (member.kind == ScriptMemberKind::field && !member.is_static &&
+                    debug_member_names.insert(member.name).second) {
+                    current_debug_members_.emplace_back(
+                        member.name, "this->" + sanitize_identifier(member.name));
+                }
+            }
+        };
+        std::unordered_set<const ScriptInnerClassSymbol*> visited_inner;
+        for (auto* base = script_symbols_->inner_base_of(*current_inner_script_);
+             base && visited_inner.insert(base).second;
+             base = script_symbols_->inner_base_of(*base)) {
+            add_debug_members(base->members);
+        }
+        std::unordered_set<const ScriptClassSymbol*> visited_scripts;
+        for (auto* base = script_symbols_->base_of(*current_inner_script_);
+             base && visited_scripts.insert(base).second; base = script_symbols_->base_of(*base)) {
+            add_debug_members(base->members);
+        }
+    }
     const auto godot_base = inner_godot_base_type(source_name);
     current_godot_base_type_ = godot_base;
     attached_godot_base_type_ = godot_base;
@@ -6768,6 +6795,20 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
     attached_godot_base_type_.clear();
     current_script_contract_hash_ = script_contract_hash;
     current_script_ = script_symbols_ ? script_symbols_->find_path(source_path) : nullptr;
+    if (script_symbols_ && current_script_) {
+        std::unordered_set<std::string> debug_member_names;
+        for (const auto& [name, expression] : current_debug_members_) {
+            static_cast<void>(expression);
+            debug_member_names.insert(name);
+        }
+        for (const auto* member : script_symbols_->inherited_members(*current_script_)) {
+            if (member->kind == ScriptMemberKind::field && !member->is_static &&
+                debug_member_names.insert(member->name).second) {
+                current_debug_members_.emplace_back(member->name,
+                                                    "this->" + sanitize_identifier(member->name));
+            }
+        }
+    }
     unit.script_class_name = current_script_
                                  ? current_script_->script_name
                                  : module.class_name.value_or(to_pascal_case(base_name));

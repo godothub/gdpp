@@ -209,9 +209,8 @@ TEST_CASE("attached descriptors defer every script constant until Godot requests
     REQUIRE(descriptor.find("gdpp::runtime::load_resource(") == std::string::npos);
     REQUIRE(descriptor.find("get_tree(") == std::string::npos);
     REQUIRE(descriptor.find("_gdpp_preload_resources(") == std::string::npos);
-    REQUIRE(descriptor.find(
-                "descriptor.method_dispatches.push_back({"
-                "godot::StringName(\"scene_resource\"), &") != std::string::npos);
+    REQUIRE(descriptor.find("descriptor.method_dispatches.push_back({"
+                            "godot::StringName(\"scene_resource\"), &") != std::string::npos);
     const auto registration = read_text(options.output_directory / "register_types.cpp");
     REQUIRE(registration.find("::_gdpp_preload_resources();") == std::string::npos);
     REQUIRE(registration.find("gdpp_engine") == std::string::npos);
@@ -850,11 +849,9 @@ TEST_CASE("attached scripts keep onready initialization independent from user re
     REQUIRE(header.find("virtual void _ready()") == std::string::npos);
     REQUIRE(source.find("godot::StringName(\"_ready\")") == std::string::npos);
     REQUIRE(source.find("void " + native_class + "::_ready()") == std::string::npos);
-    const auto initializer =
-        source.find("void " + native_class + "::_gdpp_initialize_onready() {");
-    const auto base_initializer =
-        source.find("gdpp::runtime::AttachedScriptBehavior::_gdpp_initialize_onready()",
-                    initializer);
+    const auto initializer = source.find("void " + native_class + "::_gdpp_initialize_onready() {");
+    const auto base_initializer = source.find(
+        "gdpp::runtime::AttachedScriptBehavior::_gdpp_initialize_onready()", initializer);
     const auto label_initializer = source.find("get_node<godot::Node>", initializer);
     REQUIRE(initializer != std::string::npos);
     REQUIRE(base_initializer > initializer);
@@ -2289,6 +2286,36 @@ TEST_CASE("attached ref-counted self arguments retain a typed strong reference")
     const auto base_source =
         read_text(options.output_directory / "generated" / base_script->source_file_name);
     REQUIRE(base_source.find("gdpp::runtime::binary(godot::Variant::OP_EQUAL") !=
+            std::string::npos);
+}
+
+TEST_CASE("attached breakpoint snapshots include inherited script members") {
+    const auto root = fixture_root("project-attached-breakpoint-inheritance");
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
+    write_text(root / "base.gd", "extends Node\n"
+                                 "var base_state := 4\n");
+    write_text(root / "child.gd", "extends \"res://base.gd\"\n"
+                                  "var child_state := 5\n"
+                                  "func inspect(value: int) -> void:\n"
+                                  "    breakpoint\n");
+    const auto options = project_options(root);
+
+    const auto result = gdpp::ProjectCompiler{}.compile(options);
+
+    REQUIRE(result.success);
+    const auto child =
+        std::find_if(result.scripts.begin(), result.scripts.end(), [](const auto& script) {
+            return script.relative_path.filename() == "child.gd";
+        });
+    REQUIRE(child != result.scripts.end());
+    const auto source = read_text(options.output_directory / "generated" / child->source_file_name);
+    REQUIRE(source.find("godot::StringName(\"inspect\"), 4, owner()") != std::string::npos);
+    REQUIRE(source.find(".push_back(godot::String(\"child_state\"));") != std::string::npos);
+    REQUIRE(source.find(".push_back(gdpp::runtime::to_variant(this->child_state));") !=
+            std::string::npos);
+    REQUIRE(source.find(".push_back(godot::String(\"base_state\"));") != std::string::npos);
+    REQUIRE(source.find(".push_back(gdpp::runtime::to_variant(this->base_state));") !=
             std::string::npos);
 }
 
