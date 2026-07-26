@@ -322,6 +322,7 @@ godot::Dictionary editor_script_descriptor(const CompiledProjectScript& script,
     descriptor["rpc_config"] = godot::Variant{};
     descriptor["tool"] = script.is_tool;
     descriptor["abstract"] = script.is_abstract;
+    descriptor["static_unload"] = script.static_unload;
 
     godot::Array properties;
     godot::Array methods;
