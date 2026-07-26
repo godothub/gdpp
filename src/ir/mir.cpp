@@ -109,10 +109,11 @@ class FunctionBuilder final {
         value.source = expression;
         function_.values.push_back(std::move(value));
 
-        auto& operands = function_.values[id].operands;
+        std::vector<mir::ValueId> operands;
         operands.reserve(expression->operands.size());
         for (const auto& operand : expression->operands)
             operands.push_back(register_expression(operand.get()));
+        function_.values[id].operands = std::move(operands);
         return id;
     }
 

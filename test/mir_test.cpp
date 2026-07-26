@@ -23,6 +23,20 @@ gdpp::ir::Statement marker(gdpp::ir::StatementKind kind) {
     return result;
 }
 
+gdpp::ir::ExpressionPtr nested_binary(std::size_t depth) {
+    if (depth == 0)
+        return literal("1");
+    auto result = std::make_unique<gdpp::ir::Expression>();
+    result->kind = gdpp::ir::ExpressionKind::binary;
+    result->type = {gdpp::TypeKind::integer, "int"};
+    result->storage_type = result->type;
+    result->assignment_type = result->type;
+    result->value = "+";
+    result->operands.push_back(nested_binary(depth - 1U));
+    result->operands.push_back(literal("1"));
+    return result;
+}
+
 } // namespace
 
 TEST_CASE("MIR builds explicit branches loops returns and suspension edges") {
@@ -381,4 +395,24 @@ TEST_CASE("MIR verifier rejects corrupt stable identities and value ownership") 
     gdpp::DiagnosticBag diagnostics;
     REQUIRE(!gdpp::MirVerifier{diagnostics}.verify(mir));
     REQUIRE(diagnostics.has_errors());
+}
+
+TEST_CASE("MIR value registration survives recursive storage growth") {
+    gdpp::ir::Module hir;
+    gdpp::ir::Function function;
+    function.name = "deep_values";
+    gdpp::ir::Statement returned;
+    returned.kind = gdpp::ir::StatementKind::return_statement;
+    returned.expression = nested_binary(128);
+    function.body.push_back(std::move(returned));
+    hir.functions.push_back(std::move(function));
+
+    const auto mir = gdpp::MirLowerer{}.lower(hir);
+    gdpp::DiagnosticBag diagnostics;
+    REQUIRE(gdpp::MirVerifier{diagnostics}.verify(mir));
+    REQUIRE_EQ(mir.functions.front().values.size(), std::size_t{257});
+    REQUIRE_EQ(mir.functions.front().values.front().operands.size(), std::size_t{2});
+    REQUIRE_EQ(mir.functions.front().blocks.front().terminator.condition_value,
+               gdpp::mir::ValueId{0});
+    REQUIRE(gdpp::MirSerializer{}.serialize(mir).find("value v256") != std::string::npos);
 }
