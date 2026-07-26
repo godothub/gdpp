@@ -103,7 +103,7 @@ Linux 最终 ZIP 目前有完整结构/内容测试和 host component 实跑，�
 | Chromium + COOP/COEP + DOM 行为 oracle | 两模式成功 |
 | Safari、Firefox、移动浏览器、真实 CDN | 未认证 |
 
-旧文档所写“Chromium CI 待首次留档”已经过时；当前它是正式发布阻断门禁。
+旧文档把 Chromium CI 写成尚未执行已经过时；当前它是正式发布阻断门禁。
 
 ## Attached GDExtension fixture
 
