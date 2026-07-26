@@ -4173,6 +4173,7 @@ std::string CodeGenerator::emit_expression(const ir::Expression& expression) con
                       (lambda.owner_bound ? self_object_expression() : std::string{"nullptr"}) +
                       ");\n";
         }
+        result += emit_script_function_scope(1);
         result += emit_debug_frame(lambda.span.begin.line, 1);
         result += emit_statements(lambda.body, 1, 0,
                                   parameter_locals(lambda.parameters, lambda.rest_parameter
@@ -4306,6 +4307,25 @@ std::string CodeGenerator::coroutine_return(const std::size_t indentation, std::
            ");\n";
 }
 
+std::string CodeGenerator::emit_script_function_scope(const std::size_t indentation) const {
+    return indent(indentation) + "gdpp::runtime::ScriptFunctionScope _gdpp_script_function_scope" +
+           (current_coroutine_abi_ ? "(" + current_coroutine_state_ + ")" : std::string{}) + ";\n";
+}
+
+std::string CodeGenerator::emit_script_failure_return(const std::size_t indentation,
+                                                      const bool continuation_context) const {
+    const auto prefix = indent(indentation);
+    std::string result = prefix + "if (gdpp::runtime::script_function_failed()) {\n";
+    if (current_coroutine_abi_) {
+        result += coroutine_return(indentation + 1, "godot::Variant{}", continuation_context);
+    } else if (continuation_context || current_return_type_.kind == TypeKind::void_type) {
+        result += indent(indentation + 1) + "return;\n";
+    } else {
+        result += indent(indentation + 1) + "return {};\n";
+    }
+    return result + prefix + "}\n";
+}
+
 bool CodeGenerator::can_emit_flat_async(const ir::Function& function,
                                         const mir::Function& mir_function) const noexcept {
     // A long source-level callback chain produces recursively nested lambda types. MSVC can use
@@ -4338,6 +4358,7 @@ std::string CodeGenerator::emit_flat_async(const mir::Function& function,
     result += prefix + "const std::weak_ptr<" + step_type + "> " + weak_step + " = " + step + ";\n";
     result += prefix + "*" + step + " = [=](std::size_t " + pc + ", const godot::Array &" + values +
               ") mutable {\n";
+    result += emit_script_function_scope(indentation + 1);
     result += indent(indentation + 1) + "static_cast<void>(" + values + ");\n";
     result +=
         indent(indentation + 1) + "const auto " + keep_alive + " = " + weak_step + ".lock();\n";
@@ -4564,6 +4585,7 @@ std::string CodeGenerator::emit_async_statements(
                       ");\n";
             result += prefix + "auto " + resume_name + " = [=](const godot::Array &" + result_name +
                       ") mutable {\n";
+            result += emit_script_function_scope(indentation + 1);
             result += indent(indentation + 1) + "static_cast<void>(" + result_name + ");\n";
             if (statement.kind == ir::StatementKind::await_variable) {
                 result += indent(indentation + 1) + "[[maybe_unused]] " +
@@ -6615,6 +6637,7 @@ void CodeGenerator::emit_inner_class_definition(const ir::Class& declaration,
             in_function_body_ = true;
             current_debug_function_ = "@" + field.name + "_getter";
             current_debug_instance_ = field.is_static ? "nullptr" : "owner()";
+            source << emit_script_function_scope(1);
             source << emit_debug_frame(field.getter->span.begin.line, 1);
             source << emit_statements(field.getter->body, 1);
             if (requires_native_fallback(field.getter->body))
@@ -6638,6 +6661,7 @@ void CodeGenerator::emit_inner_class_definition(const ir::Class& declaration,
             in_function_body_ = true;
             current_debug_function_ = "@" + field.name + "_setter";
             current_debug_instance_ = field.is_static ? "nullptr" : "owner()";
+            source << emit_script_function_scope(1);
             source << emit_debug_frame(field.setter->span.begin.line, 1);
             source << emit_statements(field.setter->body, 1, 0,
                                       {{field.setter->parameter, field.type}});
@@ -6733,13 +6757,14 @@ void CodeGenerator::emit_inner_class_definition(const ir::Class& declaration,
         source << " {\n";
         if (function.is_static && function.name != "_static_init" && has_static_initialization)
             source << "    _gdpp_ensure_static_initialized();\n";
-        source << emit_parameter_default_initializers(function.parameters, 1);
-        source << emit_debug_frame(function.span.begin.line, 1);
         if (current_coroutine_abi_) {
             source << "    const auto " << current_coroutine_state_
                    << " = gdpp::runtime::begin_coroutine("
                    << (function.is_static ? "nullptr" : self_object_expression()) << ");\n";
         }
+        source << emit_script_function_scope(1);
+        source << emit_parameter_default_initializers(function.parameters, 1);
+        source << emit_debug_frame(function.span.begin.line, 1);
         source << emit_statements(
             function.body, 1, 0,
             parameter_locals(function.parameters,
@@ -8036,6 +8061,7 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
                 current_debug_function_ = "@" + variable.name + "_getter";
                 current_debug_instance_ =
                     variable.is_static ? "nullptr" : (attached_script ? "owner()" : "this");
+                source << emit_script_function_scope(1);
                 source << emit_debug_frame(variable.getter->span.begin.line, 1);
                 source << emit_statements(variable.getter->body, 1);
                 in_function_body_ = false;
@@ -8064,6 +8090,7 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
                 current_debug_function_ = "@" + variable.name + "_setter";
                 current_debug_instance_ =
                     variable.is_static ? "nullptr" : (attached_script ? "owner()" : "this");
+                source << emit_script_function_scope(1);
                 source << emit_debug_frame(variable.setter->span.begin.line, 1);
                 source << emit_statements(variable.setter->body, 1, 0,
                                           {{variable.setter->parameter, variable.type}});
@@ -8184,13 +8211,14 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
         source << " {\n";
         if (function.is_static && function.name != "_static_init" && has_static_initialization)
             source << "    _gdpp_ensure_static_initialized();\n";
-        source << emit_parameter_default_initializers(function.parameters, 1);
-        source << emit_debug_frame(function.span.begin.line, 1);
         if (current_coroutine_abi_) {
             source << "    const auto " << current_coroutine_state_
                    << " = gdpp::runtime::begin_coroutine("
                    << (function.is_static ? "nullptr" : self_object_expression()) << ");\n";
         }
+        source << emit_script_function_scope(1);
+        source << emit_parameter_default_initializers(function.parameters, 1);
+        source << emit_debug_frame(function.span.begin.line, 1);
         if (function.name == "_ready" && !attached_script) {
             for (const auto& field : module.fields) {
                 if (field.onready && field.initializer) {
