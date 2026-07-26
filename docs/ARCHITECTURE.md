@@ -66,7 +66,9 @@ AST 的表达式、语句和 match pattern 使用有名结构的 `std::variant`�
 
 ## HIR 与 MIR
 
-HIR 拥有解析后的类型、成员身份、调用契约、迭代计划、RPC 配置和源码范围。原始
+HIR 拥有解析后的类型、成员身份、调用契约、迭代计划、RPC 配置和源码范围。局部声明、参数、
+迭代/match 绑定、identifier 引用和调试可见变量共享稳定 `FlowSymbolId`，因此遮蔽、lambda 捕获
+与跨 await 提升不会退化为按源码名字关联。原始
 `AwaitExpression` 在 HIR lowering 中变为 A-normal form：
 
 - 挂起前按源码顺序物化接收者、索引和参数；
@@ -75,7 +77,8 @@ HIR 拥有解析后的类型、成员身份、调用契约、迭代计划、RPC 
 - match 先绑定模式，再执行可挂起 guard；
 - assert 条件和惰性消息使用独立 debug-only 前缀；
 - breakpoint 携带精确词法作用域快照，不由 C++ emitter 重新推断可见绑定；
-- 跨挂起写入的循环局部值和参数提升到共享状态。
+- 跨挂起写入的循环局部值和参数按稳定符号身份提升到共享状态；lambda 创建时物化捕获快照，
+  每次调用再建立独立可写帧。
 
 MIR 为每个方法、getter、setter 和 lambda 建立显式基本块、前驱、终止指令与副作用。分支通过
 `BranchRole` 区分普通条件、迭代协议、match 模式、guard 和断言；`debug_breakpoint` 以
@@ -140,7 +143,9 @@ GDPP 自己的受控 build/SDK 区域。它建立：
 - 源码/目标版本/第三方契约变化的精确失效集合。
 
 manifest 只在完整编译成功后提交。陈旧生成单元按受控白名单清理，外部路径、符号链接和异常
-清单名不能逃出输出目录。对象缓存再通过 depfile、SDK/runtime 摘要、工具链和 profile 校验。
+清单名不能逃出输出目录；原地升级还会精确清除已退役的 `gdpp_project.gdextension` 与 CMake
+项目脚手架，防止旧入口 ABI 与当前直接构建 manifest 并存。对象缓存再通过 depfile、SDK/runtime
+摘要、工具链和 profile 校验。
 
 跨进程项目锁尚未实现；同一项目不能同时由多个编辑器/CLI 安全写入同一构建目录。
 
@@ -175,6 +180,10 @@ ABI 14 后，直接生成系统工具链命令：
 
 项目库文件使用 `gdpp.<debug|release>.<platform>.<arch>` 前缀；唯一公开 C 入口固定为
 `gdpp_library_init`。文件名与入口符号是分别校验的两个契约。
+
+动态语言失败使用线程局部 script fault frame。越界、除零、失效对象、Callable 参数、严格强类型
+存储和第三方扩展调用会记录原始 `.gd` 路径/行列并终止当前生成函数的后续求值，不让 C++ 异常或
+未定义行为跨越 GDExtension ABI；外层 GDScript 调用者仍按目标返回类型的默认值继续执行。
 
 ## 描述符与导出事务
 
