@@ -2098,7 +2098,7 @@ TEST_CASE("global class types win over same-stem embedded scripts in typed conta
     const auto source =
         read_text(options.output_directory / "generated" / consumer->source_file_name);
     REQUIRE(source.find("cast_to<godot::Variant>") == std::string::npos);
-    REQUIRE(source.find("cast_attached_script") != std::string::npos);
+    REQUIRE(source.find("strict_attached_script_storage") != std::string::npos);
     REQUIRE(source.find("godot::String(\"res://timeline_action.gd\")") != std::string::npos);
     REQUIRE(source.find("get_named(") != std::string::npos);
     REQUIRE(source.find("godot::StringName(\"progress\")") != std::string::npos);
@@ -2176,7 +2176,8 @@ TEST_CASE("project compiler preserves cross-script call contracts through cache 
     REQUIRE(consumer != initial.scripts.end());
     const auto initial_source =
         read_text(options.output_directory / "generated" / consumer->source_file_name);
-    REQUIRE(initial_source.find("gdpp::runtime::packed_array_storage<godot::PackedByteArray>(") !=
+    REQUIRE(initial_source.find(
+                "gdpp::runtime::strict_packed_array_storage<godot::PackedByteArray>(") !=
             std::string::npos);
     REQUIRE(initial_source.find("gdpp::runtime::call_dynamic_at(") != std::string::npos);
     REQUIRE(initial_source.find("godot::StringName(\"parse\")") != std::string::npos);

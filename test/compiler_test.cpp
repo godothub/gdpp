@@ -482,7 +482,7 @@ TEST_CASE("compiler converts Variant storage at typed PackedArray call boundarie
           "PackedFloat64Array", "PackedStringArray", "PackedVector2Array", "PackedVector3Array",
           "PackedColorArray", "PackedVector4Array"}) {
         REQUIRE(result.unit.source.find(
-                    "gdpp::runtime::packed_array_storage<godot::" + std::string{type} +
+                    "gdpp::runtime::strict_packed_array_storage<godot::" + std::string{type} +
                     ">(gdpp::runtime::to_variant(_gdpp_call_argument_") != std::string::npos);
     }
 }
@@ -517,13 +517,17 @@ TEST_CASE("compiler applies internal call contracts to every native storage fami
     REQUIRE(result.unit.source.find(
                 "gdpp::runtime::strict_typed_storage<godot::TypedDictionary<godot::String, "
                 "int64_t>>(gdpp::runtime::to_variant(_gdpp_call_argument_") != std::string::npos);
-    REQUIRE(result.unit.source.find("godot::Object::cast_to<godot::Node>((_gdpp_call_argument_") !=
+    REQUIRE(result.unit.source.find(
+                "gdpp::runtime::strict_native_pointer_storage<godot::Node>("
+                "gdpp::runtime::to_variant(_gdpp_call_argument_") !=
             std::string::npos);
     REQUIRE(result.unit.source.find(
-                "static_cast<godot::String>(gdpp::runtime::to_variant(_gdpp_call_argument_") !=
+                "gdpp::runtime::strict_builtin_storage<godot::String>("
+                "gdpp::runtime::to_variant(_gdpp_call_argument_") !=
             std::string::npos);
     REQUIRE(result.unit.source.find(
-                "static_cast<godot::Vector3>(gdpp::runtime::to_variant(_gdpp_call_argument_") !=
+                "gdpp::runtime::strict_builtin_storage<godot::Vector3>("
+                "gdpp::runtime::to_variant(_gdpp_call_argument_") !=
             std::string::npos);
 }
 
@@ -1018,7 +1022,8 @@ TEST_CASE("compiler preserves instance defaults and explicit null through native
             std::string::npos);
     REQUIRE(result.unit.source.find("DEFVAL(godot::Variant())") == std::string::npos);
     REQUIRE(result.unit.source.find("? static_cast<godot::Control*>(nullptr) : "
-                                    "godot::Object::cast_to<godot::Control>") != std::string::npos);
+                                    "gdpp::runtime::strict_native_pointer_storage<"
+                                    "godot::Control>") != std::string::npos);
 }
 
 TEST_CASE("compiler gives dynamic conditional branches an unambiguous native common type") {
@@ -1309,8 +1314,10 @@ TEST_CASE("compiler preloads member resources before instances are constructed")
     REQUIRE(result.unit.header.find("static godot::Variant& _gdpp_preloaded_scene()") !=
             std::string::npos);
     REQUIRE(result.unit.source.find("scene = _gdpp_preloaded_scene();") != std::string::npos);
-    REQUIRE(result.unit.source.find("_gdpp_preloaded_scene() = gdpp::runtime::to_variant("
-                                    "godot::Ref<godot::PackedScene>(") != std::string::npos);
+    REQUIRE(result.unit.source.find(
+                "_gdpp_preloaded_scene() = gdpp::runtime::to_variant("
+                "gdpp::runtime::strict_native_ref_storage<godot::PackedScene>(") !=
+            std::string::npos);
     REQUIRE(result.unit.source.find("gdpp::runtime::load_resource(") != std::string::npos);
     REQUIRE(result.unit.header.find("static void _gdpp_release_preloaded_resources()") !=
             std::string::npos);
@@ -2259,7 +2266,7 @@ TEST_CASE("compiler preserves explicit typed iterator variables") {
 
     REQUIRE(result.success);
     REQUIRE(result.unit.source.find("_gdpp_array_iterable_") != std::string::npos);
-    REQUIRE(result.unit.source.find("int64_t value = static_cast<int64_t>("
+    REQUIRE(result.unit.source.find("int64_t value = gdpp::runtime::strict_builtin_storage<int64_t>("
                                     "gdpp::runtime::to_variant(_gdpp_array_iterable_") !=
             std::string::npos);
     REQUIRE(result.unit.source.find("gdpp::runtime::iter_init") == std::string::npos);
@@ -2354,7 +2361,9 @@ TEST_CASE("compiler lowers static object iterators through Godot's Variant proto
     REQUIRE(result.unit.source.find("gdpp::runtime::iter_init") != std::string::npos);
     REQUIRE(result.unit.source.find("gdpp::runtime::iter_next") != std::string::npos);
     REQUIRE(result.unit.source.find("gdpp::runtime::iter_get") != std::string::npos);
-    REQUIRE(result.unit.source.find("godot::StringName value = static_cast<godot::StringName>(") !=
+    REQUIRE(result.unit.source.find(
+                "godot::StringName value = "
+                "gdpp::runtime::strict_builtin_storage<godot::StringName>(") !=
             std::string::npos);
 }
 
@@ -2415,7 +2424,8 @@ TEST_CASE("compiler emits semantic iteration strategies without backend type gue
             std::string::npos);
     REQUIRE(result.unit.source.find(".substr(_gdpp_string_index_") != std::string::npos);
     REQUIRE(result.unit.source.find("auto &&_gdpp_array_iterable_") != std::string::npos);
-    REQUIRE(result.unit.source.find("godot::String key = static_cast<godot::String>(") !=
+    REQUIRE(result.unit.source.find(
+                "godot::String key = gdpp::runtime::strict_builtin_storage<godot::String>(") !=
             std::string::npos);
     REQUIRE(result.unit.source.find("gdpp::runtime::iter_init") != std::string::npos);
 }
@@ -3000,8 +3010,10 @@ TEST_CASE("compiler covers strict and explicit Godot conversion families end to 
                                    "gdpp::runtime::to_variant(parse_source), "
                                    "godot::Variant::INT, "
                                    "gdpp::runtime::ScriptSourceLocation{") != std::string::npos);
-    REQUIRE(valid.unit.source.find("gdpp::runtime::packed_array_storage<godot::PackedInt64Array>"
-                                   "(gdpp::runtime::to_variant(values))") != std::string::npos);
+    REQUIRE(valid.unit.source.find(
+                "gdpp::runtime::strict_packed_array_storage<godot::PackedInt64Array>"
+                "(gdpp::runtime::to_variant(values), gdpp::runtime::ScriptSourceLocation{") !=
+            std::string::npos);
     REQUIRE(!invalid.success);
     REQUIRE_EQ(std::count_if(invalid.diagnostics.begin(), invalid.diagnostics.end(),
                              [](const auto& diagnostic) { return diagnostic.code == "GDS4075"; }),
@@ -3452,7 +3464,8 @@ TEST_CASE("compiler generates single-evaluation match control flow") {
     REQUIRE(result.unit.source.find("bool _gdpp_match_done_0 = false") != std::string::npos);
     REQUIRE(result.unit.source.find("State::_gdpp_enum_IDLE") != std::string::npos);
     REQUIRE(result.unit.source.find("godot::Variant _gdpp_match_bind_") != std::string::npos);
-    REQUIRE(result.unit.source.find("int64_t captured = static_cast<int64_t>(") !=
+    REQUIRE(result.unit.source.find(
+                "int64_t captured = gdpp::runtime::strict_builtin_storage<int64_t>(") !=
             std::string::npos);
     REQUIRE(result.unit.source.find("if (static_cast<bool>(([&]() -> bool") != std::string::npos);
     REQUIRE(result.unit.source.find(" = State::_gdpp_enum_RUN;") != std::string::npos);
@@ -3932,9 +3945,9 @@ TEST_CASE("semantic flow narrows type-tested values in if and while bodies") {
     REQUIRE(result.success);
     REQUIRE(result.unit.source.find("godot::Object::cast_to<godot::Node>") != std::string::npos);
     REQUIRE(result.unit.source.find("->get_name()") != std::string::npos);
-    REQUIRE(
-        result.unit.source.find("static_cast<godot::Array>(gdpp::runtime::to_variant(value))") !=
-        std::string::npos);
+    REQUIRE(result.unit.source.find(
+                "gdpp::runtime::strict_builtin_storage<godot::Array>("
+                "gdpp::runtime::to_variant(value), godot::Variant::ARRAY") != std::string::npos);
     REQUIRE(result.unit.source.find(".size()") != std::string::npos);
     REQUIRE(result.unit.source.find("gdpp::runtime::get_named") == std::string::npos);
 }
@@ -4095,7 +4108,8 @@ TEST_CASE("semantic flow narrows short-circuit logical operands") {
                          "    return value is Node and value is Node2D and value.position.x > 0\n");
 
     REQUIRE(result.success);
-    REQUIRE(result.unit.source.find("static_cast<int64_t>(gdpp::runtime::to_variant(value))") !=
+    REQUIRE(result.unit.source.find("gdpp::runtime::strict_builtin_storage<int64_t>("
+                                    "gdpp::runtime::to_variant(value), godot::Variant::INT") !=
             std::string::npos);
     REQUIRE(result.unit.source.find("godot::Object::cast_to<godot::Node>") != std::string::npos);
     REQUIRE(result.unit.source.find("godot::Object::cast_to<godot::Node2D>") != std::string::npos);
@@ -4180,11 +4194,12 @@ TEST_CASE("semantic flow narrows structural match subjects and guarded bindings"
                                           "        _: return \"\"\n");
 
     REQUIRE(result.success);
-    REQUIRE(
-        result.unit.source.find("static_cast<godot::Array>(gdpp::runtime::to_variant(value))") !=
-        std::string::npos);
     REQUIRE(result.unit.source.find(
-                "static_cast<godot::Dictionary>(gdpp::runtime::to_variant(value))") !=
+                "gdpp::runtime::strict_builtin_storage<godot::Array>("
+                "gdpp::runtime::to_variant(value), godot::Variant::ARRAY") != std::string::npos);
+    REQUIRE(result.unit.source.find(
+                "gdpp::runtime::strict_builtin_storage<godot::Dictionary>("
+                "gdpp::runtime::to_variant(value), godot::Variant::DICTIONARY") !=
             std::string::npos);
     REQUIRE(result.unit.source.find("godot::Object::cast_to<godot::Node>") != std::string::npos);
     REQUIRE(result.unit.source.find("gdpp::runtime::call_dynamic") == std::string::npos);
@@ -4566,7 +4581,7 @@ TEST_CASE("builtin unary operators use Variant evaluation when godot-cpp has no 
     REQUIRE(result.success);
     REQUIRE(result.unit.source.find("godot::Variant::OP_POSITIVE") != std::string::npos);
     REQUIRE(result.unit.source.find("godot::Variant::OP_NEGATE") != std::string::npos);
-    REQUIRE(result.unit.source.find("static_cast<godot::Vector2>("
+    REQUIRE(result.unit.source.find("gdpp::runtime::strict_builtin_storage<godot::Vector2>("
                                     "gdpp::runtime::to_variant(gdpp::runtime::unary(") !=
             std::string::npos);
     REQUIRE(result.unit.source.find(" = (+value);") != std::string::npos);
@@ -5133,7 +5148,8 @@ TEST_CASE("flow refinement remains bounded across generated logical guard chains
 
     REQUIRE(result.success);
     REQUIRE(result.metrics.ast_expression_count >= comparison_count * 2U);
-    REQUIRE(result.unit.source.find("static_cast<int64_t>(gdpp::runtime::to_variant(value))") !=
+    REQUIRE(result.unit.source.find("gdpp::runtime::strict_builtin_storage<int64_t>("
+                                    "gdpp::runtime::to_variant(value), godot::Variant::INT") !=
             std::string::npos);
     REQUIRE(result.unit.source.find("gdpp::runtime::binary") == std::string::npos);
 }
