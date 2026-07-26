@@ -36,9 +36,59 @@ class CoroutineState final {
     godot::StringName signal;
     godot::Variant result;
     std::mutex mutex;
+    ScriptFaultState script_fault;
     bool completed{false};
     bool exposed{false};
 };
+
+namespace {
+
+thread_local ScriptFaultState* active_script_fault = nullptr;
+
+ScriptFaultState* coroutine_script_fault(const CoroutineStatePtr& coroutine) noexcept {
+    return coroutine ? &coroutine->script_fault : nullptr;
+}
+
+} // namespace
+
+ScriptFunctionScope::ScriptFunctionScope() noexcept
+    : state_{&local_}, previous_{active_script_fault} {
+    active_script_fault = state_;
+}
+
+ScriptFunctionScope::ScriptFunctionScope(const CoroutineStatePtr& coroutine) noexcept
+    : state_{coroutine_script_fault(coroutine)}, previous_{active_script_fault} {
+    if (!state_)
+        state_ = &local_;
+    active_script_fault = state_;
+}
+
+ScriptFunctionScope::~ScriptFunctionScope() { active_script_fault = previous_; }
+
+bool ScriptFunctionScope::failed() const noexcept {
+    return state_ && state_->failed.load(std::memory_order_acquire);
+}
+
+void mark_script_failure() noexcept {
+    if (active_script_fault)
+        active_script_fault->failed.store(true, std::memory_order_release);
+}
+
+bool script_function_failed() noexcept {
+    return active_script_fault && active_script_fault->failed.load(std::memory_order_acquire);
+}
+
+void report_script_failure(const godot::String& message, const char* source_path,
+                           const std::int64_t line, const std::int64_t column) {
+    mark_script_failure();
+    godot::String located = message;
+    if (source_path && *source_path != '\0') {
+        located += " at " + godot::String{source_path} + ":" + godot::String::num_int64(line);
+        if (column > 0)
+            located += ":" + godot::String::num_int64(column);
+    }
+    godot::UtilityFunctions::push_error(located);
+}
 
 void emit_local_signal_variants(godot::Object* owner, const godot::Variant** arguments,
                                 const std::int64_t argument_count) {

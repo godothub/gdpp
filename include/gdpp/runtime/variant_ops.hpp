@@ -15,6 +15,7 @@
 #include <godot_cpp/variant/variant.hpp>
 
 #include <array>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -27,6 +28,39 @@ class Object;
 }
 
 namespace gdpp::runtime {
+
+class CoroutineState;
+using CoroutineStatePtr = std::shared_ptr<CoroutineState>;
+
+struct ScriptFaultState final {
+    std::atomic_bool failed{false};
+};
+
+// GDScript runtime failures terminate only the currently executing script function. A nested
+// generated call therefore installs an independent frame, while every continuation of one
+// coroutine re-enters the state owned by that coroutine. This explicit model avoids C++ exceptions
+// (disabled by Godot) and never allows a failure marker to escape across a GDExtension ABI call.
+class ScriptFunctionScope final {
+  public:
+    ScriptFunctionScope() noexcept;
+    explicit ScriptFunctionScope(const CoroutineStatePtr& coroutine) noexcept;
+    ~ScriptFunctionScope();
+
+    ScriptFunctionScope(const ScriptFunctionScope&) = delete;
+    ScriptFunctionScope& operator=(const ScriptFunctionScope&) = delete;
+
+    [[nodiscard]] bool failed() const noexcept;
+
+  private:
+    ScriptFaultState local_;
+    ScriptFaultState* state_{nullptr};
+    ScriptFaultState* previous_{nullptr};
+};
+
+void mark_script_failure() noexcept;
+[[nodiscard]] bool script_function_failed() noexcept;
+void report_script_failure(const godot::String& message, const char* source_path, std::int64_t line,
+                           std::int64_t column);
 
 template <typename Target>
 [[nodiscard]] Target explicit_variant_cast(const godot::Variant& value,
@@ -182,8 +216,6 @@ using AwaitContinuation = std::function<void(const godot::Array&)>;
                                 AwaitContinuation continuation);
 [[nodiscard]] godot::Variant await_result(const godot::Array& arguments);
 
-class CoroutineState;
-using CoroutineStatePtr = std::shared_ptr<CoroutineState>;
 [[nodiscard]] CoroutineStatePtr begin_coroutine(godot::Object* owner);
 [[nodiscard]] godot::Object* coroutine_owner(const CoroutineStatePtr& state);
 [[nodiscard]] godot::Variant coroutine_result(const CoroutineStatePtr& state);
