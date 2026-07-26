@@ -5261,7 +5261,14 @@ std::string CodeGenerator::emit_statement_body(const ir::Statement& statement,
             const auto nested_prefix = indent(indentation + 1);
             std::string result = prefix + "{\n";
             const auto saved_overrides = exact_expression_overrides_;
-            if (receiver) {
+            const bool receiver_is_type_namespace =
+                receiver && (receiver->resolution == ir::ResolutionKind::godot_type ||
+                             receiver->resolution == ir::ResolutionKind::external_type ||
+                             receiver->resolution == ir::ResolutionKind::script_type ||
+                             receiver->resolution == ir::ResolutionKind::inner_type ||
+                             receiver->resolution == ir::ResolutionKind::script_enum_type ||
+                             receiver->resolution == ir::ResolutionKind::global_enum_type);
+            if (receiver && !receiver_is_type_namespace) {
                 result += nested_prefix + "auto &&" + receiver_name + " = " +
                           emit_expression(*receiver) + ";\n";
                 result += emit_script_failure_return(indentation + 1, in_async_continuation_);

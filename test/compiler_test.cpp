@@ -2646,6 +2646,8 @@ TEST_CASE("compiler preserves owner-free static fields methods lambdas and super
             std::string::npos);
     REQUIRE(result.unit.source.find(" = GDPPNative_StaticContext__Child::_gdpp_get_total();") !=
             std::string::npos);
+    REQUIRE(result.unit.source.find("auto &&_gdpp_assignment_receiver_") == std::string::npos);
+    REQUIRE(result.unit.source.find("= GDPPNative_StaticContext__Child;") == std::string::npos);
 }
 
 TEST_CASE("compiler rejects every implicit instance dependency from static contexts") {
