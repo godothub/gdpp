@@ -3080,6 +3080,41 @@ TEST_CASE("compiler adapts flexible GDScript virtual signatures to the exact eng
                         [](const auto& diagnostic) { return diagnostic.code == "GDS4118"; }));
 }
 
+TEST_CASE("compiler preserves coroutine state behind every engine virtual return ABI") {
+    const gdpp::Compiler compiler;
+    const auto result = compiler.compile("async_virtuals.gd",
+                                         "extends Control\n"
+                                         "signal resumed\n"
+                                         "func _process(delta: float) -> void:\n"
+                                         "    await resumed\n"
+                                         "    print(delta)\n"
+                                         "func _get_drag_data(at_position: Vector2) -> Variant:\n"
+                                         "    await resumed\n"
+                                         "    return at_position\n"
+                                         "func _get_tooltip(at_position: Vector2) -> String:\n"
+                                         "    await resumed\n"
+                                         "    return str(at_position)\n");
+
+    REQUIRE(result.success);
+    REQUIRE(result.unit.header.find(
+                "virtual godot::Variant _gdpp_virtual_impl__process(double delta)") !=
+            std::string::npos);
+    REQUIRE(result.unit.header.find("virtual godot::Variant _gdpp_virtual_impl__get_drag_data(") !=
+            std::string::npos);
+    REQUIRE(result.unit.header.find("virtual godot::Variant _gdpp_virtual_impl__get_tooltip(") !=
+            std::string::npos);
+    REQUIRE(result.unit.source.find("static_cast<void>(this->_gdpp_virtual_impl__process(") !=
+            std::string::npos);
+    REQUIRE(result.unit.source.find("const godot::Variant _gdpp_virtual_result = "
+                                    "this->_gdpp_virtual_impl__get_drag_data(") !=
+            std::string::npos);
+    REQUIRE(result.unit.source.find(
+                "validate_virtual_return(_gdpp_virtual_result, godot::Variant::STRING") !=
+            std::string::npos);
+    REQUIRE(result.unit.source.find("gdpp::runtime::begin_coroutine(this)") != std::string::npos);
+    REQUIRE(result.unit.source.find("gdpp::runtime::await_signal") != std::string::npos);
+}
+
 TEST_CASE("compiler emits injective ASCII names for Unicode and C++ identifiers") {
     const gdpp::Compiler compiler;
     const auto result = compiler.compile(
