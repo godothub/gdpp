@@ -1,75 +1,87 @@
-# Web 平台支持与交付规范
+# Web 平台支持与交付
 
-GDPP 的 Web 目标使用 Godot 官方 GDExtension 动态链接模型：桌面 Godot 编辑器内运行
-`compiler` 插件，项目脚本先转译为 C++，再由 Emscripten 生成 wasm32 side module。最终网页由
-Godot 官方启用 GDExtension 的 Web 导出模板加载该模块；浏览器中不包含 GDPP 编译器、SDK、
-godot-cpp 静态库、生成 C++ 或项目 `.gd`。
+GDPP Web 后端在桌面 Godot 编辑器中完成预编译，再由 Emscripten 生成 wasm32 GDExtension side
+module。浏览器只加载 Godot 主 Wasm、项目 PCK 和 `libgdpp.*.wasm`；compiler、SDK、
+godot-cpp、生成 C++、对象文件和项目 `.gd` 都不得进入成品。
 
-## 支持范围
+当前实现同时支持 `nothreads` 与 `threads`，并通过正式发布流水线的 Chromium 运行门禁。Safari、
+Firefox、移动浏览器和真实 CDN 尚未形成认证矩阵，不能由 Chromium 结果外推。
 
-| 能力 | 当前状态 |
+## 支持矩阵
+
+| 能力 | 状态 |
 |---|---|
-| Godot 4.4、4.5、4.6、4.7 Web SDK 结构 | ✅ 自动构建与 CI 矩阵 |
-| wasm32 Release/debug side module | ✅ |
-| 单线程 `nothreads` | ✅ 独立 SDK、缓存、文件名和描述符 |
-| Web Worker `threads` | ✅ 独立 SDK、缓存、文件名和描述符 |
-| 官方 dlink Web 模板选择 | ✅ 导出预设强制启用 `variant/extensions_support` |
-| `.gd`、compiler、SDK 和原生中间物剥离 | ✅ PCK/完整目录内容门禁 |
-| Wasm 入口、dylink、内存线程属性检查 | ✅ |
-| Chromium 启动与 AOT 行为 oracle | ✅ 已建立 Linux CI 阻断门禁；本机缺少 Godot Web 模板，待流水线首次留档 |
-| Safari、Firefox、移动浏览器和真实 CDN | 尚未认证 |
-| SIMD、WebGPU、PWA 离线缓存和自定义内存增长策略 | 尚未认证 |
+| Godot 4.4～4.7 Web SDK | 发布包内置、矩阵校验 |
+| `nothreads` wasm32 side module | 支持 |
+| `threads` wasm32 side module | 支持 |
+| Debug/Release 项目语义 | 支持；两者均链接 release binding |
+| 官方 dlink 导出模板 | 强制 |
+| 无源码 PCK 与完整目录审计 | 发布阻断门禁 |
+| Wasm 入口、`dylink.0` 和共享内存属性 | 发布阻断门禁 |
+| Chromium 导出、HTTP 启动与行为 oracle | Godot 4.5.2 发布阻断门禁 |
+| Safari、Firefox、移动浏览器 | 未认证 |
+| SIMD、WebGPU、PWA 离线与自定义内存策略 | 未认证 |
 
-这里的“支持”指构建与导出链路已实现，不代表所有浏览器组合均已商业认证。对外发布前仍应以
-目标浏览器、真实服务器响应头、客户资源规模和长时间运行结果为准。
+## 安装布局
 
-## 用户安装与导出
+`gdpp-mac.zip`、`gdpp-linux.zip`、`gdpp-win.zip` 都包含 Web release SDK。用户只需把所用桌面
+平台的 ZIP 解压到项目根目录，形成 `addons/gdpp/`，不需要再下载 Web target pack。
 
-用户需要安装三部分：当前桌面平台的 GDPP 主插件、目标 Godot 小版本对应的 Web target pack，
-以及 Emscripten。target pack 叠加到项目后应形成：
+每个 Godot 版本的 Web 文件与本机、Android、iOS（仅 mac 包）文件共用 SDK 根：
 
 ```text
-addons/gdpp/sdk/<godot-version>/web/wasm32/
-├── nothreads/
-│   ├── godot-cpp/
-│   ├── include/
-│   ├── lib/
-│   ├── src/
-│   └── sdk.manifest
-└── threads/
-    ├── godot-cpp/
-    ├── include/
-    ├── lib/
-    ├── src/
-    └── sdk.manifest
+addons/gdpp/sdk/<godot-version>/
+├── godot-cpp/
+├── include/
+├── lib/
+│   ├── libgodot-cpp.web.template_release.wasm32.a
+│   └── libgodot-cpp.web.template_release.wasm32.nothreads.a
+├── sdk/
+│   └── manifests/
+│       ├── web.wasm32.threads.sdk.manifest
+│       └── web.wasm32.nothreads.sdk.manifest
+└── src/
 ```
 
-项目设置 `gdpp/build/emscripten_cxx` 默认是 `em++`，可改为绝对路径。用户不需要 CMake、
-Ninja、Python 或 SCons；这些只用于 GDPP 自身生成 target pack，导出时插件直接执行 `em++`。
+平台子目录只在 SDK 生产阶段存在；打包汇总会验证内容并合并到共享 `lib/`、`sdk/manifests/`
+中，避免复制公共头文件与 runtime 源码。
 
-Godot Web 导出预设必须满足：
+用户仍需安装与目标 Godot 匹配的官方 Web 导出模板和 Emscripten。项目设置
+`gdpp/build/emscripten_cxx` 默认查找 `em++`，也可设置绝对路径。客户导出不会调用 CMake、
+Ninja、Python 或 SCons。
 
-- [x] `Variant > Extensions Support` 已启用；否则没有动态链接主模块，GDPP 会阻断导出。
-- [x] 线程模式与安装的 target pack 一致；插件根据 Godot 导出 feature 精确选择
-  `threads` 或 `nothreads`，不允许静默混用对象缓存。
-- [x] `gdpp/strip_gdscript_sources=true` 且
-  `gdpp/allow_source_fallback=false`；商业预设不能在失败时悄悄交付脚本。
-- [x] 已安装 Godot 对应的 Web dlink 导出模板。
+## 导出前提
 
-示例项目提供 `Web AOT`、`Web AOT Threads` 和 `Web GDScript Fallback` 三个预设。前两者用于
-二进制交付，后者只用于行为与体积对照。
+Godot Web 预设必须满足：
 
-## 线程与服务器约束
+- 启用 `Variant > Extensions Support`，使用官方 dlink 模板；
+- 线程模式与服务器部署一致；
+- 商业无源码预设保持 `gdpp/strip_gdscript_sources=true`；
+- 保持 `gdpp/allow_source_fallback=false`，失败时不得静默交付脚本；
+- Emscripten 版本与目标 SDK manifest 契约兼容。
+
+GDPP 根据 Godot 导出 feature 选择 `threads` 或 `nothreads`，并把线程模式写入构建身份、对象
+缓存和 `.gdextension` 库条件，不允许交叉复用。
+
+最终项目模块位于：
+
+```text
+addons/gdpp/binary/libgdpp.<debug|release>.web.wasm32.<threads|nothreads>.wasm
+```
+
+一次导出只预编译当前 profile 和线程模式。编辑器不会构建或加载 Web 模块作为宿主桥接。
+
+## 线程版服务器契约
 
 两种模式不是同一个 ABI：
 
-| 模式 | GDPP 文件名 | Wasm 内存 | 适用场景 |
+| 模式 | 静态 binding | Wasm 内存 | 部署要求 |
 |---|---|---|---|
-| `nothreads` | `libgdpp.release.web.wasm32.nothreads.wasm` | 普通导入内存 | 默认兼容路线、较简单部署 |
-| `threads` | `libgdpp.release.web.wasm32.threads.wasm` | `shared` 导入内存 | 明确需要 Web Worker 并完成隔离部署 |
+| `nothreads` | `*.wasm32.nothreads.a` | 普通导入内存 | 标准 HTTPS/HTTP |
+| `threads` | `*.wasm32.a` | `shared` 导入内存 | cross-origin isolation |
 
-线程版必须由服务器返回 COOP/COEP 响应头，iframe 的父页面也必须满足隔离条件。GDPP 的测试
-服务器 `tools/serve_web.py` 固定返回：
+线程版必须返回 COOP/COEP；被嵌入 iframe 时，父页面也必须满足隔离要求。测试服务器
+`tools/serve_web.py` 固定发送：
 
 ```text
 Cross-Origin-Opener-Policy: same-origin
@@ -78,65 +90,63 @@ Cross-Origin-Resource-Policy: cross-origin
 Cache-Control: no-store
 ```
 
-该服务器仅用于本地和 CI，不应替代正式 CDN/Web 服务器配置。即使选择无线程模式，使用
-GDExtension 的官方 Web 模板仍有额外兼容和安全约束，不能直接双击 HTML 运行。
+这只是一套 CI 配置，不替代生产 CDN。线上还需验证 MIME、压缩、范围请求、缓存更新、Service
+Worker、跨域资源、HTTPS 与回滚策略。无论是否启用线程，GDExtension Web 导出都不能通过直接
+双击 HTML 运行。
 
-## 构建和缓存隔离
+## 构建、缓存与安全
 
-Web 原生缓存位于：
+对象缓存按以下维度隔离：
 
 ```text
 addons/gdpp/build/project/native-direct/
-└── <godot>/web/wasm32/<nothreads|threads>/<debug|release>/
+└── <godot>/web/wasm32/<threads|nothreads>/<debug|release>/
 ```
 
-`build-configuration.txt` 同时记录原生构建修订、Godot API、平台、架构、profile、Emscripten
-路径和线程模式。任何一项变化都会使旧对象失效。导出期反射使用 compiler 提供的 metadata-only
-脚本描述，不先构建或加载桌面宿主项目库；一次 Web 导出只交叉编译当前线程模式和
-debug/release profile 的一个 Wasm 模块，编辑器不会尝试加载 Wasm。
+构建身份包含 Godot API、SDK schema、runtime ABI、Emscripten 可执行文件、工具链身份、线程
+模式、profile、生成源摘要和 binding 摘要。任一变化都会使不兼容对象失效。
 
-项目编译和 target pack 都启用源路径映射。Release Wasm 不应出现客户工程或构建机的绝对路径；
-SDK manifest 的 `source_paths mapped` 是强制契约，旧 target pack 会被安全拒绝。
+Web Release 启用优化、section GC、路径映射和符号裁剪。导出门禁检查：
 
-## 维护者构建 target pack
+- PCK 中不存在 `.gd/.gdc`；
+- 成品中不存在 compiler、SDK、godot-cpp、静态库、生成 C++ 和对象；
+- side module 存在 `dylink.0` 与 `gdpp_project_library_init`；
+- `threads` 导入 shared memory，`nothreads` 不导入 shared memory；
+- 二进制不存在客户工程或构建机绝对路径；
+- 描述符只引用当前模式的一份 `libgdpp.*.wasm`。
 
-从仓库根目录执行：
+## 维护者构建与门禁
+
+维护者可生成单个目标矩阵：
 
 ```sh
 cmake --preset dev \
   -DGDPP_WEB_SDK_VERSIONS=4.5 \
   -DGDPP_WEB_VARIANTS='nothreads;threads' \
-  -DGDPP_WEB_EMCMAKE="$(command -v emcmake)"
+  -DGDPP_WEB_EMCMAKE=/absolute/path/to/emcmake
 cmake --build --preset dev --target gdpp_web_sdk --parallel
 ```
 
-Godot 4.4 target pack 使用 Emscripten 3.1.62 系列；Godot 4.5 及以上使用 4.0.0+。构建脚本会
-拒绝明显不匹配的版本，并把全部 CMake/Ninja 中间物限制在根目录 `build/`。生成的 target pack
-只进入 `example/addons/gdpp/sdk/`，发布工作流按 Godot 版本和线程模式分别归档，避免用户下载
-不需要的全部平台矩阵。
+Godot 4.4 SDK 使用 Emscripten 3.1.62 系列，4.5 及以上使用 4.0.0+。SDK 构建脚本会拒绝明显
+不匹配的版本，并把自身中间产物留在根目录 `build/`。
 
-## 自动化验收
+`.github/workflows/web.yml` 当前执行：
 
-`.github/workflows/web.yml` 分成两个独立职责：
+1. 4 个 Godot API 版本 × 2 个线程模式的 SDK 构建与 manifest/命名/隔离检查；
+2. Godot 4.5.2 两种模式的 compiler 构建、Release Web 导出和无源码审计；
+3. Wasm 结构、入口、dylink、共享内存和路径泄漏检查；
+4. 带 COOP/COEP 的本地 HTTP 服务与无头 Chromium 行为 oracle；
+5. 浏览器日志中的 Link/Runtime/Compile/SCRIPT ERROR 拒绝。
 
-- [x] 4 个 Godot API 版本 × 2 个线程模式构建 SDK，验证 manifest、库数量、命名和线程隔离。
-- [x] Godot 4.5.2 × 2 个线程模式执行 compiler 插件构建、Release Web 导出、PCK 内容审计、
-  Wasm 验证、`dylink.0`/入口/共享内存检查和 Chromium 运行 oracle。
-- [x] HTTP 门禁检查 COOP/COEP；AOT 运行时通过 `JavaScriptBridge` 写入 DOM
-  oracle，无依赖 Chrome `--dump-dom` 必须读到 `data-gdpp-status="ok"`，并拒绝
-  `LinkError`、`RuntimeError`、`CompileError` 和脚本错误。
-- [x] Web 工作流为每个版本和线程模式生成独立 target pack；它们不混入标准三宿主 × 四 Godot
-  SDK 的 12 个桌面/移动插件包，也不会把 Emscripten 或 godot-cpp 源码带进游戏成品。
+这些作业是正式 release gate，不再是待补的首次留档。
 
-本地 2026-07-17 使用 Emscripten 5.0.7 和 Godot 4.5 API SDK 的可复现结果：10 个示例脚本
-生成 12 个项目/运行时编译单元，单线程和线程版均由 NativeBuilder 完整编译、链接并通过
-Binaryen 全 feature 验证。`nothreads`/`threads` Release 文件分别为 1,015,600 B
-与 1,026,366 B，debug 文件分别为 3,176,015 B 与 3,217,253 B；均包含
-`dylink.0` 和 `gdpp_project_library_init`。线程版导入 `(memory ... shared)`，单线程版
-不含 shared 内存。target pack 分别为 87.99 MiB 和 90.57 MiB，其静态库及项目
-Wasm 都通过构建机/客户绝对路径泄漏审计。
-静态库时间戳变化的增量验收仅生成 1 条重链命令，不再重编译 12 个单元。
-Web Debug 与 Release 都使用 `-O3`、section GC 和裁剪后的 `template_release` 绑定；Debug
-仅额外保留 GDPP 脚本断言，不携带系统库 DWARF 绝对路径。
-该轮没有本地 Godot Web 导出模板和可自动化浏览器，因此不能把 CI 门禁“已实现”写成“已在
-本机浏览器通过”；流水线首次运行结果应补入平台实测报告。
+## 当前未覆盖
+
+- Safari、Firefox、iOS/Android 浏览器的真实设备矩阵；
+- CDN、反向代理、iframe、身份认证和跨域资源的组合测试；
+- 断网重连、弱网、长连接、缓存升级和 Service Worker 版本迁移；
+- 超大 PCK、内存增长、标签页后台化和多小时 soak；
+- WebGPU、SIMD、PWA 与平台特有 JavaScriptBridge 业务。
+
+项目依赖这些能力时，需要在目标部署环境增加专用 fixture 与运行门禁；GDPP 不能仅以“Wasm
+编译成功”替代浏览器行为认证。
