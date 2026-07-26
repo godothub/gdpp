@@ -1,5 +1,5 @@
 // Generated file. Do not edit manually.
-// Godot source tag: 4.7-stable
+// Godot source tag: 4.7.1-stable
 // Unicode DerivedCoreProperties: 17.0.0
 // Godot char_range.cpp SHA-256: 71921d6cc9d7124c3698c80f3e5528b44c417bf1d4fd5da94ec3c50deacb0fa4
 // Unicode confusables.txt SHA-256: 091c7f82fc39ef208faf8f94d29c244de99254675e09de163160c810d13ef22a

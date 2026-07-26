@@ -41,6 +41,13 @@ add_test(
 )
 
 add_test(
+    NAME gdpp.godot_frontend.audit
+    COMMAND
+        "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/godot_frontend_audit_test.py"
+)
+
+add_test(
     NAME gdpp.release.packaging
     COMMAND
         "${Python3_EXECUTABLE}"
@@ -191,6 +198,8 @@ if(GDPP_BUILD_CLI)
             "${PROJECT_BINARY_DIR}/compatibility/godot-parser-4.7")
         set(GDPP_PARSER_CORPUS_OUTPUT
             "${PROJECT_BINARY_DIR}/compatibility/parser-results")
+        set(GDPP_FRONTEND_SNAPSHOT
+            "${PROJECT_SOURCE_DIR}/test/compatibility/godot_frontend_4_7.json")
         add_test(
             NAME gdpp.compatibility.fetch_parser_4_7
             COMMAND
@@ -219,6 +228,25 @@ if(GDPP_BUILD_CLI)
         set_tests_properties(
             gdpp.compatibility.parser_4_7
             PROPERTIES FIXTURES_REQUIRED official_parser_4_7_corpus TIMEOUT 180
+        )
+        add_test(
+            NAME gdpp.compatibility.frontend_snapshot
+            COMMAND
+                "${Python3_EXECUTABLE}"
+                "${PROJECT_SOURCE_DIR}/tools/audit_godot_frontend.py"
+                verify
+                --snapshot "${GDPP_FRONTEND_SNAPSHOT}"
+                --checkout "${GDPP_PARSER_CORPUS_DIRECTORY}"
+                --language-features
+                "${PROJECT_SOURCE_DIR}/src/frontend/language_features.cpp"
+                --unicode-table
+                "${PROJECT_SOURCE_DIR}/src/frontend/unicode_identifier_ranges.inc"
+                --report
+                "${PROJECT_BINARY_DIR}/compatibility/frontend-snapshot-diff.json"
+        )
+        set_tests_properties(
+            gdpp.compatibility.frontend_snapshot
+            PROPERTIES FIXTURES_REQUIRED official_parser_4_7_corpus TIMEOUT 60
         )
     endif()
 endif()

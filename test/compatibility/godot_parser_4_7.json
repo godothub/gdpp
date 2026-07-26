@@ -3,13 +3,14 @@
   "repository": {
     "name": "godotengine/godot",
     "url": "https://github.com/godotengine/godot.git",
-    "commit": "5b4e0cb0fd279832bbdd69fed5354d4e5ad26f88",
+    "release_line": "4.7",
+    "release_tag": "4.7.1-stable",
+    "commit": "a13da4feb8d8aefc283c3763d33a2f170a18d541",
     "license_file": "LICENSE.txt",
     "license": "MIT",
     "sparse_paths": [
-      "modules/gdscript/tests/scripts/parser",
-      "modules/gdscript/tests/scripts/runtime/features",
-      "modules/gdscript/tests/scripts/analyzer/errors"
+      "modules/gdscript",
+      "core/string"
     ],
     "required_files": [
       "modules/gdscript/tests/scripts/parser/features/match.gd",
