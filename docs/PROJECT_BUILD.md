@@ -164,7 +164,7 @@ libgdpp.release.web.wasm32.threads.wasm
 libgdpp.release.ios.arm64.xcframework/
 ```
 
-动态库文件前缀是 `gdpp`；GDExtension C 入口固定为 `gdpp_project_library_init`。二者不要混淆。
+动态库文件前缀是 `gdpp`；GDExtension C 入口固定为 `gdpp_library_init`。二者不要混淆。
 
 ## 缓存
 

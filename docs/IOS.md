@@ -53,7 +53,7 @@ addons/gdpp/binary/libgdpp.<debug|release>.ios.arm64.xcframework/
 - 真机只支持 arm64；模拟器包同时包含 arm64 和 x86_64。
 - Debug 与 Release 均使用唯一的 Release 优化 `template_release` ABI 静态依赖；Debug 脚本
   语义由 GDPP 自身的编译定义保留，target pack 不包含 `template_debug`。
-- 发布库只导出 `gdpp_project_library_init`，Release 链接启用 dead stripping 并移除本地符号表。
+- 发布库只导出 `gdpp_library_init`，Release 链接启用 dead stripping 并移除本地符号表。
 - iOS 项目不生成 development 或 editor 项目库。
 
 ## 签名与 CI 边界

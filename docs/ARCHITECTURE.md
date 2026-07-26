@@ -173,8 +173,8 @@ ABI 14 后，直接生成系统工具链命令：
 导出都链接它；区别是 GDPP 是否保留脚本调试语义。每个翻译单元与链接命令严格串行，后台线程
 执行，主线程负责 UI 刷新和导出协调。
 
-项目库文件使用 `gdpp.<debug|release>.<platform>.<arch>` 前缀；唯一公开 C 入口仍是
-`gdpp_project_library_init`。文件名与入口符号是不同契约。
+项目库文件使用 `gdpp.<debug|release>.<platform>.<arch>` 前缀；唯一公开 C 入口固定为
+`gdpp_library_init`。文件名与入口符号是分别校验的两个契约。
 
 ## 描述符与导出事务
 

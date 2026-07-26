@@ -136,7 +136,7 @@ editor-only 物理文件不变，在导出回调中跳过它，并在成品同�
 
 正式门禁检查：
 
-- 项目库只有 `gdpp_project_library_init` 一个公开 C 入口；
+- 项目库只有 `gdpp_library_init` 一个公开 C 入口；
 - Windows PE、Linux/Android ELF、macOS/iOS Mach-O、Wasm 目标格式匹配；
 - macOS compiler/SDK/项目库为真实 Universal 2；
 - Release ELF 普通符号表剥离，链接器 dead stripping/section GC 生效；
@@ -145,7 +145,7 @@ editor-only 物理文件不变，在导出回调中跳过它，并在成品同�
 - 导出日志有 AOT 完成摘要，无未解释错误/警告；
 - 成品在没有 compiler 和 SDK 的环境独立运行。
 
-项目库文件名使用 `gdpp` 前缀，入口符号保留 `gdpp_project_library_init`；入口名不是最终文件名。
+项目库文件名使用 `gdpp` 前缀，入口符号固定为 `gdpp_library_init`；入口名不是最终文件名。
 
 ## 发布门禁
 
