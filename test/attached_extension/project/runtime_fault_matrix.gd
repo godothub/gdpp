@@ -1,6 +1,7 @@
 extends RefCounted
 
 var trace: Array[String] = []
+var retained_target: Node
 
 
 func run() -> String:
@@ -16,6 +17,9 @@ func run() -> String:
         missing_property_write,
         null_method,
         freed_method,
+        freed_parameter,
+        freed_field,
+        freed_capture,
         null_callable,
         freed_callable,
         integer_divide_zero,
@@ -115,6 +119,36 @@ func freed_method() -> void:
     target.free()
     target.get_child_count()
     after("freed_method")
+
+
+func freed_parameter() -> void:
+    var target := Node.new()
+    freed_parameter_fault(target)
+
+
+func freed_parameter_fault(target: Node) -> void:
+    before("freed_parameter")
+    target.free()
+    target.get_child_count()
+    after("freed_parameter")
+
+
+func freed_field() -> void:
+    before("freed_field")
+    retained_target = Node.new()
+    retained_target.free()
+    retained_target.get_child_count()
+    after("freed_field")
+
+
+func freed_capture() -> void:
+    var target := Node.new()
+    var callback := func() -> void:
+        before("freed_capture")
+        target.get_child_count()
+        after("freed_capture")
+    target.free()
+    callback.call()
 
 
 func null_callable() -> void:
