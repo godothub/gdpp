@@ -1,5 +1,6 @@
 ## 1.8.0
 
+- Shorten the generated customer GDExtension C entry ABI to `gdpp_library_init` and enforce that exact symbol across generated registration code, runtime descriptors, Apple embedded registration, ELF/Mach-O export lists, Wasm inspection, PCK audits, and platform release gates.
 - Implement the GDScript `breakpoint` statement end to end through the lexer, parser, semantic model, HIR, typed MIR, verifier, C++17 emitter, and native Godot debugger bridge instead of rejecting a valid production script during AOT compilation.
 - Report generated native frames through `ScriptLanguageExtension` with the original `.gd` path, function, current source line, shadow-aware lexical locals, and own plus inherited script members; debugger expressions evaluate against the same frame owner used by the attached script.
 - Preserve debugger behavior across ordinary methods, accessors, static functions, lambdas, attached third-party GDExtension bases, and suspended coroutine continuations, while keeping release products free of breakpoint instrumentation and eliding inactive debug frames when no Godot debugger is attached.

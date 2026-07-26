@@ -1,5 +1,6 @@
 ## 1.8.0
 
+- 生成的客户 GDExtension C 入口 ABI 统一缩短为 `gdpp_library_init`，生成注册代码、运行时描述符、Apple 静态入口登记、ELF/Mach-O 导出表、Wasm 检查、PCK 审计及各平台发布门禁均强制校验这一唯一符号。
 - 完整实现 GDScript `breakpoint` 语句，从词法、语法、语义模型、HIR、类型化 MIR、verifier、C++17 生成一直贯通到 Godot 原生调试器桥接，合法的生产脚本不再因该语句而在 AOT 前端失败关闭。
 - 通过 `ScriptLanguageExtension` 向调试器报告生成代码的原始 `.gd` 路径、函数、当前源码行、精确处理遮蔽关系的词法局部变量，以及当前脚本与继承脚本成员；调试表达式使用 Attached 脚本相同的帧宿主求值。
 - 普通方法、访问器、静态函数、lambda、附着到第三方 GDExtension 基类的脚本和协程恢复点统一保留调试行为；Release 产物完全移除断点插桩，没有连接 Godot 调试器时也不创建无效调试帧。
