@@ -18,7 +18,21 @@
 - Preserve legal GDScript lexical shadowing in generated C++ under Clang, GCC, and MSVC warning-as-error builds without disabling unrelated native diagnostics.
 - Allow macOS Universal debug exports to reuse a verified Release-only third-party provider fat binary when the provider does not ship a distinct debug binary. GDPP adds debug aliases only to the descriptor bytes packaged into the export and never mutates the customer's source descriptor or library.
 - Compile generated breakpoint fixtures against real godot-cpp and export and run attached third-party GDExtension projects with official Godot 4.6.2 in both Debug and Release profiles.
-- Advance the packaged runtime ABI to 15 so SDKs without the debugger-frame, canonical ScriptInstance, and FunctionState contracts fail preflight instead of producing an ABI-incompatible customer library.
+- Add bounded multi-error parser recovery, complete source-span AST serialization goldens, coverage-guided frontend fuzzing, and an official Godot 4.7.1 stable-language drift report covering all 114 accepted and 76 rejected parser fixtures.
+- Assign stable, address-free identities to MIR values and operations, serialize versioned control-flow snapshots, validate source ownership and dense predecessor metadata, and make optimization budgets and failures transactional.
+- Remove dead MIR values with complete operand remapping while preserving observable debugger, allocation, fault, and suspension operations; keep CSE, inlining, escape, and loop transformations disabled until they have independent equivalence proofs.
+- Validate every generated Godot API metadata record, argument range, property read/write ABI, Signal contract, enum/bitfield, scalar return, and forbidden native pointer boundary across the 4.4-4.7 tables.
+- Preserve binary-only dynamic Script identity for paths assembled entirely at runtime, including relative paths, UIDs, synchronous and threaded ResourceLoader calls, cache equality, `exists()`, `get_script()`, and `.new()`; paths outside the compiled project manifest fail deterministically.
+- Exercise exported real ENet peers for authority and any-peer RPC, local and remote execution, transfer modes, channels, ordering, rejection, and inherited override configuration instead of treating single-process metadata as network validation.
+- Compare source GDScript and AOT over every non-MAX Variant value family and the complete fault matrix, including typed and untyped containers, all PackedArrays, invalid keys, bounds, integer faults, Callables, null/freed Objects, Refs, and third-party calls.
+- A-normalize awaited assignment receivers and indexes before their right-hand side, retaining single evaluation, write-back ownership, lazy branches, and suspension lifetimes for locals, fields, properties, and dynamic subscripts.
+- Evaluate omitted default arguments inside the ordered callable prologue, including defaults that genuinely suspend; retain the receiver, prior explicit/default arguments, varargs, and per-call state through resumption.
+- Preserve coroutine ABI for inline and method-bound property getters/setters across instance, static, internal-class, cross-script, inherited, and concurrent calls, with transitive project cache invalidation.
+- Isolate static coroutine owner state and nested coroutine-lambda continuations from surrounding emitter context so owner-free access, typed returns, and inner failure exits cannot capture an instance or emit an invalid C++ return.
+- Reject `await` in annotation constant arguments during semantic analysis rather than allowing an impossible compile-time suspension to reach HIR or C++ generation.
+- Lower project-script `Object.free()` through Godot's Variant dispatch instead of `memdelete`, preserving ordinary Object destruction, RefCounted rejection, locked-object protection, freed identity, source locations, and current-function failure semantics.
+- Build custom and double-precision add-ons from an exact exported `extension_api.json`, binding compiler, editor/fallback binaries, godot-cpp, SDK, descriptor features, API SHA-256, precision, and runtime ABI; CI builds and audits a clean Godot 4.7 double package.
+- Advance the SDK to schema 12 and the packaged runtime ABI to 18 so SDKs missing the complete debugger, FunctionState, dynamic Script, strict Variant, coroutine-accessor, awaited-default, custom-precision, and Object lifetime contracts fail before any customer compile command is created.
 
 ## 1.7.10
 
