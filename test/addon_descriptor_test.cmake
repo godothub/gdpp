@@ -27,7 +27,7 @@ if(compiler_reloadable_offset EQUAL -1)
     message(FATAL_ERROR
         "Compiler descriptor must not advertise unsupported GDExtension hot reload")
 endif()
-set(compiler_entries "macos.editor.arm64" "macos.editor.x86_64")
+set(compiler_entries "macos.editor.single.arm64" "macos.editor.single.x86_64")
 set(compiler_libraries
     "libgdpp_compiler.macos.universal.dylib"
     "libgdpp_compiler.macos.universal.dylib")

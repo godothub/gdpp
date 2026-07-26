@@ -661,6 +661,96 @@ add_custom_target(
     VERBATIM
 )
 
+if(GDPP_CUSTOM_GDEXTENSION_API_FILE)
+    set(GDPP_CUSTOM_ADDON_ROOT
+        "${CMAKE_BINARY_DIR}/custom-addon/addons/gdpp")
+    set(GDPP_CUSTOM_ADDON_DESCRIPTOR
+        "${CMAKE_BINARY_DIR}/generated/gdpp/custom-gdpp.gdextension")
+    if(APPLE AND GDPP_ARCH STREQUAL "universal")
+        string(CONCAT GDPP_CUSTOM_ADDON_LIBRARIES
+            "macos.editor.${GDPP_GODOT_PRECISION}.arm64 = "
+            "\"res://addons/gdpp/binary/$<TARGET_FILE_NAME:gdpp_godot_plugin>\"\n"
+            "macos.editor.${GDPP_GODOT_PRECISION}.x86_64 = "
+            "\"res://addons/gdpp/binary/$<TARGET_FILE_NAME:gdpp_godot_plugin>\"")
+    else()
+        set(GDPP_CUSTOM_ADDON_LIBRARIES
+            "${GDPP_PLATFORM}.editor.${GDPP_GODOT_PRECISION}.${GDPP_ARCH} = \"res://addons/gdpp/binary/$<TARGET_FILE_NAME:gdpp_godot_plugin>\"")
+    endif()
+    file(GENERATE
+        OUTPUT "${GDPP_CUSTOM_ADDON_DESCRIPTOR}"
+        CONTENT
+            "[configuration]\n\nentry_symbol = \"gdpp_library_init\"\ncompatibility_minimum = \"${GDPP_CUSTOM_API_VERSION}\"\nreloadable = false\n\n[libraries]\n\n${GDPP_CUSTOM_ADDON_LIBRARIES}\n"
+    )
+    set(GDPP_CUSTOM_ADDON_MANIFEST
+        "${CMAKE_BINARY_DIR}/generated/gdpp/custom-package.manifest")
+    set(GDPP_CUSTOM_API_SHA256_VARIABLE
+        "GDPP_GODOT_API_SHA256_${GDPP_CUSTOM_API_MAJOR}_${GDPP_CUSTOM_API_MINOR}")
+    file(GENERATE
+        OUTPUT "${GDPP_CUSTOM_ADDON_MANIFEST}"
+        CONTENT
+            "GDPP_CUSTOM_PACKAGE 1\nversion ${PROJECT_VERSION}\napi ${GDPP_CUSTOM_API_VERSION}\napi_sha256 ${${GDPP_CUSTOM_API_SHA256_VARIABLE}}\nprecision ${GDPP_GODOT_PRECISION}\nhost ${GDPP_PLATFORM}/${GDPP_ARCH}\nlayout addons/gdpp\n"
+    )
+    set(GDPP_CUSTOM_ADDON_STATIC_COMMANDS)
+    foreach(GDPP_CUSTOM_ADDON_STATIC_FILE IN ITEMS
+            build_progress.gd
+            native_build_job.gd
+            export_plugin.gd
+            plugin.cfg
+            plugin.gd)
+        list(APPEND GDPP_CUSTOM_ADDON_STATIC_COMMANDS
+            COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+                "${GDPP_ADDON_DIRECTORY}/${GDPP_CUSTOM_ADDON_STATIC_FILE}"
+                "${GDPP_CUSTOM_ADDON_ROOT}/${GDPP_CUSTOM_ADDON_STATIC_FILE}")
+    endforeach()
+    set(GDPP_CUSTOM_SDK_SOURCE
+        "${GDPP_PACKAGED_SDK}/${GDPP_CUSTOM_API_VERSION}")
+    set(GDPP_CUSTOM_SDK_DESTINATION
+        "${GDPP_CUSTOM_ADDON_ROOT}/sdk/${GDPP_CUSTOM_API_VERSION}")
+    add_custom_target(
+        gdpp_custom_addon
+        COMMAND "${CMAKE_COMMAND}" -E remove_directory
+                "${CMAKE_BINARY_DIR}/custom-addon"
+        COMMAND "${CMAKE_COMMAND}" -E make_directory
+                "${GDPP_CUSTOM_ADDON_ROOT}/binary"
+                "${GDPP_CUSTOM_SDK_DESTINATION}"
+        ${GDPP_CUSTOM_ADDON_STATIC_COMMANDS}
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+                "${GDPP_CUSTOM_ADDON_DESCRIPTOR}"
+                "${GDPP_CUSTOM_ADDON_ROOT}/gdpp.gdextension"
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+                "${GDPP_CUSTOM_ADDON_MANIFEST}"
+                "${GDPP_CUSTOM_ADDON_ROOT}/PACKAGE_MANIFEST.txt"
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+                "$<TARGET_FILE:gdpp_godot_plugin>"
+                "${GDPP_CUSTOM_ADDON_ROOT}/binary/$<TARGET_FILE_NAME:gdpp_godot_plugin>"
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+                "$<TARGET_FILE:gdpp_fallback>"
+                "${GDPP_CUSTOM_ADDON_ROOT}/binary/$<TARGET_FILE_NAME:gdpp_fallback>"
+        COMMAND "${CMAKE_COMMAND}" -E copy_directory
+                "${GDPP_CUSTOM_SDK_SOURCE}/include"
+                "${GDPP_CUSTOM_SDK_DESTINATION}/include"
+        COMMAND "${CMAKE_COMMAND}" -E copy_directory
+                "${GDPP_CUSTOM_SDK_SOURCE}/src"
+                "${GDPP_CUSTOM_SDK_DESTINATION}/src"
+        COMMAND "${CMAKE_COMMAND}" -E copy_directory
+                "${GDPP_CUSTOM_SDK_SOURCE}/godot-cpp"
+                "${GDPP_CUSTOM_SDK_DESTINATION}/godot-cpp"
+        COMMAND "${CMAKE_COMMAND}" -E copy_directory
+                "${GDPP_CUSTOM_SDK_SOURCE}/lib"
+                "${GDPP_CUSTOM_SDK_DESTINATION}/lib"
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+                "${GDPP_CUSTOM_SDK_SOURCE}/sdk.manifest"
+                "${GDPP_CUSTOM_SDK_DESTINATION}/sdk.manifest"
+        DEPENDS
+            gdpp_addon
+            "${GDPP_CUSTOM_ADDON_DESCRIPTOR}"
+            "${GDPP_CUSTOM_ADDON_MANIFEST}"
+        COMMENT
+            "Staging custom Godot ${GDPP_CUSTOM_API_VERSION}/${GDPP_GODOT_PRECISION} add-on"
+        VERBATIM
+    )
+endif()
+
 if(GDPP_BUILD_TESTS)
     add_custom_target(
         gdpp_attached_extension_fixture ALL

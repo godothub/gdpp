@@ -6,8 +6,8 @@ reloadable = false
 
 [libraries]
 
-macos.editor.arm64 = "res://addons/gdpp/binary/libgdpp_compiler.macos.universal.dylib"
-macos.editor.x86_64 = "res://addons/gdpp/binary/libgdpp_compiler.macos.universal.dylib"
-linux.editor.x86_64 = "res://addons/gdpp/binary/libgdpp_compiler.linux.x86_64.so"
-linux.editor.arm64 = "res://addons/gdpp/binary/libgdpp_compiler.linux.arm64.so"
-windows.editor.x86_64 = "res://addons/gdpp/binary/gdpp_compiler.windows.x86_64.dll"
+macos.editor.single.arm64 = "res://addons/gdpp/binary/libgdpp_compiler.macos.universal.dylib"
+macos.editor.single.x86_64 = "res://addons/gdpp/binary/libgdpp_compiler.macos.universal.dylib"
+linux.editor.single.x86_64 = "res://addons/gdpp/binary/libgdpp_compiler.linux.x86_64.so"
+linux.editor.single.arm64 = "res://addons/gdpp/binary/libgdpp_compiler.linux.arm64.so"
+windows.editor.single.x86_64 = "res://addons/gdpp/binary/gdpp_compiler.windows.x86_64.dll"
