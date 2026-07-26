@@ -71,7 +71,9 @@ class CodeGenerator final {
     [[nodiscard]] std::string emit_integer_operation(std::string_view operation,
                                                      std::string left_value,
                                                      std::string right_value,
-                                                     const Type& result_type) const;
+                                                     const Type& result_type,
+                                                     const SourceSpan& span) const;
+    [[nodiscard]] static std::string script_location(const SourceSpan& span);
     [[nodiscard]] std::string emit_truthy(const ir::Expression& expression) const;
     [[nodiscard]] std::string emit_conversion(const Type& target, const Type& source,
                                               std::string value) const;
@@ -275,6 +277,7 @@ class CodeGenerator final {
     mutable std::string current_godot_base_type_;
     mutable std::size_t match_counter_{0};
     mutable std::size_t temporary_counter_{0};
+    mutable const SourceSpan* current_expression_span_{nullptr};
 };
 
 } // namespace gdpp
