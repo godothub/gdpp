@@ -6,6 +6,7 @@ const CONTAINER_VALUE := preload("res://z_container_value.gd")
 const INNER_DATA := preload("res://inner_data.gd")
 const NETWORK_IMAGE := preload("res://network_image.gd")
 const RPC_RUNTIME_HARNESS := preload("res://rpc_runtime_harness.gd")
+const RUNTIME_FAULT_MATRIX := preload("res://runtime_fault_matrix.gd")
 const RUNTIME_SHADER := preload("res://runtime_shader.gdshader")
 const ATTACHED_SCENE := preload("res://attached_scene.tscn")
 
@@ -59,7 +60,16 @@ func _make_delayed_adder(captured: int) -> Callable:
 
 func _ready() -> void:
     super._ready()
-    call_deferred(&"_verify_export_runtime")
+    if OS.get_cmdline_user_args().has("--gdpp-fault-matrix"):
+        call_deferred(&"_verify_fault_matrix")
+    else:
+        call_deferred(&"_verify_export_runtime")
+
+
+func _verify_fault_matrix() -> void:
+    var matrix: Variant = RUNTIME_FAULT_MATRIX.new()
+    print("GDPP_FAULT_MATRIX=" + matrix.run())
+    get_tree().quit(0)
 
 
 func _verify_export_runtime() -> void:
