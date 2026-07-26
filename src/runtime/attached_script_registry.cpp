@@ -451,10 +451,7 @@ std::optional<AttachedScriptDescriptor> resolve_attached_script(const godot::Str
             const godot::Array method_names = inherited_rpc.keys();
             for (std::int64_t index = 0; index < method_names.size(); ++index) {
                 const godot::StringName method_name{method_names[index]};
-                const bool overridden = std::any_of(
-                    resolved.methods.begin(), resolved.methods.end(),
-                    [&](const godot::MethodInfo& method) { return method.name == method_name; });
-                if (!overridden && !rpc.has(method_name))
+                if (!rpc.has(method_name))
                     rpc[method_name] = inherited_rpc[method_name];
             }
             if (!rpc.is_empty())
