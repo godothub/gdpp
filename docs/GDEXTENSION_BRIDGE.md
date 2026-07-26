@@ -157,17 +157,19 @@ var flags: VendorData.ChannelFlags = (
 生成代码使用稳定 `int64_t` 存储 GDScript enum，不依赖供应商 C++ enum 大小、命名空间或头文件。
 参数/返回在 Variant ABI 边界转换。不同命名 enum 仍保持不同语义身份。
 
-## 导出事务
+## 导出虚拟化
 
-供应商描述符和二进制保持供应商所有。GDPP 只在 Godot 某些 Universal 2 扫描场景需要时：
+供应商描述符和二进制保持供应商所有。GDPP 在 Godot 的 macOS Universal 2 扫描路径中：
 
-1. 读取并备份原始描述符字节；
-2. 用 `lipo` 验证供应商 dylib 实际包含目标切片；
-3. 临时写仅供扫描的 universal 条目；
-4. PCK 写回供应商原始描述符；
-5. 成功、失败或下次启动恢复源文件。
+1. 读取描述符并用 `lipo` 验证被选择 dylib 的真实 arm64/x86_64 切片；
+2. 通过公开导出 API 只注册一次目标二进制及匹配依赖；
+3. 在导出文件回调中向 PCK 提供归一化的描述符字节，不改写源项目文件；
+4. Debug 导出没有独立 provider Debug 库时，只允许复用已验证的 Release fat binary，并只在
+   包内描述符增加 Debug 别名；
+5. 导出后以 SHA-256 门禁确认源描述符、extension registry 和供应商库均保持不变。
 
-项目库不复制供应商二进制，不更改签名和升级边界。
+项目库不复制或链接供应商二进制，不更改签名和升级边界。启动恢复逻辑只用于清理 1.7.8 及更旧
+版本中断后可能遗留的描述符备份。
 
 ## 当前验证
 
@@ -180,7 +182,7 @@ var flags: VendorData.ChannelFlags = (
 - typed container、Node/Resource 序列化；
 - 预绑定和运行时 ShaderMaterial；
 - 网络图片、消息分派和失效对象防护；
-- 无源码导出、PCK 内容和 provider 描述符恢复。
+- Debug/Release 无源码导出、PCK 内容、provider 描述符不变性和 Release-only Universal provider。
 
 正式 CI 在 Godot 4.4.1、4.5.2、4.6.3、4.7.1 上构建、导出并运行该 fixture；iOS 另执行无签名
 Simulator Xcode 路径。更多真实供应商、移动真机和全部平台升级组合仍是认证缺口。
