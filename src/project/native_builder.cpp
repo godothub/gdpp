@@ -22,7 +22,31 @@
 namespace gdpp {
 namespace {
 
-constexpr std::string_view native_build_revision{"14"};
+constexpr std::string_view native_build_revision{"15"};
+
+struct GodotApiContract {
+    std::string_view kind;
+    std::string_view precision;
+    std::string_view sha256;
+};
+
+GodotApiContract godot_api_contract(const GodotVersion version) {
+    switch (version) {
+    case GodotVersion::v4_4:
+        return {GDPP_GODOT_API_KIND_4_4, GDPP_GODOT_API_PRECISION_4_4,
+                GDPP_GODOT_API_SHA256_4_4};
+    case GodotVersion::v4_5:
+        return {GDPP_GODOT_API_KIND_4_5, GDPP_GODOT_API_PRECISION_4_5,
+                GDPP_GODOT_API_SHA256_4_5};
+    case GodotVersion::v4_6:
+        return {GDPP_GODOT_API_KIND_4_6, GDPP_GODOT_API_PRECISION_4_6,
+                GDPP_GODOT_API_SHA256_4_6};
+    case GodotVersion::v4_7:
+        return {GDPP_GODOT_API_KIND_4_7, GDPP_GODOT_API_PRECISION_4_7,
+                GDPP_GODOT_API_SHA256_4_7};
+    }
+    return {};
+}
 
 struct BridgeBuildInputs {
     std::vector<std::filesystem::path> include_directories;
@@ -329,6 +353,9 @@ bool validate_manifest(const NativeBuildOptions& options, std::vector<std::strin
     std::string platform;
     std::string architecture;
     std::string api;
+    std::string api_kind;
+    std::string api_sha256;
+    std::string precision;
     std::string profiles;
     std::string distribution_binding;
     std::string distribution_optimization;
@@ -360,6 +387,12 @@ bool validate_manifest(const NativeBuildOptions& options, std::vector<std::strin
             architecture = value;
         else if (key == "api")
             api = value;
+        else if (key == "api_kind")
+            api_kind = value;
+        else if (key == "api_sha256")
+            api_sha256 = value;
+        else if (key == "precision")
+            precision = value;
         else if (key == "profiles")
             profiles = value;
         else if (key == "distribution_binding")
@@ -519,6 +552,27 @@ bool validate_manifest(const NativeBuildOptions& options, std::vector<std::strin
         diagnostics.push_back("native SDK Godot API mismatch: expected " +
                               std::string{godot_version_name(options.target_version)} +
                               ", package contains " + api);
+    const auto api_contract = godot_api_contract(options.target_version);
+    const auto expected_precision = native_precision_name(options.precision);
+    if (api_contract.precision != expected_precision) {
+        diagnostics.push_back(
+            "compiler Godot API precision mismatch: target requests " +
+            std::string{expected_precision} + ", compiler metadata is " +
+            std::string{api_contract.precision} +
+            "; rebuild GDPP from the exact target engine extension_api.json");
+    }
+    if (precision != expected_precision) {
+        diagnostics.push_back(
+            "native SDK precision mismatch: expected " + std::string{expected_precision} +
+            ", package contains " +
+            (precision.empty() ? std::string{"<missing>"} : precision));
+    }
+    if (api_kind != api_contract.kind || api_sha256 != api_contract.sha256) {
+        diagnostics.emplace_back(
+            "native SDK Godot API fingerprint does not match this compiler; reinstall the "
+            "matching official package or rebuild every component from one custom "
+            "extension_api.json");
+    }
     if (profiles.empty()) {
         diagnostics.emplace_back("native SDK manifest does not declare supported build profiles");
     } else {
@@ -836,6 +890,8 @@ NativeBuildCommand compile_command(const NativeBuildOptions& options,
                      "/DNOMINMAX"};
         arguments.emplace_back("/O2");
         arguments.emplace_back("/DNDEBUG");
+        if (options.precision == NativePrecision::double_precision)
+            arguments.emplace_back("/DREAL_T_IS_DOUBLE");
         arguments.emplace_back("/Gy");
         arguments.emplace_back("/Gw");
         if (options.profile == NativeBuildProfile::debug)
@@ -862,6 +918,8 @@ NativeBuildCommand compile_command(const NativeBuildOptions& options,
         arguments.insert(arguments.end(),
                          {"-O3", "-fvisibility=hidden", "-ffunction-sections", "-fdata-sections"});
         arguments.emplace_back("-DNDEBUG");
+        if (options.precision == NativePrecision::double_precision)
+            arguments.emplace_back("-DREAL_T_IS_DOUBLE");
         if (options.profile == NativeBuildProfile::debug)
             arguments.emplace_back("-DGDPP_SCRIPT_DEBUG_ENABLED");
         append_reproducible_path_arguments(arguments, options);
@@ -899,6 +957,8 @@ NativeBuildCommand ios_compile_command(const NativeBuildOptions& options,
     arguments.insert(arguments.end(),
                      {"-O3", "-fvisibility=hidden", "-ffunction-sections", "-fdata-sections"});
     arguments.emplace_back("-DNDEBUG");
+    if (options.precision == NativePrecision::double_precision)
+        arguments.emplace_back("-DREAL_T_IS_DOUBLE");
     if (options.profile == NativeBuildProfile::debug)
         arguments.emplace_back("-DGDPP_SCRIPT_DEBUG_ENABLED");
     append_reproducible_path_arguments(arguments, options);
@@ -1117,6 +1177,18 @@ std::optional<NativeBuildProfile> parse_native_build_profile(std::string_view va
     return std::nullopt;
 }
 
+const char* native_precision_name(const NativePrecision precision) noexcept {
+    return precision == NativePrecision::double_precision ? "double" : "single";
+}
+
+std::optional<NativePrecision> parse_native_precision(const std::string_view value) noexcept {
+    if (value == "single")
+        return NativePrecision::single;
+    if (value == "double")
+        return NativePrecision::double_precision;
+    return std::nullopt;
+}
+
 bool native_architecture_supported(const NativePlatform platform,
                                    const std::string_view architecture) noexcept {
     switch (platform) {
@@ -1310,7 +1382,8 @@ NativeBuildPlan NativeBuilder::plan(const NativeBuildOptions& options) const {
         std::string{godot_version_name(options.target_version)} + "\nplatform " +
         platform_name(options.platform) + "\narch " + options.architecture + "\nprofile " +
         native_build_profile_name(options.profile) + "\ncompiler " + options.compiler_executable +
-        "\nweb_threads " + web_thread_mode_name(options.web_thread_mode) + "\n";
+        "\nprecision " + native_precision_name(options.precision) + "\nweb_threads " +
+        web_thread_mode_name(options.web_thread_mode) + "\n";
     for (const auto& [source, replacement] : reproducible_path_mappings(options))
         build_configuration_contents += "path_map " + source + "=" + replacement + "\n";
     const auto build_configuration_changed =

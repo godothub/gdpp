@@ -13,10 +13,14 @@ namespace gdpp {
 enum class NativePlatform { macos, linux, windows, android, ios, web };
 enum class NativeBuildProfile { debug, release };
 enum class NativeWebThreadMode { not_applicable, single_threaded, multi_threaded };
+enum class NativePrecision { single, double_precision };
 
 [[nodiscard]] const char* native_build_profile_name(NativeBuildProfile profile) noexcept;
 [[nodiscard]] std::optional<NativeBuildProfile>
 parse_native_build_profile(std::string_view value) noexcept;
+[[nodiscard]] const char* native_precision_name(NativePrecision precision) noexcept;
+[[nodiscard]] std::optional<NativePrecision>
+parse_native_precision(std::string_view value) noexcept;
 [[nodiscard]] bool native_architecture_supported(NativePlatform platform,
                                                  std::string_view architecture) noexcept;
 [[nodiscard]] std::string
@@ -33,6 +37,7 @@ struct NativeBuildOptions {
     std::string architecture{"x86_64"};
     NativeBuildProfile profile{NativeBuildProfile::release};
     NativeWebThreadMode web_thread_mode{NativeWebThreadMode::not_applicable};
+    NativePrecision precision{NativePrecision::single};
     GodotVersion target_version{minimum_godot_version};
 };
 
