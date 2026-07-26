@@ -1,3 +1,14 @@
+## 1.8.0
+
+- Implement the GDScript `breakpoint` statement end to end through the lexer, parser, semantic model, HIR, typed MIR, verifier, C++17 emitter, and native Godot debugger bridge instead of rejecting a valid production script during AOT compilation.
+- Report generated native frames through `ScriptLanguageExtension` with the original `.gd` path, function, current source line, shadow-aware lexical locals, and own plus inherited script members; debugger expressions evaluate against the same frame owner used by the attached script.
+- Preserve debugger behavior across ordinary methods, accessors, static functions, lambdas, attached third-party GDExtension bases, and suspended coroutine continuations, while keeping release products free of breakpoint instrumentation and eliding inactive debug frames when no Godot debugger is attached.
+- Return the canonical Godot `ScriptInstance` handle from attached native instances so the debugger, engine callbacks, property access, and lifetime tracking all address the same public engine object instead of an internal implementation pointer.
+- Preserve legal GDScript lexical shadowing in generated C++ under Clang, GCC, and MSVC warning-as-error builds without disabling unrelated native diagnostics.
+- Allow macOS Universal debug exports to reuse a verified Release-only third-party provider fat binary when the provider does not ship a distinct debug binary. GDPP adds debug aliases only to the descriptor bytes packaged into the export and never mutates the customer's source descriptor or library.
+- Compile generated breakpoint fixtures against real godot-cpp and export and run attached third-party GDExtension projects with official Godot 4.6.2 in both Debug and Release profiles.
+- Advance the packaged runtime ABI to 14 so SDKs without the debugger-frame and canonical ScriptInstance contracts fail preflight instead of producing an ABI-incompatible customer library.
+
 ## 1.7.10
 
 - Match GDScript's independent implicit-ready lifecycle for attached scripts: initialize `@onready` fields base-to-derived before normal `_ready` dispatch, including scripts without a user `_ready`, inherited callbacks, internal classes, and repeated `request_ready()` cycles.
