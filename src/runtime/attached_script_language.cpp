@@ -99,6 +99,16 @@ ScriptDebugFrame::~ScriptDebugFrame() {
         frames.erase(std::next(found).base());
 }
 
+void ScriptDebugFrame::set_line(const std::int32_t line) {
+    if (token_ == 0)
+        return;
+    auto& frames = thread_debug_state.frames;
+    const auto found = std::find_if(frames.rbegin(), frames.rend(),
+                                    [&](const auto& frame) { return frame.token == token_; });
+    if (found != frames.rend())
+        found->line = line;
+}
+
 void debug_breakpoint(const godot::String& source, const godot::StringName& function,
                       const std::int32_t line, godot::Object* instance,
                       const godot::PackedStringArray& local_names, const godot::Array& local_values,

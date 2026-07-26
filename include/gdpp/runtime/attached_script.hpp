@@ -319,6 +319,8 @@ class ScriptDebugFrame final {
     ScriptDebugFrame(ScriptDebugFrame&&) = delete;
     ScriptDebugFrame& operator=(ScriptDebugFrame&&) = delete;
 
+    void set_line(std::int32_t line);
+
   private:
     std::uint64_t token_{0};
 };
