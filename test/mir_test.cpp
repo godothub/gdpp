@@ -4,15 +4,17 @@
 #include "gdpp/ir/mir_optimizer.hpp"
 
 #include <algorithm>
+#include <cstdint>
 #include <string>
+#include <vector>
 
 namespace {
 
 gdpp::typed::ExpressionPtr literal(std::string value = "true") {
     auto result = std::make_unique<gdpp::typed::Expression>();
     result->kind = gdpp::typed::ExpressionKind::literal;
-    result->literal_kind =
-        value == "true" ? gdpp::typed::LiteralKind::boolean : gdpp::typed::LiteralKind::integer;
+    result->literal_kind = value == "true" || value == "false" ? gdpp::typed::LiteralKind::boolean
+                                                               : gdpp::typed::LiteralKind::integer;
     result->value = std::move(value);
     return result;
 }
@@ -35,6 +37,35 @@ gdpp::typed::ExpressionPtr nested_binary(std::size_t depth) {
     result->operands.push_back(nested_binary(depth - 1U));
     result->operands.push_back(literal("1"));
     return result;
+}
+
+std::vector<gdpp::mir::SourceStatementId>
+observable_trace(const gdpp::mir::ControlFlowFunction& function) {
+    std::vector<gdpp::mir::SourceStatementId> trace;
+    auto block = function.entry;
+    std::size_t remaining = function.blocks.size() * 4U + 1U;
+    while (block < function.blocks.size() && remaining-- != 0U) {
+        const auto& current = function.blocks[block];
+        for (const auto& instruction : current.instructions)
+            trace.push_back(instruction.source_statement);
+        const auto& terminator = current.terminator;
+        if (terminator.kind == gdpp::mir::TerminatorKind::jump ||
+            terminator.kind == gdpp::mir::TerminatorKind::suspend) {
+            block = terminator.targets.front();
+            continue;
+        }
+        if (terminator.kind == gdpp::mir::TerminatorKind::branch) {
+            REQUIRE(terminator.condition_value < function.values.size());
+            const auto& value = function.values[terminator.condition_value];
+            REQUIRE_EQ(value.kind, gdpp::typed::ExpressionKind::literal);
+            REQUIRE_EQ(value.literal_kind, gdpp::typed::LiteralKind::boolean);
+            block = terminator.targets[value.payload == "true" ? 0U : 1U];
+            continue;
+        }
+        break;
+    }
+    REQUIRE(remaining != 0U);
+    return trace;
 }
 
 } // namespace
@@ -106,6 +137,12 @@ TEST_CASE("MIR optimizer simplifies typed boolean branches and rebuilds dense CF
     REQUIRE_EQ(stats.branches_simplified, std::size_t{1});
     REQUIRE_EQ(stats.blocks_removed, std::size_t{1});
     REQUIRE_EQ(stats.instructions_removed, std::size_t{1});
+    REQUIRE(stats.precondition_verified);
+    REQUIRE(stats.postcondition_verified);
+    REQUIRE(!stats.budget_exhausted);
+    REQUIRE_EQ(stats.functions_visited, std::size_t{1});
+    REQUIRE_EQ(stats.blocks_before, original_blocks);
+    REQUIRE_EQ(stats.blocks_after, original_blocks - 1U);
     REQUIRE_EQ(mir.functions.front().blocks.size(), original_blocks - 1U);
     REQUIRE(std::none_of(mir.functions.front().blocks.begin(), mir.functions.front().blocks.end(),
                          [](const auto& block) {
@@ -326,6 +363,81 @@ TEST_CASE("MIR verifier rejects corrupt edge and predecessor metadata") {
     gdpp::DiagnosticBag diagnostics;
     REQUIRE(!gdpp::MirVerifier{diagnostics}.verify(mir));
     REQUIRE(diagnostics.has_errors());
+}
+
+TEST_CASE("MIR optimization budgets preserve verified unoptimized input") {
+    gdpp::typed::Module program;
+    gdpp::typed::Function function;
+    function.name = "budget";
+    gdpp::typed::Statement conditional;
+    conditional.kind = gdpp::typed::StatementKind::if_statement;
+    conditional.condition = literal("true");
+    conditional.body.push_back(marker(gdpp::typed::StatementKind::expression));
+    conditional.else_body.push_back(marker(gdpp::typed::StatementKind::expression));
+    function.body.push_back(std::move(conditional));
+    program.functions.push_back(std::move(function));
+
+    auto mir = gdpp::MirLowerer{}.lower(std::move(program));
+    const auto before = gdpp::MirSerializer{}.serialize(mir);
+    gdpp::DiagnosticBag diagnostics;
+    gdpp::MirOptimizationBudget budget;
+    budget.max_functions = 0;
+    const auto stats = gdpp::MirOptimizer{}.optimize(mir, diagnostics, budget);
+
+    REQUIRE(stats.precondition_verified);
+    REQUIRE(stats.postcondition_verified);
+    REQUIRE(stats.budget_exhausted);
+    REQUIRE_EQ(stats.functions_visited, std::size_t{0});
+    REQUIRE_EQ(gdpp::MirSerializer{}.serialize(mir), before);
+    REQUIRE(!diagnostics.has_errors());
+}
+
+TEST_CASE("MIR optimizer rejects corrupt input without mutating it") {
+    gdpp::typed::Module program;
+    gdpp::typed::Function function;
+    function.name = "invalid_input";
+    function.body.push_back(marker(gdpp::typed::StatementKind::pass_statement));
+    program.functions.push_back(std::move(function));
+
+    auto mir = gdpp::MirLowerer{}.lower(std::move(program));
+    mir.functions.front().blocks.front().terminator.targets.push_back(999);
+    const auto before = gdpp::MirSerializer{}.serialize(mir);
+    gdpp::DiagnosticBag diagnostics;
+    const auto stats = gdpp::MirOptimizer{}.optimize(mir, diagnostics);
+
+    REQUIRE(!stats.precondition_verified);
+    REQUIRE(!stats.postcondition_verified);
+    REQUIRE_EQ(stats.functions_visited, std::size_t{0});
+    REQUIRE_EQ(gdpp::MirSerializer{}.serialize(mir), before);
+    REQUIRE(diagnostics.has_errors());
+}
+
+TEST_CASE("MIR constant branch optimization preserves deterministic observable traces") {
+    std::uint32_t state = 0x9e3779b9U;
+    for (std::size_t sample = 0; sample < 256U; ++sample) {
+        gdpp::typed::Module program;
+        gdpp::typed::Function function;
+        function.name = "equivalence_" + std::to_string(sample);
+        for (std::size_t branch = 0; branch < 12U; ++branch) {
+            state = state * 1664525U + 1013904223U;
+            gdpp::typed::Statement conditional;
+            conditional.kind = gdpp::typed::StatementKind::if_statement;
+            conditional.condition = literal((state & 1U) != 0U ? "true" : "false");
+            conditional.body.push_back(marker(gdpp::typed::StatementKind::expression));
+            conditional.else_body.push_back(marker(gdpp::typed::StatementKind::expression));
+            function.body.push_back(std::move(conditional));
+        }
+        program.functions.push_back(std::move(function));
+
+        auto mir = gdpp::MirLowerer{}.lower(std::move(program));
+        const auto before = observable_trace(mir.functions.front());
+        gdpp::DiagnosticBag diagnostics;
+        const auto stats = gdpp::MirOptimizer{}.optimize(mir, diagnostics);
+        REQUIRE(stats.precondition_verified);
+        REQUIRE(stats.postcondition_verified);
+        REQUIRE(!diagnostics.has_errors());
+        REQUIRE_EQ(observable_trace(mir.functions.front()), before);
+    }
 }
 
 TEST_CASE("MIR has stable value and operation identities with address-free serialization") {

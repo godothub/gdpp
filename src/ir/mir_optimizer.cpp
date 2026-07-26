@@ -7,6 +7,28 @@
 namespace gdpp {
 namespace {
 
+struct MirSize {
+    std::size_t functions{0};
+    std::size_t blocks{0};
+    std::size_t operations{0};
+};
+
+MirSize measure(const std::vector<mir::ControlFlowFunction>& functions) {
+    MirSize result;
+    result.functions = functions.size();
+    for (const auto& function : functions) {
+        result.blocks += function.blocks.size();
+        for (const auto& block : function.blocks)
+            result.operations += block.instructions.size() + 1U;
+    }
+    return result;
+}
+
+bool within_budget(const MirSize& size, const MirOptimizationBudget& budget) {
+    return size.functions <= budget.max_functions && size.blocks <= budget.max_blocks &&
+           size.operations <= budget.max_operations;
+}
+
 std::optional<bool> constant_branch_value(const mir::ControlFlowFunction& function,
                                           const mir::Terminator& terminator) {
     if (terminator.kind != mir::TerminatorKind::branch || terminator.targets.size() != 2 ||
@@ -99,8 +121,31 @@ void prune_unreachable(mir::ControlFlowFunction& function, MirOptimizationStats&
 } // namespace
 
 MirOptimizationStats MirOptimizer::optimize(mir::Module& module) const {
+    DiagnosticBag diagnostics;
+    return optimize(module, diagnostics);
+}
+
+MirOptimizationStats MirOptimizer::optimize(mir::Module& module, DiagnosticBag& diagnostics,
+                                            const MirOptimizationBudget& budget) const {
     MirOptimizationStats stats;
+    stats.precondition_verified = MirVerifier{diagnostics}.verify(module);
+    if (!stats.precondition_verified)
+        return stats;
+
+    const auto before = measure(module.functions);
+    stats.blocks_before = before.blocks;
+    stats.operations_before = before.operations;
+    if (!within_budget(before, budget)) {
+        stats.budget_exhausted = true;
+        stats.blocks_after = before.blocks;
+        stats.operations_after = before.operations;
+        stats.postcondition_verified = true;
+        return stats;
+    }
+
+    auto original = module.functions;
     for (auto& function : module.functions) {
+        ++stats.functions_visited;
         for (auto& block : function.blocks) {
             const auto value = constant_branch_value(function, block.terminator);
             if (!value)
@@ -113,6 +158,19 @@ MirOptimizationStats MirOptimizer::optimize(mir::Module& module) const {
             ++stats.branches_simplified;
         }
         prune_unreachable(function, stats);
+    }
+
+    const auto after = measure(module.functions);
+    stats.blocks_after = after.blocks;
+    stats.operations_after = after.operations;
+    stats.postcondition_verified = MirVerifier{diagnostics}.verify(module);
+    if (!stats.postcondition_verified) {
+        module.functions = std::move(original);
+        stats.blocks_after = before.blocks;
+        stats.operations_after = before.operations;
+        stats.branches_simplified = 0;
+        stats.blocks_removed = 0;
+        stats.instructions_removed = 0;
     }
     return stats;
 }
