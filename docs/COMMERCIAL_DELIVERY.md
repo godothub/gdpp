@@ -63,7 +63,7 @@ compiler 动态库，不携带 editor 静态库。
 
 ## SDK 契约
 
-SDK schema 11、runtime ABI 15 由源码、打包器和发布门禁共同校验。manifest 包含：
+SDK schema 12、runtime ABI 18 由源码、打包器和发布门禁共同校验。manifest 包含：
 
 - GDPP/Godot 版本、平台、架构、最低系统；
 - C++17、异常关闭、工具链族/版本和 MSVC CRT；
@@ -149,12 +149,15 @@ editor-only 物理文件不变，在导出回调中跳过它，并在成品同�
 
 ## 发布门禁
 
-最近完成的 1.7.10 正式发布运行包含 46 个成功作业；1.8.0 候选在相同发布拓扑上增加
-breakpoint/godot-cpp 编译和 Attached Debug/Release 导出运行回归：
+最近完成的 1.7.10 正式发布运行包含 46 个成功作业；1.8.0 在相同发布拓扑上进一步增加
+P0 语言/runtime、custom precision 和 ABI 18 回归：
 
 - macOS/Linux/Windows 编译器核心和 plugin 集成；
 - ASan、UBSan、TSan；
-- 官方项目/parser 语料；
+- 官方项目/parser 语料、coverage-guided fuzz、完整 AST span golden；
+- 全 Variant/fault 源码/AOT 差分、协程访问器与 await 默认参数；
+- 真实 ENet 多 peer RPC 与二进制动态 Script 资源加载；
+- 独立 4.7 double precision custom add-on 构建与精确 API/ABI 审计；
 - Godot 4.4.1、4.5.2、4.6.3、4.7.1；
 - 三桌面 4.4～4.7 host SDK；
 - Android 4.4～4.7 SDK 与 4.5.2 APK；

@@ -5,11 +5,11 @@
 | 项目 | 值 |
 |---|---|
 | GDPP | 1.8.0 |
-| 功能审计提交 | `2c81784fcbe9456a4ce24f047df14d3e4491bcc3` |
+| 功能审计范围 | 1.8.0 发布分支当前提交 |
 | 最近正式发布运行 | 1.7.10 / `https://github.com/abandoft/gdpp/actions/runs/30170732292` |
-| 1.8.0 发布状态 | 候选；正式发布矩阵尚待执行 |
+| 1.8.0 发布状态 | 本地候选门禁完成；正式发布矩阵由 release workflow 执行 |
 | 目标发行资产 | `gdpp-mac.zip`、`gdpp-linux.zip`、`gdpp-win.zip`、`SHA256SUMS` |
-| 本地编译器单元测试 | 507 / 507 |
+| 本地编译器单元测试 | 543 / 543 |
 
 本报告只描述可重复证据。内部商业语料和客户项目不按名称公开；它们只能补充发现问题，不能替代
 产品级 fixture 与 CI。
@@ -18,12 +18,13 @@
 
 | 门禁 | 结果 |
 |---|---|
-| 开发 core CTest | 14 / 14 |
-| 开发 plugin CTest | 15 / 15 |
-| 编译器单元 | 507 / 507 |
+| 开发 core CTest | 21 项发布前合同 |
+| 开发 plugin CTest | 23 项发布前合同 |
+| 编译器单元 | 543 / 543 |
 | godot-cpp SDK | macOS 上完整重建 4.4、4.5、4.6、4.7 `template_release` |
 | 官方 Godot 4.7.1 直接构建 | 当前 compiler 生成、顺序编译并链接真实客户项目库成功 |
-| 官方 Godot 4.7.1 AOT runtime | FunctionState/异步虚函数、静态/lambda 协程、Callable/Signal 生命周期和故障边界成功 |
+| 官方 Godot 4.7.1 AOT runtime | FunctionState、异步虚函数、await 默认参数、协程访问器、Callable/Signal、全 Variant fault 和项目脚本生命周期成功 |
+| custom/double add-on | 4.7 double 从精确 API 干净构建；compiler、SDK、descriptor、静态库和 manifest 审计成功 |
 | 官方 Godot 4.6.2 Release | Universal 2 Attached provider 导出、独立运行成功 |
 | 官方 Godot 4.6.2 Debug | Universal 2 Attached provider 导出、独立运行成功 |
 | PCK 审计 | Debug/Release 均 19 个文件、2 个转换场景、1 个转换资源、0 违规 |
@@ -31,8 +32,10 @@
 
 4.6.2 两种 profile 的独立运行都输出 `GDPP_ATTACHED_EXPORT_RUNTIME_OK`；当前 4.7.1 AOT
 故障/Callable/Signal oracle 输出 `GDPP_CALLABLE_SIGNAL_RUNTIME_OK`，FunctionState 差分输出
-`GDPP_FUNCTION_STATE_RUNTIME_OK`。这组本地证据用于在正式矩阵前验证 runtime ABI 15、
-breakpoint、静态与 lambda 协程、异步虚函数、严格存储、故障隔离和生命周期语义；
+`GDPP_FUNCTION_STATE_RUNTIME_OK`。await 默认参数和协程访问器另输出
+`GDPP_AWAIT_DEFAULT_AOT_RUNTIME_OK`、`GDPP_COROUTINE_ACCESSOR_AOT_RUNTIME_OK`。这组本地证据
+用于在正式矩阵前验证 runtime ABI 18、breakpoint、静态与 lambda 协程、异步虚函数、严格存储、
+故障隔离、项目脚本 `Object.free()` 和生命周期语义；
 它不替代下述跨 runner 发布门禁。
 
 ## 正式发布门禁
@@ -41,15 +44,16 @@ breakpoint、静态与 lambda 协程、异步虚函数、严格存储、故障�
 
 | 门禁 | 环境 | 验证 |
 |---|---|---|
-| Compiler core | Ubuntu 22.04、macOS 15、Windows 2025 | C++17、严格 warning、507 项单元 |
+| Compiler core | Ubuntu 22.04、macOS 15、Windows 2025 | C++17、严格 warning、543 项单元 |
 | ASan | Ubuntu 22.04 | 地址错误和 leak 阻断 |
 | UBSan | Ubuntu 22.04 | 未定义行为阻断 |
 | TSan | Ubuntu 22.04 | 线程数据竞争阻断 |
 | Native plugin | 三桌面 runner | compiler GDExtension、SDK、直接项目构建、进度模型 |
 | Quality | Ubuntu 24.04 | 架构、格式、workflow、固定 Action SHA、Node.js 24 MSVC action |
 
-开发 core CTest 当前 14 项；启用 plugin 的本地 CTest 当前 15 项。这里的 CTest 项目会各自运行
-大量内部断言，不能把“15 项 CTest”误写成“只有 15 个测试”。
+开发 core CTest 当前 21 项；启用 plugin 的本地 CTest 当前 23 项。部分兼容语料只在 core
+preset 注册，Godot editor 服务只在 plugin preset 注册；这里的 CTest 项目会各自运行大量内部
+断言，不能把“23 项 CTest”误写成“只有 23 个测试”。
 
 ### Godot 版本
 
@@ -142,13 +146,15 @@ Linux 最终 ZIP 目前有完整结构/内容测试和 host component 实跑，�
 Godot 4.4.1～4.7.1 均执行 Linux 导出/运行；Godot 4.6.2 另执行 macOS Universal 2 provider 路径。
 这证明公开 ClassDB/Attached 主路径，不证明所有供应商私有 ABI。
 
-1.8.0 候选另将包含 `breakpoint` 的普通、静态、lambda、词法遮蔽和 await 脚本与真实
-godot-cpp 一同编译。本地使用官方 Godot 4.6.2 完成 Attached provider 的 macOS Universal 2
+1.8.0 已把包含 `breakpoint` 的普通、静态、lambda、词法遮蔽和 await 脚本与真实 godot-cpp
+一同编译。本地使用官方 Godot 4.6.2 完成 Attached provider 的 macOS Universal 2
 Debug/Release 无源码导出和独立运行；Release-only provider 由 Debug 导出复用时，源描述符保持
 不变。官方 Godot 4.7.1 还实际运行了真正挂起的静态函数、类型化/并发 lambda 协程、创建时捕获
 快照、Signal 发射期连接变更、one-shot/deferred/reference-counted 连接、宿主销毁和多线程
 Callable 调用；挂起的异步虚函数还覆盖 FunctionState 对象、`completed`、手动恢复、旧连接清理、
-有效性和即时 native 返回转换。编辑器 gutter 断点和完整单步调试尚未列为已认证能力。
+有效性和即时 native 返回转换。await 默认参数、实例/静态/内部类属性访问器、动态二进制 Script
+加载、全 Variant family fault 及真正的多 peer RPC 已加入产品 fixture 和 CI。编辑器 gutter
+断点和完整单步调试尚未列为已认证能力。
 
 ## Windows 补充端到端审计
 
@@ -229,9 +235,9 @@ AOT / GDS: 0.8345
 `AudioStreamPlaybackWAV`/音频 Resource 退出警告。这是测试结束时序和 Godot 音频生命周期的共享
 行为，不是 GDPP 额外引用；正常生命周期不应以强制退出日志代替。
 
-损坏消息 fixture 会发送多个独立坏包。AOT runtime 采用 fail-soft：每个坏包记录错误并返回安全
-默认值，后续事件继续执行；原 GDScript 可能在首个属性错误后终止当前处理函数。该差异是已知
-错误策略边界，不能把“错误条数不同”误判为重复消息分派。
+损坏消息 fixture 会发送多个独立坏包。统一 fault frame 与 GDScript 一样中止发生故障的当前
+处理函数，外层网络循环仍可接收后续独立事件；源码/AOT oracle 比较 marker、源码位置和调用者
+继续执行，不以“进程没崩溃”代替语义验证。
 
 ## 尚未认证
 
@@ -240,7 +246,7 @@ AOT / GDS: 0.8345
 - Web 非 Chromium 浏览器、真实 CDN 和长时内存增长；
 - 多进程同时构建、用户取消、断电/低磁盘/只读目录；
 - 多小时网络、资源流送、重复场景加载和磁盘增长；
-- 全语言逐 API/逐错误路径差分；
+- 新 Godot patch 的逐 API/逐错误组合持续扩展；
 - 代码签名、公证、SBOM、provenance 和符号服务。
 
 因此当前结论是“声明矩阵内的发布主路径通过并失败关闭”，不是“全部平台与全部 GDScript 已达
