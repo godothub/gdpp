@@ -83,6 +83,8 @@ jobs:
               "$output/gdpp-attached-fault-source.log"
             grep -q '^GDPP_VALUE_MATRIX=' \
               "$output/gdpp-attached-fault-source.log"
+            grep -q '^GDPP_AWAIT_DEFAULT_MATRIX=ok$' \
+              "$output/gdpp-attached-fault-source.log"
           fi
           state="$GITHUB_WORKSPACE/build/ci/attached-${GODOT_VERSION}-extension-state.json"
           mkdir -p "$(dirname "$state")"
@@ -104,12 +106,19 @@ jobs:
           timeout 30s "$output/gdpp-attached.x86_64" --headless -- \
             --gdpp-fault-matrix \
             2>&1 | tee "$output/gdpp-attached-fault-aot.log"
+          timeout 15s "$output/gdpp-attached.x86_64" --headless \
+            --script res://aot_default_runtime_oracle.gd \
+            2>&1 | tee "$output/gdpp-attached-await-default-aot.log"
           grep -q '^GDPP_DYNAMIC_SCRIPT_RUNTIME_OK$' \
             "$output/gdpp-attached-runtime.log"
           grep -q '^GDPP_ATTACHED_EXPORT_RUNTIME_OK$' \
             "$output/gdpp-attached-runtime.log"
           grep -q '^GDPP_FAULT_MATRIX=' "$output/gdpp-attached-fault-aot.log"
           grep -q '^GDPP_VALUE_MATRIX=' "$output/gdpp-attached-fault-aot.log"
+          grep -q '^GDPP_AWAIT_DEFAULT_MATRIX=ok$' \
+            "$output/gdpp-attached-fault-aot.log"
+          grep -q '^GDPP_AWAIT_DEFAULT_AOT_RUNTIME_OK$' \
+            "$output/gdpp-attached-await-default-aot.log"
           if [[ "$GODOT_VERSION" == 4.7.* ]]; then
             source_fault="$(grep '^GDPP_FAULT_MATRIX=' \
               "$output/gdpp-attached-fault-source.log" | tail -n 1)"
