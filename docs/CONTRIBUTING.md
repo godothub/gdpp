@@ -55,6 +55,8 @@ core → frontend → semantic → ir → codegen → compiler → project
 5. 涉及导出时的项目库、PCK 无源码和 descriptor 检查；
 6. 涉及第三方 GDExtension 时的 ClassDB 契约、加载顺序和生命周期 fixture；
 7. 性能敏感路径的 AOT/GDScript 同机 AB/BA 对照。
+8. 涉及调试语义时的 Debug/Release 代码差分、真实 godot-cpp 编译和无调试器运行路径；若声明
+   编辑器调试体验，还必须有对应 Godot 调试会话证据。
 
 修复应覆盖同类结构，而不是匹配单个文件名、场景名或客户资源。测试和文档不得包含客户项目名称、
 账号、地址、凭据或可识别业务数据。
