@@ -888,6 +888,65 @@ TEST_CASE("compiler generates registered internal classes and native lambda Call
             std::string::npos);
 }
 
+TEST_CASE("lambda call frames copy creation snapshots per invocation") {
+    const gdpp::Compiler compiler;
+    const auto result = compiler.compile(
+        "lambda_snapshots.gd",
+        "func make() -> Callable:\n"
+        "    var captured := 1\n"
+        "    return func() -> int:\n"
+        "        captured += 1\n"
+        "        return captured\n");
+
+    REQUIRE(result.success);
+    const auto callable = result.unit.source.find("gdpp::runtime::make_local_callable(");
+    const auto creation_snapshot =
+        result.unit.source.find(") -> godot::Variant {", callable);
+    const auto invocation_snapshot =
+        result.unit.source.find("return [=]() mutable -> godot::Variant {", creation_snapshot);
+    const auto invocation = result.unit.source.find("captured", invocation_snapshot);
+    const auto close = result.unit.source.find("}();\n})", invocation);
+    REQUIRE(callable != std::string::npos);
+    REQUIRE(creation_snapshot > callable);
+    REQUIRE(invocation_snapshot > creation_snapshot);
+    REQUIRE(invocation > invocation_snapshot);
+    REQUIRE(close > invocation);
+}
+
+TEST_CASE("async loop lambdas snapshot symbol-identified cells at creation") {
+    const gdpp::Compiler compiler;
+    const auto result = compiler.compile(
+        "async_lambda_snapshots.gd",
+        "extends Node\n"
+        "signal resume\n"
+        "func run() -> void:\n"
+        "    var captured := 1\n"
+        "    var iteration := 0\n"
+        "    while iteration < 1:\n"
+        "        await resume\n"
+        "        var callback := func() -> int:\n"
+        "            captured += 1\n"
+        "            return captured\n"
+        "        captured = 10\n"
+        "        print(callback.call(), captured, callback.call(), captured)\n"
+        "        iteration += 1\n");
+
+    REQUIRE(result.success);
+    const auto& source = result.unit.source;
+    const auto cell = source.find("std::make_shared<int64_t>(captured)");
+    const auto snapshot = source.find("[[maybe_unused]] auto _gdpp_lambda_capture_", cell);
+    const auto snapshot_source = source.find(" = (*_gdpp_async_cell_", snapshot);
+    const auto callable = source.find("gdpp::runtime::make_local_callable(", snapshot_source);
+    const auto invocation = source.find("return [=]() mutable -> godot::Variant {", callable);
+    const auto captured_write = source.find("_gdpp_lambda_capture_", invocation);
+    REQUIRE(cell != std::string::npos);
+    REQUIRE(snapshot > cell);
+    REQUIRE(snapshot_source > snapshot);
+    REQUIRE(callable > snapshot_source);
+    REQUIRE(invocation > callable);
+    REQUIRE(captured_write > invocation);
+}
+
 TEST_CASE("typed containers preserve internal class runtime identity without include cycles") {
     const gdpp::Compiler compiler;
     const auto result = compiler.compile("inner_typed_containers.gd",
@@ -982,6 +1041,24 @@ TEST_CASE("void lambdas return a Variant when argument conversion fails") {
     REQUIRE(callable != std::string::npos);
     REQUIRE(failure != std::string::npos);
     REQUIRE(result.unit.source.find("return godot::Variant{};", failure) != std::string::npos);
+}
+
+TEST_CASE("typed lambdas return their declared default value after runtime failure") {
+    const gdpp::Compiler compiler;
+    const auto result = compiler.compile(
+        "typed_lambda_failure.gd",
+        "func make() -> Callable:\n"
+        "    return func(values: Array) -> int:\n"
+        "        return values[9]\n");
+
+    REQUIRE(result.success);
+    const auto callable = result.unit.source.find("mutable -> godot::Variant {");
+    const auto failure =
+        result.unit.source.find("if (gdpp::runtime::script_function_failed())", callable);
+    REQUIRE(callable != std::string::npos);
+    REQUIRE(failure != std::string::npos);
+    REQUIRE(result.unit.source.find("return gdpp::runtime::to_variant(int64_t{});", failure) !=
+            std::string::npos);
 }
 
 TEST_CASE("variadic lambdas receive excess arguments as a Godot Array") {
