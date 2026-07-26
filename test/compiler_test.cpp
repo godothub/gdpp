@@ -4229,6 +4229,21 @@ TEST_CASE("compiler preserves coroutine property accessor ABI") {
                                                         "    return await resumed\n"
                                                         "func consume() -> int:\n"
                                                         "    return await value\n");
+    const auto static_accessors =
+        compiler.compile("static_coroutine_property.gd",
+                         "class_name StaticCoroutineProperty\n"
+                         "extends Node\n"
+                         "static var observed := -1\n"
+                         "static var value: int:\n"
+                         "    get:\n"
+                         "        await (Engine.get_main_loop() as SceneTree).process_frame\n"
+                         "        return 44\n"
+                         "    set(next):\n"
+                         "        await (Engine.get_main_loop() as SceneTree).process_frame\n"
+                         "        observed = next\n"
+                         "func consume() -> int:\n"
+                         "    StaticCoroutineProperty.value = 43\n"
+                         "    return await StaticCoroutineProperty.value\n");
 
     REQUIRE(inline_accessors.success);
     REQUIRE(inline_accessors.unit.header.find("godot::Variant _gdpp_get_value()") !=
@@ -4236,17 +4251,51 @@ TEST_CASE("compiler preserves coroutine property accessor ABI") {
     REQUIRE(inline_accessors.unit.source.find(
                 "godot::Variant GDPPNative_CoroutineProperty::_gdpp_get_value()") !=
             std::string::npos);
-    REQUIRE(inline_accessors.unit.source.find(
-                "gdpp::runtime::begin_coroutine(this)") != std::string::npos);
+    REQUIRE(inline_accessors.unit.source.find("gdpp::runtime::begin_coroutine(this)") !=
+            std::string::npos);
     REQUIRE(inline_accessors.unit.source.find(
                 "gdpp::runtime::complete_coroutine(_gdpp_property_coroutine_state") !=
             std::string::npos);
-    REQUIRE(inline_accessors.unit.source.find("void GDPPNative_CoroutineProperty::_gdpp_set_value") !=
-            std::string::npos);
+    REQUIRE(inline_accessors.unit.source.find(
+                "void GDPPNative_CoroutineProperty::_gdpp_set_value") != std::string::npos);
     REQUIRE(bound_accessors.success);
     REQUIRE(bound_accessors.unit.header.find("godot::Variant _gdpp_get_value()") !=
             std::string::npos);
     REQUIRE(bound_accessors.unit.source.find("return read_value();") != std::string::npos);
+    REQUIRE(static_accessors.success);
+    REQUIRE(static_accessors.unit.header.find("static godot::Variant _gdpp_get_value()") !=
+            std::string::npos);
+    REQUIRE(static_accessors.unit.source.find("gdpp::runtime::begin_coroutine(nullptr)") !=
+            std::string::npos);
+    REQUIRE(static_accessors.unit.source.find(
+                "GDPPNative_StaticCoroutineProperty::_gdpp_set_value(") != std::string::npos);
+    REQUIRE(static_accessors.unit.source.find(
+                "GDPPNative_StaticCoroutineProperty::_gdpp_get_value()") != std::string::npos);
+    REQUIRE(static_accessors.unit.source.find(
+                "godot::StringName(\"GDPPNative_StaticCoroutineProperty\")::_gdpp_") ==
+            std::string::npos);
+}
+
+TEST_CASE("compiler isolates nested coroutine lambda continuation state") {
+    const gdpp::Compiler compiler;
+    const auto result =
+        compiler.compile("nested_coroutine_lambda.gd", "extends Node\n"
+                                                       "signal resumed(value)\n"
+                                                       "func run() -> int:\n"
+                                                       "    await resumed\n"
+                                                       "    var capture := func() -> int:\n"
+                                                       "        return await resumed\n"
+                                                       "    return await capture.call()\n");
+
+    REQUIRE(result.success);
+    const auto lambda_state = result.unit.source.find("const auto _gdpp_lambda_coroutine_state_");
+    REQUIRE(lambda_state != std::string::npos);
+    const auto lambda_end = result.unit.source.find("\n});", lambda_state);
+    REQUIRE(lambda_end != std::string::npos);
+    const auto lambda_source = result.unit.source.substr(lambda_state, lambda_end - lambda_state);
+    REQUIRE(lambda_source.find(
+                "return gdpp::runtime::coroutine_result(_gdpp_lambda_coroutine_state_") !=
+            std::string::npos);
 }
 
 TEST_CASE("compiler rejects invalid bound property accessor signatures") {
