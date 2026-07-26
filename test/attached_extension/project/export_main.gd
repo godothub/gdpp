@@ -84,6 +84,63 @@ func _verify_export_runtime() -> void:
         _fail("internal class coroutine lost its temporary owner or typed result")
         return
 
+    # No scene, preload, or constant references this script. It proves that binary-only exports
+    # preserve the source-path Script identity for paths computed entirely at runtime, including
+    # callers that use ResourceLoader directly instead of the global load() intrinsic.
+    var dynamic_path := "res://dynamic_" + "load_target.gd"
+    var threaded_error := ResourceLoader.load_threaded_request(dynamic_path, "Script", true)
+    if threaded_error != OK:
+        _fail("threaded dynamic compiled Script loading could not be scheduled")
+        return
+    var threaded_status := ResourceLoader.load_threaded_get_status(dynamic_path)
+    while threaded_status == ResourceLoader.THREAD_LOAD_IN_PROGRESS:
+        await get_tree().process_frame
+        threaded_status = ResourceLoader.load_threaded_get_status(dynamic_path)
+    if threaded_status != ResourceLoader.THREAD_LOAD_LOADED:
+        _fail("threaded dynamic compiled Script loading did not complete")
+        return
+    var dynamic_script: Variant = ResourceLoader.load_threaded_get(dynamic_path)
+    var relative_path := dynamic_path.trim_prefix("res://")
+    var relative_script: Variant = load(relative_path)
+    var statically_resolved_script: Variant = load("dynamic_" + "load_target.gd")
+    var resource_loader_script: Variant = ResourceLoader.load(dynamic_path)
+    var uid_script: Variant = ResourceLoader.load("uid://" + "34eqhh6l7jk6")
+    var dynamic_checks := {
+        "script_type": dynamic_script is Script,
+        "relative_identity": relative_script == dynamic_script,
+        "static_identity": statically_resolved_script == dynamic_script,
+        "resource_loader_identity": resource_loader_script == dynamic_script,
+        "uid_identity": uid_script == dynamic_script,
+        "exists": ResourceLoader.exists(dynamic_path, "Script"),
+        "missing_absent": not ResourceLoader.exists(
+            "res://missing_dynamic_script.gd",
+            "Script",
+        ),
+    }
+    if (
+        not dynamic_checks.script_type
+        or not dynamic_checks.relative_identity
+        or not dynamic_checks.static_identity
+        or not dynamic_checks.resource_loader_identity
+        or not dynamic_checks.uid_identity
+        or not dynamic_checks.exists
+        or not dynamic_checks.missing_absent
+    ):
+        _fail(
+            "dynamic compiled script loading lost path, UID, type, cache, or exists semantics: %s"
+            % [dynamic_checks],
+        )
+        return
+    var dynamic_instance: Variant = dynamic_script.new()
+    if (
+        dynamic_instance == null
+        or dynamic_instance.evaluate(2) != 42
+        or dynamic_instance.get_script() != dynamic_script
+    ):
+        _fail("dynamic compiled Script construction lost behavior or canonical identity")
+        return
+    print("GDPP_DYNAMIC_SCRIPT_RUNTIME_OK")
+
     var completion_order: Array[int] = []
     var concurrent_lambda := func(signal_value: Signal, value: int) -> int:
         await signal_value

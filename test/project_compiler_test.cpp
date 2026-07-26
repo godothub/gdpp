@@ -1611,6 +1611,12 @@ TEST_CASE("project compiler attaches scripts to third-party GDExtension instance
             std::string::npos);
     REQUIRE(registration.find("GDREGISTER_CLASS(gdpp::runtime::AttachedCompiledScript)") !=
             std::string::npos);
+    REQUIRE(registration.find("GDREGISTER_CLASS(gdpp::runtime::AttachedScriptResourceLoader)") !=
+            std::string::npos);
+    REQUIRE(registration.find("register_attached_script_resource_loader") != std::string::npos);
+    REQUIRE(registration.find("unregister_attached_script_resource_loader") != std::string::npos);
+    REQUIRE(registration.find("unregister_attached_script_resource_loader") <
+            registration.find("unregister_all_attached_scripts"));
     REQUIRE(registration.find("GDREGISTER_CLASS(gdpp::runtime::CoroutineFunctionState)") !=
             std::string::npos);
     REQUIRE(registration.find("GDREGISTER_CLASS(" + result.scripts.front().class_name + ")") !=
@@ -2831,6 +2837,9 @@ TEST_CASE("project compiler lowers cross-script constants enums and resource fac
             std::string::npos);
     REQUIRE(consumer_header.find("ScriptResource<GDPPNative_SharedValues_") != std::string::npos);
     REQUIRE(consumer_header.find("operator godot::Variant() const") != std::string::npos);
+    REQUIRE(consumer_header.find("attached_script_resource(") != std::string::npos);
+    REQUIRE(consumer_header.find("static_cast<const godot::Object *>(script.ptr())") !=
+            std::string::npos);
     REQUIRE(consumer_header.find("godot::StringName(T::get_class_static())") != std::string::npos);
     const auto consumer_source =
         read_text(options.output_directory / "generated/shared_consumer.gd.cpp");
