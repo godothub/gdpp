@@ -68,7 +68,7 @@ class CodeGenerator final {
 
   private:
     struct StatementSlice {
-        const std::vector<ir::Statement>* statements{nullptr};
+        const std::vector<typed::Statement>* statements{nullptr};
         std::size_t begin{0};
     };
 
@@ -85,35 +85,36 @@ class CodeGenerator final {
         Type type;
     };
 
-    [[nodiscard]] std::string emit_expression(const ir::Expression& expression) const;
-    [[nodiscard]] std::string emit_integer_binary(const ir::Expression& expression) const;
+    [[nodiscard]] std::string emit_expression(const typed::Expression& expression) const;
+    [[nodiscard]] std::string emit_integer_binary(const typed::Expression& expression) const;
     [[nodiscard]] std::string emit_integer_operation(std::string_view operation,
                                                      std::string left_value,
                                                      std::string right_value,
                                                      const Type& result_type,
                                                      const SourceSpan& span) const;
     [[nodiscard]] static std::string script_location(const SourceSpan& span);
-    [[nodiscard]] std::string emit_truthy(const ir::Expression& expression) const;
+    [[nodiscard]] std::string emit_truthy(const typed::Expression& expression) const;
     [[nodiscard]] std::string emit_conversion(const Type& target, const Type& source,
                                               std::string value,
                                               const SourceSpan* source_span = nullptr) const;
     [[nodiscard]] std::string emit_explicit_conversion(const Type& target, const Type& source,
                                                        std::string value) const;
-    [[nodiscard]] std::string emit_parameter_default(const ir::Parameter& parameter) const;
-    [[nodiscard]] std::string parameter_native_type(const ir::Parameter& parameter) const;
-    [[nodiscard]] std::string parameter_native_name(const ir::Parameter& parameter) const;
+    [[nodiscard]] std::string emit_parameter_default(const typed::Parameter& parameter) const;
+    [[nodiscard]] std::string parameter_native_type(const typed::Parameter& parameter) const;
+    [[nodiscard]] std::string parameter_native_name(const typed::Parameter& parameter) const;
     [[nodiscard]] std::string
-    emit_parameter_default_initializers(const std::vector<ir::Parameter>& parameters,
+    emit_parameter_default_initializers(const std::vector<typed::Parameter>& parameters,
                                         std::size_t indent) const;
     [[nodiscard]] std::string
-    emit_bound_parameter_defaults(const std::vector<ir::Parameter>& parameters) const;
-    [[nodiscard]] static std::string method_callback_name(const ir::Function& function);
-    [[nodiscard]] std::string emit_method_callback_declaration(const ir::Function& function) const;
+    emit_bound_parameter_defaults(const std::vector<typed::Parameter>& parameters) const;
+    [[nodiscard]] static std::string method_callback_name(const typed::Function& function);
     [[nodiscard]] std::string
-    emit_method_callback_definition(const ir::Function& function, std::string_view native_class,
+    emit_method_callback_declaration(const typed::Function& function) const;
+    [[nodiscard]] std::string
+    emit_method_callback_definition(const typed::Function& function, std::string_view native_class,
                                     std::string_view native_method,
                                     std::string_view native_return_type) const;
-    [[nodiscard]] std::string emit_method_registration(const ir::Function& function,
+    [[nodiscard]] std::string emit_method_registration(const typed::Function& function,
                                                        std::string_view native_class,
                                                        std::string_view native_return_type) const;
     [[nodiscard]] std::string emit_api_argument(std::string_view api_type,
@@ -132,40 +133,40 @@ class CodeGenerator final {
                                                              std::string object,
                                                              std::string_view member,
                                                              std::string value) const;
-    [[nodiscard]] std::string emit_dynamic_assignment(const ir::Statement& statement,
+    [[nodiscard]] std::string emit_dynamic_assignment(const typed::Statement& statement,
                                                       std::size_t indent) const;
-    [[nodiscard]] std::string emit_dictionary_member_assignment(const ir::Statement& statement,
+    [[nodiscard]] std::string emit_dictionary_member_assignment(const typed::Statement& statement,
                                                                 std::size_t indent) const;
-    void collect_match_bindings(const ir::MatchPattern& pattern,
+    void collect_match_bindings(const typed::MatchPattern& pattern,
                                 std::vector<MatchBinding>& bindings) const;
-    [[nodiscard]] std::string emit_match_pattern(const ir::MatchPattern& pattern,
+    [[nodiscard]] std::string emit_match_pattern(const typed::MatchPattern& pattern,
                                                  const std::string& candidate,
                                                  const std::vector<MatchBinding>& bindings) const;
-    [[nodiscard]] std::string emit_statement(const ir::Statement& statement,
+    [[nodiscard]] std::string emit_statement(const typed::Statement& statement,
                                              std::size_t indent) const;
-    [[nodiscard]] std::string emit_statement_body(const ir::Statement& statement,
+    [[nodiscard]] std::string emit_statement_body(const typed::Statement& statement,
                                                   std::size_t indent) const;
     [[nodiscard]] std::string emit_debug_frame(std::size_t line, std::size_t indent) const;
     [[nodiscard]] std::string emit_debug_line(std::size_t line, std::size_t indent) const;
-    [[nodiscard]] std::string emit_debug_breakpoint(const ir::Statement& statement,
+    [[nodiscard]] std::string emit_debug_breakpoint(const typed::Statement& statement,
                                                     std::size_t indent) const;
-    [[nodiscard]] std::string emit_statements(const std::vector<ir::Statement>& statements,
+    [[nodiscard]] std::string emit_statements(const std::vector<typed::Statement>& statements,
                                               std::size_t indent, std::size_t begin = 0) const;
     [[nodiscard]] std::string
-    emit_async_statements(const std::vector<ir::Statement>& statements, std::size_t indent,
+    emit_async_statements(const std::vector<typed::Statement>& statements, std::size_t indent,
                           std::size_t begin, std::vector<StatementSlice> tails,
                           const std::string& terminal, bool continuation_context,
                           std::shared_ptr<const AsyncLoopControl> loop_control = {}) const;
     [[nodiscard]] std::string
-    emit_async_match_branch(const ir::Statement& branch, std::size_t next_branch,
+    emit_async_match_branch(const typed::Statement& branch, std::size_t next_branch,
                             std::size_t after_branch, const std::string& value_name,
                             const std::string& keep_alive, std::size_t indent,
                             std::shared_ptr<const AsyncLoopControl> loop_control) const;
-    [[nodiscard]] std::string emit_assert_failure(const ir::Statement& statement,
+    [[nodiscard]] std::string emit_assert_failure(const typed::Statement& statement,
                                                   std::size_t indent,
                                                   bool continuation_context) const;
-    [[nodiscard]] bool statement_contains_await(const ir::Statement& statement) const noexcept;
-    [[nodiscard]] static bool await_can_suspend(const ir::Statement& statement) noexcept;
+    [[nodiscard]] bool statement_contains_await(const typed::Statement& statement) const noexcept;
+    [[nodiscard]] static bool await_can_suspend(const typed::Statement& statement) noexcept;
     [[nodiscard]] std::string async_return(std::size_t indent, bool continuation_context) const;
     [[nodiscard]] std::string coroutine_return(std::size_t indent, std::string value,
                                                bool continuation_context) const;
@@ -173,14 +174,14 @@ class CodeGenerator final {
                                                          bool inherit_existing = false) const;
     [[nodiscard]] std::string emit_script_failure_return(std::size_t indent,
                                                          bool continuation_context) const;
-    [[nodiscard]] std::string emit_suspension_lifetime(const ir::Statement& statement,
+    [[nodiscard]] std::string emit_suspension_lifetime(const typed::Statement& statement,
                                                        std::size_t indent) const;
-    [[nodiscard]] bool can_emit_flat_async(const ir::Function& function,
-                                           const mir::Function& mir_function) const noexcept;
-    [[nodiscard]] std::string emit_flat_async(const ir::Function& source,
-                                              const mir::Function& function,
+    [[nodiscard]] bool can_emit_flat_async(const typed::Function& function,
+                                           const mir::ControlFlowFunction& mir_function) const;
+    [[nodiscard]] std::string emit_flat_async(const typed::Function& source,
+                                              const mir::ControlFlowFunction& function,
                                               std::size_t indent) const;
-    [[nodiscard]] std::string lift_async_loop_locals(const ir::Statement& statement,
+    [[nodiscard]] std::string lift_async_loop_locals(const typed::Statement& statement,
                                                      std::size_t indent) const;
     [[nodiscard]] std::string cpp_type(const Type& type) const;
     [[nodiscard]] std::string native_default_value(const Type& type) const;
@@ -219,11 +220,11 @@ class CodeGenerator final {
                                               std::string_view derived_godot_base,
                                               const ScriptMemberSymbol& base,
                                               std::string_view base_godot_base) const;
-    [[nodiscard]] bool same_native_function_abi(const ir::Function& derived,
+    [[nodiscard]] bool same_native_function_abi(const typed::Function& derived,
                                                 std::string_view derived_godot_base,
-                                                const ir::Function& base,
+                                                const typed::Function& base,
                                                 std::string_view base_godot_base) const;
-    [[nodiscard]] const ir::Function*
+    [[nodiscard]] const typed::Function*
     find_inherited_inner_function(std::string_view base, std::string_view method,
                                   std::string* declaration_owner = nullptr) const noexcept;
     [[nodiscard]] std::string script_method_native_name(const ScriptClassSymbol& owner,
@@ -243,21 +244,21 @@ class CodeGenerator final {
                                      const ScriptMemberSymbol& method) const;
     [[nodiscard]] bool inner_overrides_method(const ScriptInnerClassSymbol& owner,
                                               const ScriptMemberSymbol& method) const;
-    [[nodiscard]] bool managed_constant_field(const ir::Field& field) const;
-    [[nodiscard]] bool managed_constant_reference(const ir::Expression& expression) const;
-    void emit_inner_class_declaration(const ir::Class& declaration, std::ostringstream& header,
+    [[nodiscard]] bool managed_constant_field(const typed::Field& field) const;
+    [[nodiscard]] bool managed_constant_reference(const typed::Expression& expression) const;
+    void emit_inner_class_declaration(const typed::Class& declaration, std::ostringstream& header,
                                       const std::string& native_name,
                                       const std::string& source_name, bool tool_mode) const;
-    void emit_inner_class_definition(const ir::Class& declaration, std::ostringstream& source,
+    void emit_inner_class_definition(const typed::Class& declaration, std::ostringstream& source,
                                      const std::string& native_name, const std::string& source_name,
                                      bool tool_mode) const;
     void emit_attached_descriptor_definition(
         std::ostringstream& source, const std::string& native_name, const std::string& source_path,
         const std::string& global_name, const std::string& native_base_type,
         const std::string& base_script_path, const std::string& contract_hash, bool tool_mode,
-        bool is_abstract, const std::vector<ir::Field>& fields,
-        const std::vector<ir::Function>& functions, const std::vector<ir::Signal>& signals,
-        const std::vector<ir::Enum>& enums) const;
+        bool is_abstract, const std::vector<typed::Field>& fields,
+        const std::vector<typed::Function>& functions, const std::vector<typed::Signal>& signals,
+        const std::vector<typed::Enum>& enums) const;
     [[nodiscard]] static std::string sanitize_identifier(const std::string& value);
     [[nodiscard]] static std::string sanitize_qualified_identifier(std::string_view value);
     [[nodiscard]] static std::string enum_identifier(const std::string& value);
@@ -282,14 +283,14 @@ class CodeGenerator final {
     mutable std::unordered_map<std::string, std::string> inner_godot_base_types_;
     mutable std::unordered_map<std::string, std::string> inner_attached_native_base_types_;
     mutable std::unordered_map<std::string, std::string> inner_base_names_;
-    mutable std::unordered_map<std::string, const ir::Class*> inner_declarations_;
+    mutable std::unordered_map<std::string, const typed::Class*> inner_declarations_;
     mutable std::unordered_set<std::string> inner_ref_types_;
     mutable std::unordered_set<std::string> container_enum_types_;
     mutable std::unordered_map<std::string, std::vector<Type>> local_function_parameters_;
-    mutable std::unordered_map<std::string, const ir::Function*> local_functions_;
-    mutable std::unordered_map<std::string, const ir::Function*> constructor_functions_;
+    mutable std::unordered_map<std::string, const typed::Function*> local_functions_;
+    mutable std::unordered_map<std::string, const typed::Function*> constructor_functions_;
     mutable std::unordered_map<FlowSymbolId, std::string> local_expression_overrides_;
-    mutable std::unordered_map<const ir::Expression*, std::string> exact_expression_overrides_;
+    mutable std::unordered_map<const typed::Expression*, std::string> exact_expression_overrides_;
     mutable bool lowering_assignment_{false};
     mutable std::string current_debug_source_;
     mutable std::string current_debug_function_;

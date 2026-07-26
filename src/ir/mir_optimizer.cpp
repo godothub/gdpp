@@ -7,9 +7,10 @@
 namespace gdpp {
 namespace {
 
-std::optional<bool> constant_branch_value(const mir::Terminator& terminator) {
-    if (terminator.kind != mir::TerminatorKind::branch || !terminator.condition ||
-        terminator.targets.size() != 2) {
+std::optional<bool> constant_branch_value(const mir::ControlFlowFunction& function,
+                                          const mir::Terminator& terminator) {
+    if (terminator.kind != mir::TerminatorKind::branch || terminator.targets.size() != 2 ||
+        terminator.condition_value >= function.values.size()) {
         return std::nullopt;
     }
     switch (terminator.branch_role) {
@@ -22,15 +23,15 @@ std::optional<bool> constant_branch_value(const mir::Terminator& terminator) {
     case mir::BranchRole::match_pattern:
         return std::nullopt;
     }
-    const auto& expression = *terminator.condition;
-    if (expression.kind != ir::ExpressionKind::literal ||
-        expression.literal_kind != ir::LiteralKind::boolean) {
+    const auto& value = function.values[terminator.condition_value];
+    if (value.kind != typed::ExpressionKind::literal ||
+        value.literal_kind != typed::LiteralKind::boolean) {
         return std::nullopt;
     }
-    return expression.value == "true";
+    return value.payload == "true";
 }
 
-void rebuild_predecessors(mir::Function& function) {
+void rebuild_predecessors(mir::ControlFlowFunction& function) {
     for (auto& block : function.blocks)
         block.predecessors.clear();
     for (const auto& block : function.blocks) {
@@ -46,7 +47,7 @@ void rebuild_predecessors(mir::Function& function) {
     }
 }
 
-void rebuild_operation_ids(mir::Function& function) {
+void rebuild_operation_ids(mir::ControlFlowFunction& function) {
     mir::OperationId next{0};
     for (auto& block : function.blocks) {
         for (auto& instruction : block.instructions)
@@ -55,7 +56,7 @@ void rebuild_operation_ids(mir::Function& function) {
     }
 }
 
-void prune_unreachable(mir::Function& function, MirOptimizationStats& stats) {
+void prune_unreachable(mir::ControlFlowFunction& function, MirOptimizationStats& stats) {
     std::vector<bool> reachable(function.blocks.size(), false);
     std::vector<mir::BlockId> worklist{function.entry};
     while (!worklist.empty()) {
@@ -101,12 +102,11 @@ MirOptimizationStats MirOptimizer::optimize(mir::Module& module) const {
     MirOptimizationStats stats;
     for (auto& function : module.functions) {
         for (auto& block : function.blocks) {
-            const auto value = constant_branch_value(block.terminator);
+            const auto value = constant_branch_value(function, block.terminator);
             if (!value)
                 continue;
             const auto target = block.terminator.targets[*value ? 0U : 1U];
             block.terminator.kind = mir::TerminatorKind::jump;
-            block.terminator.condition = nullptr;
             block.terminator.condition_value = mir::invalid_value;
             block.terminator.targets = {target};
             block.terminator.branch_role = mir::BranchRole::none;

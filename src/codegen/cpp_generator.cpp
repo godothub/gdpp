@@ -37,10 +37,10 @@ std::string indent_block(const std::size_t level, std::string_view block) {
     return result;
 }
 
-bool contains_preload(const ir::Expression& expression) {
-    if (expression.kind == ir::ExpressionKind::call && !expression.operands.empty()) {
+bool contains_preload(const typed::Expression& expression) {
+    if (expression.kind == typed::ExpressionKind::call && !expression.operands.empty()) {
         const auto& callee = *expression.operands.front();
-        if (callee.resolution == ir::ResolutionKind::intrinsic &&
+        if (callee.resolution == typed::ResolutionKind::intrinsic &&
             callee.intrinsic == IntrinsicKind::preload) {
             return true;
         }
@@ -49,19 +49,19 @@ bool contains_preload(const ir::Expression& expression) {
                        [](const auto& operand) { return contains_preload(*operand); });
 }
 
-bool cached_preload_field(const ir::Field& field) {
+bool cached_preload_field(const typed::Field& field) {
     // Static fields and constants already own class-lifetime transactional storage. Only instance
     // fields need a separate class-level preload cache before their per-instance assignment.
     return !field.is_constant && !field.is_static && !field.onready && field.initializer &&
            contains_preload(*field.initializer);
 }
 
-bool requires_static_initialization(const std::vector<ir::Field>& fields,
-                                    const std::vector<ir::Function>& functions) {
+bool requires_static_initialization(const std::vector<typed::Field>& fields,
+                                    const std::vector<typed::Function>& functions) {
     return std::any_of(
                fields.begin(), fields.end(),
-               [](const ir::Field& field) { return !field.is_constant && field.is_static; }) ||
-           std::any_of(functions.begin(), functions.end(), [](const ir::Function& function) {
+               [](const typed::Field& field) { return !field.is_constant && field.is_static; }) ||
+           std::any_of(functions.begin(), functions.end(), [](const typed::Function& function) {
                return function.name == "_static_init";
            });
 }
@@ -76,7 +76,7 @@ bool managed_static_constant(const Type& type) {
     return true;
 }
 
-bool editor_safe_initializer(const ir::Expression& expression) {
+bool editor_safe_initializer(const typed::Expression& expression) {
     const auto all_operands_are_safe = [&expression](std::size_t begin = 0) {
         return std::all_of(expression.operands.begin() + static_cast<std::ptrdiff_t>(begin),
                            expression.operands.end(),
@@ -84,69 +84,70 @@ bool editor_safe_initializer(const ir::Expression& expression) {
     };
 
     switch (expression.kind) {
-    case ir::ExpressionKind::literal:
+    case typed::ExpressionKind::literal:
         return true;
-    case ir::ExpressionKind::identifier:
-        return expression.resolution == ir::ResolutionKind::godot_type ||
-               expression.resolution == ir::ResolutionKind::global_constant ||
-               expression.resolution == ir::ResolutionKind::global_enum_type ||
-               expression.resolution == ir::ResolutionKind::global_enum_value ||
-               expression.resolution == ir::ResolutionKind::builtin_constant ||
-               expression.resolution == ir::ResolutionKind::enum_member;
-    case ir::ExpressionKind::unary:
-    case ir::ExpressionKind::await_expression:
-    case ir::ExpressionKind::binary:
-    case ir::ExpressionKind::subscript:
-    case ir::ExpressionKind::conditional:
-    case ir::ExpressionKind::array_literal:
-    case ir::ExpressionKind::dictionary_literal:
+    case typed::ExpressionKind::identifier:
+        return expression.resolution == typed::ResolutionKind::godot_type ||
+               expression.resolution == typed::ResolutionKind::global_constant ||
+               expression.resolution == typed::ResolutionKind::global_enum_type ||
+               expression.resolution == typed::ResolutionKind::global_enum_value ||
+               expression.resolution == typed::ResolutionKind::builtin_constant ||
+               expression.resolution == typed::ResolutionKind::enum_member;
+    case typed::ExpressionKind::unary:
+    case typed::ExpressionKind::await_expression:
+    case typed::ExpressionKind::binary:
+    case typed::ExpressionKind::subscript:
+    case typed::ExpressionKind::conditional:
+    case typed::ExpressionKind::array_literal:
+    case typed::ExpressionKind::dictionary_literal:
         return all_operands_are_safe();
-    case ir::ExpressionKind::member:
-        return (expression.resolution == ir::ResolutionKind::global_constant ||
-                expression.resolution == ir::ResolutionKind::global_enum_type ||
-                expression.resolution == ir::ResolutionKind::global_enum_value ||
-                expression.resolution == ir::ResolutionKind::builtin_constant ||
-                expression.resolution == ir::ResolutionKind::enum_member) &&
+    case typed::ExpressionKind::member:
+        return (expression.resolution == typed::ResolutionKind::global_constant ||
+                expression.resolution == typed::ResolutionKind::global_enum_type ||
+                expression.resolution == typed::ResolutionKind::global_enum_value ||
+                expression.resolution == typed::ResolutionKind::builtin_constant ||
+                expression.resolution == typed::ResolutionKind::enum_member) &&
                all_operands_are_safe();
-    case ir::ExpressionKind::call:
+    case typed::ExpressionKind::call:
         // Value-type constructors such as Vector2(...) and Color(...) are pure.
         // Object constructors, utility functions, methods, preload/load, and
         // customer callables may touch the SceneTree or external services.
         return !expression.operands.empty() &&
-               expression.operands.front()->resolution == ir::ResolutionKind::godot_constructor &&
+               expression.operands.front()->resolution ==
+                   typed::ResolutionKind::godot_constructor &&
                expression.type.kind != TypeKind::object && all_operands_are_safe(1);
-    case ir::ExpressionKind::node_reference:
-    case ir::ExpressionKind::lambda:
+    case typed::ExpressionKind::node_reference:
+    case typed::ExpressionKind::lambda:
         return false;
     }
     return false;
 }
 
-const ir::Expression* range_call(const ir::Expression& expression) {
-    if (expression.kind != ir::ExpressionKind::call || expression.operands.size() < 2 ||
+const typed::Expression* range_call(const typed::Expression& expression) {
+    if (expression.kind != typed::ExpressionKind::call || expression.operands.size() < 2 ||
         expression.operands.size() > 4) {
         return nullptr;
     }
     const auto& callee = *expression.operands.front();
-    return callee.resolution == ir::ResolutionKind::intrinsic &&
+    return callee.resolution == typed::ResolutionKind::intrinsic &&
                    callee.intrinsic == IntrinsicKind::range
                ? &expression
                : nullptr;
 }
 
-bool requires_native_fallback(const std::vector<ir::Statement>& statements) {
+bool requires_native_fallback(const std::vector<typed::Statement>& statements) {
     // Match currently lowers to guarded branches plus a matched sentinel. Even an
     // exhaustive catch-all is therefore not provably exhaustive to a C++ compiler.
     // Semantic analysis has already guaranteed that this fallback is unreachable.
-    return !statements.empty() && statements.back().kind == ir::StatementKind::match_statement;
+    return !statements.empty() && statements.back().kind == typed::StatementKind::match_statement;
 }
 
-bool contains_current_loop_break(const std::vector<ir::Statement>& statements) {
+bool contains_current_loop_break(const std::vector<typed::Statement>& statements) {
     for (const auto& statement : statements) {
-        if (statement.kind == ir::StatementKind::break_statement)
+        if (statement.kind == typed::StatementKind::break_statement)
             return true;
-        if (statement.kind == ir::StatementKind::while_statement ||
-            statement.kind == ir::StatementKind::for_statement)
+        if (statement.kind == typed::StatementKind::while_statement ||
+            statement.kind == typed::StatementKind::for_statement)
             continue;
         if (contains_current_loop_break(statement.body) ||
             contains_current_loop_break(statement.else_body))
@@ -155,13 +156,13 @@ bool contains_current_loop_break(const std::vector<ir::Statement>& statements) {
     return false;
 }
 
-bool contains_current_loop_control(const ir::Statement& statement) {
-    if (statement.kind == ir::StatementKind::break_statement ||
-        statement.kind == ir::StatementKind::continue_statement) {
+bool contains_current_loop_control(const typed::Statement& statement) {
+    if (statement.kind == typed::StatementKind::break_statement ||
+        statement.kind == typed::StatementKind::continue_statement) {
         return true;
     }
-    if (statement.kind == ir::StatementKind::while_statement ||
-        statement.kind == ir::StatementKind::for_statement) {
+    if (statement.kind == typed::StatementKind::while_statement ||
+        statement.kind == typed::StatementKind::for_statement) {
         return false;
     }
     return std::any_of(statement.body.begin(), statement.body.end(),
@@ -181,20 +182,20 @@ struct AsyncLocalSymbol final {
     Type type;
 };
 
-void collect_match_declarations(const ir::MatchPattern& pattern,
+void collect_match_declarations(const typed::MatchPattern& pattern,
                                 std::unordered_set<FlowSymbolId>& symbols) {
-    if (pattern.kind == ir::MatchPatternKind::binding && pattern.symbol_identity != 0)
+    if (pattern.kind == typed::MatchPatternKind::binding && pattern.symbol_identity != 0)
         symbols.insert(pattern.symbol_identity);
     for (const auto& child : pattern.elements)
         collect_match_declarations(child, symbols);
 }
 
-void collect_declared_symbols(const std::vector<ir::Statement>& statements,
+void collect_declared_symbols(const std::vector<typed::Statement>& statements,
                               std::unordered_set<FlowSymbolId>& symbols) {
     for (const auto& statement : statements) {
-        if (statement.kind == ir::StatementKind::variable ||
-            statement.kind == ir::StatementKind::await_variable ||
-            statement.kind == ir::StatementKind::for_statement) {
+        if (statement.kind == typed::StatementKind::variable ||
+            statement.kind == typed::StatementKind::await_variable ||
+            statement.kind == typed::StatementKind::for_statement) {
             if (statement.symbol_identity != 0)
                 symbols.insert(statement.symbol_identity);
         }
@@ -208,12 +209,12 @@ void collect_declared_symbols(const std::vector<ir::Statement>& statements,
     }
 }
 
-void collect_assigned_symbols(const std::vector<ir::Statement>& statements,
+void collect_assigned_symbols(const std::vector<typed::Statement>& statements,
                               std::unordered_map<FlowSymbolId, AsyncLocalSymbol>& symbols) {
     for (const auto& statement : statements) {
-        if (statement.kind == ir::StatementKind::assignment && statement.condition &&
-            statement.condition->kind == ir::ExpressionKind::identifier &&
-            statement.condition->resolution == ir::ResolutionKind::none &&
+        if (statement.kind == typed::StatementKind::assignment && statement.condition &&
+            statement.condition->kind == typed::ExpressionKind::identifier &&
+            statement.condition->resolution == typed::ResolutionKind::none &&
             statement.condition->symbol_identity != 0) {
             const auto& target = *statement.condition;
             symbols.try_emplace(target.symbol_identity,
@@ -232,52 +233,52 @@ void collect_assigned_symbols(const std::vector<ir::Statement>& statements,
     }
 }
 
-bool native_statements_fall_through(const std::vector<ir::Statement>& statements);
+bool native_statements_fall_through(const std::vector<typed::Statement>& statements);
 
-bool flat_async_statement_supported(const ir::Statement& statement) {
+bool flat_async_statement_supported(const typed::Statement& statement) {
     switch (statement.kind) {
-    case ir::StatementKind::expression:
-    case ir::StatementKind::assignment:
-    case ir::StatementKind::await_statement:
-    case ir::StatementKind::pass_statement:
-    case ir::StatementKind::breakpoint_statement:
+    case typed::StatementKind::expression:
+    case typed::StatementKind::assignment:
+    case typed::StatementKind::await_statement:
+    case typed::StatementKind::pass_statement:
+    case typed::StatementKind::breakpoint_statement:
         break;
-    case ir::StatementKind::assert_statement:
+    case typed::StatementKind::assert_statement:
         return statement.assert_condition_prefix.empty() && statement.assert_message_prefix.empty();
-    case ir::StatementKind::if_statement:
+    case typed::StatementKind::if_statement:
         return std::all_of(statement.body.begin(), statement.body.end(),
                            flat_async_statement_supported) &&
                std::all_of(statement.else_body.begin(), statement.else_body.end(),
                            flat_async_statement_supported);
-    case ir::StatementKind::return_statement:
-    case ir::StatementKind::await_variable:
-    case ir::StatementKind::variable:
-    case ir::StatementKind::for_statement:
-    case ir::StatementKind::while_statement:
-    case ir::StatementKind::match_statement:
-    case ir::StatementKind::match_branch:
-    case ir::StatementKind::break_statement:
-    case ir::StatementKind::continue_statement:
+    case typed::StatementKind::return_statement:
+    case typed::StatementKind::await_variable:
+    case typed::StatementKind::variable:
+    case typed::StatementKind::for_statement:
+    case typed::StatementKind::while_statement:
+    case typed::StatementKind::match_statement:
+    case typed::StatementKind::match_branch:
+    case typed::StatementKind::break_statement:
+    case typed::StatementKind::continue_statement:
         return false;
     }
     return statement.body.empty() && statement.else_body.empty();
 }
 
-bool native_statement_falls_through(const ir::Statement& statement) {
+bool native_statement_falls_through(const typed::Statement& statement) {
     switch (statement.kind) {
-    case ir::StatementKind::return_statement:
-    case ir::StatementKind::break_statement:
-    case ir::StatementKind::continue_statement:
+    case typed::StatementKind::return_statement:
+    case typed::StatementKind::break_statement:
+    case typed::StatementKind::continue_statement:
         return false;
-    case ir::StatementKind::if_statement:
+    case typed::StatementKind::if_statement:
         return statement.else_body.empty() || native_statements_fall_through(statement.body) ||
                native_statements_fall_through(statement.else_body);
-    case ir::StatementKind::match_statement:
+    case typed::StatementKind::match_statement:
         // The sentinel-based native lowering is conservatively fall-through to C++.
         return true;
-    case ir::StatementKind::while_statement:
-        if (statement.condition && statement.condition->kind == ir::ExpressionKind::literal &&
-            statement.condition->literal_kind == ir::LiteralKind::boolean &&
+    case typed::StatementKind::while_statement:
+        if (statement.condition && statement.condition->kind == typed::ExpressionKind::literal &&
+            statement.condition->literal_kind == typed::LiteralKind::boolean &&
             statement.condition->value == "true" && !contains_current_loop_break(statement.body))
             return false;
         return true;
@@ -286,7 +287,7 @@ bool native_statement_falls_through(const ir::Statement& statement) {
     }
 }
 
-bool native_statements_fall_through(const std::vector<ir::Statement>& statements) {
+bool native_statements_fall_through(const std::vector<typed::Statement>& statements) {
     bool falls_through = true;
     for (const auto& statement : statements) {
         if (!falls_through)
@@ -370,24 +371,25 @@ std::string godot_string_name(const std::string& value) {
     return "godot::StringName(" + godot_text_argument(value) + ")";
 }
 
-bool has_rpc_configuration(const std::vector<ir::Function>& functions) {
+bool has_rpc_configuration(const std::vector<typed::Function>& functions) {
     return std::any_of(functions.begin(), functions.end(),
-                       [](const ir::Function& function) { return function.rpc.has_value(); });
+                       [](const typed::Function& function) { return function.rpc.has_value(); });
 }
 
-bool has_rpc_configuration(const ir::Class& declaration) {
+bool has_rpc_configuration(const typed::Class& declaration) {
     return has_rpc_configuration(declaration.functions) ||
            std::any_of(declaration.classes.begin(), declaration.classes.end(),
-                       [](const ir::Class& nested) { return has_rpc_configuration(nested); });
+                       [](const typed::Class& nested) { return has_rpc_configuration(nested); });
 }
 
-bool has_rpc_configuration(const ir::Module& module) {
+bool has_rpc_configuration(const typed::Module& module) {
     return has_rpc_configuration(module.functions) ||
            std::any_of(module.classes.begin(), module.classes.end(),
-                       [](const ir::Class& nested) { return has_rpc_configuration(nested); });
+                       [](const typed::Class& nested) { return has_rpc_configuration(nested); });
 }
 
-void emit_rpc_configurations(std::ostringstream& source, const std::vector<ir::Function>& functions,
+void emit_rpc_configurations(std::ostringstream& source,
+                             const std::vector<typed::Function>& functions,
                              const std::size_t indentation) {
     const auto prefix = indent(indentation);
     for (const auto& function : functions) {
@@ -543,16 +545,16 @@ void collect_type(const Type& type, NativeTypeIncludes& includes, const GodotApi
         includes.script_resources.insert(type.name);
 }
 
-void collect_statement_types(const ir::Statement& statement, NativeTypeIncludes& includes,
+void collect_statement_types(const typed::Statement& statement, NativeTypeIncludes& includes,
                              const GodotApi& api, const ScriptSymbolTable* script_symbols);
 
-void collect_header_expression_dependencies(const ir::Expression& expression,
+void collect_header_expression_dependencies(const typed::Expression& expression,
                                             NativeTypeIncludes& includes) {
-    if (expression.resolution == ir::ResolutionKind::script_type &&
+    if (expression.resolution == typed::ResolutionKind::script_type &&
         expression.type.kind == TypeKind::object) {
         includes.complete_scripts.insert(expression.type.name);
     }
-    if (expression.resolution == ir::ResolutionKind::script_resource &&
+    if (expression.resolution == typed::ResolutionKind::script_resource &&
         expression.type.kind == TypeKind::script_resource) {
         includes.complete_script_resources.insert(expression.type.name);
     }
@@ -572,7 +574,7 @@ void collect_header_expression_dependencies(const ir::Expression& expression,
     }
 }
 
-void collect_expression_types(const ir::Expression& expression, NativeTypeIncludes& includes,
+void collect_expression_types(const typed::Expression& expression, NativeTypeIncludes& includes,
                               const GodotApi& api, const ScriptSymbolTable* script_symbols) {
     collect_type(expression.type, includes, api, script_symbols);
     collect_type(expression.storage_type, includes, api, script_symbols);
@@ -583,7 +585,8 @@ void collect_expression_types(const ir::Expression& expression, NativeTypeInclud
     // A GDScript property can intentionally publish a broader type than its native getter. For
     // example, SceneTree.root is a Node property while godot-cpp returns Window*. Include the
     // concrete getter result so C++ can see the inheritance needed for the implicit upcast.
-    if (expression.resolution == ir::ResolutionKind::godot_property && !expression.getter.empty()) {
+    if (expression.resolution == typed::ResolutionKind::godot_property &&
+        !expression.getter.empty()) {
         if (const auto* getter = api.find_method(expression.resolved_owner, expression.getter)) {
             if (std::string_view{getter->return_type}.size() != 0) {
                 collect_type(type_from_godot_api(getter->return_type), includes, api,
@@ -591,14 +594,14 @@ void collect_expression_types(const ir::Expression& expression, NativeTypeInclud
             }
         }
     }
-    if ((expression.resolution == ir::ResolutionKind::script_autoload ||
-         expression.resolution == ir::ResolutionKind::script_type) &&
+    if ((expression.resolution == typed::ResolutionKind::script_autoload ||
+         expression.resolution == typed::ResolutionKind::script_type) &&
         !expression.resolved_owner.empty()) {
         includes.resolved_native_scripts.insert(expression.resolved_owner);
     }
-    if (expression.kind == ir::ExpressionKind::call && !expression.operands.empty()) {
+    if (expression.kind == typed::ExpressionKind::call && !expression.operands.empty()) {
         const auto& callee = *expression.operands.front();
-        if (callee.resolution == ir::ResolutionKind::godot_method) {
+        if (callee.resolution == typed::ResolutionKind::godot_method) {
             if (const auto* method = api.find_method(callee.resolved_owner, callee.value)) {
                 const auto provided = expression.operands.size() - 1;
                 const auto count =
@@ -624,7 +627,7 @@ void collect_expression_types(const ir::Expression& expression, NativeTypeInclud
     }
 }
 
-void collect_statement_types(const ir::Statement& statement, NativeTypeIncludes& includes,
+void collect_statement_types(const typed::Statement& statement, NativeTypeIncludes& includes,
                              const GodotApi& api, const ScriptSymbolTable* script_symbols) {
     collect_type(statement.declared_type, includes, api, script_symbols);
     if (statement.expression)
@@ -643,7 +646,7 @@ void collect_statement_types(const ir::Statement& statement, NativeTypeIncludes&
         collect_statement_types(child, includes, api, script_symbols);
 }
 
-void collect_class_types(const ir::Class& declaration, NativeTypeIncludes& includes,
+void collect_class_types(const typed::Class& declaration, NativeTypeIncludes& includes,
                          const GodotApi& api, const ScriptSymbolTable* script_symbols) {
     collect_type({TypeKind::object, declaration.base_type}, includes, api, script_symbols);
     for (const auto& field : declaration.fields) {
@@ -674,7 +677,7 @@ void collect_class_types(const ir::Class& declaration, NativeTypeIncludes& inclu
         collect_class_types(inner, includes, api, script_symbols);
 }
 
-NativeTypeIncludes collect_native_types(const ir::Module& module, const GodotApi& api,
+NativeTypeIncludes collect_native_types(const typed::Module& module, const GodotApi& api,
                                         const ScriptSymbolTable* script_symbols) {
     NativeTypeIncludes includes;
     for (const auto& field : module.fields) {
@@ -774,7 +777,7 @@ std::string variant_type(const Type& type) {
     }
 }
 
-std::string property_hint(const ir::Field& field, const GodotApi& api,
+std::string property_hint(const typed::Field& field, const GodotApi& api,
                           const ScriptSymbolTable* script_symbols) {
     if (!field.property)
         return {};
@@ -859,7 +862,8 @@ std::string property_hint(const ir::Field& field, const GodotApi& api,
     return {};
 }
 
-std::string property_hint_string(const ir::Field& field, const ScriptSymbolTable* script_symbols) {
+std::string property_hint_string(const typed::Field& field,
+                                 const ScriptSymbolTable* script_symbols) {
     if (!field.property)
         return {};
     if (field.property_type.kind == TypeKind::enumeration) {
@@ -937,7 +941,7 @@ std::string property_hint_string(const ir::Field& field, const ScriptSymbolTable
         if (!result.empty())
             result.push_back(',');
         auto value = argument.value;
-        if (argument.kind == ir::PropertyArgumentKind::number) {
+        if (argument.kind == typed::PropertyArgumentKind::number) {
             value.erase(std::remove(value.begin(), value.end(), '_'), value.end());
         }
         result += value;
@@ -945,7 +949,7 @@ std::string property_hint_string(const ir::Field& field, const ScriptSymbolTable
     return result;
 }
 
-bool is_bound_property(const ir::Field& field) {
+bool is_bound_property(const typed::Field& field) {
     // GDScript instance variables are always visible through Object.get/set,
     // even without @export or custom accessors. Generated native classes must
     // expose the same surface or cross-script expressions such as
@@ -955,7 +959,7 @@ bool is_bound_property(const ir::Field& field) {
     return !field.is_static && !field.is_constant;
 }
 
-std::string property_info(const ir::Field& field, const GodotApi& api,
+std::string property_info(const typed::Field& field, const GodotApi& api,
                           const ScriptSymbolTable* script_symbols, const std::string& native_type) {
     if (describe_container_type(field.property_type) &&
         (!field.property || field.property->name == "export" ||
@@ -1693,11 +1697,11 @@ bool CodeGenerator::same_native_method_abi(const ScriptMemberSymbol& derived,
     return true;
 }
 
-bool CodeGenerator::same_native_function_abi(const ir::Function& derived,
+bool CodeGenerator::same_native_function_abi(const typed::Function& derived,
                                              const std::string_view derived_godot_base,
-                                             const ir::Function& base,
+                                             const typed::Function& base,
                                              const std::string_view base_godot_base) const {
-    const auto native_return_type = [&](const ir::Function& function,
+    const auto native_return_type = [&](const typed::Function& function,
                                         const std::string_view godot_base) {
         const auto* engine_method =
             function.is_static ? nullptr : api_.find_method(godot_base, function.name);
@@ -1721,7 +1725,7 @@ bool CodeGenerator::same_native_function_abi(const ir::Function& derived,
     return true;
 }
 
-const ir::Function*
+const typed::Function*
 CodeGenerator::find_inherited_inner_function(const std::string_view base,
                                              const std::string_view method,
                                              std::string* declaration_owner) const noexcept {
@@ -1898,7 +1902,7 @@ bool CodeGenerator::inner_overrides_method(const ScriptInnerClassSymbol& owner,
                                   base_godot_type);
 }
 
-bool CodeGenerator::managed_constant_field(const ir::Field& field) const {
+bool CodeGenerator::managed_constant_field(const typed::Field& field) const {
     if (!field.is_constant)
         return false;
     const auto uses_signature = [&](const auto& members) -> std::optional<bool> {
@@ -1919,7 +1923,7 @@ bool CodeGenerator::managed_constant_field(const ir::Field& field) const {
     return managed_static_constant(field.type);
 }
 
-bool CodeGenerator::managed_constant_reference(const ir::Expression& expression) const {
+bool CodeGenerator::managed_constant_reference(const typed::Expression& expression) const {
     const auto uses_signature = [&](const auto& members) -> std::optional<bool> {
         const auto found = std::find_if(members.begin(), members.end(), [&](const auto& member) {
             return member.kind == ScriptMemberKind::constant && member.name == expression.value;
@@ -2064,7 +2068,7 @@ std::string CodeGenerator::emit_explicit_conversion(const Type& target, const Ty
            ")";
 }
 
-std::string CodeGenerator::emit_parameter_default(const ir::Parameter& parameter) const {
+std::string CodeGenerator::emit_parameter_default(const typed::Parameter& parameter) const {
     if (!parameter.default_value)
         return {};
     // C++ default arguments are evaluated in the caller and cannot reference the callee's
@@ -2073,17 +2077,17 @@ std::string CodeGenerator::emit_parameter_default(const ir::Parameter& parameter
     return "gdpp::runtime::default_argument()";
 }
 
-std::string CodeGenerator::parameter_native_type(const ir::Parameter& parameter) const {
+std::string CodeGenerator::parameter_native_type(const typed::Parameter& parameter) const {
     return parameter.default_value ? "godot::Variant" : cpp_type(parameter.type);
 }
 
-std::string CodeGenerator::parameter_native_name(const ir::Parameter& parameter) const {
+std::string CodeGenerator::parameter_native_name(const typed::Parameter& parameter) const {
     const auto name = sanitize_identifier(parameter.name);
     return parameter.default_value ? "_gdpp_argument_" + name : name;
 }
 
 std::string
-CodeGenerator::emit_parameter_default_initializers(const std::vector<ir::Parameter>& parameters,
+CodeGenerator::emit_parameter_default_initializers(const std::vector<typed::Parameter>& parameters,
                                                    const std::size_t indent) const {
     std::string result;
     const std::string prefix(indent * 4, ' ');
@@ -2111,8 +2115,8 @@ CodeGenerator::emit_parameter_default_initializers(const std::vector<ir::Paramet
     return result;
 }
 
-std::string
-CodeGenerator::emit_bound_parameter_defaults(const std::vector<ir::Parameter>& parameters) const {
+std::string CodeGenerator::emit_bound_parameter_defaults(
+    const std::vector<typed::Parameter>& parameters) const {
     std::string result;
     for (const auto& parameter : parameters) {
         if (!parameter.default_value)
@@ -2124,18 +2128,18 @@ CodeGenerator::emit_bound_parameter_defaults(const std::vector<ir::Parameter>& p
     return result;
 }
 
-std::string CodeGenerator::method_callback_name(const ir::Function& function) {
+std::string CodeGenerator::method_callback_name(const typed::Function& function) {
     return "_gdpp_variant_call_" + sanitize_identifier(function.name);
 }
 
-std::string CodeGenerator::emit_method_callback_declaration(const ir::Function& function) const {
+std::string CodeGenerator::emit_method_callback_declaration(const typed::Function& function) const {
     return "    static void " + method_callback_name(function) +
            "(void*, GDExtensionClassInstancePtr, const GDExtensionConstVariantPtr*, "
            "GDExtensionInt, GDExtensionVariantPtr, GDExtensionCallError*);\n";
 }
 
 std::string CodeGenerator::emit_method_callback_definition(
-    const ir::Function& function, const std::string_view native_class,
+    const typed::Function& function, const std::string_view native_class,
     const std::string_view native_method, const std::string_view native_return_type) const {
     const auto callback = method_callback_name(function);
     const auto fixed_count = function.parameters.size();
@@ -2236,7 +2240,7 @@ std::string CodeGenerator::emit_method_callback_definition(
 }
 
 std::string
-CodeGenerator::emit_method_registration(const ir::Function& function,
+CodeGenerator::emit_method_registration(const typed::Function& function,
                                         const std::string_view native_class,
                                         const std::string_view native_return_type) const {
     std::ostringstream result;
@@ -2431,14 +2435,14 @@ std::string CodeGenerator::emit_direct_builtin_assignment(std::string_view owner
     return object + "." + sanitize_identifier(std::string{member}) + " = " + value;
 }
 
-std::string CodeGenerator::emit_dynamic_assignment(const ir::Statement& statement,
+std::string CodeGenerator::emit_dynamic_assignment(const typed::Statement& statement,
                                                    std::size_t indentation) const {
     const auto& target = *statement.condition;
     const auto prefix = indent(indentation);
     const auto nested_prefix = indent(indentation + 1);
     const auto suffix = std::to_string(temporary_counter_++);
 
-    if (target.kind == ir::ExpressionKind::identifier) {
+    if (target.kind == typed::ExpressionKind::identifier) {
         const auto owner = "_gdpp_dynamic_owner_" + suffix;
         const auto value = "_gdpp_dynamic_value_" + suffix;
         std::string result = prefix + "{\n" + nested_prefix + "godot::Variant " + owner +
@@ -2465,11 +2469,11 @@ std::string CodeGenerator::emit_dynamic_assignment(const ir::Statement& statemen
     // A Variant access may cross value types such as Vector2, Color or Transform3D. Godot returns
     // those values by copy, so changing only the leaf silently loses the mutation. Preserve the
     // complete lvalue chain and write each changed child back into its parent in reverse order.
-    std::vector<const ir::Expression*> access_chain;
-    const ir::Expression* root = &target;
-    while (
-        (root->kind == ir::ExpressionKind::member || root->kind == ir::ExpressionKind::subscript) &&
-        !root->operands.empty()) {
+    std::vector<const typed::Expression*> access_chain;
+    const typed::Expression* root = &target;
+    while ((root->kind == typed::ExpressionKind::member ||
+            root->kind == typed::ExpressionKind::subscript) &&
+           !root->operands.empty()) {
         access_chain.push_back(root);
         root = root->operands.front().get();
     }
@@ -2489,7 +2493,7 @@ std::string CodeGenerator::emit_dynamic_assignment(const ir::Statement& statemen
     for (std::size_t index = 0; index + 1 < access_chain.size(); ++index) {
         const auto* access = access_chain[index];
         const auto child_name = "_gdpp_dynamic_child_" + suffix + "_" + std::to_string(index);
-        if (access->kind == ir::ExpressionKind::subscript) {
+        if (access->kind == typed::ExpressionKind::subscript) {
             keys[index] = "_gdpp_dynamic_key_" + suffix + "_" + std::to_string(index);
             result += nested_prefix + "const godot::Variant " + keys[index] + " = " +
                       "gdpp::runtime::to_variant(" + emit_expression(*access->operands.at(1)) +
@@ -2508,7 +2512,7 @@ std::string CodeGenerator::emit_dynamic_assignment(const ir::Statement& statemen
     }
 
     const auto* leaf = access_chain.back();
-    if (leaf->kind == ir::ExpressionKind::subscript) {
+    if (leaf->kind == typed::ExpressionKind::subscript) {
         const auto leaf_index = access_chain.size() - 1;
         keys[leaf_index] = "_gdpp_dynamic_key_" + suffix + "_" + std::to_string(leaf_index);
         result += nested_prefix + "const godot::Variant " + keys[leaf_index] + " = " +
@@ -2522,7 +2526,7 @@ std::string CodeGenerator::emit_dynamic_assignment(const ir::Statement& statemen
     if (compound) {
         current_name = "_gdpp_dynamic_current_" + suffix;
         result += nested_prefix + "const godot::Variant " + current_name + " = ";
-        if (leaf->kind == ir::ExpressionKind::subscript) {
+        if (leaf->kind == typed::ExpressionKind::subscript) {
             result += "gdpp::runtime::get_key(" + containers.back() + ", " + keys.back() + ", " +
                       script_location(leaf->span) + ");\n";
         } else {
@@ -2546,7 +2550,7 @@ std::string CodeGenerator::emit_dynamic_assignment(const ir::Statement& statemen
         assigned_value = assigned_name;
     }
 
-    if (leaf->kind == ir::ExpressionKind::subscript) {
+    if (leaf->kind == typed::ExpressionKind::subscript) {
         result += nested_prefix + "gdpp::runtime::set_key(" + containers.back() + ", " +
                   keys.back() + ", " + assigned_value + ", " + script_location(leaf->span) + ");\n";
     } else {
@@ -2559,7 +2563,7 @@ std::string CodeGenerator::emit_dynamic_assignment(const ir::Statement& statemen
     for (std::size_t child_index = containers.size() - 1; child_index > 0; --child_index) {
         const auto access_index = child_index - 1;
         const auto* access = access_chain[access_index];
-        if (access->kind == ir::ExpressionKind::subscript) {
+        if (access->kind == typed::ExpressionKind::subscript) {
             result += nested_prefix + "gdpp::runtime::set_key(" + containers[child_index - 1] +
                       ", " + keys[access_index] + ", " + containers[child_index] + ", " +
                       script_location(access->span) + ");\n";
@@ -2574,16 +2578,16 @@ std::string CodeGenerator::emit_dynamic_assignment(const ir::Statement& statemen
     // Objects, Array and Dictionary carry reference semantics through Variant. Other roots are
     // values and need one final assignment so copy-on-write builtins and Variant-held values live.
     const bool root_requires_writeback =
-        root->kind == ir::ExpressionKind::identifier && root->type.kind != TypeKind::object &&
+        root->kind == typed::ExpressionKind::identifier && root->type.kind != TypeKind::object &&
         root->type.kind != TypeKind::array && root->type.kind != TypeKind::dictionary &&
         root->type.kind != TypeKind::script_resource;
     if (root_requires_writeback) {
         auto converted =
             emit_conversion(root->type, {TypeKind::variant, "Variant"}, root_name, &root->span);
-        if (root->resolution == ir::ResolutionKind::script_property) {
+        if (root->resolution == typed::ResolutionKind::script_property) {
             result += nested_prefix + root->setter + "(" + converted + ");\n";
-        } else if (root->resolution == ir::ResolutionKind::godot_property && !root->direct_access &&
-                   !root->setter.empty()) {
+        } else if (root->resolution == typed::ResolutionKind::godot_property &&
+                   !root->direct_access && !root->setter.empty()) {
             std::string index;
             const auto* setter = api_.find_method(root->resolved_owner, root->setter);
             if (root->indexed_argument >= 0) {
@@ -2611,7 +2615,7 @@ std::string CodeGenerator::emit_dynamic_assignment(const ir::Statement& statemen
     return result + prefix + "}\n";
 }
 
-std::string CodeGenerator::emit_dictionary_member_assignment(const ir::Statement& statement,
+std::string CodeGenerator::emit_dictionary_member_assignment(const typed::Statement& statement,
                                                              const std::size_t indentation) const {
     const auto& target = *statement.condition;
     const auto prefix = indent(indentation);
@@ -2648,7 +2652,7 @@ std::string CodeGenerator::emit_dictionary_member_assignment(const ir::Statement
     return result + prefix + "}\n";
 }
 
-std::string CodeGenerator::emit_truthy(const ir::Expression& expression) const {
+std::string CodeGenerator::emit_truthy(const typed::Expression& expression) const {
     auto value = emit_expression(expression);
     switch (expression.type.truthiness()) {
     case TruthinessKind::invalid:
@@ -2678,7 +2682,7 @@ std::string CodeGenerator::emit_truthy(const ir::Expression& expression) const {
     return "(gdpp::runtime::to_variant(" + value + ")).booleanize()";
 }
 
-std::string CodeGenerator::emit_integer_binary(const ir::Expression& expression) const {
+std::string CodeGenerator::emit_integer_binary(const typed::Expression& expression) const {
     auto left = emit_expression(*expression.operands.at(0));
     auto right = emit_expression(*expression.operands.at(1));
     return emit_integer_operation(expression.value, std::move(left), std::move(right),
@@ -2736,7 +2740,7 @@ std::string CodeGenerator::script_location(const SourceSpan& span) {
            std::to_string(span.begin.line) + ", " + std::to_string(span.begin.column) + "}";
 }
 
-std::string CodeGenerator::emit_expression(const ir::Expression& expression) const {
+std::string CodeGenerator::emit_expression(const typed::Expression& expression) const {
     struct ExpressionSpanScope final {
         const SourceSpan*& current;
         const SourceSpan* previous;
@@ -2749,12 +2753,12 @@ std::string CodeGenerator::emit_expression(const ir::Expression& expression) con
         return override->second;
     }
     switch (expression.kind) {
-    case ir::ExpressionKind::literal: {
-        if (expression.literal_kind == ir::LiteralKind::boolean)
+    case typed::ExpressionKind::literal: {
+        if (expression.literal_kind == typed::LiteralKind::boolean)
             return expression.value;
-        if (expression.literal_kind == ir::LiteralKind::nil)
+        if (expression.literal_kind == typed::LiteralKind::nil)
             return "godot::Variant()";
-        if (expression.literal_kind == ir::LiteralKind::integer) {
+        if (expression.literal_kind == typed::LiteralKind::integer) {
             if (expression.value == "9223372036854775808" ||
                 expression.value == "-9223372036854775808") {
                 return "(-static_cast<int64_t>(9223372036854775807LL) - "
@@ -2762,7 +2766,7 @@ std::string CodeGenerator::emit_expression(const ir::Expression& expression) con
             }
             return "static_cast<int64_t>(" + expression.value + ")";
         }
-        if (expression.literal_kind == ir::LiteralKind::floating) {
+        if (expression.literal_kind == typed::LiteralKind::floating) {
             if (expression.value == "inf")
                 return "Math_INF";
             if (expression.value == "-inf")
@@ -2771,13 +2775,13 @@ std::string CodeGenerator::emit_expression(const ir::Expression& expression) con
                 return "Math_NAN";
             return expression.value;
         }
-        if (expression.literal_kind == ir::LiteralKind::string_name)
+        if (expression.literal_kind == typed::LiteralKind::string_name)
             return godot_string_name(expression.value);
-        if (expression.literal_kind == ir::LiteralKind::node_path)
+        if (expression.literal_kind == typed::LiteralKind::node_path)
             return godot_node_path(expression.value);
         return godot_string(expression.value);
     }
-    case ir::ExpressionKind::node_reference: {
+    case typed::ExpressionKind::node_reference: {
         auto path = expression.value;
         if (!path.empty() && path.front() == '$')
             path.erase(path.begin());
@@ -2785,53 +2789,54 @@ std::string CodeGenerator::emit_expression(const ir::Expression& expression) con
                (attached_script_ ? godot_owner_expression() + "->" : std::string{}) +
                "get_node<godot::Node>(" + godot_node_path(path) + "))";
     }
-    case ir::ExpressionKind::identifier:
-        if (expression.resolution == ir::ResolutionKind::none && expression.symbol_identity != 0) {
+    case typed::ExpressionKind::identifier:
+        if (expression.resolution == typed::ResolutionKind::none &&
+            expression.symbol_identity != 0) {
             if (const auto override = local_expression_overrides_.find(expression.symbol_identity);
                 override != local_expression_overrides_.end()) {
                 return override->second;
             }
         }
-        if (expression.resolution == ir::ResolutionKind::godot_constructor)
+        if (expression.resolution == typed::ResolutionKind::godot_constructor)
             return cpp_type(expression.type);
-        if (expression.resolution == ir::ResolutionKind::godot_singleton)
+        if (expression.resolution == typed::ResolutionKind::godot_singleton)
             return "godot::" + godot_cpp_class_name(expression.resolved_owner) +
                    "::get_singleton()";
-        if (expression.resolution == ir::ResolutionKind::external_singleton)
+        if (expression.resolution == typed::ResolutionKind::external_singleton)
             return "gdpp::runtime::find_engine_singleton_at(" +
                    godot_string_name(expression.value) + ", " + script_location(expression.span) +
                    ")";
-        if (expression.resolution == ir::ResolutionKind::godot_type)
+        if (expression.resolution == typed::ResolutionKind::godot_type)
             return expression.type.kind == TypeKind::object
                        ? "godot::" + godot_cpp_class_name(expression.resolved_owner)
                        : cpp_type(expression.type);
-        if (expression.resolution == ir::ResolutionKind::external_type)
+        if (expression.resolution == typed::ResolutionKind::external_type)
             return godot_string_name(expression.resolved_owner);
-        if (expression.resolution == ir::ResolutionKind::external_callable)
+        if (expression.resolution == typed::ResolutionKind::external_callable)
             return "gdpp::runtime::external_callable_at(gdpp::runtime::to_variant(" +
                    self_object_expression() + "), " + godot_string_name(expression.value) + ", " +
                    script_location(expression.span) + ")";
-        if (expression.resolution == ir::ResolutionKind::external_signal)
+        if (expression.resolution == typed::ResolutionKind::external_signal)
             return "gdpp::runtime::external_signal_at(gdpp::runtime::to_variant(" +
                    self_object_expression() + "), " + godot_string_name(expression.value) + ", " +
                    script_location(expression.span) + ")";
-        if (expression.resolution == ir::ResolutionKind::script_type)
+        if (expression.resolution == typed::ResolutionKind::script_type)
             return godot_string_name(expression.resolved_owner);
-        if (expression.resolution == ir::ResolutionKind::script_resource)
+        if (expression.resolution == typed::ResolutionKind::script_resource)
             return cpp_type(expression.type) + "{}";
-        if (expression.resolution == ir::ResolutionKind::inner_type)
+        if (expression.resolution == typed::ResolutionKind::inner_type)
             return inner_cpp_type(expression.resolved_owner);
-        if (expression.resolution == ir::ResolutionKind::script_super)
+        if (expression.resolution == typed::ResolutionKind::script_super)
             return native_super_owner(expression.resolved_owner);
-        if (expression.resolution == ir::ResolutionKind::script_signal)
+        if (expression.resolution == typed::ResolutionKind::script_signal)
             return "godot::Signal(" + self_object_expression() + ", " +
                    godot_string_name(expression.value) + ")";
-        if (expression.resolution == ir::ResolutionKind::script_autoload)
+        if (expression.resolution == typed::ResolutionKind::script_autoload)
             return "gdpp::runtime::find_autoload(" + godot_string_name(expression.getter) + ")";
-        if (expression.resolution == ir::ResolutionKind::script_callable)
+        if (expression.resolution == typed::ResolutionKind::script_callable)
             return "godot::Callable(" + self_object_expression() + ", " +
                    godot_string_name(expression.value) + ")";
-        if (expression.resolution == ir::ResolutionKind::script_static_callable) {
+        if (expression.resolution == typed::ResolutionKind::script_static_callable) {
             const auto found = local_functions_.find(expression.value);
             if (found == local_functions_.end() || current_native_class_name_.empty()) {
                 diagnostics_.error("GDS3010", "static callable metadata is unavailable",
@@ -2891,18 +2896,18 @@ std::string CodeGenerator::emit_expression(const ir::Expression& expression) con
                 result += "; return godot::Variant()";
             return result + "; })";
         }
-        if (expression.resolution == ir::ResolutionKind::script_static_field)
+        if (expression.resolution == typed::ResolutionKind::script_static_field)
             return "_gdpp_static_" + sanitize_identifier(expression.value) + "_storage()";
-        if (expression.resolution == ir::ResolutionKind::script_enum_type &&
+        if (expression.resolution == typed::ResolutionKind::script_enum_type &&
             !expression.resolved_owner.empty())
             return sanitize_qualified_identifier(expression.resolved_owner);
-        if (expression.resolution == ir::ResolutionKind::enum_member)
+        if (expression.resolution == typed::ResolutionKind::enum_member)
             return enum_identifier(expression.value);
-        if (expression.resolution == ir::ResolutionKind::script_constant &&
+        if (expression.resolution == typed::ResolutionKind::script_constant &&
             managed_constant_reference(expression)) {
             return sanitize_identifier(expression.value) + "()";
         }
-        if (expression.resolution == ir::ResolutionKind::godot_property &&
+        if (expression.resolution == typed::ResolutionKind::godot_property &&
             !expression.direct_access && !expression.getter.empty()) {
             std::string index;
             if (expression.indexed_argument >= 0) {
@@ -2919,21 +2924,21 @@ std::string CodeGenerator::emit_expression(const ir::Expression& expression) con
                 (attached_script_ ? godot_owner_expression() + "->" : std::string{}) +
                     expression.getter + "(" + index + ")");
         }
-        if (expression.resolution == ir::ResolutionKind::script_property)
+        if (expression.resolution == typed::ResolutionKind::script_property)
             return expression.getter + "()";
-        if (expression.resolution == ir::ResolutionKind::godot_method)
+        if (expression.resolution == typed::ResolutionKind::godot_method)
             return (attached_script_ ? godot_owner_expression() + "->" : std::string{}) +
                    sanitize_identifier(expression.value);
-        if (expression.resolution == ir::ResolutionKind::dynamic_property) {
+        if (expression.resolution == typed::ResolutionKind::dynamic_property) {
             auto value = "gdpp::runtime::get_named(gdpp::runtime::to_variant(" +
                          self_object_expression() + "), " + godot_string_name(expression.value) +
                          ", " + script_location(expression.span) + ")";
             return emit_conversion(expression.type, {TypeKind::variant, "Variant"},
                                    std::move(value));
         }
-        if (expression.resolution == ir::ResolutionKind::global_constant ||
-            expression.resolution == ir::ResolutionKind::global_enum_value ||
-            expression.resolution == ir::ResolutionKind::global_enum_type)
+        if (expression.resolution == typed::ResolutionKind::global_constant ||
+            expression.resolution == typed::ResolutionKind::global_enum_value ||
+            expression.resolution == typed::ResolutionKind::global_enum_type)
             return expression.resolved_owner;
         if (current_inner_script_ &&
             local_functions_.find(expression.value) != local_functions_.end()) {
@@ -2967,17 +2972,17 @@ std::string CodeGenerator::emit_expression(const ir::Expression& expression) con
                                                          : sanitize_identifier(expression.value);
             if (expression.storage_type.kind != TypeKind::unknown &&
                 expression.storage_type != expression.type &&
-                (expression.resolution == ir::ResolutionKind::none ||
-                 expression.resolution == ir::ResolutionKind::local_constant)) {
+                (expression.resolution == typed::ResolutionKind::none ||
+                 expression.resolution == typed::ResolutionKind::local_constant)) {
                 identifier = emit_conversion(expression.type, expression.storage_type,
                                              std::move(identifier));
             }
             return identifier;
         }
-    case ir::ExpressionKind::unary: {
+    case typed::ExpressionKind::unary: {
         if (expression.value == "-" &&
-            expression.operands.at(0)->kind == ir::ExpressionKind::literal &&
-            expression.operands.at(0)->literal_kind == ir::LiteralKind::integer &&
+            expression.operands.at(0)->kind == typed::ExpressionKind::literal &&
+            expression.operands.at(0)->literal_kind == typed::LiteralKind::integer &&
             expression.operands.at(0)->value == "9223372036854775808")
             return emit_expression(*expression.operands.at(0));
         const auto& operand_type = expression.operands.at(0)->type;
@@ -3008,11 +3013,11 @@ std::string CodeGenerator::emit_expression(const ir::Expression& expression) con
         }
         return "(" + expression.value + emit_expression(*expression.operands.at(0)) + ")";
     }
-    case ir::ExpressionKind::await_expression:
+    case typed::ExpressionKind::await_expression:
         diagnostics_.error("GDS3006", "unlowered await expression reached code generation",
                            expression.span);
         return "godot::Variant()";
-    case ir::ExpressionKind::binary: {
+    case typed::ExpressionKind::binary: {
         if (expression.value == "and" || expression.value == "or") {
             const auto suffix = std::to_string(temporary_counter_++);
             const auto left_name = "_gdpp_logic_left_" + suffix;
@@ -3066,18 +3071,18 @@ std::string CodeGenerator::emit_expression(const ir::Expression& expression) con
             const auto& value = *expression.operands.at(0);
             const auto& target = *expression.operands.at(1);
             const auto emitted_value = emit_expression(value);
-            if (target.resolution != ir::ResolutionKind::godot_type &&
-                target.resolution != ir::ResolutionKind::external_type &&
-                target.resolution != ir::ResolutionKind::script_type &&
-                target.resolution != ir::ResolutionKind::inner_type &&
-                target.resolution != ir::ResolutionKind::script_enum_type &&
-                target.resolution != ir::ResolutionKind::global_enum_type) {
+            if (target.resolution != typed::ResolutionKind::godot_type &&
+                target.resolution != typed::ResolutionKind::external_type &&
+                target.resolution != typed::ResolutionKind::script_type &&
+                target.resolution != typed::ResolutionKind::inner_type &&
+                target.resolution != typed::ResolutionKind::script_enum_type &&
+                target.resolution != typed::ResolutionKind::global_enum_type) {
                 diagnostics_.error("GDS3001", "type test is missing its resolved target type",
                                    expression.span);
                 return type_test("false");
             }
             if (target.type.kind == TypeKind::object) {
-                if (target.resolution == ir::ResolutionKind::external_type) {
+                if (target.resolution == typed::ResolutionKind::external_type) {
                     return type_test("gdpp::runtime::is_external_instance("
                                      "gdpp::runtime::to_variant(" +
                                      emitted_value + "), " +
@@ -3092,8 +3097,8 @@ std::string CodeGenerator::emit_expression(const ir::Expression& expression) con
                                      godot_string(source_path) + ")");
                 }
                 const auto target_cpp =
-                    target.resolution == ir::ResolutionKind::script_type ? target.resolved_owner
-                    : target.resolution == ir::ResolutionKind::inner_type
+                    target.resolution == typed::ResolutionKind::script_type ? target.resolved_owner
+                    : target.resolution == typed::ResolutionKind::inner_type
                         ? inner_cpp_type(target.resolved_owner)
                         : "godot::" + godot_cpp_class_name(target.resolved_owner);
                 std::string object_value;
@@ -3138,7 +3143,7 @@ std::string CodeGenerator::emit_expression(const ir::Expression& expression) con
             const auto& value = *expression.operands.at(0);
             const auto& target = *expression.operands.at(1);
             const auto emitted_value = emit_expression(value);
-            if (target.resolution == ir::ResolutionKind::external_type) {
+            if (target.resolution == typed::ResolutionKind::external_type) {
                 const auto suffix = std::to_string(temporary_counter_++);
                 const auto temporary = "_gdpp_external_cast_" + suffix;
                 return "([&]() -> godot::Variant { const godot::Variant " + temporary + " = " +
@@ -3162,12 +3167,12 @@ std::string CodeGenerator::emit_expression(const ir::Expression& expression) con
                 }
             }
             if (target.type.kind == TypeKind::object &&
-                (target.resolution == ir::ResolutionKind::godot_type ||
-                 target.resolution == ir::ResolutionKind::script_type ||
-                 target.resolution == ir::ResolutionKind::inner_type)) {
+                (target.resolution == typed::ResolutionKind::godot_type ||
+                 target.resolution == typed::ResolutionKind::script_type ||
+                 target.resolution == typed::ResolutionKind::inner_type)) {
                 const auto target_cpp =
-                    target.resolution == ir::ResolutionKind::script_type ? target.resolved_owner
-                    : target.resolution == ir::ResolutionKind::inner_type
+                    target.resolution == typed::ResolutionKind::script_type ? target.resolved_owner
+                    : target.resolution == typed::ResolutionKind::inner_type
                         ? inner_cpp_type(target.resolved_owner)
                         : "godot::" + godot_cpp_class_name(target.resolved_owner);
                 auto object = value.type.is_dynamic()
@@ -3258,8 +3263,8 @@ std::string CodeGenerator::emit_expression(const ir::Expression& expression) con
             return "(" + left + " " + operation + " " + right + ")";
         });
     }
-    case ir::ExpressionKind::conditional: {
-        const auto emit_branch = [&](const ir::Expression& branch) {
+    case typed::ExpressionKind::conditional: {
+        const auto emit_branch = [&](const typed::Expression& branch) {
             auto value = emit_expression(branch);
             if (expression.type.is_dynamic())
                 return "gdpp::runtime::to_variant(" + value + ")";
@@ -3277,20 +3282,20 @@ std::string CodeGenerator::emit_expression(const ir::Expression& expression) con
                "; if (gdpp::runtime::script_function_failed()) return {}; return " + value +
                "; }())";
     }
-    case ir::ExpressionKind::call: {
+    case typed::ExpressionKind::call: {
         const auto expression_failure_return =
             !expression.coroutine_call && expression.type.kind == TypeKind::void_type
                 ? std::string{"if (gdpp::runtime::script_function_failed()) return; "}
                 : std::string{"if (gdpp::runtime::script_function_failed()) return {}; "};
-        if (expression.resolution == ir::ResolutionKind::script_resource)
+        if (expression.resolution == typed::ResolutionKind::script_resource)
             return cpp_type(expression.type) + "{}";
         const auto& callee = *expression.operands.at(0);
-        if (callee.resolution == ir::ResolutionKind::external_constructor) {
+        if (callee.resolution == typed::ResolutionKind::external_constructor) {
             return "gdpp::runtime::instantiate_external_class_at(" +
                    godot_string_name(callee.resolved_owner) + ", " +
                    script_location(expression.span) + ")";
         }
-        if (callee.resolution == ir::ResolutionKind::external_super_method) {
+        if (callee.resolution == typed::ResolutionKind::external_super_method) {
             const auto suffix = std::to_string(temporary_counter_++);
             std::string invocation = "([&]() -> godot::Variant { ";
             for (std::size_t index = 1; index < expression.operands.size(); ++index) {
@@ -3321,7 +3326,7 @@ std::string CodeGenerator::emit_expression(const ir::Expression& expression) con
                        : emit_conversion(expression.type, {TypeKind::variant, "Variant"},
                                          invocation);
         }
-        if (callee.resolution == ir::ResolutionKind::external_static_method) {
+        if (callee.resolution == typed::ResolutionKind::external_static_method) {
             const auto suffix = std::to_string(temporary_counter_++);
             std::string invocation = "([&]() -> godot::Variant { ";
             for (std::size_t index = 1; index < expression.operands.size(); ++index) {
@@ -3351,14 +3356,14 @@ std::string CodeGenerator::emit_expression(const ir::Expression& expression) con
                        : emit_conversion(expression.type, {TypeKind::variant, "Variant"},
                                          invocation);
         }
-        if (callee.resolution == ir::ResolutionKind::godot_constructor &&
+        if (callee.resolution == typed::ResolutionKind::godot_constructor &&
             callee.type.kind == TypeKind::object) {
             const auto native_type = "godot::" + godot_cpp_class_name(callee.resolved_owner);
             if (api_.inherits(callee.resolved_owner, "RefCounted"))
                 return cpp_type(callee.type) + "(memnew(" + native_type + "))";
             return "memnew(" + native_type + ")";
         }
-        if (callee.resolution == ir::ResolutionKind::godot_constructor &&
+        if (callee.resolution == typed::ResolutionKind::godot_constructor &&
             expression.operands.size() == 2 &&
             (expression.type.kind == TypeKind::boolean ||
              expression.type.kind == TypeKind::integer ||
@@ -3369,14 +3374,14 @@ std::string CodeGenerator::emit_expression(const ir::Expression& expression) con
                                             emit_expression(*expression.operands.at(1)));
         }
         const auto* godot_method =
-            callee.resolution == ir::ResolutionKind::godot_method
+            callee.resolution == typed::ResolutionKind::godot_method
                 ? api_.find_method(callee.resolved_owner, callee.value)
-            : callee.resolution == ir::ResolutionKind::script_super && !callee.getter.empty()
+            : callee.resolution == typed::ResolutionKind::script_super && !callee.getter.empty()
                 ? api_.find_method(callee.getter,
                                    callee.setter.empty() ? callee.value : callee.setter)
                 : nullptr;
         const auto* godot_constructor =
-            callee.resolution == ir::ResolutionKind::godot_constructor &&
+            callee.resolution == typed::ResolutionKind::godot_constructor &&
                     callee.indexed_argument >= 0
                 ? api_.find_constructor(callee.resolved_owner, expression.operands.size() - 1,
                                         static_cast<std::size_t>(callee.indexed_argument))
@@ -3386,21 +3391,21 @@ std::string CodeGenerator::emit_expression(const ir::Expression& expression) con
         const ScriptInnerClassSymbol* inner_method_owner = nullptr;
         if (script_symbols_) {
             const ScriptClassSymbol* owner = nullptr;
-            if (callee.kind == ir::ExpressionKind::identifier) {
-                if (callee.resolution == ir::ResolutionKind::script_super) {
+            if (callee.kind == typed::ExpressionKind::identifier) {
+                if (callee.resolution == typed::ResolutionKind::script_super) {
                     owner = script_symbols_->find_native_class(callee.resolved_owner);
                     if (!owner && current_script_ && !current_inner_script_)
                         owner = script_symbols_->base_of(*current_script_);
                 } else {
                     owner = current_script_;
                 }
-            } else if (callee.kind == ir::ExpressionKind::member && !callee.operands.empty()) {
-                if (callee.resolution == ir::ResolutionKind::script_super) {
+            } else if (callee.kind == typed::ExpressionKind::member && !callee.operands.empty()) {
+                if (callee.resolution == typed::ResolutionKind::script_super) {
                     owner = script_symbols_->find_native_class(callee.resolved_owner);
                     if (!owner && current_script_ && !current_inner_script_)
                         owner = script_symbols_->base_of(*current_script_);
                 }
-                if (!owner && callee.resolution == ir::ResolutionKind::script_static_callable &&
+                if (!owner && callee.resolution == typed::ResolutionKind::script_static_callable &&
                     !callee.resolved_owner.empty()) {
                     owner = script_symbols_->find_native_class(callee.resolved_owner);
                 }
@@ -3411,10 +3416,10 @@ std::string CodeGenerator::emit_expression(const ir::Expression& expression) con
             }
             if (owner) {
                 const auto* member = script_symbols_->find_member(
-                    *owner,
-                    callee.resolution == ir::ResolutionKind::script_super && !callee.setter.empty()
-                        ? callee.setter
-                        : callee.value);
+                    *owner, callee.resolution == typed::ResolutionKind::script_super &&
+                                    !callee.setter.empty()
+                                ? callee.setter
+                                : callee.value);
                 if (member && member->kind == ScriptMemberKind::function) {
                     script_method = member;
                     const ScriptClassSymbol* declaration_owner = owner;
@@ -3435,18 +3440,19 @@ std::string CodeGenerator::emit_expression(const ir::Expression& expression) con
                 }
             }
             if (current_inner_script_) {
-                const auto method_name =
-                    callee.resolution == ir::ResolutionKind::script_super && !callee.setter.empty()
-                        ? std::string_view{callee.setter}
-                        : std::string_view{callee.value};
+                const auto method_name = callee.resolution == typed::ResolutionKind::script_super &&
+                                                 !callee.setter.empty()
+                                             ? std::string_view{callee.setter}
+                                             : std::string_view{callee.value};
                 InnerMethodDeclaration declaration;
-                if (callee.kind == ir::ExpressionKind::identifier) {
+                if (callee.kind == typed::ExpressionKind::identifier) {
                     declaration = find_inner_method_declaration(
                         *current_inner_script_, method_name,
-                        callee.resolution != ir::ResolutionKind::script_super);
-                } else if (callee.kind == ir::ExpressionKind::member && !callee.operands.empty()) {
+                        callee.resolution != typed::ResolutionKind::script_super);
+                } else if (callee.kind == typed::ExpressionKind::member &&
+                           !callee.operands.empty()) {
                     const ScriptInnerClassSymbol* receiver_owner = nullptr;
-                    if (callee.resolution == ir::ResolutionKind::script_super) {
+                    if (callee.resolution == typed::ResolutionKind::script_super) {
                         receiver_owner = current_inner_script_;
                     } else {
                         receiver_owner =
@@ -3461,7 +3467,7 @@ std::string CodeGenerator::emit_expression(const ir::Expression& expression) con
                     if (receiver_owner) {
                         declaration = find_inner_method_declaration(
                             *receiver_owner, method_name,
-                            callee.resolution != ir::ResolutionKind::script_super);
+                            callee.resolution != typed::ResolutionKind::script_super);
                     }
                 }
                 if (declaration.method) {
@@ -3469,7 +3475,7 @@ std::string CodeGenerator::emit_expression(const ir::Expression& expression) con
                     inner_method_owner = declaration.inner_owner;
                     script_method_owner = declaration.script_owner;
                 }
-            } else if (callee.kind == ir::ExpressionKind::member && !callee.operands.empty()) {
+            } else if (callee.kind == typed::ExpressionKind::member && !callee.operands.empty()) {
                 const auto* receiver_owner =
                     script_symbols_->find_inner_native(callee.operands.at(0)->type.name);
                 if (!receiver_owner && current_script_) {
@@ -3486,13 +3492,13 @@ std::string CodeGenerator::emit_expression(const ir::Expression& expression) con
                     }
                 }
             }
-            if (!script_method && callee.resolution == ir::ResolutionKind::script_constructor) {
+            if (!script_method && callee.resolution == typed::ResolutionKind::script_constructor) {
                 if (const auto* script_owner =
                         script_symbols_->find_native_class(callee.resolved_owner)) {
                     script_method = script_symbols_->find_member(*script_owner, "_init");
                 }
             }
-            if (!script_method && callee.resolution == ir::ResolutionKind::inner_constructor &&
+            if (!script_method && callee.resolution == typed::ResolutionKind::inner_constructor &&
                 current_script_) {
                 const auto* inner_owner = script_symbols_->find_inner_native(callee.resolved_owner);
                 if (!inner_owner)
@@ -3505,23 +3511,23 @@ std::string CodeGenerator::emit_expression(const ir::Expression& expression) con
         }
         const auto script_native_name = [&]() {
             if (script_method && inner_method_owner) {
-                return callee.resolution == ir::ResolutionKind::script_super
+                return callee.resolution == typed::ResolutionKind::script_super
                            ? inner_method_implementation_name(*inner_method_owner, *script_method)
                            : inner_method_native_name(*inner_method_owner, *script_method);
             }
             if (script_method && script_method_owner) {
-                return callee.resolution == ir::ResolutionKind::script_super
+                return callee.resolution == typed::ResolutionKind::script_super
                            ? script_method_implementation_name(*script_method_owner, *script_method)
                            : script_method_native_name(*script_method_owner, *script_method);
             }
             return sanitize_identifier(callee.value);
         }();
         const std::vector<Type>* local_parameters = nullptr;
-        const ir::Function* local_function = nullptr;
-        const ir::Function* constructor_function = nullptr;
+        const typed::Function* local_function = nullptr;
+        const typed::Function* constructor_function = nullptr;
         if (!script_method &&
-            (callee.kind == ir::ExpressionKind::identifier ||
-             (callee.kind == ir::ExpressionKind::member && !callee.operands.empty() &&
+            (callee.kind == typed::ExpressionKind::identifier ||
+             (callee.kind == typed::ExpressionKind::member && !callee.operands.empty() &&
               (callee.operands.at(0)->value == "self" ||
                callee.operands.at(0)->type.name == (current_inner_script_
                                                         ? current_inner_script_->name
@@ -3536,8 +3542,8 @@ std::string CodeGenerator::emit_expression(const ir::Expression& expression) con
                 }
             }
         }
-        if (callee.resolution == ir::ResolutionKind::script_constructor ||
-            callee.resolution == ir::ResolutionKind::inner_constructor) {
+        if (callee.resolution == typed::ResolutionKind::script_constructor ||
+            callee.resolution == typed::ResolutionKind::inner_constructor) {
             if (const auto found = constructor_functions_.find(callee.resolved_owner);
                 found != constructor_functions_.end()) {
                 constructor_function = found->second;
@@ -3607,9 +3613,9 @@ std::string CodeGenerator::emit_expression(const ir::Expression& expression) con
             if (needs_null_default || array_reduce_default)
                 call += (provided == 0 ? "godot::Variant()" : ", godot::Variant()");
         };
-        if (callee.resolution == ir::ResolutionKind::utility_function ||
-            callee.resolution == ir::ResolutionKind::intrinsic) {
-            const bool is_intrinsic = callee.resolution == ir::ResolutionKind::intrinsic;
+        if (callee.resolution == typed::ResolutionKind::utility_function ||
+            callee.resolution == typed::ResolutionKind::intrinsic) {
+            const bool is_intrinsic = callee.resolution == typed::ResolutionKind::intrinsic;
             if (is_intrinsic &&
                 (callee.intrinsic == IntrinsicKind::load ||
                  callee.intrinsic == IntrinsicKind::preload) &&
@@ -3642,11 +3648,11 @@ std::string CodeGenerator::emit_expression(const ir::Expression& expression) con
                 if (callee.intrinsic != IntrinsicKind::is_instance_of || index != 2)
                     return emit_expression(argument);
                 std::string type_name;
-                if (argument.resolution == ir::ResolutionKind::godot_type ||
-                    argument.resolution == ir::ResolutionKind::external_type ||
-                    argument.resolution == ir::ResolutionKind::script_type) {
+                if (argument.resolution == typed::ResolutionKind::godot_type ||
+                    argument.resolution == typed::ResolutionKind::external_type ||
+                    argument.resolution == typed::ResolutionKind::script_type) {
                     type_name = argument.resolved_owner;
-                } else if (argument.resolution == ir::ResolutionKind::inner_type) {
+                } else if (argument.resolution == typed::ResolutionKind::inner_type) {
                     type_name = inner_cpp_type(argument.resolved_owner);
                 }
                 return type_name.empty()
@@ -3732,11 +3738,11 @@ std::string CodeGenerator::emit_expression(const ir::Expression& expression) con
             }
             return result + "; }())";
         }
-        if (callee.resolution == ir::ResolutionKind::script_free)
+        if (callee.resolution == typed::ResolutionKind::script_free)
             return "memdelete(" + emit_expression(*callee.operands.at(0)) + ")";
         if (godot_method && callee.value == "get_script" && expression.operands.size() == 1) {
             std::string object = self_object_expression();
-            if (callee.kind == ir::ExpressionKind::member) {
+            if (callee.kind == typed::ExpressionKind::member) {
                 object = emit_expression(*callee.operands.at(0));
                 const bool ref_counted = is_ref_counted_object(callee.operands.at(0)->type);
                 if (ref_counted)
@@ -3750,14 +3756,14 @@ std::string CodeGenerator::emit_expression(const ir::Expression& expression) con
         // cache the immutable StringName per call site, and still materialize arguments in source
         // order before entering Godot. Keep arbitrary `other.signal.emit()` on the general Signal
         // path because a null external receiver must retain Godot's ordinary error semantics.
-        if (callee.kind == ir::ExpressionKind::member && callee.value == "emit" &&
+        if (callee.kind == typed::ExpressionKind::member && callee.value == "emit" &&
             !callee.operands.empty()) {
             const auto& signal = *callee.operands.at(0);
             const bool local_signal =
-                signal.resolution == ir::ResolutionKind::script_signal &&
-                (signal.kind == ir::ExpressionKind::identifier ||
-                 (signal.kind == ir::ExpressionKind::member && !signal.operands.empty() &&
-                  signal.operands.at(0)->kind == ir::ExpressionKind::identifier &&
+                signal.resolution == typed::ResolutionKind::script_signal &&
+                (signal.kind == typed::ExpressionKind::identifier ||
+                 (signal.kind == typed::ExpressionKind::member && !signal.operands.empty() &&
+                  signal.operands.at(0)->kind == typed::ExpressionKind::identifier &&
                   signal.operands.at(0)->value == "self"));
             if (local_signal) {
                 const auto suffix = std::to_string(temporary_counter_++);
@@ -3779,7 +3785,7 @@ std::string CodeGenerator::emit_expression(const ir::Expression& expression) con
                 return result + "); " + expression_failure_return + "}())";
             }
         }
-        if (callee.kind == ir::ExpressionKind::member && callee.value == "call" &&
+        if (callee.kind == typed::ExpressionKind::member && callee.value == "call" &&
             callee.operands.at(0)->type.kind == TypeKind::builtin &&
             callee.operands.at(0)->type.name == "Callable") {
             const auto suffix = std::to_string(temporary_counter_++);
@@ -3808,9 +3814,9 @@ std::string CodeGenerator::emit_expression(const ir::Expression& expression) con
         }
         const bool attached_self_dynamic_call =
             attached_script_ &&
-            (callee.kind == ir::ExpressionKind::identifier ||
-             (callee.kind == ir::ExpressionKind::member && !callee.operands.empty() &&
-              callee.operands.at(0)->kind == ir::ExpressionKind::identifier &&
+            (callee.kind == typed::ExpressionKind::identifier ||
+             (callee.kind == typed::ExpressionKind::member && !callee.operands.empty() &&
+              callee.operands.at(0)->kind == typed::ExpressionKind::identifier &&
               callee.operands.at(0)->value == "self"));
         // Generated script methods live on the attached behavior, but inherited ClassDB methods
         // still live on the provider-owned Godot object. External dynamic resolutions carry their
@@ -3818,18 +3824,18 @@ std::string CodeGenerator::emit_expression(const ir::Expression& expression) con
         const bool attached_behavior_dynamic_call =
             attached_self_dynamic_call && callee.resolved_owner.empty();
         const bool explicit_self_script_call =
-            callee.kind == ir::ExpressionKind::member && !callee.operands.empty() &&
-            callee.operands.at(0)->kind == ir::ExpressionKind::identifier &&
+            callee.kind == typed::ExpressionKind::member && !callee.operands.empty() &&
+            callee.operands.at(0)->kind == typed::ExpressionKind::identifier &&
             callee.operands.at(0)->value == "self";
         const bool attached_instance_script_call =
-            script_method && callee.kind == ir::ExpressionKind::member &&
+            script_method && callee.kind == typed::ExpressionKind::member &&
             !script_method->is_static && !callee.operands.empty() && !explicit_self_script_call &&
-            callee.resolution != ir::ResolutionKind::script_super &&
-            callee.operands.at(0)->resolution != ir::ResolutionKind::script_type &&
-            callee.operands.at(0)->resolution != ir::ResolutionKind::inner_type &&
+            callee.resolution != typed::ResolutionKind::script_super &&
+            callee.operands.at(0)->resolution != typed::ResolutionKind::script_type &&
+            callee.operands.at(0)->resolution != typed::ResolutionKind::inner_type &&
             !attached_script_source_path(callee.operands.at(0)->type, callee.resolved_owner)
                  .empty();
-        if (callee.resolution == ir::ResolutionKind::dynamic_method ||
+        if (callee.resolution == typed::ResolutionKind::dynamic_method ||
             attached_instance_script_call) {
             const auto identity = temporary_counter_++;
             const auto suffix = std::to_string(identity);
@@ -3838,7 +3844,7 @@ std::string CodeGenerator::emit_expression(const ir::Expression& expression) con
             std::string result = "([&]() -> godot::Variant { godot::Variant " + target_name +
                                  " = gdpp::runtime::to_variant(" +
                                  (attached_behavior_dynamic_call ? "this"
-                                  : callee.kind == ir::ExpressionKind::identifier
+                                  : callee.kind == typed::ExpressionKind::identifier
                                       ? self_object_expression()
                                       : emit_expression(*callee.operands.at(0))) +
                                  "); if (gdpp::runtime::script_function_failed()) return {}; "
@@ -3867,19 +3873,19 @@ std::string CodeGenerator::emit_expression(const ir::Expression& expression) con
         }
         if (!in_function_body_) {
             std::string direct =
-                callee.resolution == ir::ResolutionKind::script_constructor
+                callee.resolution == typed::ResolutionKind::script_constructor
                     ? detail_namespace_ + "::ScriptResource<" + callee.resolved_owner +
                           ">{}.instantiate"
-                : callee.resolution == ir::ResolutionKind::inner_constructor
+                : callee.resolution == typed::ResolutionKind::inner_constructor
                     ? detail_namespace_ + "::InternalClassResource<" +
                           inner_cpp_type(callee.resolved_owner) + ">{}.instantiate"
-                : callee.resolution == ir::ResolutionKind::script_super
+                : callee.resolution == typed::ResolutionKind::script_super
                     ? native_super_owner(callee.resolved_owner) + "::" + script_native_name
-                : callee.resolution == ir::ResolutionKind::script_static_callable &&
+                : callee.resolution == typed::ResolutionKind::script_static_callable &&
                         !callee.resolved_owner.empty()
                     ? callee.resolved_owner + "::" + script_native_name
                     : emit_expression(callee);
-            if (callee.resolution == ir::ResolutionKind::godot_method &&
+            if (callee.resolution == typed::ResolutionKind::godot_method &&
                 callee.value == "get_node") {
                 direct += "<godot::Node>";
             }
@@ -3941,24 +3947,24 @@ std::string CodeGenerator::emit_expression(const ir::Expression& expression) con
         std::string receiver_setup;
         std::string receiver_name;
         const auto suffix = std::to_string(temporary_counter_++);
-        if (callee.resolution == ir::ResolutionKind::script_constructor) {
+        if (callee.resolution == typed::ResolutionKind::script_constructor) {
             invocation =
                 detail_namespace_ + "::ScriptResource<" + callee.resolved_owner + ">{}.instantiate";
-        } else if (callee.resolution == ir::ResolutionKind::inner_constructor) {
+        } else if (callee.resolution == typed::ResolutionKind::inner_constructor) {
             invocation = detail_namespace_ + "::InternalClassResource<" +
                          inner_cpp_type(callee.resolved_owner) + ">{}.instantiate";
-        } else if (callee.resolution == ir::ResolutionKind::script_super) {
+        } else if (callee.resolution == typed::ResolutionKind::script_super) {
             invocation = native_super_owner(callee.resolved_owner) + "::" + script_native_name;
-        } else if (callee.resolution == ir::ResolutionKind::script_static_callable &&
+        } else if (callee.resolution == typed::ResolutionKind::script_static_callable &&
                    !callee.resolved_owner.empty()) {
             invocation = callee.resolved_owner + "::" + script_native_name;
         } else if (explicit_self_script_call && script_method) {
             invocation = "this->" + script_native_name;
-        } else if (callee.kind == ir::ExpressionKind::member &&
-                   callee.resolution != ir::ResolutionKind::script_super &&
-                   callee.operands.at(0)->resolution != ir::ResolutionKind::godot_type &&
-                   callee.operands.at(0)->resolution != ir::ResolutionKind::script_type &&
-                   callee.operands.at(0)->resolution != ir::ResolutionKind::inner_type) {
+        } else if (callee.kind == typed::ExpressionKind::member &&
+                   callee.resolution != typed::ResolutionKind::script_super &&
+                   callee.operands.at(0)->resolution != typed::ResolutionKind::godot_type &&
+                   callee.operands.at(0)->resolution != typed::ResolutionKind::script_type &&
+                   callee.operands.at(0)->resolution != typed::ResolutionKind::inner_type) {
             const auto receiver = "_gdpp_call_receiver_" + suffix;
             receiver_name = receiver;
             receiver_setup =
@@ -3970,13 +3976,13 @@ std::string CodeGenerator::emit_expression(const ir::Expression& expression) con
                     callee.operands.at(0)->type.kind == TypeKind::object ? "->" : ".";
                 invocation = receiver + connector + script_native_name;
             }
-            if (callee.resolution == ir::ResolutionKind::godot_method &&
+            if (callee.resolution == typed::ResolutionKind::godot_method &&
                 callee.value == "get_node") {
                 invocation += "<godot::Node>";
             }
         } else {
             invocation = emit_expression(callee);
-            if (callee.resolution == ir::ResolutionKind::godot_method &&
+            if (callee.resolution == typed::ResolutionKind::godot_method &&
                 callee.value == "get_node") {
                 invocation += "<godot::Node>";
             }
@@ -4009,7 +4015,7 @@ std::string CodeGenerator::emit_expression(const ir::Expression& expression) con
             const auto temporary =
                 "_gdpp_call_argument_" + suffix + "_" + std::to_string(index - 1);
             const auto native_type = cpp_type(argument.type);
-            if (argument.kind == ir::ExpressionKind::identifier && argument.value == "self" &&
+            if (argument.kind == typed::ExpressionKind::identifier && argument.value == "self" &&
                 native_type.rfind("godot::Ref<", 0) == 0) {
                 const auto object_type =
                     native_type.substr(std::string{"godot::Ref<"}.size(),
@@ -4067,62 +4073,63 @@ std::string CodeGenerator::emit_expression(const ir::Expression& expression) con
         }
         return result + "; }())";
     }
-    case ir::ExpressionKind::member: {
-        if (expression.resolution == ir::ResolutionKind::inner_type)
+    case typed::ExpressionKind::member: {
+        if (expression.resolution == typed::ResolutionKind::inner_type)
             return inner_cpp_type(expression.resolved_owner);
-        if (expression.resolution == ir::ResolutionKind::external_callable) {
+        if (expression.resolution == typed::ResolutionKind::external_callable) {
             return "gdpp::runtime::external_callable_at(gdpp::runtime::to_variant(" +
                    emit_expression(*expression.operands.at(0)) + "), " +
                    godot_string_name(expression.value) + ", " + script_location(expression.span) +
                    ")";
         }
-        if (expression.resolution == ir::ResolutionKind::external_signal) {
+        if (expression.resolution == typed::ResolutionKind::external_signal) {
             return "gdpp::runtime::external_signal_at(gdpp::runtime::to_variant(" +
                    emit_expression(*expression.operands.at(0)) + "), " +
                    godot_string_name(expression.value) + ", " + script_location(expression.span) +
                    ")";
         }
-        if (expression.resolution == ir::ResolutionKind::script_enum_type)
+        if (expression.resolution == typed::ResolutionKind::script_enum_type)
             return sanitize_qualified_identifier(expression.resolved_owner);
-        if (expression.resolution == ir::ResolutionKind::script_constant &&
+        if (expression.resolution == typed::ResolutionKind::script_constant &&
             !expression.resolved_owner.empty()) {
             const auto inner_owner = inner_cpp_type(expression.resolved_owner);
             return (inner_owner.empty() ? expression.resolved_owner : inner_owner) +
                    "::" + sanitize_identifier(expression.value) +
                    (managed_static_constant(expression.type) ? "()" : "");
         }
-        if (expression.resolution == ir::ResolutionKind::script_super)
+        if (expression.resolution == typed::ResolutionKind::script_super)
             return native_super_owner(expression.resolved_owner) +
                    "::" + sanitize_identifier(expression.value);
-        if (expression.resolution == ir::ResolutionKind::script_signal) {
+        if (expression.resolution == typed::ResolutionKind::script_signal) {
             auto object = emit_expression(*expression.operands.at(0));
             const bool ref_counted = is_ref_counted_object(expression.operands.at(0)->type);
             if (ref_counted && object != self_object_expression())
                 object = "(" + object + ").ptr()";
             return "godot::Signal(" + object + ", " + godot_string_name(expression.value) + ")";
         }
-        if (expression.resolution == ir::ResolutionKind::script_callable) {
+        if (expression.resolution == typed::ResolutionKind::script_callable) {
             auto object = emit_expression(*expression.operands.at(0));
             const bool ref_counted = is_ref_counted_object(expression.operands.at(0)->type);
             if (ref_counted && object != self_object_expression())
                 object = "(" + object + ").ptr()";
             return "godot::Callable(" + object + ", " + godot_string_name(expression.value) + ")";
         }
-        if (expression.resolution == ir::ResolutionKind::global_constant ||
-            expression.resolution == ir::ResolutionKind::global_enum_value)
+        if (expression.resolution == typed::ResolutionKind::global_constant ||
+            expression.resolution == typed::ResolutionKind::global_enum_value)
             return expression.resolved_owner;
-        if (expression.resolution == ir::ResolutionKind::builtin_constant)
+        if (expression.resolution == typed::ResolutionKind::builtin_constant)
             return builtin_constant_expression(expression.resolved_owner);
-        if (expression.resolution == ir::ResolutionKind::script_runtime_static_field) {
+        if (expression.resolution == typed::ResolutionKind::script_runtime_static_field) {
             const auto access = expression.resolved_owner + "::" + expression.getter + "()";
             return "(gdpp::runtime::is_editor_hint() ? godot::Variant() : "
                    "gdpp::runtime::to_variant(" +
                    access + "))";
         }
-        const auto object = expression.operands.at(0)->resolution == ir::ResolutionKind::script_type
-                                ? expression.operands.at(0)->resolved_owner
-                                : emit_expression(*expression.operands.at(0));
-        if (expression.resolution == ir::ResolutionKind::dynamic_property) {
+        const auto object =
+            expression.operands.at(0)->resolution == typed::ResolutionKind::script_type
+                ? expression.operands.at(0)->resolved_owner
+                : emit_expression(*expression.operands.at(0));
+        if (expression.resolution == typed::ResolutionKind::dynamic_property) {
             if (expression.operands.at(0)->type.kind == TypeKind::dictionary) {
                 const auto key =
                     "_gdpp_dictionary_read_key_" + std::to_string(temporary_counter_++);
@@ -4138,11 +4145,11 @@ std::string CodeGenerator::emit_expression(const ir::Expression& expression) con
                                    std::move(value));
         }
         const auto& receiver = *expression.operands.at(0);
-        const bool checked_object_access = receiver.type.kind == TypeKind::object &&
-                                           object != "this" &&
-                                           receiver.resolution != ir::ResolutionKind::godot_type &&
-                                           receiver.resolution != ir::ResolutionKind::script_type &&
-                                           receiver.resolution != ir::ResolutionKind::inner_type;
+        const bool checked_object_access =
+            receiver.type.kind == TypeKind::object && object != "this" &&
+            receiver.resolution != typed::ResolutionKind::godot_type &&
+            receiver.resolution != typed::ResolutionKind::script_type &&
+            receiver.resolution != typed::ResolutionKind::inner_type;
         const auto receiver_name = checked_object_access ? "_gdpp_property_receiver_" +
                                                                std::to_string(temporary_counter_++)
                                                          : object;
@@ -4163,16 +4170,16 @@ std::string CodeGenerator::emit_expression(const ir::Expression& expression) con
                    "_gdpp_member_result; }())";
         };
         const auto connector =
-            expression.resolution == ir::ResolutionKind::enum_member ||
-                    expression.resolution == ir::ResolutionKind::builtin_constant
+            expression.resolution == typed::ResolutionKind::enum_member ||
+                    expression.resolution == typed::ResolutionKind::builtin_constant
                 ? "::"
-            : expression.operands.at(0)->resolution == ir::ResolutionKind::godot_type  ? "::"
-            : expression.operands.at(0)->resolution == ir::ResolutionKind::script_type ? "::"
-            : expression.operands.at(0)->resolution == ir::ResolutionKind::inner_type  ? "::"
+            : expression.operands.at(0)->resolution == typed::ResolutionKind::godot_type  ? "::"
+            : expression.operands.at(0)->resolution == typed::ResolutionKind::script_type ? "::"
+            : expression.operands.at(0)->resolution == typed::ResolutionKind::inner_type  ? "::"
             : receiver_name == "this" || expression.operands.at(0)->type.kind == TypeKind::object
                 ? "->"
                 : ".";
-        if (expression.resolution == ir::ResolutionKind::godot_property &&
+        if (expression.resolution == typed::ResolutionKind::godot_property &&
             !expression.direct_access && !expression.getter.empty()) {
             std::string index;
             if (expression.indexed_argument >= 0) {
@@ -4188,20 +4195,20 @@ std::string CodeGenerator::emit_expression(const ir::Expression& expression) con
                 emit_api_return(expression.type,
                                 receiver_name + connector + expression.getter + "(" + index + ")"));
         }
-        if (expression.resolution == ir::ResolutionKind::script_property &&
+        if (expression.resolution == typed::ResolutionKind::script_property &&
             !expression.getter.empty()) {
             if (expression.operands.at(0)->type.kind == TypeKind::script_resource &&
                 !expression.resolved_owner.empty()) {
                 return expression.resolved_owner + "::" + expression.getter + "()";
             }
-            if (expression.operands.at(0)->resolution == ir::ResolutionKind::script_type ||
-                expression.operands.at(0)->resolution == ir::ResolutionKind::inner_type) {
+            if (expression.operands.at(0)->resolution == typed::ResolutionKind::script_type ||
+                expression.operands.at(0)->resolution == typed::ResolutionKind::inner_type) {
                 return emit_expression(*expression.operands.at(0)) + "::" + expression.getter +
                        "()";
             }
             const bool explicit_self =
                 attached_script_ &&
-                expression.operands.at(0)->kind == ir::ExpressionKind::identifier &&
+                expression.operands.at(0)->kind == typed::ExpressionKind::identifier &&
                 expression.operands.at(0)->value == "self";
             if (explicit_self)
                 return expression.getter + "()";
@@ -4216,20 +4223,21 @@ std::string CodeGenerator::emit_expression(const ir::Expression& expression) con
             }
             return finish_object_access(receiver_name + connector + expression.getter + "()");
         }
-        if (expression.resolution == ir::ResolutionKind::godot_property &&
+        if (expression.resolution == typed::ResolutionKind::godot_property &&
             expression.direct_access && expression.operands.at(0)->type.kind == TypeKind::builtin) {
             return emit_direct_builtin_member(expression.resolved_owner, object, expression.value);
         }
-        return finish_object_access(receiver_name + connector +
-                                    (expression.resolution == ir::ResolutionKind::enum_member
-                                         ? enum_identifier(expression.value)
-                                         : sanitize_identifier(expression.value)) +
-                                    (expression.resolution == ir::ResolutionKind::script_constant &&
-                                             managed_static_constant(expression.type)
-                                         ? "()"
-                                         : ""));
+        return finish_object_access(
+            receiver_name + connector +
+            (expression.resolution == typed::ResolutionKind::enum_member
+                 ? enum_identifier(expression.value)
+                 : sanitize_identifier(expression.value)) +
+            (expression.resolution == typed::ResolutionKind::script_constant &&
+                     managed_static_constant(expression.type)
+                 ? "()"
+                 : ""));
     }
-    case ir::ExpressionKind::subscript: {
+    case typed::ExpressionKind::subscript: {
         if (expression.operands.at(0)->type.is_dynamic() ||
             expression.operands.at(0)->type.kind == TypeKind::object) {
             const auto suffix = std::to_string(temporary_counter_++);
@@ -4264,7 +4272,7 @@ std::string CodeGenerator::emit_expression(const ir::Expression& expression) con
                "; if (gdpp::runtime::script_function_failed()) return {}; return " + value_name +
                "; }())";
     }
-    case ir::ExpressionKind::array_literal: {
+    case typed::ExpressionKind::array_literal: {
         const auto descriptor = describe_container_type(expression.type);
         const auto runtime_typed = descriptor && descriptor->has_runtime_constraint();
         const auto native_type = runtime_typed ? cpp_type(expression.type) : "godot::Array";
@@ -4291,7 +4299,7 @@ std::string CodeGenerator::emit_expression(const ir::Expression& expression) con
         }
         return result + "return " + array + "; }())";
     }
-    case ir::ExpressionKind::dictionary_literal: {
+    case typed::ExpressionKind::dictionary_literal: {
         const auto descriptor = describe_container_type(expression.type);
         const auto runtime_typed = descriptor && descriptor->has_runtime_constraint();
         const auto native_type = runtime_typed ? cpp_type(expression.type) : "godot::Dictionary";
@@ -4325,7 +4333,7 @@ std::string CodeGenerator::emit_expression(const ir::Expression& expression) con
         }
         return result + "return " + dictionary + "; }())";
     }
-    case ir::ExpressionKind::lambda: {
+    case typed::ExpressionKind::lambda: {
         if (!expression.lambda) {
             diagnostics_.error("GDS3007", "lambda expression is missing typed IR payload",
                                expression.span);
@@ -4448,7 +4456,7 @@ std::string CodeGenerator::emit_expression(const ir::Expression& expression) con
     return "godot::Variant()";
 }
 
-std::string CodeGenerator::emit_statements(const std::vector<ir::Statement>& statements,
+std::string CodeGenerator::emit_statements(const std::vector<typed::Statement>& statements,
                                            const std::size_t indentation,
                                            const std::size_t begin) const {
     const auto saved_overrides = local_expression_overrides_;
@@ -4457,7 +4465,7 @@ std::string CodeGenerator::emit_statements(const std::vector<ir::Statement>& sta
     return result;
 }
 
-std::string CodeGenerator::lift_async_loop_locals(const ir::Statement& statement,
+std::string CodeGenerator::lift_async_loop_locals(const typed::Statement& statement,
                                                   const std::size_t indentation) const {
     std::unordered_map<FlowSymbolId, AsyncLocalSymbol> assigned;
     std::unordered_set<FlowSymbolId> declared;
@@ -4478,11 +4486,11 @@ std::string CodeGenerator::lift_async_loop_locals(const ir::Statement& statement
     return result;
 }
 
-bool CodeGenerator::statement_contains_await(const ir::Statement& statement) const noexcept {
-    if (statement.kind == ir::StatementKind::await_statement ||
-        statement.kind == ir::StatementKind::await_variable)
+bool CodeGenerator::statement_contains_await(const typed::Statement& statement) const noexcept {
+    if (statement.kind == typed::StatementKind::await_statement ||
+        statement.kind == typed::StatementKind::await_variable)
         return await_can_suspend(statement);
-    const auto contains = [this](const std::vector<ir::Statement>& statements) {
+    const auto contains = [this](const std::vector<typed::Statement>& statements) {
         return std::any_of(statements.begin(), statements.end(),
                            [this](const auto& child) { return statement_contains_await(child); });
     };
@@ -4491,7 +4499,7 @@ bool CodeGenerator::statement_contains_await(const ir::Statement& statement) con
            contains(statement.assert_message_prefix);
 }
 
-bool CodeGenerator::await_can_suspend(const ir::Statement& statement) noexcept {
+bool CodeGenerator::await_can_suspend(const typed::Statement& statement) noexcept {
     if (!statement.expression)
         return false;
     const auto& type = statement.expression->type;
@@ -4556,7 +4564,7 @@ std::string CodeGenerator::emit_script_failure_return(const std::size_t indentat
     return result + prefix + "}\n";
 }
 
-std::string CodeGenerator::emit_suspension_lifetime(const ir::Statement& statement,
+std::string CodeGenerator::emit_suspension_lifetime(const typed::Statement& statement,
                                                     const std::size_t indentation) const {
     std::string result;
     for (const auto& variable : statement.suspension_variables) {
@@ -4569,8 +4577,8 @@ std::string CodeGenerator::emit_suspension_lifetime(const ir::Statement& stateme
     return result;
 }
 
-bool CodeGenerator::can_emit_flat_async(const ir::Function& function,
-                                        const mir::Function& mir_function) const noexcept {
+bool CodeGenerator::can_emit_flat_async(const typed::Function& function,
+                                        const mir::ControlFlowFunction& mir_function) const {
     // A long source-level callback chain produces recursively nested lambda types. MSVC can use
     // more than 10 GiB compiling such a function before failing with C1060. Flat MIR dispatch is
     // safe whenever the function has no locals that must be lifted across suspension and no loop
@@ -4579,15 +4587,42 @@ bool CodeGenerator::can_emit_flat_async(const ir::Function& function,
     const auto suspensions = std::count_if(
         mir_function.blocks.begin(), mir_function.blocks.end(),
         [](const auto& block) { return block.terminator.kind == mir::TerminatorKind::suspend; });
+    const MirSourceIndex source_index{function.body};
+    if (source_index.statement_count() != mir_function.source_statement_count ||
+        source_index.expression_count() != mir_function.source_expression_count) {
+        return false;
+    }
+    for (const auto& block : mir_function.blocks) {
+        for (const auto& instruction : block.instructions) {
+            if (!source_index.statement(instruction.source_statement))
+                return false;
+        }
+        if (block.terminator.condition_value != mir::invalid_value) {
+            if (block.terminator.condition_value >= mir_function.values.size())
+                return false;
+            const auto source_expression =
+                mir_function.values[block.terminator.condition_value].source_expression;
+            if (!source_index.expression(source_expression))
+                return false;
+        }
+    }
     std::unordered_set<FlowSymbolId> declared;
     collect_declared_symbols(function.body, declared);
     return mir_function.suspends && suspensions >= 8 && declared.empty() &&
            std::all_of(function.body.begin(), function.body.end(), flat_async_statement_supported);
 }
 
-std::string CodeGenerator::emit_flat_async(const ir::Function& source,
-                                           const mir::Function& function,
+std::string CodeGenerator::emit_flat_async(const typed::Function& source,
+                                           const mir::ControlFlowFunction& function,
                                            const std::size_t indentation) const {
+    const MirSourceIndex source_index{source.body};
+    const auto terminator_expression =
+        [&](const mir::Terminator& terminator) -> const typed::Expression* {
+        if (terminator.condition_value >= function.values.size())
+            return nullptr;
+        return source_index.expression(
+            function.values[terminator.condition_value].source_expression);
+    };
     const auto prefix = indent(indentation);
     const auto identity = std::to_string(temporary_counter_++);
     const auto step_type = "_gdpp_async_step_type_" + identity;
@@ -4625,11 +4660,13 @@ std::string CodeGenerator::emit_flat_async(const ir::Function& source,
     for (const auto& block : function.blocks) {
         result += indent(indentation + 2) + "case " + std::to_string(block.id) + ": {\n";
         for (const auto& instruction : block.instructions) {
-            if (!instruction.source || instruction.kind == mir::InstructionKind::suspend_value)
+            const auto* statement = source_index.statement(instruction.source_statement);
+            if (!statement || instruction.kind == mir::InstructionKind::suspend_value)
                 continue;
-            result += emit_statement(*instruction.source, indentation + 3);
+            result += emit_statement(*statement, indentation + 3);
         }
         const auto& terminator = block.terminator;
+        const auto* expression = terminator_expression(terminator);
         switch (terminator.kind) {
         case mir::TerminatorKind::jump:
             result += indent(indentation + 3) + pc + " = " +
@@ -4638,8 +4675,7 @@ std::string CodeGenerator::emit_flat_async(const ir::Function& source,
             break;
         case mir::TerminatorKind::branch:
             result += indent(indentation + 3) +
-                      "const bool _gdpp_flat_condition = " + emit_truthy(*terminator.condition) +
-                      ";\n";
+                      "const bool _gdpp_flat_condition = " + emit_truthy(*expression) + ";\n";
             result += emit_script_failure_return(indentation + 3, true);
             result += indent(indentation + 3) + pc + " = _gdpp_flat_condition ? " +
                       std::to_string(terminator.targets[0]) + " : " +
@@ -4650,8 +4686,7 @@ std::string CodeGenerator::emit_flat_async(const ir::Function& source,
             const auto target = std::to_string(terminator.targets.front());
             const auto awaitable = "_gdpp_flat_awaitable_" + std::to_string(temporary_counter_++);
             result += indent(indentation + 3) + "const godot::Variant " + awaitable +
-                      " = gdpp::runtime::to_variant(" + emit_expression(*terminator.condition) +
-                      ");\n";
+                      " = gdpp::runtime::to_variant(" + emit_expression(*expression) + ");\n";
             result += emit_script_failure_return(indentation + 3, true);
             result += indent(indentation + 3) + "if (!gdpp::runtime::is_awaitable(" + awaitable +
                       ")) {\n";
@@ -4673,9 +4708,9 @@ std::string CodeGenerator::emit_flat_async(const ir::Function& source,
         }
         case mir::TerminatorKind::return_value:
             if (current_coroutine_abi_) {
-                if (terminator.condition) {
+                if (expression) {
                     result += indent(indentation + 3) + "const auto _gdpp_flat_return_value = " +
-                              emit_expression(*terminator.condition) + ";\n";
+                              emit_expression(*expression) + ";\n";
                     result += emit_script_failure_return(indentation + 3, true);
                     result += coroutine_return(indentation + 3, "_gdpp_flat_return_value", true);
                 } else {
@@ -4708,7 +4743,7 @@ std::string CodeGenerator::emit_flat_async(const ir::Function& source,
 }
 
 std::string CodeGenerator::emit_async_match_branch(
-    const ir::Statement& branch, const std::size_t next_branch, const std::size_t after_branch,
+    const typed::Statement& branch, const std::size_t next_branch, const std::size_t after_branch,
     const std::string& value_name, const std::string& keep_alive, const std::size_t indentation,
     std::shared_ptr<const AsyncLoopControl> loop_control) const {
     std::string condition;
@@ -4770,7 +4805,7 @@ std::string CodeGenerator::emit_async_match_branch(
     return result;
 }
 
-std::string CodeGenerator::emit_assert_failure(const ir::Statement& statement,
+std::string CodeGenerator::emit_assert_failure(const typed::Statement& statement,
                                                const std::size_t indentation,
                                                const bool continuation_context) const {
     const auto location = current_source_path_ + ":" + std::to_string(statement.span.begin.line);
@@ -4794,27 +4829,27 @@ std::string CodeGenerator::emit_assert_failure(const ir::Statement& statement,
 }
 
 std::string CodeGenerator::emit_async_statements(
-    const std::vector<ir::Statement>& statements, const std::size_t indentation,
+    const std::vector<typed::Statement>& statements, const std::size_t indentation,
     const std::size_t begin, std::vector<StatementSlice> tails, const std::string& terminal,
     const bool continuation_context, std::shared_ptr<const AsyncLoopControl> loop_control) const {
     std::string result;
     for (std::size_t index = begin; index < statements.size(); ++index) {
         const auto& statement = statements[index];
-        if (loop_control && statement.kind == ir::StatementKind::break_statement) {
+        if (loop_control && statement.kind == typed::StatementKind::break_statement) {
             result += emit_async_statements({}, indentation, 0, loop_control->break_tails,
                                             loop_control->break_terminal, continuation_context,
                                             loop_control->parent);
             result += async_return(indentation, continuation_context);
             return result;
         }
-        if (loop_control && statement.kind == ir::StatementKind::continue_statement) {
+        if (loop_control && statement.kind == typed::StatementKind::continue_statement) {
             result += indent(indentation) + loop_control->continue_terminal + "\n";
             result += async_return(indentation, continuation_context);
             return result;
         }
         const bool requires_loop_control = loop_control && contains_current_loop_control(statement);
         if (!statement_contains_await(statement) && !requires_loop_control) {
-            if (statement.kind == ir::StatementKind::return_statement) {
+            if (statement.kind == typed::StatementKind::return_statement) {
                 if (current_coroutine_abi_ || !continuation_context) {
                     const auto saved_async_continuation = in_async_continuation_;
                     in_async_continuation_ = in_async_continuation_ || continuation_context;
@@ -4838,8 +4873,8 @@ std::string CodeGenerator::emit_async_statements(
         if (index + 1 < statements.size())
             continuation.insert(continuation.begin(), StatementSlice{&statements, index + 1});
         const auto prefix = indent(indentation);
-        if (statement.kind == ir::StatementKind::await_statement ||
-            statement.kind == ir::StatementKind::await_variable) {
+        if (statement.kind == typed::StatementKind::await_statement ||
+            statement.kind == typed::StatementKind::await_variable) {
             const auto identity = std::to_string(temporary_counter_++);
             const auto awaitable_name = "_gdpp_awaitable_" + identity;
             const auto result_name = "_gdpp_await_values_" + identity;
@@ -4854,7 +4889,7 @@ std::string CodeGenerator::emit_async_statements(
             result += emit_script_function_scope(indentation + 1);
             result += indent(indentation + 1) + "static_cast<void>(" + result_name + ");\n";
             result += emit_suspension_lifetime(statement, indentation + 1);
-            if (statement.kind == ir::StatementKind::await_variable) {
+            if (statement.kind == typed::StatementKind::await_variable) {
                 result += indent(indentation + 1) + "[[maybe_unused]] " +
                           cpp_type(statement.declared_type) + " " +
                           sanitize_identifier(statement.name) + " = " +
@@ -4885,7 +4920,7 @@ std::string CodeGenerator::emit_async_statements(
             return result;
         }
 
-        if (statement.kind == ir::StatementKind::if_statement) {
+        if (statement.kind == typed::StatementKind::if_statement) {
             const auto condition_name =
                 "_gdpp_async_if_condition_" + std::to_string(temporary_counter_++);
             result += prefix + "const bool " + condition_name + " = " +
@@ -4901,7 +4936,7 @@ std::string CodeGenerator::emit_async_statements(
             return result;
         }
 
-        if (statement.kind == ir::StatementKind::assert_statement) {
+        if (statement.kind == typed::StatementKind::assert_statement) {
             const auto identity = std::to_string(temporary_counter_++);
             const auto after_assert = "_gdpp_after_assert_" + identity;
             result += prefix + "{\n" + indent(indentation + 1) + "auto " + after_assert +
@@ -4911,7 +4946,7 @@ std::string CodeGenerator::emit_async_statements(
             result += indent(indentation + 1) + "};\n";
 
             const auto prefix_suspends =
-                [this](const std::vector<ir::Statement>& prefix_statements) {
+                [this](const std::vector<typed::Statement>& prefix_statements) {
                     return std::any_of(
                         prefix_statements.begin(), prefix_statements.end(),
                         [this](const auto& child) { return statement_contains_await(child); });
@@ -4936,7 +4971,7 @@ std::string CodeGenerator::emit_async_statements(
             return result;
         }
 
-        if (statement.kind == ir::StatementKind::match_statement) {
+        if (statement.kind == typed::StatementKind::match_statement) {
             const auto identity = std::to_string(match_counter_++);
             const auto value_name = "_gdpp_async_match_value_" + identity;
             const auto dispatch_type = "_gdpp_async_match_dispatch_type_" + identity;
@@ -4975,7 +5010,7 @@ std::string CodeGenerator::emit_async_statements(
             return result;
         }
 
-        if (statement.kind == ir::StatementKind::for_statement) {
+        if (statement.kind == typed::StatementKind::for_statement) {
             const auto saved_overrides = local_expression_overrides_;
             const auto identity = temporary_counter_++;
             const auto suffix = std::to_string(identity);
@@ -5042,7 +5077,7 @@ std::string CodeGenerator::emit_async_statements(
             return result;
         }
 
-        if (statement.kind == ir::StatementKind::while_statement) {
+        if (statement.kind == typed::StatementKind::while_statement) {
             const auto saved_overrides = local_expression_overrides_;
             const auto suffix = std::to_string(temporary_counter_++);
             const auto loop = "_gdpp_async_loop_" + suffix;
@@ -5098,9 +5133,9 @@ std::string CodeGenerator::emit_async_statements(
     return result;
 }
 
-void CodeGenerator::collect_match_bindings(const ir::MatchPattern& pattern,
+void CodeGenerator::collect_match_bindings(const typed::MatchPattern& pattern,
                                            std::vector<MatchBinding>& bindings) const {
-    if (pattern.kind == ir::MatchPatternKind::binding) {
+    if (pattern.kind == typed::MatchPatternKind::binding) {
         const auto found = std::find_if(bindings.begin(), bindings.end(), [&](const auto& binding) {
             return binding.name == pattern.name;
         });
@@ -5114,11 +5149,11 @@ void CodeGenerator::collect_match_bindings(const ir::MatchPattern& pattern,
         collect_match_bindings(element, bindings);
 }
 
-std::string CodeGenerator::emit_match_pattern(const ir::MatchPattern& pattern,
+std::string CodeGenerator::emit_match_pattern(const typed::MatchPattern& pattern,
                                               const std::string& candidate,
                                               const std::vector<MatchBinding>& bindings) const {
     switch (pattern.kind) {
-    case ir::MatchPatternKind::value: {
+    case typed::MatchPatternKind::value: {
         const auto suffix = std::to_string(temporary_counter_++);
         const auto actual = "_gdpp_pattern_actual_" + suffix;
         const auto expected = "_gdpp_pattern_expected_" + suffix;
@@ -5128,10 +5163,10 @@ std::string CodeGenerator::emit_match_pattern(const ir::MatchPattern& pattern,
                "); return static_cast<bool>(gdpp::runtime::binary(" + "godot::Variant::OP_EQUAL, " +
                actual + ", " + expected + ", " + script_location(pattern.span) + ")); }())";
     }
-    case ir::MatchPatternKind::wildcard:
-    case ir::MatchPatternKind::rest:
+    case typed::MatchPatternKind::wildcard:
+    case typed::MatchPatternKind::rest:
         return "true";
-    case ir::MatchPatternKind::binding: {
+    case typed::MatchPatternKind::binding: {
         const auto found = std::find_if(bindings.begin(), bindings.end(), [&](const auto& binding) {
             return binding.name == pattern.name;
         });
@@ -5142,12 +5177,12 @@ std::string CodeGenerator::emit_match_pattern(const ir::MatchPattern& pattern,
         return "([&]() -> bool { " + found->slot + " = gdpp::runtime::to_variant(" + candidate +
                "); return true; }())";
     }
-    case ir::MatchPatternKind::array: {
+    case typed::MatchPatternKind::array: {
         const auto suffix = std::to_string(temporary_counter_++);
         const auto actual = "_gdpp_pattern_array_value_" + suffix;
         const auto array = "_gdpp_pattern_array_" + suffix;
-        const bool has_rest =
-            !pattern.elements.empty() && pattern.elements.back().kind == ir::MatchPatternKind::rest;
+        const bool has_rest = !pattern.elements.empty() &&
+                              pattern.elements.back().kind == typed::MatchPatternKind::rest;
         const auto fixed_size = pattern.elements.size() - (has_rest ? 1U : 0U);
         std::string result = "([&]() -> bool { const godot::Variant " + actual +
                              " = gdpp::runtime::to_variant(" + candidate + "); if (" + actual +
@@ -5163,13 +5198,13 @@ std::string CodeGenerator::emit_match_pattern(const ir::MatchPattern& pattern,
         }
         return result + "return true; }())";
     }
-    case ir::MatchPatternKind::dictionary: {
+    case typed::MatchPatternKind::dictionary: {
         const auto suffix = std::to_string(temporary_counter_++);
         const auto actual = "_gdpp_pattern_dictionary_value_" + suffix;
         const auto dictionary = "_gdpp_pattern_dictionary_" + suffix;
         const bool has_rest = !pattern.elements.empty() && !pattern.keys.empty() &&
                               !pattern.keys.back() &&
-                              pattern.elements.back().kind == ir::MatchPatternKind::rest;
+                              pattern.elements.back().kind == typed::MatchPatternKind::rest;
         const auto fixed_size = pattern.elements.size() - (has_rest ? 1U : 0U);
         std::string result = "([&]() -> bool { const godot::Variant " + actual +
                              " = gdpp::runtime::to_variant(" + candidate + "); if (" + actual +
@@ -5182,7 +5217,7 @@ std::string CodeGenerator::emit_match_pattern(const ir::MatchPattern& pattern,
             result += "const godot::Variant " + key + " = gdpp::runtime::to_variant(" +
                       emit_expression(*pattern.keys[index]) + "); if (!" + dictionary + ".has(" +
                       key + ")) return false; ";
-            if (pattern.elements[index].kind != ir::MatchPatternKind::wildcard) {
+            if (pattern.elements[index].kind != typed::MatchPatternKind::wildcard) {
                 result += "if (!(" +
                           emit_match_pattern(pattern.elements[index], dictionary + "[" + key + "]",
                                              bindings) +
@@ -5221,7 +5256,7 @@ std::string CodeGenerator::emit_debug_line(const std::size_t line,
            std::to_string(line) + ");\n" + prefix + "#endif\n";
 }
 
-std::string CodeGenerator::emit_debug_breakpoint(const ir::Statement& statement,
+std::string CodeGenerator::emit_debug_breakpoint(const typed::Statement& statement,
                                                  const std::size_t indentation) const {
     const auto prefix = indent(indentation);
     const auto body = indent(indentation + 1);
@@ -5258,26 +5293,26 @@ std::string CodeGenerator::emit_debug_breakpoint(const ir::Statement& statement,
     return result;
 }
 
-std::string CodeGenerator::emit_statement(const ir::Statement& statement,
+std::string CodeGenerator::emit_statement(const typed::Statement& statement,
                                           const std::size_t indentation) const {
     auto result = emit_debug_line(statement.span.begin.line, indentation) +
                   emit_statement_body(statement, indentation);
-    if (statement.kind == ir::StatementKind::assignment)
+    if (statement.kind == typed::StatementKind::assignment)
         result += emit_script_failure_return(indentation, in_async_continuation_);
     return result;
 }
 
-std::string CodeGenerator::emit_statement_body(const ir::Statement& statement,
+std::string CodeGenerator::emit_statement_body(const typed::Statement& statement,
                                                std::size_t indentation) const {
     const auto prefix = indent(indentation);
     switch (statement.kind) {
-    case ir::StatementKind::expression:
+    case typed::StatementKind::expression:
         // GDScript permits intentionally ignoring any expression result. Make that intent
         // explicit so nodiscard Godot value types and ordinary conversion expressions remain
         // warning-clean under commercial -Wall/-Wextra builds.
         return prefix + "static_cast<void>(" + emit_expression(*statement.expression) + ");\n" +
                emit_script_failure_return(indentation, in_async_continuation_);
-    case ir::StatementKind::return_statement:
+    case typed::StatementKind::return_statement:
         if (statement.expression) {
             const auto value_name = "_gdpp_return_value_" + std::to_string(temporary_counter_++);
             std::string value;
@@ -5313,14 +5348,14 @@ std::string CodeGenerator::emit_statement_body(const ir::Statement& statement,
         if (!statement.expression && current_return_type_.kind != TypeKind::void_type)
             return prefix + "return {};\n";
         return prefix + "return;\n";
-    case ir::StatementKind::await_statement:
+    case typed::StatementKind::await_statement:
         if (await_can_suspend(statement)) {
             diagnostics_.error("GDS3006", "nested await reached code generation", statement.span);
             return prefix + "/* invalid nested await */;\n";
         }
         return prefix + "static_cast<void>(" + emit_expression(*statement.expression) + ");\n" +
                emit_script_failure_return(indentation, in_async_continuation_);
-    case ir::StatementKind::await_variable:
+    case typed::StatementKind::await_variable:
         if (await_can_suspend(statement)) {
             diagnostics_.error("GDS3006", "nested await reached code generation", statement.span);
             return prefix + "/* invalid nested await */;\n";
@@ -5332,7 +5367,7 @@ std::string CodeGenerator::emit_statement_body(const ir::Statement& statement,
                                emit_expression(*statement.expression),
                                &statement.expression->span) +
                ";\n" + emit_script_failure_return(indentation, in_async_continuation_);
-    case ir::StatementKind::assert_statement: {
+    case typed::StatementKind::assert_statement: {
         std::string result = prefix + "#ifdef GDPP_SCRIPT_DEBUG_ENABLED\n";
         for (const auto& child : statement.assert_condition_prefix)
             result += emit_statement(child, indentation);
@@ -5346,9 +5381,9 @@ std::string CodeGenerator::emit_statement_body(const ir::Statement& statement,
         result += prefix + "}\n";
         return result + prefix + "#endif\n";
     }
-    case ir::StatementKind::variable:
+    case typed::StatementKind::variable:
         return prefix + "[[maybe_unused]] " + (statement.is_constant ? "const " : "") +
-               (statement.expression && statement.expression->kind == ir::ExpressionKind::lambda
+               (statement.expression && statement.expression->kind == typed::ExpressionKind::lambda
                     ? std::string{"auto"}
                     : cpp_type(statement.declared_type)) +
                " " + sanitize_identifier(statement.name) +
@@ -5358,17 +5393,17 @@ std::string CodeGenerator::emit_statement_body(const ir::Statement& statement,
                                               &statement.expression->span)
                     : "{}") +
                ";\n" + emit_script_failure_return(indentation, in_async_continuation_);
-    case ir::StatementKind::assignment: {
+    case typed::StatementKind::assignment: {
         const auto& target = *statement.condition;
         if (!lowering_assignment_) {
-            const ir::Expression* receiver = nullptr;
-            const ir::Expression* access = &target;
-            while ((access->kind == ir::ExpressionKind::member ||
-                    access->kind == ir::ExpressionKind::subscript) &&
+            const typed::Expression* receiver = nullptr;
+            const typed::Expression* access = &target;
+            while ((access->kind == typed::ExpressionKind::member ||
+                    access->kind == typed::ExpressionKind::subscript) &&
                    !access->operands.empty()) {
                 const auto* parent = access->operands.front().get();
-                if ((parent->kind == ir::ExpressionKind::member ||
-                     parent->kind == ir::ExpressionKind::subscript) &&
+                if ((parent->kind == typed::ExpressionKind::member ||
+                     parent->kind == typed::ExpressionKind::subscript) &&
                     !parent->operands.empty()) {
                     access = parent;
                     continue;
@@ -5384,12 +5419,12 @@ std::string CodeGenerator::emit_statement_body(const ir::Statement& statement,
             std::string result = prefix + "{\n";
             const auto saved_overrides = exact_expression_overrides_;
             const bool receiver_is_type_namespace =
-                receiver && (receiver->resolution == ir::ResolutionKind::godot_type ||
-                             receiver->resolution == ir::ResolutionKind::external_type ||
-                             receiver->resolution == ir::ResolutionKind::script_type ||
-                             receiver->resolution == ir::ResolutionKind::inner_type ||
-                             receiver->resolution == ir::ResolutionKind::script_enum_type ||
-                             receiver->resolution == ir::ResolutionKind::global_enum_type);
+                receiver && (receiver->resolution == typed::ResolutionKind::godot_type ||
+                             receiver->resolution == typed::ResolutionKind::external_type ||
+                             receiver->resolution == typed::ResolutionKind::script_type ||
+                             receiver->resolution == typed::ResolutionKind::inner_type ||
+                             receiver->resolution == typed::ResolutionKind::script_enum_type ||
+                             receiver->resolution == typed::ResolutionKind::global_enum_type);
             if (receiver && !receiver_is_type_namespace) {
                 result += nested_prefix + "auto &&" + receiver_name + " = " +
                           emit_expression(*receiver) + ";\n";
@@ -5422,14 +5457,14 @@ std::string CodeGenerator::emit_statement_body(const ir::Statement& statement,
                    "if (!gdpp::runtime::is_instance_valid(gdpp::runtime::to_variant(" + receiver +
                    "))) { " + failure + " }\n";
         };
-        if (target.resolution == ir::ResolutionKind::dynamic_property &&
-            target.kind == ir::ExpressionKind::member && !target.operands.empty() &&
+        if (target.resolution == typed::ResolutionKind::dynamic_property &&
+            target.kind == typed::ExpressionKind::member && !target.operands.empty() &&
             target.operands.at(0)->type.kind == TypeKind::dictionary) {
             return emit_dictionary_member_assignment(statement, indentation);
         }
-        if (target.resolution == ir::ResolutionKind::dynamic_property)
+        if (target.resolution == typed::ResolutionKind::dynamic_property)
             return emit_dynamic_assignment(statement, indentation);
-        if (target.kind == ir::ExpressionKind::subscript &&
+        if (target.kind == typed::ExpressionKind::subscript &&
             (target.operands.at(0)->type.is_dynamic() ||
              target.operands.at(0)->type.kind == TypeKind::object ||
              (target.operands.at(0)->type.kind == TypeKind::builtin &&
@@ -5437,7 +5472,7 @@ std::string CodeGenerator::emit_statement_body(const ir::Statement& statement,
              target.operands.at(0)->type.kind == TypeKind::string)) {
             return emit_dynamic_assignment(statement, indentation);
         }
-        if (target.kind == ir::ExpressionKind::subscript) {
+        if (target.kind == typed::ExpressionKind::subscript) {
             const auto suffix = std::to_string(temporary_counter_++);
             const auto container_name = "_gdpp_subscript_container_" + suffix;
             const auto index_name = "_gdpp_subscript_index_" + suffix;
@@ -5570,7 +5605,7 @@ std::string CodeGenerator::emit_statement_body(const ir::Statement& statement,
                    emit_script_failure_return(write_indentation + 1, in_async_continuation_) +
                    inner + write(assigned) + ";\n" + outer + "}\n";
         };
-        if (target.resolution == ir::ResolutionKind::script_runtime_static_field) {
+        if (target.resolution == typed::ResolutionKind::script_runtime_static_field) {
             const auto* owner = script_symbols_
                                     ? script_symbols_->find_native_class(target.resolved_owner)
                                     : nullptr;
@@ -5590,16 +5625,17 @@ std::string CodeGenerator::emit_statement_body(const ir::Statement& statement,
                 },
                 indentation);
         }
-        if (target.resolution == ir::ResolutionKind::godot_property && target.direct_access &&
-            target.kind == ir::ExpressionKind::member) {
-            std::vector<const ir::Expression*> direct_chain;
-            const ir::Expression* root = &target;
-            while (root->resolution == ir::ResolutionKind::godot_property && root->direct_access &&
-                   root->kind == ir::ExpressionKind::member && !root->operands.empty()) {
+        if (target.resolution == typed::ResolutionKind::godot_property && target.direct_access &&
+            target.kind == typed::ExpressionKind::member) {
+            std::vector<const typed::Expression*> direct_chain;
+            const typed::Expression* root = &target;
+            while (root->resolution == typed::ResolutionKind::godot_property &&
+                   root->direct_access && root->kind == typed::ExpressionKind::member &&
+                   !root->operands.empty()) {
                 direct_chain.push_back(root);
                 root = root->operands.front().get();
             }
-            if (root->resolution == ir::ResolutionKind::godot_property && !root->direct_access &&
+            if (root->resolution == typed::ResolutionKind::godot_property && !root->direct_access &&
                 !root->getter.empty() && !root->setter.empty()) {
                 const auto suffix = std::to_string(temporary_counter_++);
                 const auto root_name = "_gdpp_property_value_" + suffix;
@@ -5607,7 +5643,7 @@ std::string CodeGenerator::emit_statement_body(const ir::Statement& statement,
                 std::string result = prefix + "{\n";
                 std::string receiver;
                 std::string connector;
-                if (root->kind == ir::ExpressionKind::member) {
+                if (root->kind == typed::ExpressionKind::member) {
                     const auto receiver_name = "_gdpp_property_receiver_" + suffix;
                     result += nested_prefix + "auto &&" + receiver_name + " = " +
                               emit_expression(*root->operands.at(0)) + ";\n";
@@ -5700,8 +5736,8 @@ std::string CodeGenerator::emit_statement_body(const ir::Statement& statement,
                        ";\n" + prefix + "}\n";
             }
         }
-        if (target.resolution == ir::ResolutionKind::script_property) {
-            if (target.kind == ir::ExpressionKind::member) {
+        if (target.resolution == typed::ResolutionKind::script_property) {
+            if (target.kind == typed::ExpressionKind::member) {
                 const auto& owner = *target.operands.at(0);
                 if (owner.type.kind == TypeKind::script_resource &&
                     !target.resolved_owner.empty()) {
@@ -5717,8 +5753,8 @@ std::string CodeGenerator::emit_statement_body(const ir::Statement& statement,
                         },
                         indentation);
                 }
-                if (owner.resolution == ir::ResolutionKind::script_type ||
-                    owner.resolution == ir::ResolutionKind::inner_type) {
+                if (owner.resolution == typed::ResolutionKind::script_type ||
+                    owner.resolution == typed::ResolutionKind::inner_type) {
                     const auto owner_type = emit_expression(owner);
                     const auto current = statement.operation == "="
                                              ? std::string{}
@@ -5732,7 +5768,7 @@ std::string CodeGenerator::emit_statement_body(const ir::Statement& statement,
                         indentation);
                 }
                 const bool explicit_self = attached_script_ &&
-                                           owner.kind == ir::ExpressionKind::identifier &&
+                                           owner.kind == typed::ExpressionKind::identifier &&
                                            owner.value == "self";
                 if (explicit_self) {
                     const auto current =
@@ -5796,12 +5832,12 @@ std::string CodeGenerator::emit_statement_body(const ir::Statement& statement,
                 [&](const std::string& assigned) { return target.setter + "(" + assigned + ")"; },
                 indentation);
         }
-        if (target.resolution == ir::ResolutionKind::godot_property && !target.direct_access) {
+        if (target.resolution == typed::ResolutionKind::godot_property && !target.direct_access) {
             if (target.setter.empty()) {
                 diagnostics_.error("GDS3003", "Godot property is read-only", target.span);
                 return prefix + "/* read-only property assignment */;\n";
             }
-            if (target.kind == ir::ExpressionKind::identifier) {
+            if (target.kind == typed::ExpressionKind::identifier) {
                 std::string raw_index;
                 if (target.indexed_argument >= 0)
                     raw_index = std::to_string(target.indexed_argument);
@@ -5850,15 +5886,15 @@ std::string CodeGenerator::emit_statement_body(const ir::Statement& statement,
                     },
                     indentation);
             }
-            if (target.kind == ir::ExpressionKind::member) {
+            if (target.kind == typed::ExpressionKind::member) {
                 const auto object = emit_expression(*target.operands.at(0));
                 const bool checked_object =
                     target.operands.at(0)->type.kind == TypeKind::object &&
-                    target.operands.at(0)->resolution != ir::ResolutionKind::script_type;
+                    target.operands.at(0)->resolution != typed::ResolutionKind::script_type;
                 const auto suffix = std::to_string(temporary_counter_++);
                 const auto receiver = checked_object ? "_gdpp_property_receiver_" + suffix : object;
                 const auto connector =
-                    target.operands.at(0)->resolution == ir::ResolutionKind::script_type ? "::"
+                    target.operands.at(0)->resolution == typed::ResolutionKind::script_type ? "::"
                     : receiver == "this" || target.operands.at(0)->type.kind == TypeKind::object
                         ? "->"
                         : ".";
@@ -5928,7 +5964,7 @@ std::string CodeGenerator::emit_statement_body(const ir::Statement& statement,
             },
             indentation);
     }
-    case ir::StatementKind::if_statement: {
+    case typed::StatementKind::if_statement: {
         const auto condition = "_gdpp_if_condition_" + std::to_string(temporary_counter_++);
         std::string result = prefix + "const bool " + condition + " = " +
                              emit_truthy(*statement.condition) + ";\n" +
@@ -5946,7 +5982,7 @@ std::string CodeGenerator::emit_statement_body(const ir::Statement& statement,
         }
         return result + "\n";
     }
-    case ir::StatementKind::match_statement: {
+    case typed::StatementKind::match_statement: {
         const auto identity = match_counter_++;
         const auto value_name = "_gdpp_match_value_" + std::to_string(identity);
         const auto matched_name = "_gdpp_match_done_" + std::to_string(identity);
@@ -6000,11 +6036,11 @@ std::string CodeGenerator::emit_statement_body(const ir::Statement& statement,
         }
         return result + prefix + "}\n";
     }
-    case ir::StatementKind::match_branch:
+    case typed::StatementKind::match_branch:
         diagnostics_.error("GDS3004", "orphan match branch reached code generation",
                            statement.span);
         return prefix + "/* invalid match branch */;\n";
-    case ir::StatementKind::while_statement: {
+    case typed::StatementKind::while_statement: {
         const auto condition = "_gdpp_while_condition_" + std::to_string(temporary_counter_++);
         std::string result = prefix + "while (true) {\n" + indent(indentation + 1) + "const bool " +
                              condition + " = " + emit_truthy(*statement.condition) + ";\n" +
@@ -6014,7 +6050,7 @@ std::string CodeGenerator::emit_statement_body(const ir::Statement& statement,
             result += emit_statement(child, indentation + 1);
         return result + prefix + "}\n";
     }
-    case ir::StatementKind::for_statement: {
+    case typed::StatementKind::for_statement: {
         if (statement.iteration.strategy == IterationStrategy::intrinsic_range) {
             const auto* direct_range = range_call(*statement.condition);
             if (!direct_range) {
@@ -6276,13 +6312,13 @@ std::string CodeGenerator::emit_statement_body(const ir::Statement& statement,
                            statement.span);
         return prefix + "/* unsupported iterable */;\n";
     }
-    case ir::StatementKind::pass_statement:
+    case typed::StatementKind::pass_statement:
         return prefix + ";\n";
-    case ir::StatementKind::break_statement:
+    case typed::StatementKind::break_statement:
         return prefix + "break;\n";
-    case ir::StatementKind::continue_statement:
+    case typed::StatementKind::continue_statement:
         return prefix + "continue;\n";
-    case ir::StatementKind::breakpoint_statement:
+    case typed::StatementKind::breakpoint_statement:
         return emit_debug_breakpoint(statement, indentation);
     }
     return {};
@@ -6292,9 +6328,9 @@ void CodeGenerator::emit_attached_descriptor_definition(
     std::ostringstream& source, const std::string& native_name, const std::string& source_path,
     const std::string& global_name, const std::string& native_base_type,
     const std::string& base_script_path, const std::string& contract_hash, const bool tool_mode,
-    const bool is_abstract, const std::vector<ir::Field>& fields,
-    const std::vector<ir::Function>& functions, const std::vector<ir::Signal>& signals,
-    const std::vector<ir::Enum>& enums) const {
+    const bool is_abstract, const std::vector<typed::Field>& fields,
+    const std::vector<typed::Function>& functions, const std::vector<typed::Signal>& signals,
+    const std::vector<typed::Enum>& enums) const {
     source << "gdpp::runtime::AttachedScriptDescriptor " << native_name
            << "::_gdpp_descriptor() {\n"
            << "    gdpp::runtime::AttachedScriptDescriptor descriptor;\n"
@@ -6448,7 +6484,7 @@ void CodeGenerator::emit_attached_descriptor_definition(
     source << "    return descriptor;\n}\n\n";
 }
 
-void CodeGenerator::emit_inner_class_declaration(const ir::Class& declaration,
+void CodeGenerator::emit_inner_class_declaration(const typed::Class& declaration,
                                                  std::ostringstream& header,
                                                  const std::string& native_name,
                                                  const std::string& source_name,
@@ -6484,18 +6520,18 @@ void CodeGenerator::emit_inner_class_declaration(const ir::Class& declaration,
     const auto godot_base = inner_godot_base_type(source_name);
     current_godot_base_type_ = godot_base;
     attached_godot_base_type_ = godot_base;
-    const auto engine_virtual_for = [&](const ir::Function& function) {
+    const auto engine_virtual_for = [&](const typed::Function& function) {
         static_cast<void>(function);
         return static_cast<const GodotMethodRecord*>(nullptr);
     };
-    const auto coroutine_abi_for = [&](const ir::Function& function) {
+    const auto coroutine_abi_for = [&](const typed::Function& function) {
         return function.is_coroutine && !engine_virtual_for(function);
     };
-    const auto function_return_type = [&](const ir::Function& function) {
+    const auto function_return_type = [&](const typed::Function& function) {
         return coroutine_abi_for(function) ? std::string{"godot::Variant"}
                                            : cpp_type(function.return_type);
     };
-    const auto function_symbol = [&](const ir::Function& function) {
+    const auto function_symbol = [&](const typed::Function& function) {
         if (!current_inner_script_)
             return static_cast<const ScriptMemberSymbol*>(nullptr);
         const auto member =
@@ -6506,7 +6542,7 @@ void CodeGenerator::emit_inner_class_declaration(const ir::Class& declaration,
                          });
         return member == current_inner_script_->members.end() ? nullptr : &*member;
     };
-    const auto function_native_name = [&](const ir::Function& function) {
+    const auto function_native_name = [&](const typed::Function& function) {
         const auto* symbol = function_symbol(function);
         if (symbol)
             return inner_method_implementation_name(*current_inner_script_, *symbol);
@@ -6686,7 +6722,7 @@ void CodeGenerator::emit_inner_class_declaration(const ir::Class& declaration,
     current_inner_script_ = previous_inner_script;
 }
 
-void CodeGenerator::emit_inner_class_definition(const ir::Class& declaration,
+void CodeGenerator::emit_inner_class_definition(const typed::Class& declaration,
                                                 std::ostringstream& source,
                                                 const std::string& native_name,
                                                 const std::string& source_name,
@@ -6768,18 +6804,18 @@ void CodeGenerator::emit_inner_class_definition(const ir::Class& declaration,
                                   : native_script_base ? "res://" + native_script_base->path
                                                        : std::string{};
     const auto native_base_type = inner_attached_native_base_type(source_name);
-    const auto engine_virtual_for = [&](const ir::Function& function) {
+    const auto engine_virtual_for = [&](const typed::Function& function) {
         static_cast<void>(function);
         return static_cast<const GodotMethodRecord*>(nullptr);
     };
-    const auto coroutine_abi_for = [&](const ir::Function& function) {
+    const auto coroutine_abi_for = [&](const typed::Function& function) {
         return function.is_coroutine && !engine_virtual_for(function);
     };
-    const auto function_return_type = [&](const ir::Function& function) {
+    const auto function_return_type = [&](const typed::Function& function) {
         return coroutine_abi_for(function) ? std::string{"godot::Variant"}
                                            : cpp_type(function.return_type);
     };
-    const auto function_symbol = [&](const ir::Function& function) {
+    const auto function_symbol = [&](const typed::Function& function) {
         if (!current_inner_script_)
             return static_cast<const ScriptMemberSymbol*>(nullptr);
         const auto member =
@@ -6790,7 +6826,7 @@ void CodeGenerator::emit_inner_class_definition(const ir::Class& declaration,
                          });
         return member == current_inner_script_->members.end() ? nullptr : &*member;
     };
-    const auto function_native_name = [&](const ir::Function& function) {
+    const auto function_native_name = [&](const typed::Function& function) {
         const auto* symbol = function_symbol(function);
         if (symbol)
             return inner_method_implementation_name(*current_inner_script_, *symbol);
@@ -7018,7 +7054,7 @@ void CodeGenerator::emit_inner_class_definition(const ir::Class& declaration,
 
     const auto notification =
         std::find_if(declaration.functions.begin(), declaration.functions.end(),
-                     [](const ir::Function& function) {
+                     [](const typed::Function& function) {
                          return !function.is_static && function.name == "_notification";
                      });
     source << "void " << native_name
@@ -7400,11 +7436,7 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
                                       const std::string& attached_native_base,
                                       const std::string& attached_base_script_path,
                                       const std::string& script_contract_hash) const {
-    if (!mir_module.hir) {
-        diagnostics_.error("GDS5108", "C++ backend received a detached MIR module", {});
-        return {};
-    }
-    const auto& module = *mir_module.hir;
+    const auto& module = mir_module.program;
     const std::filesystem::path path{source_path};
     const auto base_name = path.stem().string();
     GeneratedUnit unit;
@@ -7482,7 +7514,7 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
         if (!enumeration.name.empty())
             container_enum_types_.insert(enumeration.name);
     }
-    std::vector<std::pair<std::string, const ir::Class*>> named_inner_classes;
+    std::vector<std::pair<std::string, const typed::Class*>> named_inner_classes;
     const auto collect_inner_classes = [&](const auto& self, const auto& declarations,
                                            const std::string& parent) -> void {
         for (const auto& declaration : declarations) {
@@ -7493,7 +7525,7 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
         }
     };
     collect_inner_classes(collect_inner_classes, module.classes, "");
-    const auto find_named_inner = [&](std::string_view name) -> const ir::Class* {
+    const auto find_named_inner = [&](std::string_view name) -> const typed::Class* {
         const auto found = std::find_if(named_inner_classes.begin(), named_inner_classes.end(),
                                         [&](const auto& value) { return value.first == name; });
         return found == named_inner_classes.end() ? nullptr : found->second;
@@ -7567,7 +7599,7 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
                 continue;
             }
         }
-        const ir::Class* current = declaration;
+        const typed::Class* current = declaration;
         std::string current_name = qualified;
         std::unordered_set<std::string> visited{qualified};
         while (!api_.find_class(current->base_type)) {
@@ -7586,11 +7618,11 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
                                                                  ? current->base_type
                                                                  : std::string{"RefCounted"});
     }
-    std::vector<std::pair<std::string, const ir::Class*>> ordered_inner_classes;
+    std::vector<std::pair<std::string, const typed::Class*>> ordered_inner_classes;
     std::unordered_set<std::string> ordered_inner_names;
     std::unordered_set<std::string> visiting_inner_names;
     const auto order_inner = [&](const auto& self, const std::string& qualified,
-                                 const ir::Class& declaration) -> void {
+                                 const typed::Class& declaration) -> void {
         if (ordered_inner_names.find(qualified) != ordered_inner_names.end() ||
             !visiting_inner_names.insert(qualified).second) {
             return;
@@ -7638,9 +7670,9 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
                                                       : native_base_class;
     const auto initializer =
         std::find_if(module.functions.begin(), module.functions.end(),
-                     [](const ir::Function& function) { return function.name == "_init"; });
+                     [](const typed::Function& function) { return function.name == "_init"; });
     const bool has_instance_initializers =
-        std::any_of(module.fields.begin(), module.fields.end(), [](const ir::Field& field) {
+        std::any_of(module.fields.begin(), module.fields.end(), [](const typed::Field& field) {
             return !field.is_constant && !field.is_static && !field.onready && field.initializer;
         });
     const bool has_static_initialization =
@@ -7648,29 +7680,29 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
     const bool is_autoload = current_script_ && !current_script_->autoload_name.empty();
     const auto ready =
         std::find_if(module.functions.begin(), module.functions.end(),
-                     [](const ir::Function& function) { return function.name == "_ready"; });
+                     [](const typed::Function& function) { return function.name == "_ready"; });
     const bool has_onready_fields =
         std::any_of(module.fields.begin(), module.fields.end(),
-                    [](const ir::Field& field) { return field.onready; });
+                    [](const typed::Field& field) { return field.onready; });
     const auto godot_base_type = current_script_ ? current_script_->godot_base_type : base;
     attached_godot_base_type_ = godot_base_type;
     const bool has_native_rpc =
         has_rpc_configuration(module.functions) &&
         (godot_base_type == "Node" || api_.inherits(godot_base_type, "Node"));
-    const auto virtual_method_for = [&](const ir::Function& function) {
+    const auto virtual_method_for = [&](const typed::Function& function) {
         if (function.is_static || attached_script)
             return static_cast<const GodotMethodRecord*>(nullptr);
         const auto* method = api_.find_method(godot_base_type, function.name);
         return method && method->is_virtual ? method : nullptr;
     };
-    const auto coroutine_abi_for = [&](const ir::Function& function) {
+    const auto coroutine_abi_for = [&](const typed::Function& function) {
         return function.is_coroutine;
     };
-    const auto function_return_type = [&](const ir::Function& function) {
+    const auto function_return_type = [&](const typed::Function& function) {
         return coroutine_abi_for(function) ? std::string{"godot::Variant"}
                                            : cpp_type(function.return_type);
     };
-    const auto overrides_script_method = [&](const ir::Function& function) {
+    const auto overrides_script_method = [&](const typed::Function& function) {
         if (function.is_static || function.name == "_init" || !script_symbols_ ||
             !current_script_) {
             return false;
@@ -7718,7 +7750,7 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
         return has_inherited_method && script_method_native_name(*current_script_, *declared) ==
                                            sanitize_identifier(function.name);
     };
-    const auto function_native_name = [&](const ir::Function& function) {
+    const auto function_native_name = [&](const typed::Function& function) {
         if (!current_script_ || function.is_static)
             return virtual_method_for(function)
                        ? "_gdpp_virtual_impl_" + sanitize_identifier(function.name)
@@ -7735,7 +7767,7 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
                    ? "_gdpp_virtual_impl_" + sanitize_identifier(function.name)
                    : sanitize_identifier(function.name);
     };
-    const auto function_parameter_type = [&](const ir::Function& function,
+    const auto function_parameter_type = [&](const typed::Function& function,
                                              const std::size_t index) {
         return cpp_type(function.parameters[index].type);
     };
@@ -7973,7 +8005,7 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
             header << ' ' << sanitize_identifier(variable.name) << ";\n";
     }
     if (std::any_of(module.fields.begin(), module.fields.end(),
-                    [](const ir::Field& field) { return field.is_constant; }))
+                    [](const typed::Field& field) { return field.is_constant; }))
         header << '\n';
     if (attached_script) {
         header << "    " << unit.class_name << "();\n"
@@ -7982,9 +8014,9 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
                << "    void _gdpp_dispatch_notification(std::int32_t what, bool reversed) "
                   "override;\n\n";
     } else if (initializer != module.functions.end()) {
-        const auto required =
-            std::count_if(initializer->parameters.begin(), initializer->parameters.end(),
-                          [](const ir::Parameter& parameter) { return !parameter.default_value; });
+        const auto required = std::count_if(
+            initializer->parameters.begin(), initializer->parameters.end(),
+            [](const typed::Parameter& parameter) { return !parameter.default_value; });
         if (required != 0 || initializer->rest_parameter)
             header << "    " << unit.class_name
                    << (has_instance_initializers || has_static_initialization || is_autoload ||
@@ -8025,7 +8057,7 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
         header << '\n';
     }
     if (std::none_of(module.fields.begin(), module.fields.end(),
-                     [](const ir::Field& field) { return !field.is_constant; }))
+                     [](const typed::Field& field) { return !field.is_constant; }))
         header << "    // No script fields.\n";
     for (const auto& variable : module.fields) {
         if (variable.is_constant)
@@ -8086,7 +8118,7 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
                << "(" << cpp_type(variable.type) << ' ' << setter_parameter << ");\n";
     }
     if (std::any_of(module.fields.begin(), module.fields.end(),
-                    [](const ir::Field& field) { return !field.is_constant; })) {
+                    [](const typed::Field& field) { return !field.is_constant; })) {
         header << '\n';
     }
     for (const auto& function : module.functions) {
@@ -8310,7 +8342,7 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
                << "    return _gdpp_constant_" << name << "_storage();\n}\n\n";
     }
     if (std::any_of(module.fields.begin(), module.fields.end(),
-                    [](const ir::Field& field) { return field.is_constant; }))
+                    [](const typed::Field& field) { return field.is_constant; }))
         source << '\n';
     for (const auto& variable : module.fields) {
         if (!variable.is_constant && variable.is_static) {
@@ -8360,8 +8392,9 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
                    << "_pointer().exchange(nullptr, std::memory_order_acq_rel);\n}\n\n";
         }
     }
-    if (std::any_of(module.fields.begin(), module.fields.end(),
-                    [](const ir::Field& field) { return !field.is_constant && field.is_static; })) {
+    if (std::any_of(module.fields.begin(), module.fields.end(), [](const typed::Field& field) {
+            return !field.is_constant && field.is_static;
+        })) {
         source << '\n';
     }
     const auto emit_instance_initializers = [&]() {
@@ -8458,7 +8491,7 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
         source << "}\n\n";
 
         const auto notification = std::find_if(
-            module.functions.begin(), module.functions.end(), [](const ir::Function& function) {
+            module.functions.begin(), module.functions.end(), [](const typed::Function& function) {
                 return !function.is_static && function.name == "_notification";
             });
         source << "void " << unit.class_name
@@ -8963,7 +8996,7 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
         const auto mir_name = mir_owner + "::" + function.name;
         const auto mir_function = std::find_if(
             mir_module.functions.begin(), mir_module.functions.end(),
-            [&](const mir::Function& candidate) {
+            [&](const mir::ControlFlowFunction& candidate) {
                 return candidate.role == mir::FunctionRole::method && candidate.name == mir_name;
             });
         if (mir_function != mir_module.functions.end() &&

@@ -7,9 +7,87 @@
 #include <unordered_set>
 
 namespace gdpp {
+
+MirSourceIndex::MirSourceIndex(const std::vector<typed::Statement>& statements) {
+    index_statements(statements);
+}
+
+mir::SourceStatementId
+MirSourceIndex::statement_id(const typed::Statement& statement) const noexcept {
+    const auto found = statement_ids_.find(&statement);
+    return found == statement_ids_.end() ? mir::invalid_source_statement : found->second;
+}
+
+mir::SourceExpressionId
+MirSourceIndex::expression_id(const typed::Expression& expression) const noexcept {
+    const auto found = expression_ids_.find(&expression);
+    return found == expression_ids_.end() ? mir::invalid_source_expression : found->second;
+}
+
+const typed::Statement* MirSourceIndex::statement(const mir::SourceStatementId id) const noexcept {
+    return id < statements_.size() ? statements_[id] : nullptr;
+}
+
+const typed::Expression*
+MirSourceIndex::expression(const mir::SourceExpressionId id) const noexcept {
+    return id < expressions_.size() ? expressions_[id] : nullptr;
+}
+
+std::size_t MirSourceIndex::statement_count() const noexcept { return statements_.size(); }
+
+std::size_t MirSourceIndex::expression_count() const noexcept { return expressions_.size(); }
+
+void MirSourceIndex::index_statements(const std::vector<typed::Statement>& statements) {
+    for (const auto& statement : statements)
+        index_statement(statement);
+}
+
+void MirSourceIndex::index_statement(const typed::Statement& statement) {
+    if (statement_ids_.find(&statement) != statement_ids_.end())
+        return;
+    const auto id = static_cast<mir::SourceStatementId>(statements_.size());
+    statements_.push_back(&statement);
+    statement_ids_.emplace(&statement, id);
+
+    if (statement.condition)
+        index_expression(*statement.condition);
+    if (statement.expression)
+        index_expression(*statement.expression);
+    for (const auto& pattern : statement.patterns)
+        index_pattern(pattern);
+    index_statements(statement.guard_prefix);
+    index_statements(statement.assert_condition_prefix);
+    index_statements(statement.assert_message_prefix);
+    index_statements(statement.body);
+    index_statements(statement.else_body);
+}
+
+void MirSourceIndex::index_pattern(const typed::MatchPattern& pattern) {
+    if (pattern.expression)
+        index_expression(*pattern.expression);
+    for (const auto& key : pattern.keys) {
+        if (key)
+            index_expression(*key);
+    }
+    for (const auto& element : pattern.elements)
+        index_pattern(element);
+}
+
+void MirSourceIndex::index_expression(const typed::Expression& expression) {
+    if (expression_ids_.find(&expression) != expression_ids_.end())
+        return;
+    const auto id = static_cast<mir::SourceExpressionId>(expressions_.size());
+    expressions_.push_back(&expression);
+    expression_ids_.emplace(&expression, id);
+    for (const auto& operand : expression.operands) {
+        if (operand)
+            index_expression(*operand);
+    }
+}
+
 namespace {
 
-bool await_can_suspend(const ir::Statement& statement) {
+bool await_can_suspend(const typed::Statement& statement) {
     if (!statement.expression)
         return false;
     const auto& type = statement.expression->type;
@@ -26,12 +104,19 @@ class FunctionBuilder final {
         function_.entry = add_block();
     }
 
-    [[nodiscard]] mir::Function build(const std::vector<ir::Statement>& statements) {
+    [[nodiscard]] mir::ControlFlowFunction build(const std::vector<typed::Statement>& statements) {
+        MirSourceIndex source_index{statements};
+        source_index_ = &source_index;
+        function_.source_statement_count =
+            static_cast<std::uint32_t>(source_index.statement_count());
+        function_.source_expression_count =
+            static_cast<std::uint32_t>(source_index.expression_count());
         const auto end = lower_statements(statements, function_.entry, {});
         if (open(end))
             terminate(end, mir::TerminatorKind::stop, {}, nullptr, function_.span);
         prune_unreachable();
         rebuild_predecessors();
+        source_index_ = nullptr;
         return std::move(function_);
     }
 
@@ -53,12 +138,11 @@ class FunctionBuilder final {
     }
 
     void terminate(mir::BlockId block, mir::TerminatorKind kind, std::vector<mir::BlockId> targets,
-                   const ir::Expression* condition, SourceSpan span,
+                   const typed::Expression* condition, SourceSpan span,
                    mir::BranchRole branch_role = mir::BranchRole::none) {
         auto& terminator = function_.blocks[block].terminator;
         terminator.id = next_operation_++;
         terminator.kind = kind;
-        terminator.condition = condition;
         terminator.condition_value = register_expression(condition);
         terminator.targets = std::move(targets);
         terminator.span = span;
@@ -66,18 +150,18 @@ class FunctionBuilder final {
     }
 
     void append(mir::BlockId block, mir::InstructionKind kind, mir::Effect effects,
-                const ir::Statement& statement) {
+                const typed::Statement& statement) {
         mir::Instruction instruction;
         instruction.id = next_operation_++;
         instruction.kind = kind;
         instruction.effects = effects;
-        instruction.source = &statement;
+        instruction.source_statement = source_index_->statement_id(statement);
         append_statement_inputs(statement, instruction.inputs);
         instruction.span = statement.span;
         function_.blocks[block].instructions.push_back(std::move(instruction));
     }
 
-    [[nodiscard]] mir::ValueId register_expression(const ir::Expression* expression) {
+    [[nodiscard]] mir::ValueId register_expression(const typed::Expression* expression) {
         if (!expression)
             return mir::invalid_value;
         if (const auto existing = value_ids_.find(expression); existing != value_ids_.end())
@@ -106,7 +190,7 @@ class FunctionBuilder final {
         value.intrinsic = expression->intrinsic;
         value.call_contract = expression->call_contract;
         value.span = expression->span;
-        value.source = expression;
+        value.source_expression = source_index_->expression_id(*expression);
         function_.values.push_back(std::move(value));
 
         std::vector<mir::ValueId> operands;
@@ -117,7 +201,8 @@ class FunctionBuilder final {
         return id;
     }
 
-    void append_pattern_inputs(const ir::MatchPattern& pattern, std::vector<mir::ValueId>& inputs) {
+    void append_pattern_inputs(const typed::MatchPattern& pattern,
+                               std::vector<mir::ValueId>& inputs) {
         if (pattern.expression)
             inputs.push_back(register_expression(pattern.expression.get()));
         for (const auto& key : pattern.keys) {
@@ -128,7 +213,7 @@ class FunctionBuilder final {
             append_pattern_inputs(element, inputs);
     }
 
-    void append_statement_inputs(const ir::Statement& statement,
+    void append_statement_inputs(const typed::Statement& statement,
                                  std::vector<mir::ValueId>& inputs) {
         if (statement.condition)
             inputs.push_back(register_expression(statement.condition.get()));
@@ -138,7 +223,7 @@ class FunctionBuilder final {
             append_pattern_inputs(pattern, inputs);
     }
 
-    [[nodiscard]] mir::BlockId lower_statements(const std::vector<ir::Statement>& statements,
+    [[nodiscard]] mir::BlockId lower_statements(const std::vector<typed::Statement>& statements,
                                                 mir::BlockId current, LoopTargets loop) {
         for (const auto& statement : statements) {
             if (!open(current))
@@ -148,7 +233,7 @@ class FunctionBuilder final {
         return current;
     }
 
-    [[nodiscard]] mir::BlockId lower_if(const ir::Statement& statement, mir::BlockId current,
+    [[nodiscard]] mir::BlockId lower_if(const typed::Statement& statement, mir::BlockId current,
                                         LoopTargets loop) {
         const auto then_block = add_block();
         const auto else_block = add_block();
@@ -164,7 +249,7 @@ class FunctionBuilder final {
         return join_block;
     }
 
-    [[nodiscard]] mir::BlockId lower_loop(const ir::Statement& statement, mir::BlockId current,
+    [[nodiscard]] mir::BlockId lower_loop(const typed::Statement& statement, mir::BlockId current,
                                           bool iterator_loop) {
         const auto condition_block = add_block();
         const auto body_block = add_block();
@@ -186,7 +271,7 @@ class FunctionBuilder final {
         return after_block;
     }
 
-    [[nodiscard]] mir::BlockId lower_match(const ir::Statement& statement, mir::BlockId current,
+    [[nodiscard]] mir::BlockId lower_match(const typed::Statement& statement, mir::BlockId current,
                                            LoopTargets loop) {
         if (statement.body.empty()) {
             append(current, mir::InstructionKind::match_test,
@@ -219,23 +304,23 @@ class FunctionBuilder final {
         return join_block;
     }
 
-    [[nodiscard]] mir::BlockId lower_statement(const ir::Statement& statement, mir::BlockId current,
-                                               LoopTargets loop) {
+    [[nodiscard]] mir::BlockId lower_statement(const typed::Statement& statement,
+                                               mir::BlockId current, LoopTargets loop) {
         switch (statement.kind) {
-        case ir::StatementKind::expression:
+        case typed::StatementKind::expression:
             append(current, mir::InstructionKind::evaluate,
                    mir::Effect::reads_state | mir::Effect::may_fail, statement);
             return current;
-        case ir::StatementKind::variable:
+        case typed::StatementKind::variable:
             append(current, mir::InstructionKind::declare_variable,
                    mir::Effect::writes_state | mir::Effect::may_allocate, statement);
             return current;
-        case ir::StatementKind::assignment:
+        case typed::StatementKind::assignment:
             append(current, mir::InstructionKind::assign,
                    mir::Effect::reads_state | mir::Effect::writes_state | mir::Effect::may_fail,
                    statement);
             return current;
-        case ir::StatementKind::assert_statement:
+        case typed::StatementKind::assert_statement:
             if (!statement.assert_condition_prefix.empty() ||
                 !statement.assert_message_prefix.empty()) {
                 const auto condition_end =
@@ -258,35 +343,35 @@ class FunctionBuilder final {
             append(current, mir::InstructionKind::assert_condition,
                    mir::Effect::reads_state | mir::Effect::may_fail, statement);
             return current;
-        case ir::StatementKind::breakpoint_statement:
+        case typed::StatementKind::breakpoint_statement:
             append(current, mir::InstructionKind::debug_breakpoint,
                    mir::Effect::reads_state | mir::Effect::observes_debugger, statement);
             return current;
-        case ir::StatementKind::return_statement:
+        case typed::StatementKind::return_statement:
             terminate(current, mir::TerminatorKind::return_value, {}, statement.expression.get(),
                       statement.span);
             return mir::invalid_block;
-        case ir::StatementKind::break_statement:
+        case typed::StatementKind::break_statement:
             terminate(current, mir::TerminatorKind::jump, {loop.break_target}, nullptr,
                       statement.span);
             return mir::invalid_block;
-        case ir::StatementKind::continue_statement:
+        case typed::StatementKind::continue_statement:
             terminate(current, mir::TerminatorKind::jump, {loop.continue_target}, nullptr,
                       statement.span);
             return mir::invalid_block;
-        case ir::StatementKind::if_statement:
+        case typed::StatementKind::if_statement:
             return lower_if(statement, current, loop);
-        case ir::StatementKind::while_statement:
+        case typed::StatementKind::while_statement:
             return lower_loop(statement, current, false);
-        case ir::StatementKind::for_statement:
+        case typed::StatementKind::for_statement:
             return lower_loop(statement, current, true);
-        case ir::StatementKind::match_statement:
+        case typed::StatementKind::match_statement:
             return lower_match(statement, current, loop);
-        case ir::StatementKind::await_statement:
-        case ir::StatementKind::await_variable: {
+        case typed::StatementKind::await_statement:
+        case typed::StatementKind::await_variable: {
             if (!await_can_suspend(statement)) {
                 append(current,
-                       statement.kind == ir::StatementKind::await_variable
+                       statement.kind == typed::StatementKind::await_variable
                            ? mir::InstructionKind::declare_variable
                            : mir::InstructionKind::evaluate,
                        mir::Effect::reads_state | mir::Effect::may_fail, statement);
@@ -302,9 +387,9 @@ class FunctionBuilder final {
             function_.suspends = true;
             return resume;
         }
-        case ir::StatementKind::pass_statement:
+        case typed::StatementKind::pass_statement:
             return current;
-        case ir::StatementKind::match_branch:
+        case typed::StatementKind::match_branch:
             append(current, mir::InstructionKind::match_test,
                    mir::Effect::reads_state | mir::Effect::may_fail, statement);
             return lower_statements(statement.body, current, loop);
@@ -361,16 +446,19 @@ class FunctionBuilder final {
         function_.blocks = std::move(retained);
     }
 
-    mir::Function function_;
+    mir::ControlFlowFunction function_;
     mir::OperationId next_operation_{0};
-    std::unordered_map<const ir::Expression*, mir::ValueId> value_ids_;
+    std::unordered_map<const typed::Expression*, mir::ValueId> value_ids_;
+    const MirSourceIndex* source_index_{nullptr};
 };
 
-void collect_expression_lambdas(const ir::Expression& expression, std::string_view owner,
-                                std::size_t& lambda_index, std::vector<mir::Function>& output);
+void collect_expression_lambdas(const typed::Expression& expression, std::string_view owner,
+                                std::size_t& lambda_index,
+                                std::vector<mir::ControlFlowFunction>& output);
 
-void collect_pattern_lambdas(const ir::MatchPattern& pattern, std::string_view owner,
-                             std::size_t& lambda_index, std::vector<mir::Function>& output) {
+void collect_pattern_lambdas(const typed::MatchPattern& pattern, std::string_view owner,
+                             std::size_t& lambda_index,
+                             std::vector<mir::ControlFlowFunction>& output) {
     if (pattern.expression)
         collect_expression_lambdas(*pattern.expression, owner, lambda_index, output);
     for (const auto& key : pattern.keys) {
@@ -381,8 +469,9 @@ void collect_pattern_lambdas(const ir::MatchPattern& pattern, std::string_view o
         collect_pattern_lambdas(element, owner, lambda_index, output);
 }
 
-void collect_statement_lambdas(const std::vector<ir::Statement>& statements, std::string_view owner,
-                               std::size_t& lambda_index, std::vector<mir::Function>& output) {
+void collect_statement_lambdas(const std::vector<typed::Statement>& statements,
+                               std::string_view owner, std::size_t& lambda_index,
+                               std::vector<mir::ControlFlowFunction>& output) {
     for (const auto& statement : statements) {
         if (statement.expression)
             collect_expression_lambdas(*statement.expression, owner, lambda_index, output);
@@ -398,8 +487,9 @@ void collect_statement_lambdas(const std::vector<ir::Statement>& statements, std
     }
 }
 
-void collect_expression_lambdas(const ir::Expression& expression, std::string_view owner,
-                                std::size_t& lambda_index, std::vector<mir::Function>& output) {
+void collect_expression_lambdas(const typed::Expression& expression, std::string_view owner,
+                                std::size_t& lambda_index,
+                                std::vector<mir::ControlFlowFunction>& output) {
     for (const auto& operand : expression.operands)
         collect_expression_lambdas(*operand, owner, lambda_index, output);
     if (!expression.lambda)
@@ -411,8 +501,8 @@ void collect_expression_lambdas(const ir::Expression& expression, std::string_vi
     collect_statement_lambdas(expression.lambda->body, name, lambda_index, output);
 }
 
-void lower_functions(const std::vector<ir::Function>& functions, std::string_view owner,
-                     std::vector<mir::Function>& output) {
+void lower_functions(const std::vector<typed::Function>& functions, std::string_view owner,
+                     std::vector<mir::ControlFlowFunction>& output) {
     for (const auto& function : functions) {
         if (function.is_abstract)
             continue;
@@ -424,8 +514,8 @@ void lower_functions(const std::vector<ir::Function>& functions, std::string_vie
     }
 }
 
-void lower_fields(const std::vector<ir::Field>& fields, std::string_view owner,
-                  std::vector<mir::Function>& output) {
+void lower_fields(const std::vector<typed::Field>& fields, std::string_view owner,
+                  std::vector<mir::ControlFlowFunction>& output) {
     for (const auto& field : fields) {
         if (field.getter && field.getter->method.empty()) {
             output.push_back(FunctionBuilder{std::string{owner} + "::<get:" + field.name + ">",
@@ -440,8 +530,8 @@ void lower_fields(const std::vector<ir::Field>& fields, std::string_view owner,
     }
 }
 
-void lower_class(const ir::Class& declaration, std::string_view owner,
-                 std::vector<mir::Function>& output) {
+void lower_class(const typed::Class& declaration, std::string_view owner,
+                 std::vector<mir::ControlFlowFunction>& output) {
     const auto name = std::string{owner} + "::" + declaration.name;
     lower_fields(declaration.fields, name, output);
     lower_functions(declaration.functions, name, output);
@@ -449,7 +539,7 @@ void lower_class(const ir::Class& declaration, std::string_view owner,
         lower_class(child, name, output);
 }
 
-std::vector<mir::BlockId> expected_predecessors(const mir::Function& function,
+std::vector<mir::BlockId> expected_predecessors(const mir::ControlFlowFunction& function,
                                                 mir::BlockId target) {
     std::vector<mir::BlockId> result;
     for (const auto& block : function.blocks) {
@@ -463,9 +553,8 @@ std::vector<mir::BlockId> expected_predecessors(const mir::Function& function,
 
 } // namespace
 
-mir::Module MirLowerer::lower(const ir::Module& module) const {
+mir::Module MirLowerer::lower(typed::Module module) const {
     mir::Module lowered;
-    lowered.hir = &module;
     const auto owner = module.class_name.value_or("<script>");
     lower_fields(module.fields, owner, lowered.functions);
     lower_functions(module.functions, owner, lowered.functions);
@@ -473,16 +562,13 @@ mir::Module MirLowerer::lower(const ir::Module& module) const {
         lower_class(declaration, owner, lowered.functions);
     for (std::size_t index = 0; index < lowered.functions.size(); ++index)
         lowered.functions[index].id = static_cast<mir::FunctionId>(index);
+    lowered.program = std::move(module);
     return lowered;
 }
 
 bool MirVerifier::verify(const mir::Module& module) const {
     if (module.format_version != mir::schema_version) {
         diagnostics_.error("GDS5109", "MIR module has an unsupported schema version", {});
-        return false;
-    }
-    if (!module.hir) {
-        diagnostics_.error("GDS5100", "MIR module is detached from its typed HIR", {});
         return false;
     }
     bool valid = true;
@@ -506,8 +592,9 @@ bool MirVerifier::verify(const mir::Module& module) const {
                                    value.span);
                 valid = false;
             }
-            if (!value.source) {
-                diagnostics_.error("GDS5112", "MIR value has no typed HIR source", value.span);
+            if (value.source_expression >= function.source_expression_count) {
+                diagnostics_.error("GDS5112", "MIR value has an invalid typed source identity",
+                                   value.span);
                 valid = false;
             }
             if (value.ownership != value.type.ownership()) {
@@ -574,13 +661,11 @@ bool MirVerifier::verify(const mir::Module& module) const {
             }
             const bool branch_contract_valid =
                 block.terminator.kind == mir::TerminatorKind::branch
-                    ? block.terminator.condition != nullptr &&
-                          block.terminator.condition_value < function.values.size() &&
+                    ? block.terminator.condition_value < function.values.size() &&
                           block.terminator.branch_role != mir::BranchRole::none
                     : block.terminator.branch_role == mir::BranchRole::none &&
-                          (block.terminator.condition == nullptr
-                               ? block.terminator.condition_value == mir::invalid_value
-                               : block.terminator.condition_value < function.values.size());
+                          (block.terminator.condition_value == mir::invalid_value ||
+                           block.terminator.condition_value < function.values.size());
             if (!branch_contract_valid) {
                 diagnostics_.error("GDS5108", "MIR branch has an invalid semantic role",
                                    block.terminator.span);
@@ -607,8 +692,9 @@ bool MirVerifier::verify(const mir::Module& module) const {
             }
             for (const auto& instruction : block.instructions) {
                 record_operation(instruction.id, instruction.span);
-                if (!instruction.source) {
-                    diagnostics_.error("GDS5107", "MIR instruction has no typed HIR source",
+                if (instruction.source_statement >= function.source_statement_count) {
+                    diagnostics_.error("GDS5107",
+                                       "MIR instruction has an invalid typed source identity",
                                        instruction.span);
                     valid = false;
                 }

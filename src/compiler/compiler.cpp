@@ -184,7 +184,7 @@ CompileResult Compiler::compile(std::string path, std::string source_text,
             result.metrics.optimize_ns = elapsed_ns(optimize_begin, Clock::now());
         }
         const auto mir_begin = Clock::now();
-        auto mir = MirLowerer{}.lower(module);
+        auto mir = MirLowerer{}.lower(std::move(module));
         MirVerifier mir_verifier{diagnostics};
         (void)mir_verifier.verify(mir);
         result.metrics.mir_lower_verify_ns = elapsed_ns(mir_begin, Clock::now());
@@ -204,11 +204,10 @@ CompileResult Compiler::compile(std::string path, std::string source_text,
                                 options.script_symbols};
         if (!diagnostics.has_errors()) {
             const auto codegen_begin = Clock::now();
-            result.unit = generator.generate(mir, source.path(), options.native_class_suffix,
-                                             options.native_base_class, options.native_base_header,
-                                             options.attached_script, options.attached_native_base,
-                                             options.attached_base_script_path,
-                                             options.script_contract_hash);
+            result.unit = generator.generate(
+                mir, source.path(), options.native_class_suffix, options.native_base_class,
+                options.native_base_header, options.attached_script, options.attached_native_base,
+                options.attached_base_script_path, options.script_contract_hash);
             result.metrics.codegen_ns = elapsed_ns(codegen_begin, Clock::now());
         }
         if (diagnostics.has_errors()) {

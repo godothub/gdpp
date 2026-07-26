@@ -79,139 +79,139 @@ std::string_view branch_role_name(const mir::BranchRole role) {
     return "invalid";
 }
 
-std::string_view expression_kind_name(const ir::ExpressionKind kind) {
+std::string_view expression_kind_name(const typed::ExpressionKind kind) {
     switch (kind) {
-    case ir::ExpressionKind::literal:
+    case typed::ExpressionKind::literal:
         return "literal";
-    case ir::ExpressionKind::identifier:
+    case typed::ExpressionKind::identifier:
         return "identifier";
-    case ir::ExpressionKind::unary:
+    case typed::ExpressionKind::unary:
         return "unary";
-    case ir::ExpressionKind::await_expression:
+    case typed::ExpressionKind::await_expression:
         return "await";
-    case ir::ExpressionKind::binary:
+    case typed::ExpressionKind::binary:
         return "binary";
-    case ir::ExpressionKind::call:
+    case typed::ExpressionKind::call:
         return "call";
-    case ir::ExpressionKind::member:
+    case typed::ExpressionKind::member:
         return "member";
-    case ir::ExpressionKind::subscript:
+    case typed::ExpressionKind::subscript:
         return "subscript";
-    case ir::ExpressionKind::conditional:
+    case typed::ExpressionKind::conditional:
         return "conditional";
-    case ir::ExpressionKind::node_reference:
+    case typed::ExpressionKind::node_reference:
         return "node_reference";
-    case ir::ExpressionKind::array_literal:
+    case typed::ExpressionKind::array_literal:
         return "array";
-    case ir::ExpressionKind::dictionary_literal:
+    case typed::ExpressionKind::dictionary_literal:
         return "dictionary";
-    case ir::ExpressionKind::lambda:
+    case typed::ExpressionKind::lambda:
         return "lambda";
     }
     return "invalid";
 }
 
-std::string_view literal_kind_name(const ir::LiteralKind kind) {
+std::string_view literal_kind_name(const typed::LiteralKind kind) {
     switch (kind) {
-    case ir::LiteralKind::none:
+    case typed::LiteralKind::none:
         return "none";
-    case ir::LiteralKind::nil:
+    case typed::LiteralKind::nil:
         return "nil";
-    case ir::LiteralKind::boolean:
+    case typed::LiteralKind::boolean:
         return "boolean";
-    case ir::LiteralKind::integer:
+    case typed::LiteralKind::integer:
         return "integer";
-    case ir::LiteralKind::floating:
+    case typed::LiteralKind::floating:
         return "floating";
-    case ir::LiteralKind::string:
+    case typed::LiteralKind::string:
         return "string";
-    case ir::LiteralKind::string_name:
+    case typed::LiteralKind::string_name:
         return "string_name";
-    case ir::LiteralKind::node_path:
+    case typed::LiteralKind::node_path:
         return "node_path";
     }
     return "invalid";
 }
 
-std::string_view resolution_kind_name(const ir::ResolutionKind kind) {
+std::string_view resolution_kind_name(const typed::ResolutionKind kind) {
     switch (kind) {
-    case ir::ResolutionKind::none:
+    case typed::ResolutionKind::none:
         return "none";
-    case ir::ResolutionKind::godot_method:
+    case typed::ResolutionKind::godot_method:
         return "godot_method";
-    case ir::ResolutionKind::godot_property:
+    case typed::ResolutionKind::godot_property:
         return "godot_property";
-    case ir::ResolutionKind::godot_constructor:
+    case typed::ResolutionKind::godot_constructor:
         return "godot_constructor";
-    case ir::ResolutionKind::godot_singleton:
+    case typed::ResolutionKind::godot_singleton:
         return "godot_singleton";
-    case ir::ResolutionKind::external_singleton:
+    case typed::ResolutionKind::external_singleton:
         return "external_singleton";
-    case ir::ResolutionKind::godot_type:
+    case typed::ResolutionKind::godot_type:
         return "godot_type";
-    case ir::ResolutionKind::external_type:
+    case typed::ResolutionKind::external_type:
         return "external_type";
-    case ir::ResolutionKind::script_type:
+    case typed::ResolutionKind::script_type:
         return "script_type";
-    case ir::ResolutionKind::script_autoload:
+    case typed::ResolutionKind::script_autoload:
         return "script_autoload";
-    case ir::ResolutionKind::script_constant:
+    case typed::ResolutionKind::script_constant:
         return "script_constant";
-    case ir::ResolutionKind::local_constant:
+    case typed::ResolutionKind::local_constant:
         return "local_constant";
-    case ir::ResolutionKind::script_enum_type:
+    case typed::ResolutionKind::script_enum_type:
         return "script_enum_type";
-    case ir::ResolutionKind::script_resource:
+    case typed::ResolutionKind::script_resource:
         return "script_resource";
-    case ir::ResolutionKind::script_constructor:
+    case typed::ResolutionKind::script_constructor:
         return "script_constructor";
-    case ir::ResolutionKind::external_constructor:
+    case typed::ResolutionKind::external_constructor:
         return "external_constructor";
-    case ir::ResolutionKind::external_static_method:
+    case typed::ResolutionKind::external_static_method:
         return "external_static_method";
-    case ir::ResolutionKind::external_super_method:
+    case typed::ResolutionKind::external_super_method:
         return "external_super_method";
-    case ir::ResolutionKind::external_callable:
+    case typed::ResolutionKind::external_callable:
         return "external_callable";
-    case ir::ResolutionKind::external_signal:
+    case typed::ResolutionKind::external_signal:
         return "external_signal";
-    case ir::ResolutionKind::inner_constructor:
+    case typed::ResolutionKind::inner_constructor:
         return "inner_constructor";
-    case ir::ResolutionKind::inner_type:
+    case typed::ResolutionKind::inner_type:
         return "inner_type";
-    case ir::ResolutionKind::script_super:
+    case typed::ResolutionKind::script_super:
         return "script_super";
-    case ir::ResolutionKind::script_signal:
+    case typed::ResolutionKind::script_signal:
         return "script_signal";
-    case ir::ResolutionKind::script_callable:
+    case typed::ResolutionKind::script_callable:
         return "script_callable";
-    case ir::ResolutionKind::script_static_callable:
+    case typed::ResolutionKind::script_static_callable:
         return "script_static_callable";
-    case ir::ResolutionKind::script_static_field:
+    case typed::ResolutionKind::script_static_field:
         return "script_static_field";
-    case ir::ResolutionKind::script_runtime_static_field:
+    case typed::ResolutionKind::script_runtime_static_field:
         return "script_runtime_static_field";
-    case ir::ResolutionKind::script_free:
+    case typed::ResolutionKind::script_free:
         return "script_free";
-    case ir::ResolutionKind::enum_member:
+    case typed::ResolutionKind::enum_member:
         return "enum_member";
-    case ir::ResolutionKind::script_property:
+    case typed::ResolutionKind::script_property:
         return "script_property";
-    case ir::ResolutionKind::dynamic_method:
+    case typed::ResolutionKind::dynamic_method:
         return "dynamic_method";
-    case ir::ResolutionKind::dynamic_property:
+    case typed::ResolutionKind::dynamic_property:
         return "dynamic_property";
-    case ir::ResolutionKind::utility_function:
+    case typed::ResolutionKind::utility_function:
         return "utility_function";
-    case ir::ResolutionKind::global_constant:
+    case typed::ResolutionKind::global_constant:
         return "global_constant";
-    case ir::ResolutionKind::global_enum_type:
+    case typed::ResolutionKind::global_enum_type:
         return "global_enum_type";
-    case ir::ResolutionKind::global_enum_value:
+    case typed::ResolutionKind::global_enum_value:
         return "global_enum_value";
-    case ir::ResolutionKind::builtin_constant:
+    case typed::ResolutionKind::builtin_constant:
         return "builtin_constant";
-    case ir::ResolutionKind::intrinsic:
+    case typed::ResolutionKind::intrinsic:
         return "intrinsic";
     }
     return "invalid";
@@ -299,7 +299,9 @@ std::string MirSerializer::serialize(const mir::Module& module) const {
     for (const auto& function : module.functions) {
         output << "function f" << function.id << " role " << function_role_name(function.role)
                << " name " << std::quoted(function.name) << " entry b" << function.entry
-               << " suspends " << (function.suspends ? 1 : 0) << " span ";
+               << " suspends " << (function.suspends ? 1 : 0) << " source_statements "
+               << function.source_statement_count << " source_expressions "
+               << function.source_expression_count << " span ";
         write_span(output, function.span);
         output << '\n';
         output << "values " << function.values.size() << '\n';
@@ -319,7 +321,8 @@ std::string MirSerializer::serialize(const mir::Module& module) const {
                    << (value.direct_access ? 1 : 0) << " argument " << value.indexed_argument
                    << " payload " << std::quoted(value.payload) << " owner "
                    << std::quoted(value.resolved_owner) << " getter " << std::quoted(value.getter)
-                   << " setter " << std::quoted(value.setter) << " operands ";
+                   << " setter " << std::quoted(value.setter) << " source e"
+                   << value.source_expression << " operands ";
             write_ids(output, value.operands, 'v');
             output << " span ";
             write_span(output, value.span);
@@ -348,7 +351,8 @@ std::string MirSerializer::serialize(const mir::Module& module) const {
             for (const auto& instruction : block.instructions) {
                 output << "    operation o" << instruction.id << " instruction "
                        << instruction_kind_name(instruction.kind) << " effects "
-                       << static_cast<unsigned>(instruction.effects) << " inputs ";
+                       << static_cast<unsigned>(instruction.effects) << " source s"
+                       << instruction.source_statement << " inputs ";
                 write_ids(output, instruction.inputs, 'v');
                 output << " span ";
                 write_span(output, instruction.span);

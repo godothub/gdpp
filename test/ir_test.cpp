@@ -216,7 +216,15 @@ TEST_CASE("typed IR models abstract methods as non-executable contracts") {
     gdpp::DiagnosticBag diagnostics;
     gdpp::IrVerifier verifier{diagnostics};
     REQUIRE(verifier.verify(module));
-    const auto mir = gdpp::MirLowerer{}.lower(module);
+    gdpp::ir::Module mir_input;
+    mir_input.class_name = "AbstractWorker";
+    mir_input.is_abstract = true;
+    gdpp::ir::Function mir_function;
+    mir_function.name = "execute";
+    mir_function.return_type = {gdpp::TypeKind::void_type, "void"};
+    mir_function.is_abstract = true;
+    mir_input.functions.push_back(std::move(mir_function));
+    const auto mir = gdpp::MirLowerer{}.lower(std::move(mir_input));
     REQUIRE(mir.functions.empty());
 
     gdpp::ir::Statement body_statement;
@@ -231,11 +239,11 @@ TEST_CASE("typed IR models abstract methods as non-executable contracts") {
 
 TEST_CASE("typed IR preserves parsed abstract classes and method signatures") {
     gdpp::DiagnosticBag diagnostics;
-    const auto module = lower_source("@abstract\n"
-                                     "class_name AbstractWorker\n"
-                                     "@abstract\n"
-                                     "func execute(value: int) -> String\n",
-                                     diagnostics);
+    auto module = lower_source("@abstract\n"
+                               "class_name AbstractWorker\n"
+                               "@abstract\n"
+                               "func execute(value: int) -> String\n",
+                               diagnostics);
 
     REQUIRE(!diagnostics.has_errors());
     REQUIRE(module.is_abstract);
@@ -247,7 +255,7 @@ TEST_CASE("typed IR preserves parsed abstract classes and method signatures") {
 
     gdpp::IrVerifier verifier{diagnostics};
     REQUIRE(verifier.verify(module));
-    REQUIRE(gdpp::MirLowerer{}.lower(module).functions.empty());
+    REQUIRE(gdpp::MirLowerer{}.lower(std::move(module)).functions.empty());
 }
 
 TEST_CASE("typed IR preserves script tool execution mode") {
