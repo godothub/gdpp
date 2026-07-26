@@ -5,6 +5,7 @@
 - 支持真正挂起的静态函数，通过无实例 FunctionState 保留类型化结果和 Signal 恢复；类型化 lambda 协程也拥有逐次调用独立的挂起状态和可逆序完成的并发恢复。
 - 真正挂起的协程统一返回引用计数 FunctionState 而非裸 Signal，提供 `completed(result)`、`resume(arg)`、`is_valid(extended_check)`、零/一/多 Signal 参数折叠、旧连接清理和宿主销毁防护；生成的 `await` 同时识别 GDPP 与原生 GDScript 状态对象。
 - 以稳定局部符号身份匹配 GDScript lambda 捕获：Callable 创建时取得值快照，Array/Dictionary/Object 保持共享身份，每次调用建立独立可写标量帧，并在词法遮蔽下完整保留嵌套、返回、共享容器递归、异步循环和调试器可见捕获。
+- 所有受支持 godot-cpp 版本的 Callable 创建快照统一通过可变类型擦除桥接实例化，避免 GCC 在 Godot 4.5/4.6 构建中把逐次调用的可写标量及共享容器帧错误限定为只读。
 - 真实 Godot 运行矩阵新增 Callable 相等性/有效性、bind/unbind 参数数量、一次性/延迟/引用计数 Signal 连接、发射期连接变更、宿主销毁、共享容器递归，以及两个原生 Thread 并发调用同一生成 Callable。
 - 引入脚本 fault frame：致命 GDScript 操作只终止当前生成函数，调用方可继续执行；同时保留源码求值顺序、惰性分支、专用调用参数顺序、Callable 默认返回，以及 Variant、容器、对象和第三方扩展边界的精确 `.gd` 路径、行列诊断。
 - 动态标量、Object/Ref、Array/Dictionary、PackedArray 和 Attached 属性写入统一执行 Godot 严格运行时存储转换，不再接受 godot-cpp 更宽松的 cast，也不会把非法值静默变成默认值。
@@ -32,6 +33,7 @@
 - 静态协程的无 owner 状态与嵌套协程 lambda continuation 完全隔离于外层 emitter 上下文，避免捕获实例、丢失类型化返回或在内部失败路径生成非法 C++ return。
 - 注解常量参数中的 `await` 在语义阶段稳定拒绝，不让不可能的编译期挂起进入 HIR 或 C++ 生成。
 - 项目脚本 `Object.free()` 改经 Godot Variant 调度而非直接 `memdelete`，保留普通 Object 销毁、RefCounted 拒绝、锁定对象保护、已释放身份、源码位置和当前函数失败语义。
+- 空对象及已释放对象身份统一通过 godot-cpp 精确的 `Variant::operator ObjectID()` ABI 读取，消除 MSVC 的有符号/无符号歧义转换，同时不放宽生命周期校验。
 - custom/double precision 插件由目标引擎导出的精确 `extension_api.json` 生产，compiler、editor/fallback、godot-cpp、SDK、描述符 feature、API SHA-256、precision 与 runtime ABI 全部绑定；CI 会干净构建并审计 Godot 4.7 double 完整包。
 - SDK 升级到 schema 12、发行 runtime ABI 升级到 18；缺少完整调试器、FunctionState、动态 Script、严格 Variant、协程访问器、await 默认参数、自定义精度或 Object 生命周期契约的旧 SDK 会在创建任何客户编译命令前失败关闭。
 
