@@ -359,6 +359,12 @@ if(GDPP_ANDROID_SDK_VERSIONS)
             message(FATAL_ERROR "Unsupported Android SDK Godot version: ${GDPP_ANDROID_VERSION}")
         endif()
         string(REPLACE "." "_" GDPP_ANDROID_VERSION_SUFFIX "${GDPP_ANDROID_VERSION}")
+        set(GDPP_ANDROID_API_FILE_VARIABLE
+            "GDPP_GODOT_API_FILE_${GDPP_ANDROID_VERSION_SUFFIX}")
+        set(GDPP_ANDROID_API_KIND_VARIABLE
+            "GDPP_GODOT_API_KIND_${GDPP_ANDROID_VERSION_SUFFIX}")
+        set(GDPP_ANDROID_API_SHA256_VARIABLE
+            "GDPP_GODOT_API_SHA256_${GDPP_ANDROID_VERSION_SUFFIX}")
         foreach(GDPP_ANDROID_ARCH IN LISTS GDPP_ANDROID_ARCHITECTURES)
             if(NOT GDPP_ANDROID_ARCH MATCHES "^(arm64|x86_64)$")
                 message(FATAL_ERROR "Unsupported Android architecture: ${GDPP_ANDROID_ARCH}")
@@ -374,6 +380,10 @@ if(GDPP_ANDROID_SDK_VERSIONS)
                     --addon-root "${CMAKE_SOURCE_DIR}/example/addons/gdpp"
                     --ndk-root "${GDPP_ANDROID_NDK_ROOT}"
                     --godot-version "${GDPP_ANDROID_VERSION}"
+                    --api-file "${${GDPP_ANDROID_API_FILE_VARIABLE}}"
+                    --api-kind "${${GDPP_ANDROID_API_KIND_VARIABLE}}"
+                    --api-sha256 "${${GDPP_ANDROID_API_SHA256_VARIABLE}}"
+                    --precision "${GDPP_GODOT_PRECISION}"
                     --architecture "${GDPP_ANDROID_ARCH}"
                     --api-level "${GDPP_ANDROID_API_LEVEL}"
                     --schema "${GDPP_NATIVE_SDK_SCHEMA}"
@@ -406,6 +416,9 @@ if(GDPP_WEB_SDK_VERSIONS)
             message(FATAL_ERROR "Unsupported Web SDK Godot version: ${GDPP_WEB_VERSION}")
         endif()
         string(REPLACE "." "_" GDPP_WEB_VERSION_SUFFIX "${GDPP_WEB_VERSION}")
+        set(GDPP_WEB_API_FILE_VARIABLE "GDPP_GODOT_API_FILE_${GDPP_WEB_VERSION_SUFFIX}")
+        set(GDPP_WEB_API_KIND_VARIABLE "GDPP_GODOT_API_KIND_${GDPP_WEB_VERSION_SUFFIX}")
+        set(GDPP_WEB_API_SHA256_VARIABLE "GDPP_GODOT_API_SHA256_${GDPP_WEB_VERSION_SUFFIX}")
         foreach(GDPP_WEB_VARIANT IN LISTS GDPP_WEB_VARIANTS)
             if(NOT GDPP_WEB_VARIANT MATCHES "^(nothreads|threads)$")
                 message(FATAL_ERROR "Unsupported Web SDK variant: ${GDPP_WEB_VARIANT}")
@@ -420,6 +433,10 @@ if(GDPP_WEB_SDK_VERSIONS)
                     --build-root "${CMAKE_BINARY_DIR}/web-sdk"
                     --addon-root "${CMAKE_SOURCE_DIR}/example/addons/gdpp"
                     --godot-version "${GDPP_WEB_VERSION}"
+                    --api-file "${${GDPP_WEB_API_FILE_VARIABLE}}"
+                    --api-kind "${${GDPP_WEB_API_KIND_VARIABLE}}"
+                    --api-sha256 "${${GDPP_WEB_API_SHA256_VARIABLE}}"
+                    --precision "${GDPP_GODOT_PRECISION}"
                     --variant "${GDPP_WEB_VARIANT}"
                     --emcmake "${GDPP_WEB_EMCMAKE}"
                     --schema "${GDPP_NATIVE_SDK_SCHEMA}"
@@ -455,6 +472,9 @@ if(GDPP_IOS_SDK_VERSIONS)
             message(FATAL_ERROR "Unsupported iOS SDK Godot version: ${GDPP_IOS_VERSION}")
         endif()
         string(REPLACE "." "_" GDPP_IOS_VERSION_SUFFIX "${GDPP_IOS_VERSION}")
+        set(GDPP_IOS_API_FILE_VARIABLE "GDPP_GODOT_API_FILE_${GDPP_IOS_VERSION_SUFFIX}")
+        set(GDPP_IOS_API_KIND_VARIABLE "GDPP_GODOT_API_KIND_${GDPP_IOS_VERSION_SUFFIX}")
+        set(GDPP_IOS_API_SHA256_VARIABLE "GDPP_GODOT_API_SHA256_${GDPP_IOS_VERSION_SUFFIX}")
         set(GDPP_IOS_TARGET "gdpp_ios_sdk_${GDPP_IOS_VERSION_SUFFIX}_arm64")
         add_custom_target(
             ${GDPP_IOS_TARGET}
@@ -464,6 +484,10 @@ if(GDPP_IOS_SDK_VERSIONS)
                 --build-root "${CMAKE_BINARY_DIR}/ios-sdk"
                 --addon-root "${CMAKE_SOURCE_DIR}/example/addons/gdpp"
                 --godot-version "${GDPP_IOS_VERSION}"
+                --api-file "${${GDPP_IOS_API_FILE_VARIABLE}}"
+                --api-kind "${${GDPP_IOS_API_KIND_VARIABLE}}"
+                --api-sha256 "${${GDPP_IOS_API_SHA256_VARIABLE}}"
+                --precision "${GDPP_GODOT_PRECISION}"
                 --deployment-target "${GDPP_MIN_IOS_VERSION}"
                 --schema "${GDPP_NATIVE_SDK_SCHEMA}"
                 --runtime-abi "${GDPP_NATIVE_RUNTIME_ABI}"

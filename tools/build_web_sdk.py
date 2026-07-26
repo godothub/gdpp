@@ -11,6 +11,8 @@ import re
 import shutil
 import subprocess
 
+from godot_api_contract import validate_godot_api_contract
+
 
 GODOT_TARGET = "template_release"
 VARIANTS = {"threads": True, "nothreads": False}
@@ -30,6 +32,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--build-root", type=Path, required=True)
     parser.add_argument("--addon-root", type=Path, required=True)
     parser.add_argument("--godot-version", required=True)
+    parser.add_argument("--api-file", type=Path, required=True)
+    parser.add_argument("--api-kind", choices=("official", "custom"), required=True)
+    parser.add_argument("--api-sha256", required=True)
+    parser.add_argument("--precision", choices=("single", "double"), required=True)
     parser.add_argument("--variant", choices=sorted(VARIANTS), required=True)
     parser.add_argument("--emcmake", default="emcmake")
     parser.add_argument("--schema", type=int, required=True)
@@ -108,6 +114,16 @@ def main() -> int:
     validate_toolchain(args.godot_version, compiler_semver)
 
     godot_cpp = source_root / "third/godot-cpp"
+    try:
+        api_contract = validate_godot_api_contract(
+            args.api_file,
+            args.godot_version,
+            args.precision,
+            args.api_kind,
+            args.api_sha256,
+        )
+    except ValueError as error:
+        raise SystemExit(str(error)) from error
     runtime_header = source_root / "include/gdpp/runtime/variant_ops.hpp"
     reference_semantics_header = source_root / "include/gdpp/runtime/reference_semantics.hpp"
     runtime_source = source_root / "src/runtime/variant_ops.cpp"
@@ -141,29 +157,29 @@ def main() -> int:
     (stage / "lib").mkdir(parents=True)
 
     directory = build_root / args.godot_version / variant / "release"
-    run(
-        [
-            args.emcmake,
-            "cmake",
-            "-S",
-            str(godot_cpp),
-            "-B",
-            str(directory),
-            "-G",
-            "Ninja",
-            "-DCMAKE_BUILD_TYPE=Release",
-            f"-DGODOTCPP_API_VERSION={args.godot_version}",
-            f"-DGODOTCPP_TARGET={GODOT_TARGET}",
-            f"-DGODOTCPP_THREADS={'ON' if VARIANTS[variant] else 'OFF'}",
-            "-DGODOTCPP_ENABLE_TESTING=OFF",
-            "-DGODOTCPP_SYSTEM_HEADERS=ON",
-            f"-DCMAKE_CXX_FLAGS=-ffile-prefix-map={source_root}=/gdpp",
-        ]
-    )
+    configure_command = [
+        args.emcmake,
+        "cmake",
+        "-S",
+        str(godot_cpp),
+        "-B",
+        str(directory),
+        "-G",
+        "Ninja",
+        "-DCMAKE_BUILD_TYPE=Release",
+        f"-DGODOTCPP_TARGET={GODOT_TARGET}",
+        f"-DGODOTCPP_THREADS={'ON' if VARIANTS[variant] else 'OFF'}",
+        "-DGODOTCPP_ENABLE_TESTING=OFF",
+        "-DGODOTCPP_SYSTEM_HEADERS=ON",
+        f"-DCMAKE_CXX_FLAGS=-ffile-prefix-map={source_root}=/gdpp",
+    ]
+    configure_command.extend(api_contract.godot_cpp_cmake_arguments())
+    run(configure_command)
     run(["cmake", "--build", str(directory), "--target", "godot-cpp", "--parallel"])
     suffix = "" if VARIANTS[variant] else ".nothreads"
+    precision_suffix = ".double" if args.precision == "double" else ""
     expected = directory / "bin" / (
-        f"libgodot-cpp.web.{GODOT_TARGET}.wasm32{suffix}.a"
+        f"libgodot-cpp.web.{GODOT_TARGET}{precision_suffix}.wasm32{suffix}.a"
     )
     if not expected.is_file():
         candidates = sorted((directory / "bin").glob(f"*{GODOT_TARGET}*wasm32*.a"))
@@ -194,6 +210,9 @@ def main() -> int:
     manifest = (
         f"GDPP_SDK {args.schema}\n"
         f"api {args.godot_version}\n"
+        f"api_kind {args.api_kind}\n"
+        f"api_sha256 {args.api_sha256}\n"
+        f"precision {args.precision}\n"
         "platform web\n"
         "arch wasm32\n"
         "profiles debug,release\n"

@@ -11,6 +11,8 @@ import platform
 import shutil
 import subprocess
 
+from godot_api_contract import validate_godot_api_contract
+
 
 GODOT_TARGET = "template_release"
 SLICES = {
@@ -26,6 +28,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--build-root", type=Path, required=True)
     parser.add_argument("--addon-root", type=Path, required=True)
     parser.add_argument("--godot-version", choices=["4.4", "4.5", "4.6", "4.7"], required=True)
+    parser.add_argument("--api-file", type=Path, required=True)
+    parser.add_argument("--api-kind", choices=("official", "custom"), required=True)
+    parser.add_argument("--api-sha256", required=True)
+    parser.add_argument("--precision", choices=("single", "double"), required=True)
     parser.add_argument("--deployment-target", default="16.0")
     parser.add_argument("--schema", type=int, required=True)
     parser.add_argument("--runtime-abi", type=int, required=True)
@@ -70,8 +76,15 @@ def require_descendant(path: Path, parent: Path, label: str) -> None:
         raise SystemExit(f"{label} must remain below {parent}: {path}") from error
 
 
-def find_archive(directory: Path, target: str, architecture: str) -> Path:
-    expected = directory / "bin" / f"libgodot-cpp.ios.{target}.{architecture}.a"
+def find_archive(
+    directory: Path, target: str, architecture: str, precision: str
+) -> Path:
+    precision_suffix = ".double" if precision == "double" else ""
+    expected = (
+        directory
+        / "bin"
+        / f"libgodot-cpp.ios.{target}{precision_suffix}.{architecture}.a"
+    )
     if expected.is_file():
         return expected
     candidates = sorted((directory / "bin").glob(f"*{target}*{architecture}*.a"))
@@ -103,6 +116,16 @@ def main() -> int:
     deployment_target = args.deployment_target
 
     godot_cpp = source_root / "third/godot-cpp"
+    try:
+        api_contract = validate_godot_api_contract(
+            args.api_file,
+            args.godot_version,
+            args.precision,
+            args.api_kind,
+            args.api_sha256,
+        )
+    except ValueError as error:
+        raise SystemExit(str(error)) from error
     toolchain = godot_cpp / "cmake/ios.toolchain.cmake"
     runtime_header = source_root / "include/gdpp/runtime/variant_ops.hpp"
     reference_semantics_header = source_root / "include/gdpp/runtime/reference_semantics.hpp"
@@ -144,37 +167,39 @@ def main() -> int:
     archives: dict[str, Path] = {}
     for slice_name, (toolchain_platform, architecture) in SLICES.items():
         directory = build_root / args.godot_version / "release" / slice_name
-        run(
-            [
-                "cmake",
-                "-S",
-                str(godot_cpp),
-                "-B",
-                str(directory),
-                "-G",
-                "Ninja",
-                "-DCMAKE_BUILD_TYPE=Release",
-                f"-DCMAKE_TOOLCHAIN_FILE={toolchain}",
-                f"-DPLATFORM={toolchain_platform}",
-                f"-DDEPLOYMENT_TARGET={deployment_target}",
-                f"-DGODOTCPP_API_VERSION={args.godot_version}",
-                f"-DGODOTCPP_TARGET={GODOT_TARGET}",
-                "-DGODOTCPP_ENABLE_TESTING=OFF",
-                "-DGODOTCPP_SYSTEM_HEADERS=ON",
-                f"-DCMAKE_CXX_FLAGS=-ffile-prefix-map={source_root}=/gdpp",
-            ]
-        )
+        configure_command = [
+            "cmake",
+            "-S",
+            str(godot_cpp),
+            "-B",
+            str(directory),
+            "-G",
+            "Ninja",
+            "-DCMAKE_BUILD_TYPE=Release",
+            f"-DCMAKE_TOOLCHAIN_FILE={toolchain}",
+            f"-DPLATFORM={toolchain_platform}",
+            f"-DDEPLOYMENT_TARGET={deployment_target}",
+            f"-DGODOTCPP_TARGET={GODOT_TARGET}",
+            "-DGODOTCPP_ENABLE_TESTING=OFF",
+            "-DGODOTCPP_SYSTEM_HEADERS=ON",
+            f"-DCMAKE_CXX_FLAGS=-ffile-prefix-map={source_root}=/gdpp",
+        ]
+        configure_command.extend(api_contract.godot_cpp_cmake_arguments())
+        run(configure_command)
         run(["cmake", "--build", str(directory), "--target", "godot-cpp", "--parallel"])
-        archive = find_archive(directory, GODOT_TARGET, architecture)
+        archive = find_archive(directory, GODOT_TARGET, architecture, args.precision)
         actual_architectures = output(["xcrun", "lipo", "-archs", str(archive)]).split()
         if actual_architectures != [architecture]:
             raise SystemExit(f"unexpected architectures in {archive}: {actual_architectures}")
         archives[slice_name] = archive
         generated_include = directory / "gen/include"
 
-    device_name = f"libgodot-cpp.ios.{GODOT_TARGET}.arm64.a"
+    precision_suffix = ".double" if args.precision == "double" else ""
+    device_name = f"libgodot-cpp.ios.{GODOT_TARGET}{precision_suffix}.arm64.a"
     shutil.copy2(archives["device-arm64"], stage / "lib/device" / device_name)
-    simulator_name = f"libgodot-cpp.ios.{GODOT_TARGET}.universal.a"
+    simulator_name = (
+        f"libgodot-cpp.ios.{GODOT_TARGET}{precision_suffix}.universal.a"
+    )
     simulator_output = stage / "lib/simulator" / simulator_name
     run(
         [
@@ -214,6 +239,9 @@ def main() -> int:
     manifest = (
         f"GDPP_SDK {args.schema}\n"
         f"api {args.godot_version}\n"
+        f"api_kind {args.api_kind}\n"
+        f"api_sha256 {args.api_sha256}\n"
+        f"precision {args.precision}\n"
         "platform ios\n"
         "arch arm64\n"
         "profiles debug,release\n"

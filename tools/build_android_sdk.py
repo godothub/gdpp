@@ -10,6 +10,8 @@ from pathlib import Path
 import shutil
 import subprocess
 
+from godot_api_contract import validate_godot_api_contract
+
 
 ANDROID_ABIS = {"arm64": "arm64-v8a", "x86_64": "x86_64"}
 GODOT_TARGET = "template_release"
@@ -28,6 +30,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--addon-root", type=Path, required=True)
     parser.add_argument("--ndk-root", type=Path, required=True)
     parser.add_argument("--godot-version", required=True)
+    parser.add_argument("--api-file", type=Path, required=True)
+    parser.add_argument("--api-kind", choices=("official", "custom"), required=True)
+    parser.add_argument("--api-sha256", required=True)
+    parser.add_argument("--precision", choices=("single", "double"), required=True)
     parser.add_argument("--architecture", choices=sorted(ANDROID_ABIS), required=True)
     parser.add_argument("--api-level", type=int, default=28)
     parser.add_argument("--schema", type=int, required=True)
@@ -71,6 +77,16 @@ def main() -> int:
         raise SystemExit("GDPP Android SDK ABI baseline is fixed at API level 28 (Android 9)")
 
     godot_cpp = source_root / "third/godot-cpp"
+    try:
+        api_contract = validate_godot_api_contract(
+            args.api_file,
+            args.godot_version,
+            args.precision,
+            args.api_kind,
+            args.api_sha256,
+        )
+    except ValueError as error:
+        raise SystemExit(str(error)) from error
     runtime_header = source_root / "include/gdpp/runtime/variant_ops.hpp"
     reference_semantics_header = source_root / "include/gdpp/runtime/reference_semantics.hpp"
     runtime_source = source_root / "src/runtime/variant_ops.cpp"
@@ -104,29 +120,29 @@ def main() -> int:
     (stage / "lib").mkdir(parents=True)
 
     directory = build_root / args.godot_version / architecture / "release"
-    run(
-        [
-            "cmake",
-            "-S",
-            str(godot_cpp),
-            "-B",
-            str(directory),
-            "-G",
-            "Ninja",
-            "-DCMAKE_BUILD_TYPE=Release",
-            f"-DCMAKE_TOOLCHAIN_FILE={toolchain}",
-            f"-DANDROID_ABI={abi}",
-            f"-DANDROID_PLATFORM={args.api_level}",
-            "-DANDROID_STL=c++_shared",
-            f"-DGODOTCPP_API_VERSION={args.godot_version}",
-            f"-DGODOTCPP_TARGET={GODOT_TARGET}",
-            "-DGODOTCPP_ENABLE_TESTING=OFF",
-            "-DGODOTCPP_SYSTEM_HEADERS=ON",
-        ]
-    )
+    configure_command = [
+        "cmake",
+        "-S",
+        str(godot_cpp),
+        "-B",
+        str(directory),
+        "-G",
+        "Ninja",
+        "-DCMAKE_BUILD_TYPE=Release",
+        f"-DCMAKE_TOOLCHAIN_FILE={toolchain}",
+        f"-DANDROID_ABI={abi}",
+        f"-DANDROID_PLATFORM={args.api_level}",
+        "-DANDROID_STL=c++_shared",
+        f"-DGODOTCPP_TARGET={GODOT_TARGET}",
+        "-DGODOTCPP_ENABLE_TESTING=OFF",
+        "-DGODOTCPP_SYSTEM_HEADERS=ON",
+    ]
+    configure_command.extend(api_contract.godot_cpp_cmake_arguments())
+    run(configure_command)
     run(["cmake", "--build", str(directory), "--target", "godot-cpp", "--parallel"])
+    precision_suffix = ".double" if args.precision == "double" else ""
     expected = directory / "bin" / (
-        f"libgodot-cpp.android.{GODOT_TARGET}.{architecture}.a"
+        f"libgodot-cpp.android.{GODOT_TARGET}{precision_suffix}.{architecture}.a"
     )
     if not expected.is_file():
         candidates = sorted((directory / "bin").glob(f"*{GODOT_TARGET}*{architecture}*.a"))
@@ -173,6 +189,9 @@ def main() -> int:
     manifest = (
         f"GDPP_SDK {args.schema}\n"
         f"api {args.godot_version}\n"
+        f"api_kind {args.api_kind}\n"
+        f"api_sha256 {args.api_sha256}\n"
+        f"precision {args.precision}\n"
         "platform android\n"
         f"arch {architecture}\n"
         "profiles debug,release\n"

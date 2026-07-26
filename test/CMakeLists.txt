@@ -49,6 +49,14 @@ add_test(
 )
 
 add_test(
+    NAME gdpp.api.contract
+    COMMAND
+        "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/godot_api_contract_test.py"
+        "${PROJECT_SOURCE_DIR}"
+)
+
+add_test(
     NAME gdpp.export.immutability
     COMMAND
         "${Python3_EXECUTABLE}"
