@@ -692,12 +692,12 @@ if(GDPP_BUILD_TESTS)
                 "$<TARGET_FILE:gdpp_godot_plugin>"
                 "${GDPP_ATTACHED_TEST_ROOT}/addons/gdpp/binary/$<TARGET_FILE_NAME:gdpp_godot_plugin>"
         COMMAND "${CMAKE_COMMAND}" -E make_directory
-                "${GDPP_ATTACHED_TEST_ROOT}/addons/gdpp/sdk/${GDPP_ATTACHED_TEST_SDK_VERSION}"
+                "${GDPP_ATTACHED_TEST_ROOT}/addons/gdpp/sdk"
         COMMAND "${CMAKE_COMMAND}" -E touch
                 "${GDPP_ATTACHED_TEST_ROOT}/addons/gdpp/sdk/.gdignore"
         COMMAND "${CMAKE_COMMAND}" -E copy_directory
-                "${GDPP_ATTACHED_TEST_SDK}"
-                "${GDPP_ATTACHED_TEST_ROOT}/addons/gdpp/sdk/${GDPP_ATTACHED_TEST_SDK_VERSION}"
+                "${GDPP_PACKAGED_SDK}"
+                "${GDPP_ATTACHED_TEST_ROOT}/addons/gdpp/sdk"
         DEPENDS gdpp_addon gdpp_test_vendor gdpp_test_vendor_release
         COMMENT "Preparing independent GDExtension attachment integration project"
         VERBATIM
