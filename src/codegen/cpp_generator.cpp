@@ -548,6 +548,9 @@ void collect_type(const Type& type, NativeTypeIncludes& includes, const GodotApi
 void collect_statement_types(const typed::Statement& statement, NativeTypeIncludes& includes,
                              const GodotApi& api, const ScriptSymbolTable* script_symbols);
 
+void collect_header_statement_dependencies(const typed::Statement& statement,
+                                           NativeTypeIncludes& includes);
+
 void collect_header_expression_dependencies(const typed::Expression& expression,
                                             NativeTypeIncludes& includes) {
     if (expression.resolution == typed::ResolutionKind::script_type &&
@@ -562,16 +565,32 @@ void collect_header_expression_dependencies(const typed::Expression& expression,
         collect_header_expression_dependencies(*operand, includes);
     if (expression.lambda) {
         for (const auto& parameter : expression.lambda->parameters) {
+            for (const auto& statement : parameter.default_prefix)
+                collect_header_statement_dependencies(statement, includes);
             if (parameter.default_value)
                 collect_header_expression_dependencies(*parameter.default_value, includes);
         }
-        for (const auto& statement : expression.lambda->body) {
-            if (statement.expression)
-                collect_header_expression_dependencies(*statement.expression, includes);
-            if (statement.condition)
-                collect_header_expression_dependencies(*statement.condition, includes);
-        }
+        for (const auto& statement : expression.lambda->body)
+            collect_header_statement_dependencies(statement, includes);
     }
+}
+
+void collect_header_statement_dependencies(const typed::Statement& statement,
+                                           NativeTypeIncludes& includes) {
+    if (statement.expression)
+        collect_header_expression_dependencies(*statement.expression, includes);
+    if (statement.condition)
+        collect_header_expression_dependencies(*statement.condition, includes);
+    for (const auto& child : statement.body)
+        collect_header_statement_dependencies(child, includes);
+    for (const auto& child : statement.else_body)
+        collect_header_statement_dependencies(child, includes);
+    for (const auto& child : statement.guard_prefix)
+        collect_header_statement_dependencies(child, includes);
+    for (const auto& child : statement.assert_condition_prefix)
+        collect_header_statement_dependencies(child, includes);
+    for (const auto& child : statement.assert_message_prefix)
+        collect_header_statement_dependencies(child, includes);
 }
 
 void collect_expression_types(const typed::Expression& expression, NativeTypeIncludes& includes,
@@ -618,8 +637,13 @@ void collect_expression_types(const typed::Expression& expression, NativeTypeInc
         collect_expression_types(*operand, includes, api, script_symbols);
     if (expression.lambda) {
         collect_type(expression.lambda->return_type, includes, api, script_symbols);
-        for (const auto& parameter : expression.lambda->parameters)
+        for (const auto& parameter : expression.lambda->parameters) {
             collect_type(parameter.type, includes, api, script_symbols);
+            for (const auto& statement : parameter.default_prefix)
+                collect_statement_types(statement, includes, api, script_symbols);
+            if (parameter.default_value)
+                collect_expression_types(*parameter.default_value, includes, api, script_symbols);
+        }
         if (expression.lambda->rest_parameter)
             collect_type(expression.lambda->rest_parameter->type, includes, api, script_symbols);
         for (const auto& statement : expression.lambda->body)
@@ -667,8 +691,14 @@ void collect_class_types(const typed::Class& declaration, NativeTypeIncludes& in
         for (const auto& parameter : function.parameters)
             collect_type(parameter.type, includes, api, script_symbols);
         for (const auto& parameter : function.parameters) {
-            if (parameter.default_value)
+            for (const auto& statement : parameter.default_prefix) {
+                collect_header_statement_dependencies(statement, includes);
+                collect_statement_types(statement, includes, api, script_symbols);
+            }
+            if (parameter.default_value) {
                 collect_header_expression_dependencies(*parameter.default_value, includes);
+                collect_expression_types(*parameter.default_value, includes, api, script_symbols);
+            }
         }
         for (const auto& statement : function.body)
             collect_statement_types(statement, includes, api, script_symbols);
@@ -702,6 +732,10 @@ NativeTypeIncludes collect_native_types(const typed::Module& module, const Godot
         for (const auto& parameter : function.parameters)
             collect_type(parameter.type, includes, api, script_symbols);
         for (const auto& parameter : function.parameters) {
+            for (const auto& statement : parameter.default_prefix) {
+                collect_header_statement_dependencies(statement, includes);
+                collect_statement_types(statement, includes, api, script_symbols);
+            }
             if (parameter.default_value)
                 collect_header_expression_dependencies(*parameter.default_value, includes);
         }
@@ -2085,12 +2119,28 @@ std::string
 CodeGenerator::emit_parameter_default_initializers(const std::vector<typed::Parameter>& parameters,
                                                    const std::size_t indent) const {
     std::string result;
-    const std::string prefix(indent * 4, ' ');
-    for (const auto& parameter : parameters) {
+    for (std::size_t index = 0; index < parameters.size(); ++index)
+        result += emit_parameter_initializer(parameters[index], index, {}, indent, false);
+    return result;
+}
+
+std::string CodeGenerator::emit_parameter_initializer(const typed::Parameter& parameter,
+                                                      const std::size_t index,
+                                                      const std::string_view arguments,
+                                                      const std::size_t indentation,
+                                                      const bool continuation_context) const {
+    const auto prefix = indent(indentation);
+    const auto source_name = sanitize_identifier(parameter.name);
+    if (arguments.empty()) {
         if (!parameter.default_value)
-            continue;
+            return {};
+        if (!parameter.default_prefix.empty()) {
+            diagnostics_.error("GDS3006",
+                               "awaited parameter default reached the synchronous initializer",
+                               parameter.span);
+            return {};
+        }
         const auto native_name = parameter_native_name(parameter);
-        const auto source_name = sanitize_identifier(parameter.name);
         auto fallback = emit_conversion(parameter.type, parameter.default_value->type,
                                         emit_expression(*parameter.default_value),
                                         &parameter.default_value->span);
@@ -2103,10 +2153,132 @@ CodeGenerator::emit_parameter_default_initializers(const std::vector<typed::Para
             fallback = "gdpp::runtime::to_variant(" + fallback + ")";
         const auto supplied = emit_conversion(parameter.type, {TypeKind::variant, "Variant"},
                                               native_name, &parameter.span);
-        result += prefix + cpp_type(parameter.type) + " " + source_name + " = " +
-                  "gdpp::runtime::is_default_argument(" + native_name + ") ? " + fallback + " : " +
-                  supplied + ";\n";
+        return prefix + cpp_type(parameter.type) + " " + source_name + " = " +
+               "gdpp::runtime::is_default_argument(" + native_name + ") ? " + fallback + " : " +
+               supplied + ";\n" + emit_script_failure_return(indentation, continuation_context);
     }
+
+    if (!parameter.default_prefix.empty()) {
+        diagnostics_.error("GDS3006", "awaited lambda default reached the synchronous initializer",
+                           parameter.span);
+        return {};
+    }
+    const auto argument = std::string{arguments} + "[" + std::to_string(index) + "]";
+    const auto supplied =
+        emit_conversion(parameter.type, {TypeKind::variant, "Variant"}, argument, &parameter.span);
+    std::string value = supplied;
+    if (parameter.default_value) {
+        value = std::string{arguments} + ".size() > " + std::to_string(index) + " ? " + supplied +
+                " : " +
+                emit_conversion(parameter.type, parameter.default_value->type,
+                                emit_expression(*parameter.default_value),
+                                &parameter.default_value->span);
+    }
+    return prefix + "[[maybe_unused]] " + cpp_type(parameter.type) + " " + source_name + " = " +
+           value + ";\n" + emit_script_failure_return(indentation, continuation_context);
+}
+
+bool CodeGenerator::has_parameter_control_flow(
+    const std::vector<typed::Parameter>& parameters) noexcept {
+    return std::any_of(parameters.begin(), parameters.end(),
+                       [](const auto& parameter) { return !parameter.default_prefix.empty(); });
+}
+
+std::string CodeGenerator::emit_parameter_cells(const std::vector<typed::Parameter>& parameters,
+                                                const std::size_t indentation) const {
+    std::string result;
+    for (const auto& parameter : parameters) {
+        if (parameter.default_prefix.empty())
+            continue;
+        if (parameter.symbol_identity == 0) {
+            diagnostics_.error("GDS3006",
+                               "awaited parameter default is missing its lexical identity",
+                               parameter.span);
+            continue;
+        }
+        const auto cell = "_gdpp_parameter_cell_" + std::to_string(parameter.symbol_identity);
+        result += indent(indentation) + "const auto " + cell + " = std::make_shared<" +
+                  cpp_type(parameter.type) + ">();\n";
+        local_expression_overrides_[parameter.symbol_identity] = "(*" + cell + ")";
+    }
+    return result;
+}
+
+std::string CodeGenerator::emit_parameter_initialization_chain(
+    const std::vector<typed::Parameter>& parameters,
+    const std::optional<typed::Parameter>& rest_parameter,
+    const std::vector<typed::Statement>& body, const std::string_view arguments,
+    const std::size_t indentation, const std::size_t begin, const bool continuation_context) const {
+    std::string result;
+    for (std::size_t index = begin; index < parameters.size(); ++index) {
+        const auto& parameter = parameters[index];
+        if (parameter.default_prefix.empty()) {
+            result += emit_parameter_initializer(parameter, index, arguments, indentation,
+                                                 continuation_context);
+            continue;
+        }
+
+        const auto suffix = std::to_string(temporary_counter_++);
+        const auto after = "_gdpp_after_parameter_" + suffix;
+        const auto commit = "_gdpp_commit_parameter_" + suffix;
+        const auto cell = "_gdpp_parameter_cell_" + std::to_string(parameter.symbol_identity);
+        const auto prefix = indent(indentation);
+        const auto next_index = index + 1U;
+        const auto continuation = emit_parameter_initialization_chain(
+            parameters, rest_parameter, body, arguments, indentation + 1U, next_index, true);
+        result += prefix + "auto " + after + " = [=]() mutable {\n";
+        result += continuation;
+        result += prefix + "};\n";
+        result += prefix + "auto " + commit +
+                  " = [=](const godot::Variant &_gdpp_parameter_value) mutable {\n";
+        result += indent(indentation + 1) + "(*" + cell + ") = " +
+                  emit_conversion(parameter.type, {TypeKind::variant, "Variant"},
+                                  "_gdpp_parameter_value", &parameter.span) +
+                  ";\n";
+        result += emit_script_failure_return(indentation + 1, true);
+        result += indent(indentation + 1) + after + "();\n";
+        result += prefix + "};\n";
+
+        const auto supplied =
+            arguments.empty()
+                ? "!gdpp::runtime::is_default_argument(" + parameter_native_name(parameter) + ")"
+                : std::string{arguments} + ".size() > " + std::to_string(index);
+        const auto supplied_value =
+            arguments.empty() ? parameter_native_name(parameter)
+                              : std::string{arguments} + "[" + std::to_string(index) + "]";
+        result += prefix + "if (" + supplied + ") {\n";
+        result += indent(indentation + 1) + commit + "(gdpp::runtime::to_variant(" +
+                  supplied_value + "));\n";
+        result += async_return(indentation + 1, continuation_context);
+        result += prefix + "}\n";
+
+        const auto terminal = commit + "(gdpp::runtime::to_variant(" +
+                              emit_expression(*parameter.default_value) + "));";
+        const auto prefix_suspends = std::any_of(
+            parameter.default_prefix.begin(), parameter.default_prefix.end(),
+            [this](const auto& statement) { return statement_contains_await(statement); });
+        result += emit_async_statements(parameter.default_prefix, indentation, 0, {}, terminal,
+                                        continuation_context);
+        if (!prefix_suspends)
+            result += async_return(indentation, continuation_context);
+        return result;
+    }
+
+    if (!arguments.empty() && rest_parameter) {
+        const auto rest_name = sanitize_identifier(rest_parameter->name);
+        result += indent(indentation) + "[[maybe_unused]] godot::Array " + rest_name + ";\n";
+        result += indent(indentation) + rest_name + ".resize(" + std::string{arguments} +
+                  ".size() > " + std::to_string(parameters.size()) + " ? " +
+                  std::string{arguments} + ".size() - " + std::to_string(parameters.size()) +
+                  " : 0);\n";
+        result += indent(indentation) +
+                  "for (std::int64_t _gdpp_rest_index = " + std::to_string(parameters.size()) +
+                  "; _gdpp_rest_index < " + std::string{arguments} +
+                  ".size(); ++_gdpp_rest_index) " + rest_name + "[_gdpp_rest_index - " +
+                  std::to_string(parameters.size()) + "] = " + std::string{arguments} +
+                  "[static_cast<std::size_t>(_gdpp_rest_index)];\n";
+    }
+    result += emit_async_statements(body, indentation, 0, {}, {}, continuation_context);
     return result;
 }
 
@@ -4389,35 +4561,28 @@ std::string CodeGenerator::emit_expression(const typed::Expression& expression) 
         // retain the same failure state.
         result += emit_script_function_scope(1);
         result += emit_debug_frame(lambda.span.begin.line, 1);
-        for (std::size_t index = 0; index < lambda.parameters.size(); ++index) {
-            const auto& parameter = lambda.parameters[index];
-            result += "    [[maybe_unused]] " + cpp_type(parameter.type) + " " +
-                      sanitize_identifier(parameter.name) + " = ";
-            const auto converted =
-                emit_conversion(parameter.type, {TypeKind::variant, "Variant"},
-                                arguments + "[" + std::to_string(index) + "]", &parameter.span);
-            if (parameter.default_value) {
-                result += arguments + ".size() > " + std::to_string(index) + " ? " + converted +
-                          " : " + emit_expression(*parameter.default_value);
-            } else {
-                result += converted;
+        if (has_parameter_control_flow(lambda.parameters)) {
+            result += emit_parameter_cells(lambda.parameters, 1);
+            result += emit_parameter_initialization_chain(lambda.parameters, lambda.rest_parameter,
+                                                          lambda.body, arguments, 1, 0, false);
+        } else {
+            for (std::size_t index = 0; index < lambda.parameters.size(); ++index)
+                result += emit_parameter_initializer(lambda.parameters[index], index, arguments, 1,
+                                                     false);
+            if (lambda.rest_parameter) {
+                const auto rest_name = sanitize_identifier(lambda.rest_parameter->name);
+                result += "    [[maybe_unused]] godot::Array " + rest_name + ";\n";
+                result += "    " + rest_name + ".resize(" + arguments + ".size() > " +
+                          std::to_string(lambda.parameters.size()) + " ? " + arguments +
+                          ".size() - " + std::to_string(lambda.parameters.size()) + " : 0);\n";
+                result += "    for (std::int64_t _gdpp_rest_index = " +
+                          std::to_string(lambda.parameters.size()) + "; _gdpp_rest_index < " +
+                          arguments + ".size(); ++_gdpp_rest_index) " + rest_name +
+                          "[_gdpp_rest_index - " + std::to_string(lambda.parameters.size()) +
+                          "] = " + arguments + "[static_cast<std::size_t>(_gdpp_rest_index)];\n";
             }
-            result += ";\n";
-            result += emit_script_failure_return(1, false);
+            result += emit_statements(lambda.body, 1);
         }
-        if (lambda.rest_parameter) {
-            const auto rest_name = sanitize_identifier(lambda.rest_parameter->name);
-            result += "    [[maybe_unused]] godot::Array " + rest_name + ";\n";
-            result += "    " + rest_name + ".resize(" + arguments + ".size() > " +
-                      std::to_string(lambda.parameters.size()) + " ? " + arguments + ".size() - " +
-                      std::to_string(lambda.parameters.size()) + " : 0);\n";
-            result += "    for (std::int64_t _gdpp_rest_index = " +
-                      std::to_string(lambda.parameters.size()) + "; _gdpp_rest_index < " +
-                      arguments + ".size(); ++_gdpp_rest_index) " + rest_name +
-                      "[_gdpp_rest_index - " + std::to_string(lambda.parameters.size()) +
-                      "] = " + arguments + "[static_cast<std::size_t>(_gdpp_rest_index)];\n";
-        }
-        result += emit_statements(lambda.body, 1);
         current_return_type_ = saved_return;
         in_callable_lambda_ = saved_callable;
         in_function_body_ = saved_function;
@@ -7393,9 +7558,17 @@ void CodeGenerator::emit_inner_class_definition(const typed::Class& declaration,
             source << "    (void)_gdpp_ensure_static_initialized();\n";
             source << emit_script_failure_return(1, false);
         }
-        source << emit_parameter_default_initializers(function.parameters, 1);
         source << emit_debug_frame(function.span.begin.line, 1);
-        source << emit_statements(function.body, 1);
+        if (has_parameter_control_flow(function.parameters)) {
+            const auto saved_overrides = local_expression_overrides_;
+            source << emit_parameter_cells(function.parameters, 1);
+            source << emit_parameter_initialization_chain(
+                function.parameters, function.rest_parameter, function.body, {}, 1, 0, false);
+            local_expression_overrides_ = saved_overrides;
+        } else {
+            source << emit_parameter_default_initializers(function.parameters, 1);
+            source << emit_statements(function.body, 1);
+        }
         if (!current_coroutine_abi_ && function.return_type.kind != TypeKind::void_type &&
             (requires_native_fallback(function.body) ||
              (function.return_type.is_dynamic() && native_statements_fall_through(function.body))))
@@ -8981,9 +9154,18 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
             source << "    (void)_gdpp_ensure_static_initialized();\n";
             source << emit_script_failure_return(1, false);
         }
-        source << emit_parameter_default_initializers(function.parameters, 1);
         source << emit_debug_frame(function.span.begin.line, 1);
-        if (function.name == "_ready" && !attached_script) {
+        const auto parameter_control_flow = has_parameter_control_flow(function.parameters);
+        if (parameter_control_flow) {
+            const auto saved_overrides = local_expression_overrides_;
+            source << emit_parameter_cells(function.parameters, 1);
+            source << emit_parameter_initialization_chain(
+                function.parameters, function.rest_parameter, function.body, {}, 1, 0, false);
+            local_expression_overrides_ = saved_overrides;
+        } else {
+            source << emit_parameter_default_initializers(function.parameters, 1);
+        }
+        if (!parameter_control_flow && function.name == "_ready" && !attached_script) {
             for (const auto& field : module.fields) {
                 if (field.onready && field.initializer) {
                     source << "    "
@@ -8997,17 +9179,20 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
                 }
             }
         }
-        const auto mir_name = mir_owner + "::" + function.name;
-        const auto mir_function = std::find_if(
-            mir_module.functions.begin(), mir_module.functions.end(),
-            [&](const mir::ControlFlowFunction& candidate) {
-                return candidate.role == mir::FunctionRole::method && candidate.name == mir_name;
-            });
-        if (mir_function != mir_module.functions.end() &&
-            can_emit_flat_async(function, *mir_function)) {
-            source << emit_flat_async(function, *mir_function, 1);
-        } else {
-            source << emit_statements(function.body, 1);
+        if (!parameter_control_flow) {
+            const auto mir_name = mir_owner + "::" + function.name;
+            const auto mir_function =
+                std::find_if(mir_module.functions.begin(), mir_module.functions.end(),
+                             [&](const mir::ControlFlowFunction& candidate) {
+                                 return candidate.role == mir::FunctionRole::method &&
+                                        candidate.name == mir_name;
+                             });
+            if (mir_function != mir_module.functions.end() &&
+                can_emit_flat_async(function, *mir_function)) {
+                source << emit_flat_async(function, *mir_function, 1);
+            } else {
+                source << emit_statements(function.body, 1);
+            }
         }
         if (!current_coroutine_abi_ && function.return_type.kind != TypeKind::void_type &&
             (requires_native_fallback(function.body) ||

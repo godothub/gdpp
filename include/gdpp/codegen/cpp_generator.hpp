@@ -105,6 +105,21 @@ class CodeGenerator final {
     [[nodiscard]] std::string
     emit_parameter_default_initializers(const std::vector<typed::Parameter>& parameters,
                                         std::size_t indent) const;
+    [[nodiscard]] std::string emit_parameter_initializer(const typed::Parameter& parameter,
+                                                         std::size_t index,
+                                                         std::string_view arguments,
+                                                         std::size_t indent,
+                                                         bool continuation_context) const;
+    [[nodiscard]] std::string emit_parameter_cells(const std::vector<typed::Parameter>& parameters,
+                                                   std::size_t indent) const;
+    [[nodiscard]] std::string
+    emit_parameter_initialization_chain(const std::vector<typed::Parameter>& parameters,
+                                        const std::optional<typed::Parameter>& rest_parameter,
+                                        const std::vector<typed::Statement>& body,
+                                        std::string_view arguments, std::size_t indent,
+                                        std::size_t begin, bool continuation_context) const;
+    [[nodiscard]] static bool
+    has_parameter_control_flow(const std::vector<typed::Parameter>& parameters) noexcept;
     [[nodiscard]] std::string
     emit_bound_parameter_defaults(const std::vector<typed::Parameter>& parameters) const;
     [[nodiscard]] static std::string method_callback_name(const typed::Function& function);
