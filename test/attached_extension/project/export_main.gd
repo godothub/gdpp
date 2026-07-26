@@ -36,6 +36,16 @@ class ContainerItem extends RefCounted:
         value = initial
 
 
+class InnerCoroutineProbe extends RefCounted:
+    func forward(signal_value: Signal) -> int:
+        return await later(signal_value)
+
+
+    func later(signal_value: Signal) -> int:
+        await signal_value
+        return 42
+
+
 static func _await_static_result(signal_value: Signal) -> int:
     await signal_value
     return 42
@@ -66,6 +76,12 @@ func _verify_export_runtime() -> void:
     )
     if lambda_result != 42:
         _fail("typed coroutine lambda lost its captured value or completion result")
+        return
+    var inner_result: int = await InnerCoroutineProbe.new().forward(
+        get_tree().create_timer(0.001).timeout,
+    )
+    if inner_result != 42:
+        _fail("internal class coroutine lost its temporary owner or typed result")
         return
 
     var completion_order: Array[int] = []
