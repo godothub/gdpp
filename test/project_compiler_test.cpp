@@ -120,12 +120,18 @@ TEST_CASE("project compiler incrementally generates a unified native extension")
                "extends Node\nclass_name ProjectEnemy\nfunc attack() -> int:\n    return 1\n");
     const gdpp::ProjectCompiler compiler;
     const auto options = project_options(root);
+    write_text(options.output_directory / "CMakeLists.txt", "retired\n");
+    write_text(options.output_directory / "gdpp_project.gdextension",
+               "[configuration]\nentry_symbol=\"gdpp_project_library_init\"\n");
+    write_text(options.output_directory / "patch_godot_cpp_class_db.cmake", "retired\n");
+    write_text(options.output_directory / "prune_stale_development.cmake", "retired\n");
 
     const auto first = compiler.compile(options);
     REQUIRE(first.success);
     REQUIRE_EQ(first.compiled_count, std::size_t{2});
     REQUIRE_EQ(first.cache_hit_count, std::size_t{0});
     REQUIRE(!std::filesystem::exists(options.output_directory / "CMakeLists.txt"));
+    REQUIRE(!std::filesystem::exists(options.output_directory / "gdpp_project.gdextension"));
     REQUIRE(!std::filesystem::exists(options.output_directory / "prune_stale_development.cmake"));
     REQUIRE(!std::filesystem::exists(options.output_directory / "patch_godot_cpp_class_db.cmake"));
     REQUIRE(std::filesystem::is_regular_file(options.output_directory / "register_types.cpp"));
