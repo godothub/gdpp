@@ -4150,14 +4150,11 @@ SemanticAnalyzer::FlowResult SemanticAnalyzer::analyze_statement(const ast::Stat
         return FlowResult{true, false, false, false};
     }
     case ast::StatementKind::assignment: {
-        const auto previous_await_context = await_expression_allowed_;
         const auto previous_suppression = suppress_flow_refinements_;
-        await_expression_allowed_ = false;
         suppress_flow_refinements_ =
             statement.condition()->kind() == ast::ExpressionKind::identifier;
         const auto target = analyze_expression(*statement.condition());
         suppress_flow_refinements_ = previous_suppression;
-        await_expression_allowed_ = previous_await_context;
         const auto value = analyze_expression(*statement.expression());
         auto assignment_target = target;
         if (const auto* resolution = model_.api_resolution_of(*statement.condition());

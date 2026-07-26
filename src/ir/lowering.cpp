@@ -398,6 +398,15 @@ void normalize_await_block(std::vector<ir::Statement>& statements, std::size_t& 
             statement.condition = normalize_await_expression(std::move(statement.condition), prefix,
                                                              temporary_counter);
         }
+        // GDScript evaluates an assignment target's receiver and subscript operands before its
+        // right-hand side. Normalize awaits in those operands while retaining the outer
+        // member/subscript node as an lvalue. If the value can also suspend, stabilize the
+        // already-evaluated target below so resumption neither repeats side effects nor writes to
+        // a different receiver.
+        if (statement.kind == ir::StatementKind::assignment && statement.condition) {
+            statement.condition = normalize_await_expression(std::move(statement.condition), prefix,
+                                                             temporary_counter);
+        }
         if (statement.kind == ir::StatementKind::assignment && statement.expression &&
             contains_await_expression(*statement.expression) && statement.condition) {
             stabilize_assignment_target(*statement.condition, prefix, temporary_counter);
