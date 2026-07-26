@@ -6,11 +6,11 @@
 ## 审计基线
 
 - 审计版本：GDPP 1.8.0。
-- 功能审计提交：`2c81784fcbe9456a4ce24f047df14d3e4491bcc3`；1.8.0 正式发布门禁尚待执行。
+- 功能审计范围：1.8.0 发布分支当前提交；正式发布门禁由同一提交的 release workflow 执行。
 - 最近正式发布门禁：1.7.10 / GitHub Actions `30170732292`，46 个作业全部成功。
-- 本地编译器单元测试：507 / 507。
+- 本地编译器单元测试：543 / 543。
 - Godot 目标：4.4、4.5、4.6、4.7；CI 使用 4.4.1、4.5.2、4.6.3、4.7.1。
-- SDK schema：11；生成项目 runtime ABI：15。
+- SDK schema：12；生成项目 runtime ABI：18。
 
 状态标记只表达已经存在的证据：
 
@@ -42,35 +42,43 @@
 | 无源码交付 | 成功 AOT 包剥离 `.gd/.gdc`、compiler、SDK、静态库、生成 C++ 与对象文件 |
 | 发行物 | `gdpp-mac.zip`、`gdpp-linux.zip`、`gdpp-win.zip`，每个包含 Godot 4.4～4.7 SDK |
 
-## 仍存在的功能缺口
+## P0 语言与运行语义结论
 
-这些项目会影响普通客户项目的可编译范围或运行等价性，优先级高于新增语法。
+1.8.0 已关闭当前声明兼容面的 M1～M4 P0 阻断项：
 
-### P0：语言与运行语义
+- 前端具有可恢复多错误解析、完整 AST/`SourceSpan` 序列化 golden、coverage-guided fuzz、
+  资源预算以及 Godot 4.7.1 官方合法/非法语料漂移门禁。
+- 38 个非 `MAX` Variant 家族、PackedArray、强类型 Array/Dictionary、Callable、空值、失效
+  Object/Ref、错误键、越界和整数故障均进入统一 source/AOT fault 差分；故障携带源码位置并
+  只中止当前脚本函数。
+- 真正挂起的实例/静态/lambda/内部类/属性访问器、await 默认参数和赋值目标都使用同一
+  FunctionState 契约；项目 ABI 变化会传递失效所有消费者。
+- 真实 ENet 多 peer RPC 门禁覆盖 authority/any-peer、call-local/remote、transfer mode、
+  channel、排序、拒绝和导出后运行，不再以单进程反射代替网络语义。
+- 项目中的每个可交付 `.gd` 都登记为无源码 `Script` 身份。运行时拼接路径、相对路径、UID、
+  `ResourceLoader` 同步/线程加载、缓存、`exists()` 和 `.new()` 都从编译清单解析；清单之外的
+  动态路径确定失败，不会在成品中偷偷依赖源码。
+- 标准及 custom/double 引擎 SDK 都绑定精确 `extension_api.json` SHA-256、precision、
+  Godot 版本、godot-cpp 和 runtime ABI；不匹配在生成编译命令前失败。
+- MIR 已有稳定 Value/Operation ID、去地址序列化、事务 verifier、优化预算和死值密集重映射；
+  native meta、符号映射、唯一入口和生成二进制审计均有发布门禁。
+- 项目脚本 `Object.free()` 通过 Godot 原生 Variant 调度保留普通 Object 销毁、RefCounted
+  拒绝、锁定对象保护和当前函数失败边界，不直接 `memdelete` 绕过引擎生命周期。
 
-1. 动态强类型容器转换、Callable、外部扩展调用、除零、越界、失效 Object/Ref 和错误字典键
-   已进入统一 fault frame，并保留源码位置和当前函数中止边界；仍缺所有 Variant/容器/Ref 组合
-   的 GDScript VM 全量差分。
-2. RPC 注解与单进程 `call_local` 已实现；真实多 peer 的 authority 拒绝、可靠性/排序/丢包、
-   断线重连和对象序列化压力尚未认证。
-3. 字面量脚本路径的 `preload/load`、脚本工厂和 UID 可解析；运行时拼接出的 `.gd` 路径无法在
-   已剥离源码的包中穷举。当前缺少显式动态脚本保留清单和可证明的路径集合分析。
-4. 自定义 Godot 构建、double precision API、用户合并的 extension API 还没有正式 SDK
-   生产与冲突校验流程。
-
-1.8.0 候选已经关闭了此前列在 P0 的真正挂起静态协程、类型化/并发 lambda 协程、创建时捕获
-快照、嵌套与共享容器递归闭包、Signal/Callable 生命周期矩阵，以及异步虚函数的 FunctionState
-返回 ABI。挂起调用现在返回具备 `completed`、`resume()`、`is_valid()` 和一次性连接清理的引用
-计数状态对象；引擎虚函数按 Godot 自身规则立即把该对象转换为声明的原生返回类型，不虚构引擎
-会等待脚本协程。`_init` 挂起仍按 GDScript 构造边界稳定拒绝，不能与已完成的普通静态协程混为
-一项缺失。
+挂起调用返回具备 `completed`、`resume()`、`is_valid()` 和一次性连接清理的引用计数状态对象；
+引擎虚函数按 Godot 自身规则立即把该对象转换为声明的原生返回类型，不虚构引擎会等待脚本协程。
+`_init` 挂起仍按 GDScript 构造边界稳定拒绝，这是语言规则而不是功能缺失。
 
 `@static_unload` 的语法、HIR、缓存和 Script metadata 已完整保留。当前目标 Godot 4.4～4.7 的
 可观察行为是脚本静态状态保持到语言/扩展关闭；Godot 4.7 官方实现和文档也明确记录脚本目前不会
 因引用归零被释放。GDPP 与该目标行为一致，并在扩展终止时确定清理；未来 Godot 修复上游卸载
 行为时必须新增目标版本差分，不能在现有目标上提前实现一个与引擎不同的重置时机。
 
-### P1：项目构建与编辑器体验
+## 仍存在的 P1 功能与认证缺口
+
+以下内容不改变当前声明语言面的运行结果，但会影响构建体验、性能上限、供应链保证或支持矩阵。
+
+### 项目构建与编辑器体验
 
 1. 同一项目被多个 Godot 编辑器或 CLI 同时构建时，没有跨进程排他锁；单进程内事务和缓存是
    安全的，但多进程并发写同一 `addons/gdpp/build` 尚未认证。
