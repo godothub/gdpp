@@ -1,0 +1,62 @@
+{
+  "schema_version": 1,
+  "before": {
+    "release_tag": "4.7-stable",
+    "commit": "5b4e0cb0fd279832bbdd69fed5354d4e5ad26f88"
+  },
+  "after": {
+    "release_tag": "4.7.1-stable",
+    "commit": "a13da4feb8d8aefc283c3763d33a2f170a18d541"
+  },
+  "parser_corpus": {
+    "valid": {
+      "added": [],
+      "removed": [],
+      "changed": []
+    },
+    "invalid": {
+      "added": [],
+      "removed": [],
+      "changed": []
+    }
+  },
+  "warnings": {
+    "added": [],
+    "removed": []
+  },
+  "annotations": {
+    "added": [],
+    "removed": []
+  },
+  "unicode_identifiers": {
+    "changed": false,
+    "before": {
+      "source_path": "core/string/char_range.cpp",
+      "source_sha256": "71921d6cc9d7124c3698c80f3e5528b44c417bf1d4fd5da94ec3c50deacb0fa4",
+      "tables": {
+        "xid_start": {
+          "range_count": 692,
+          "range_sha256": "6e2bcbe0aaeb849036dc3987b9cb9bf96411f67dd9dc5755820404748f60cbfe"
+        },
+        "xid_continue": {
+          "range_count": 806,
+          "range_sha256": "770ae2692941ad6d69539fc745420cd291c2aa6b811a61c10c9aff22bc9fcd02"
+        }
+      }
+    },
+    "after": {
+      "source_path": "core/string/char_range.cpp",
+      "source_sha256": "71921d6cc9d7124c3698c80f3e5528b44c417bf1d4fd5da94ec3c50deacb0fa4",
+      "tables": {
+        "xid_start": {
+          "range_count": 692,
+          "range_sha256": "6e2bcbe0aaeb849036dc3987b9cb9bf96411f67dd9dc5755820404748f60cbfe"
+        },
+        "xid_continue": {
+          "range_count": 806,
+          "range_sha256": "770ae2692941ad6d69539fc745420cd291c2aa6b811a61c10c9aff22bc9fcd02"
+        }
+      }
+    }
+  }
+}

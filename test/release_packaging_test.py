@@ -486,6 +486,11 @@ class ReleasePackagingTest(unittest.TestCase):
             workflow,
         )
         self.assertNotIn("vendor_child.gd:24", workflow)
+        self.assertIn(
+            "Verify the latest supported Godot stable frontend pin", workflow
+        )
+        self.assertIn("tools/update_godot_frontend.py", workflow)
+        self.assertIn("test/compatibility/godot_frontend_4_7.json", workflow)
 
     def test_host_staging_excludes_msvc_import_products(self) -> None:
         source = create_host_component(self.temporary / "source", "windows-x64")

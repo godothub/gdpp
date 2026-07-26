@@ -366,6 +366,16 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
           submodules: recursive
+      - name: Verify the latest supported Godot stable frontend pin
+        run: >-
+          python3 tools/update_godot_frontend.py
+          --manifest test/compatibility/godot_parser_4_7.json
+          --snapshot test/compatibility/godot_frontend_4_7.json
+          --language-features src/frontend/language_features.cpp
+          --unicode-table src/frontend/unicode_identifier_ranges.inc
+          --build-root build
+          --output build/godot-frontend-update
+          --check-only
       - name: Configure pinned official corpus
         run: cmake --preset dev -DGDPP_ENABLE_OFFICIAL_CORPUS_TESTS=ON
       - name: Build compiler
@@ -382,5 +392,6 @@ jobs:
           path: |
             build/dev/compatibility/results/report.json
             build/dev/compatibility/parser-results/report.json
+            build/dev/compatibility/frontend-snapshot-diff.json
           if-no-files-found: warn
           retention-days: 14
