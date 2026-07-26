@@ -1312,12 +1312,54 @@ TEST_CASE("compiler preloads member resources before instances are constructed")
     REQUIRE(result.unit.source.find("gdpp::runtime::load_resource(") != std::string::npos);
     REQUIRE(result.unit.header.find("static void _gdpp_release_preloaded_resources()") !=
             std::string::npos);
+    REQUIRE(result.unit.header.find("_gdpp_preload_initialization()") != std::string::npos);
+    REQUIRE(result.unit.source.find("_gdpp_preload_initialization().run(") != std::string::npos);
+    REQUIRE(result.unit.source.find("_gdpp_preload_initialization().reset(") != std::string::npos);
+    REQUIRE(result.unit.source.find("std::once_flag") == std::string::npos);
+    REQUIRE(result.unit.source.find("std::call_once") == std::string::npos);
     REQUIRE(
         result.unit.source.find("_gdpp_preloaded_scene() = "
                                 "std::remove_reference_t<decltype(_gdpp_preloaded_scene())>{};") !=
         std::string::npos);
     REQUIRE(result.unit.source.find("if (!gdpp_editor_hint) _gdpp_preload_resources();") !=
             std::string::npos);
+}
+
+TEST_CASE("script initialization is transactional across roots and internal classes") {
+    const gdpp::Compiler compiler;
+    const auto result = compiler.compile("transactional_initialization.gd",
+                                         "extends Node\n"
+                                         "static var root_value: int = [1][4]\n"
+                                         "var root_scene = preload(\"res://root.tscn\")\n"
+                                         "static func _static_init() -> void:\n"
+                                         "    root_value += 1\n"
+                                         "class Worker:\n"
+                                         "    static var worker_value: int = [1][4]\n"
+                                         "    var worker_scene = preload(\"res://worker.tscn\")\n"
+                                         "    static func _static_init() -> void:\n"
+                                         "        worker_value += 1\n");
+
+    REQUIRE(result.success);
+    const auto& source = result.unit.source;
+    REQUIRE(std::count(source.begin(), source.end(), '\n') > 20);
+    REQUIRE(source.find("Script initialization previously failed") == std::string::npos);
+    REQUIRE(source.find("Static initialization previously failed for GDPPNative_") !=
+            std::string::npos);
+    REQUIRE(source.find("Preload initialization previously failed for GDPPNative_") !=
+            std::string::npos);
+    REQUIRE(source.find("_gdpp_static_root_value_release();") != std::string::npos);
+    REQUIRE(source.find("_gdpp_static_worker_value_release();") != std::string::npos);
+    REQUIRE(source.find("_gdpp_preloaded_root_scene()") != std::string::npos);
+    REQUIRE(source.find("_gdpp_preloaded_worker_scene()") != std::string::npos);
+    REQUIRE(source.find("std::once_flag") == std::string::npos);
+    REQUIRE(source.find("std::call_once") == std::string::npos);
+
+    std::size_t transactions = 0;
+    constexpr std::string_view run{"ScriptInitializationState state"};
+    for (auto position = source.find(run); position != std::string::npos;
+         position = source.find(run, position + run.size()))
+        ++transactions;
+    REQUIRE(transactions >= std::size_t{4});
 }
 
 TEST_CASE("compiler releases script static storage before Godot servers stop") {
@@ -2552,12 +2594,12 @@ TEST_CASE("compiler defines static script fields outside the generated header") 
     REQUIRE(result.success);
     REQUIRE(result.unit.header.find("static int64_t& _gdpp_static_count_storage()") !=
             std::string::npos);
-    REQUIRE(result.unit.header.find(
-                "static std::atomic<std::uint8_t>& _gdpp_static_initialization_state()") !=
-            std::string::npos);
+    REQUIRE(result.unit.header.find("static gdpp::runtime::ScriptInitializationState& "
+                                    "_gdpp_static_initialization()") != std::string::npos);
     REQUIRE(result.unit.source.find("value = new int64_t{}") != std::string::npos);
     REQUIRE(result.unit.source.find("*value = static_cast<int64_t>(1)") != std::string::npos);
-    REQUIRE(result.unit.source.find("static thread_local bool active = false") !=
+    REQUIRE(result.unit.source.find("_gdpp_static_initialization().run(") != std::string::npos);
+    REQUIRE(result.unit.source.find("static thread_local bool active = false") ==
             std::string::npos);
     const auto increment = result.unit.source.find("::increment() {");
     REQUIRE(increment != std::string::npos);
@@ -4348,15 +4390,21 @@ TEST_CASE("static constructors are validated and run through the class initializ
                                                                     "        pass\n");
 
     REQUIRE(valid.success);
-    REQUIRE(valid.unit.header.find("static void _gdpp_ensure_static_initialized()") !=
+    REQUIRE(valid.unit.header.find("static bool _gdpp_ensure_static_initialized()") !=
             std::string::npos);
-    REQUIRE(valid.unit.source.find("static thread_local bool active = false") != std::string::npos);
-    REQUIRE(valid.unit.source.find("if (gdpp::runtime::is_editor_hint()) return;") !=
+    REQUIRE(valid.unit.source.find("_gdpp_static_initialization().run(") != std::string::npos);
+    REQUIRE(valid.unit.source.find("static thread_local bool active = false") == std::string::npos);
+    REQUIRE(valid.unit.source.find("if (gdpp::runtime::is_editor_hint()) return true;") !=
             std::string::npos);
     REQUIRE(valid.unit.source.find("static thread_local bool editor_value{}") != std::string::npos);
     const auto valid_guard = valid.unit.source.find("::_gdpp_ensure_static_initialized() {");
     REQUIRE(valid_guard != std::string::npos);
-    REQUIRE(valid.unit.source.find("    _static_init();", valid_guard) != std::string::npos);
+    REQUIRE(valid.unit.source.find("            _static_init();", valid_guard) !=
+            std::string::npos);
+    const auto static_initializer = valid.unit.source.find("::_static_init() {");
+    REQUIRE(static_initializer != std::string::npos);
+    REQUIRE(valid.unit.source.find("ScriptFaultPolicy::inherit_existing", static_initializer) !=
+            std::string::npos);
     const auto valid_bind = valid.unit.source.find("::_bind_methods() {");
     const auto valid_bind_end = valid.unit.source.find("}\n\n", valid_bind);
     REQUIRE(valid_bind != std::string::npos);
@@ -4368,7 +4416,7 @@ TEST_CASE("static constructors are validated and run through the class initializ
     REQUIRE(tool.success);
     const auto tool_guard = tool.unit.source.find("::_gdpp_ensure_static_initialized() {");
     REQUIRE(tool_guard != std::string::npos);
-    REQUIRE(tool.unit.source.find("    _static_init();", tool_guard) != std::string::npos);
+    REQUIRE(tool.unit.source.find("            _static_init();", tool_guard) != std::string::npos);
     REQUIRE(tool.unit.source.find("editor_value") == std::string::npos);
     const auto tool_bind = tool.unit.source.find("::_bind_methods() {");
     const auto tool_bind_end = tool.unit.source.find("}\n\n", tool_bind);

@@ -598,15 +598,21 @@ add_custom_command(
         "${GDPP_SMOKE_DIR}/hello_aot.gd.cpp"
         "${GDPP_SMOKE_DIR}/breakpoint.gd.hpp"
         "${GDPP_SMOKE_DIR}/breakpoint.gd.cpp"
+        "${GDPP_SMOKE_DIR}/transactional_initialization.gd.hpp"
+        "${GDPP_SMOKE_DIR}/transactional_initialization.gd.cpp"
     COMMAND "${CMAKE_COMMAND}" -E make_directory "${GDPP_SMOKE_DIR}"
     COMMAND $<TARGET_FILE:gdpp> compile "${CMAKE_SOURCE_DIR}/example/hello.gd"
             --output "${GDPP_SMOKE_DIR}"
     COMMAND $<TARGET_FILE:gdpp> compile "${CMAKE_SOURCE_DIR}/test/fixtures/breakpoint.gd"
             --output "${GDPP_SMOKE_DIR}"
+    COMMAND $<TARGET_FILE:gdpp> compile
+            "${CMAKE_SOURCE_DIR}/test/fixtures/transactional_initialization.gd"
+            --output "${GDPP_SMOKE_DIR}"
     DEPENDS
         gdpp
         "${CMAKE_SOURCE_DIR}/example/hello.gd"
         "${CMAKE_SOURCE_DIR}/test/fixtures/breakpoint.gd"
+        "${CMAKE_SOURCE_DIR}/test/fixtures/transactional_initialization.gd"
     VERBATIM
 )
 add_library(
@@ -614,6 +620,7 @@ add_library(
     STATIC
     "${GDPP_SMOKE_DIR}/hello_aot.gd.cpp"
     "${GDPP_SMOKE_DIR}/breakpoint.gd.cpp"
+    "${GDPP_SMOKE_DIR}/transactional_initialization.gd.cpp"
 )
 target_include_directories(gdpp_generated_smoke PRIVATE "${GDPP_SMOKE_DIR}")
 target_link_libraries(gdpp_generated_smoke PRIVATE gdpp::runtime godot::cpp)
