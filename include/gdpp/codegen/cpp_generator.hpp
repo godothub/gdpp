@@ -76,7 +76,8 @@ class CodeGenerator final {
     [[nodiscard]] static std::string script_location(const SourceSpan& span);
     [[nodiscard]] std::string emit_truthy(const ir::Expression& expression) const;
     [[nodiscard]] std::string emit_conversion(const Type& target, const Type& source,
-                                              std::string value) const;
+                                              std::string value,
+                                              const SourceSpan* source_span = nullptr) const;
     [[nodiscard]] std::string emit_explicit_conversion(const Type& target, const Type& source,
                                                        std::string value) const;
     [[nodiscard]] std::string emit_parameter_default(const ir::Parameter& parameter) const;
@@ -183,8 +184,9 @@ class CodeGenerator final {
     [[nodiscard]] std::string inner_attached_native_base_type(std::string_view name) const;
     [[nodiscard]] std::string
     attached_script_source_path(const Type& type, std::string_view resolved_owner = {}) const;
-    [[nodiscard]] std::string emit_attached_script_cast(const Type& target,
-                                                        std::string value) const;
+    [[nodiscard]] std::string
+    emit_attached_script_cast(const Type& target, std::string value,
+                              const SourceSpan* source_span = nullptr) const;
     [[nodiscard]] bool is_ref_counted_object(const Type& type) const noexcept;
     [[nodiscard]] std::string native_super_owner(std::string_view owner) const;
     struct InnerMethodDeclaration {

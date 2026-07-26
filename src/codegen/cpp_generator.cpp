@@ -1553,12 +1553,18 @@ CodeGenerator::attached_script_source_path(const Type& type,
     return owner ? resource_path(owner->path) + "::" + inner->name : std::string{};
 }
 
-std::string CodeGenerator::emit_attached_script_cast(const Type& target, std::string value) const {
+std::string CodeGenerator::emit_attached_script_cast(const Type& target, std::string value,
+                                                     const SourceSpan* source_span) const {
     const auto source_path = attached_script_source_path(target);
     if (source_path.empty())
         return value;
-    auto object = "gdpp::runtime::cast_attached_script(gdpp::runtime::to_variant(" +
-                  std::move(value) + "), " + godot_string(source_path) + ")";
+    const auto* location_span = source_span ? source_span : current_expression_span_;
+    const auto location = location_span
+                              ? ", " + script_location(*location_span)
+                              : ", gdpp::runtime::ScriptSourceLocation{}";
+    auto object = "gdpp::runtime::strict_attached_script_storage("
+                  "gdpp::runtime::to_variant(" +
+                  std::move(value) + "), " + godot_string(source_path) + location + ")";
     const auto target_cpp = cpp_type(target);
     if (target_cpp.rfind("godot::Ref<", 0) == 0) {
         return target_cpp + "(godot::Object::cast_to<godot::RefCounted>(" + object + "))";
@@ -1880,9 +1886,11 @@ bool CodeGenerator::managed_constant_reference(const ir::Expression& expression)
 }
 
 std::string CodeGenerator::emit_conversion(const Type& target, const Type& source,
-                                           std::string value) const {
-    const auto location = current_expression_span_
-                              ? ", " + script_location(*current_expression_span_)
+                                           std::string value,
+                                           const SourceSpan* source_span) const {
+    const auto* location_span = source_span ? source_span : current_expression_span_;
+    const auto location = location_span
+                              ? ", " + script_location(*location_span)
                               : std::string{};
     if (target.kind == TypeKind::void_type)
         return "(static_cast<void>(" + value + "))";
@@ -1891,13 +1899,19 @@ std::string CodeGenerator::emit_conversion(const Type& target, const Type& sourc
     if (target == source)
         return value;
     if (!attached_script_source_path(target).empty())
-        return emit_attached_script_cast(target, std::move(value));
+        return emit_attached_script_cast(target, std::move(value), source_span);
     const bool target_external = target.kind == TypeKind::object && script_symbols_ &&
                                  script_symbols_->find_external(target.name);
     const bool source_external = source.kind == TypeKind::object && script_symbols_ &&
                                  script_symbols_->find_external(source.name);
-    if (target_external)
+    if (target_external) {
+        if (source.is_dynamic()) {
+            return "gdpp::runtime::strict_external_object_storage("
+                   "gdpp::runtime::to_variant(" +
+                   value + "), " + godot_string_name(target.name) + location + ")";
+        }
         return "gdpp::runtime::to_variant(" + value + ")";
+    }
     // Project symbol refinement can express the same nested enum through its source-qualified
     // name on a declaration and its collision-safe native-qualified name in typed container
     // storage. Semantic analysis has already rejected unrelated enum assignments; the native
@@ -1915,11 +1929,16 @@ std::string CodeGenerator::emit_conversion(const Type& target, const Type& sourc
             return "gdpp::runtime::strict_typed_storage<" + cpp_type(target) +
                    ">(gdpp::runtime::to_variant(" + value + ")" + location + ")";
         }
+        if (source.is_dynamic()) {
+            return "gdpp::runtime::strict_builtin_storage<" + cpp_type(target) +
+                   ">(gdpp::runtime::to_variant(" + value + "), " + variant_type(target) +
+                   location + ")";
+        }
         return cpp_type(target) + "(gdpp::runtime::to_variant(" + value + "))";
     }
     if (target.is_packed_array()) {
-        return "gdpp::runtime::packed_array_storage<godot::" + target.name +
-               ">(gdpp::runtime::to_variant(" + value + "))";
+        return "gdpp::runtime::strict_packed_array_storage<godot::" + target.name +
+               ">(gdpp::runtime::to_variant(" + value + ")" + location + ")";
     }
     if (target.kind == TypeKind::object && source.kind == TypeKind::object &&
         target.name != source.name) {
@@ -1949,16 +1968,24 @@ std::string CodeGenerator::emit_conversion(const Type& target, const Type& sourc
         if (target_cpp.rfind(ref_prefix, 0) == 0 && target_cpp.back() == '>') {
             const auto object_cpp =
                 target_cpp.substr(ref_prefix.size(), target_cpp.size() - ref_prefix.size() - 1);
-            return target_cpp + "(godot::Object::cast_to<" + object_cpp + ">((" + value +
-                   ").get_validated_object()))";
+            return "gdpp::runtime::strict_native_ref_storage<" + object_cpp +
+                   ">(gdpp::runtime::to_variant(" + value + "), " +
+                   godot_string_name(target.name) + location + ")";
         }
         auto object_cpp = target_cpp;
         if (!object_cpp.empty() && object_cpp.back() == '*')
             object_cpp.pop_back();
-        return "godot::Object::cast_to<" + object_cpp + ">((" + value + ").get_validated_object())";
+        return "gdpp::runtime::strict_native_pointer_storage<" + object_cpp +
+               ">(gdpp::runtime::to_variant(" + value + "), " +
+               godot_string_name(target.name) + location + ")";
     }
     const auto conversion = classify_conversion(target, source);
-    if (conversion == ConversionKind::implicit || conversion == ConversionKind::dynamic) {
+    if (conversion == ConversionKind::dynamic) {
+        return "gdpp::runtime::strict_builtin_storage<" + cpp_type(target) +
+               ">(gdpp::runtime::to_variant(" + value + "), " + variant_type(target) +
+               location + ")";
+    }
+    if (conversion == ConversionKind::implicit) {
         return "static_cast<" + cpp_type(target) + ">(gdpp::runtime::to_variant(" + value + "))";
     }
     diagnostics_.error("GDS3008",
@@ -2019,7 +2046,8 @@ CodeGenerator::emit_parameter_default_initializers(const std::vector<ir::Paramet
         const auto native_name = parameter_native_name(parameter);
         const auto source_name = sanitize_identifier(parameter.name);
         auto fallback = emit_conversion(parameter.type, parameter.default_value->type,
-                                        emit_expression(*parameter.default_value));
+                                        emit_expression(*parameter.default_value),
+                                        &parameter.default_value->span);
         if (fallback == "{}") {
             const auto native_type = cpp_type(parameter.type);
             fallback =
@@ -2028,7 +2056,8 @@ CodeGenerator::emit_parameter_default_initializers(const std::vector<ir::Paramet
         if (parameter.type.is_dynamic())
             fallback = "gdpp::runtime::to_variant(" + fallback + ")";
         const auto supplied =
-            emit_conversion(parameter.type, {TypeKind::variant, "Variant"}, native_name);
+            emit_conversion(parameter.type, {TypeKind::variant, "Variant"}, native_name,
+                            &parameter.span);
         result += prefix + cpp_type(parameter.type) + " " + source_name + " = " +
                   "gdpp::runtime::is_default_argument(" + native_name + ") ? " + fallback + " : " +
                   supplied + ";\n";
@@ -2503,7 +2532,8 @@ std::string CodeGenerator::emit_dynamic_assignment(const ir::Statement& statemen
         root->type.kind != TypeKind::array && root->type.kind != TypeKind::dictionary &&
         root->type.kind != TypeKind::script_resource;
     if (root_requires_writeback) {
-        auto converted = emit_conversion(root->type, {TypeKind::variant, "Variant"}, root_name);
+        auto converted =
+            emit_conversion(root->type, {TypeKind::variant, "Variant"}, root_name, &root->span);
         if (root->resolution == ir::ResolutionKind::script_property) {
             result += nested_prefix + root->setter + "(" + converted + ");\n";
         } else if (root->resolution == ir::ResolutionKind::godot_property && !root->direct_access &&
@@ -2799,8 +2829,8 @@ std::string CodeGenerator::emit_expression(const ir::Expression& expression) con
                               " ? gdpp::runtime::to_variant(" + indexed +
                               ") : gdpp::runtime::default_argument()";
                 } else {
-                    result +=
-                        emit_conversion(parameter.type, {TypeKind::variant, "Variant"}, indexed);
+                    result += emit_conversion(parameter.type, {TypeKind::variant, "Variant"},
+                                              indexed, &parameter.span);
                 }
             }
             if (function.rest_parameter) {
@@ -3501,20 +3531,24 @@ std::string CodeGenerator::emit_expression(const ir::Expression& expression) con
             if (expression.call_contract &&
                 operand_index - 1 < expression.call_contract->parameters.size()) {
                 return emit_conversion(expression.call_contract->parameters[operand_index - 1],
-                                       expression.operands[operand_index]->type, std::move(value));
+                                       expression.operands[operand_index]->type, std::move(value),
+                                       &expression.operands[operand_index]->span);
             }
             if (script_method && operand_index - 1 < script_method->parameters.size()) {
                 return emit_conversion(script_method->parameters[operand_index - 1],
-                                       expression.operands[operand_index]->type, std::move(value));
+                                       expression.operands[operand_index]->type, std::move(value),
+                                       &expression.operands[operand_index]->span);
             }
             if (local_parameters && operand_index - 1 < local_parameters->size()) {
                 return emit_conversion((*local_parameters)[operand_index - 1],
-                                       expression.operands[operand_index]->type, std::move(value));
+                                       expression.operands[operand_index]->type, std::move(value),
+                                       &expression.operands[operand_index]->span);
             }
             if (constructor_function &&
                 operand_index - 1 < constructor_function->parameters.size()) {
                 return emit_conversion(constructor_function->parameters[operand_index - 1].type,
-                                       expression.operands[operand_index]->type, std::move(value));
+                                       expression.operands[operand_index]->type, std::move(value),
+                                       &expression.operands[operand_index]->span);
             }
             return value;
         };
@@ -4297,7 +4331,8 @@ std::string CodeGenerator::emit_expression(const ir::Expression& expression) con
             result += "    [[maybe_unused]] " + cpp_type(parameter.type) + " " +
                       sanitize_identifier(parameter.name) + " = ";
             const auto converted = emit_conversion(parameter.type, {TypeKind::variant, "Variant"},
-                                                   arguments + "[" + std::to_string(index) + "]");
+                                                   arguments + "[" + std::to_string(index) + "]",
+                                                   &parameter.span);
             if (parameter.default_value) {
                 result += arguments + ".size() > " + std::to_string(index) + " ? " + converted +
                           " : " + emit_expression(*parameter.default_value);
@@ -4627,7 +4662,8 @@ std::string CodeGenerator::emit_async_match_branch(
     for (const auto& binding : bindings) {
         result += indent(content_indent) + "[[maybe_unused]] " + cpp_type(binding.type) + " " +
                   sanitize_identifier(binding.name) + " = " +
-                  emit_conversion(binding.type, {TypeKind::variant, "Variant"}, binding.slot) +
+                  emit_conversion(binding.type, {TypeKind::variant, "Variant"}, binding.slot,
+                                  &branch.span) +
                   ";\n";
     }
 
@@ -4753,7 +4789,8 @@ std::string CodeGenerator::emit_async_statements(
                           cpp_type(statement.declared_type) + " " +
                           sanitize_identifier(statement.name) + " = " +
                           emit_conversion(statement.declared_type, {TypeKind::variant, "Variant"},
-                                          "gdpp::runtime::await_result(" + result_name + ")") +
+                                          "gdpp::runtime::await_result(" + result_name + ")",
+                                          &statement.span) +
                           ";\n";
             }
             result += emit_async_statements(statements, indentation + 1, index + 1, tails, terminal,
@@ -4911,7 +4948,8 @@ std::string CodeGenerator::emit_async_statements(
                       " " + sanitize_identifier(statement.name) + " = " +
                       emit_conversion(statement.declared_type, {TypeKind::variant, "Variant"},
                                       "gdpp::runtime::iter_get(*" + iterable + ", *" + iterator +
-                                          ", " + script_location(statement.condition->span) + ")") +
+                                          ", " + script_location(statement.condition->span) + ")",
+                                      &statement.span) +
                       ";\n" + indent(indentation + 2) +
                       "if (gdpp::runtime::script_function_failed()) return;\n";
             const auto advance =
@@ -5175,10 +5213,12 @@ std::string CodeGenerator::emit_statement_body(const ir::Statement& statement,
                 value = current_return_type_.is_dynamic()
                             ? emit_expression(*statement.expression)
                             : emit_conversion(current_return_type_, statement.expression->type,
-                                              emit_expression(*statement.expression));
+                                              emit_expression(*statement.expression),
+                                              &statement.expression->span);
             } else {
                 value = emit_conversion(current_return_type_, statement.expression->type,
-                                        emit_expression(*statement.expression));
+                                        emit_expression(*statement.expression),
+                                        &statement.expression->span);
             }
             std::string result = prefix + "const auto " + value_name + " = " + value + ";\n" +
                                  emit_script_failure_return(indentation, in_async_continuation_);
@@ -5217,7 +5257,8 @@ std::string CodeGenerator::emit_statement_body(const ir::Statement& statement,
                cpp_type(statement.declared_type) + " " + sanitize_identifier(statement.name) +
                " = " +
                emit_conversion(statement.declared_type, statement.expression->type,
-                               emit_expression(*statement.expression)) +
+                               emit_expression(*statement.expression),
+                               &statement.expression->span) +
                ";\n" + emit_script_failure_return(indentation, in_async_continuation_);
     case ir::StatementKind::assert_statement: {
         std::string result = prefix + "#ifdef GDPP_SCRIPT_DEBUG_ENABLED\n";
@@ -5241,7 +5282,8 @@ std::string CodeGenerator::emit_statement_body(const ir::Statement& statement,
                " " + sanitize_identifier(statement.name) +
                (statement.expression
                     ? " = " + emit_conversion(statement.declared_type, statement.expression->type,
-                                              emit_expression(*statement.expression))
+                                              emit_expression(*statement.expression),
+                                              &statement.expression->span)
                     : "{}") +
                ";\n" + emit_script_failure_return(indentation, in_async_continuation_);
     case ir::StatementKind::assignment: {
@@ -5374,7 +5416,8 @@ std::string CodeGenerator::emit_statement_body(const ir::Statement& statement,
                 : target.type.is_dynamic() || statement.expression->type.is_dynamic()
                     ? Type{TypeKind::variant, "Variant"}
                     : target.type;
-            assigned = emit_conversion(target.type, assigned_source_type, std::move(assigned));
+            assigned = emit_conversion(target.type, assigned_source_type, std::move(assigned),
+                                       &statement.expression->span);
             assigned = emit_subscript_store(target.operands.at(0)->type, std::move(assigned));
             const auto final_name = "_gdpp_subscript_assigned_" + suffix;
             result += nested_prefix + "const auto " + final_name + " = " + assigned + ";\n";
@@ -5413,7 +5456,8 @@ std::string CodeGenerator::emit_statement_body(const ir::Statement& statement,
                 const auto integer_value = statement.expression->type.kind == TypeKind::integer ||
                                            statement.expression->type.kind == TypeKind::enumeration;
                 if (integer_target && statement.expression->type.is_dynamic()) {
-                    value = emit_conversion(target.type, statement.expression->type, right_name);
+                    value = emit_conversion(target.type, statement.expression->type, right_name,
+                                            &statement.expression->span);
                     value = emit_integer_operation(operation, current_name, std::move(value),
                                                    target.type, target.span);
                 } else if (integer_target && integer_value) {
@@ -5421,7 +5465,8 @@ std::string CodeGenerator::emit_statement_body(const ir::Statement& statement,
                                                    target.span);
                 } else if (!target.type.is_dynamic() && target.type.is_numeric() &&
                            statement.expression->type.is_dynamic()) {
-                    value = emit_conversion(target.type, statement.expression->type, right_name);
+                    value = emit_conversion(target.type, statement.expression->type, right_name,
+                                            &statement.expression->span);
                     value = "(" + current_name + " " + operation + " " + value + ")";
                 } else if (target.type.is_dynamic() || statement.expression->type.is_dynamic()) {
                     value = "gdpp::runtime::binary(godot::Variant::" + variant_operator(operation) +
@@ -5433,12 +5478,14 @@ std::string CodeGenerator::emit_statement_body(const ir::Statement& statement,
                 source = target.type.is_dynamic() || statement.expression->type.is_dynamic()
                              ? Type{TypeKind::variant, "Variant"}
                              : target.type;
-                value = emit_conversion(destination, source, std::move(value));
+                value = emit_conversion(destination, source, std::move(value),
+                                        &statement.expression->span);
                 return "([&]() { const auto " + current_name + " = " + current_expression +
                        "; const auto " + right_name + " = " + right_expression + "; return " +
                        value + "; }())";
             }
-            return emit_conversion(destination, source, std::move(value));
+            return emit_conversion(destination, source, std::move(value),
+                                   &statement.expression->span);
         };
         const auto guarded_write = [&](std::string value, const auto& write,
                                        const std::size_t write_indentation) {
@@ -5636,7 +5683,8 @@ std::string CodeGenerator::emit_statement_body(const ir::Statement& statement,
                             : emit_conversion(target.type, {TypeKind::variant, "Variant"},
                                               "gdpp::runtime::get_named(" + object + ", " +
                                                   godot_string_name(target.value) + ", " +
-                                                  script_location(target.span) + ")");
+                                                  script_location(target.span) + ")",
+                                              &target.span);
                     auto value = assignment_value(current, target.assignment_type);
                     const auto assigned = "_gdpp_attached_property_assigned_" + suffix;
                     return prefix + "{\n" + nested_prefix + "godot::Variant " + object +
@@ -5855,7 +5903,8 @@ std::string CodeGenerator::emit_statement_body(const ir::Statement& statement,
                 result +=
                     indent(content_indent) + "[[maybe_unused]] " + cpp_type(binding.type) + " " +
                     sanitize_identifier(binding.name) + " = " +
-                    emit_conversion(binding.type, {TypeKind::variant, "Variant"}, binding.slot) +
+                    emit_conversion(binding.type, {TypeKind::variant, "Variant"}, binding.slot,
+                                    &branch.span) +
                     ";\n";
             }
             for (const auto& guard_statement : branch.guard_prefix)
@@ -5911,7 +5960,7 @@ std::string CodeGenerator::emit_statement_body(const ir::Statement& statement,
             const auto integer_argument = [&](const std::size_t index) {
                 const auto& argument = *direct_range->operands.at(index);
                 return emit_conversion({TypeKind::integer, "int"}, argument.type,
-                                       emit_expression(argument));
+                                       emit_expression(argument), &argument.span);
             };
             const auto start_value = argument_count == 1 ? std::string{"0"} : integer_argument(1);
             const auto stop_value = argument_count == 1 ? integer_argument(1) : integer_argument(2);
@@ -5938,7 +5987,9 @@ std::string CodeGenerator::emit_statement_body(const ir::Statement& statement,
                 (statement.declared_type.is_dynamic() ? std::string{"godot::Variant"}
                                                       : cpp_type(statement.declared_type)) +
                 " " + sanitize_identifier(statement.name) + " = " +
-                emit_conversion(statement.declared_type, {TypeKind::integer, "int"}, value) + ";\n";
+                emit_conversion(statement.declared_type, {TypeKind::integer, "int"}, value,
+                                &statement.span) +
+                ";\n";
             for (const auto& child : statement.body)
                 result += emit_statement(child, indentation + 2);
             return result + nested_prefix + "}\n" + prefix + "}\n";
@@ -5975,7 +6026,8 @@ std::string CodeGenerator::emit_statement_body(const ir::Statement& statement,
                 (statement.declared_type.is_dynamic() ? std::string{"godot::Variant"}
                                                       : cpp_type(statement.declared_type)) +
                 " " + sanitize_identifier(statement.name) + " = " +
-                emit_conversion(statement.declared_type, {TypeKind::floating, "float"}, value) +
+                emit_conversion(statement.declared_type, {TypeKind::floating, "float"}, value,
+                                &statement.span) +
                 ";\n";
             for (const auto& child : statement.body)
                 result += emit_statement(child, indentation + 2);
@@ -6001,7 +6053,8 @@ std::string CodeGenerator::emit_statement_body(const ir::Statement& statement,
                 (statement.declared_type.is_dynamic() ? std::string{"godot::Variant"}
                                                       : cpp_type(statement.declared_type)) +
                 " " + sanitize_identifier(statement.name) + " = " +
-                emit_conversion(statement.declared_type, source_type, value) + ";\n";
+                emit_conversion(statement.declared_type, source_type, value, &statement.span) +
+                ";\n";
             for (const auto& child : statement.body)
                 result += emit_statement(child, indentation + 2);
             return result + nested_prefix + "}\n" + prefix + "}\n";
@@ -6036,7 +6089,8 @@ std::string CodeGenerator::emit_statement_body(const ir::Statement& statement,
                 (statement.declared_type.is_dynamic() ? std::string{"godot::Variant"}
                                                       : cpp_type(statement.declared_type)) +
                 " " + sanitize_identifier(statement.name) + " = " +
-                emit_conversion(statement.declared_type, source_type, value) + ";\n";
+                emit_conversion(statement.declared_type, source_type, value, &statement.span) +
+                ";\n";
             for (const auto& child : statement.body)
                 result += emit_statement(child, indentation + 2);
             return result + nested_prefix + "}\n" + prefix + "}\n";
@@ -6058,7 +6112,8 @@ std::string CodeGenerator::emit_statement_body(const ir::Statement& statement,
                                                       : cpp_type(statement.declared_type)) +
                 " " + sanitize_identifier(statement.name) + " = " +
                 emit_conversion(statement.declared_type, statement.iteration.element_type,
-                                iterable_name + ".native()[" + index_name + "]") +
+                                iterable_name + ".native()[" + index_name + "]",
+                                &statement.span) +
                 ";\n";
             for (const auto& child : statement.body)
                 result += emit_statement(child, indentation + 2);
@@ -6083,7 +6138,8 @@ std::string CodeGenerator::emit_statement_body(const ir::Statement& statement,
                                                       : cpp_type(statement.declared_type)) +
                 " " + sanitize_identifier(statement.name) + " = " +
                 emit_conversion(statement.declared_type, statement.iteration.element_type,
-                                iterable_name + ".substr(" + index_name + ", 1)") +
+                                iterable_name + ".substr(" + index_name + ", 1)",
+                                &statement.span) +
                 ";\n";
             for (const auto& child : statement.body)
                 result += emit_statement(child, indentation + 2);
@@ -6106,7 +6162,7 @@ std::string CodeGenerator::emit_statement_body(const ir::Statement& statement,
                                                       : cpp_type(statement.declared_type)) +
                 " " + sanitize_identifier(statement.name) + " = " +
                 emit_conversion(statement.declared_type, {TypeKind::variant, "Variant"},
-                                iterable_name + "[" + index_name + "]") +
+                                iterable_name + "[" + index_name + "]", &statement.span) +
                 ";\n";
             for (const auto& child : statement.body)
                 result += emit_statement(child, indentation + 2);
@@ -6137,7 +6193,8 @@ std::string CodeGenerator::emit_statement_body(const ir::Statement& statement,
                 " " + sanitize_identifier(statement.name) + " = " +
                 emit_conversion(statement.declared_type, {TypeKind::variant, "Variant"},
                                 "gdpp::runtime::iter_get(" + iterable_name + ", " + iterator_name +
-                                    ", " + script_location(statement.condition->span) + ")") +
+                                    ", " + script_location(statement.condition->span) + ")",
+                                &statement.span) +
                 ";\n" + emit_script_failure_return(indentation + 2, in_async_continuation_);
             for (const auto& child : statement.body)
                 result += emit_statement(child, indentation + 2);
@@ -6206,7 +6263,9 @@ void CodeGenerator::emit_attached_descriptor_definition(
                << "::get_class_static())) return false;\n"
                << "            auto *typed = static_cast<" << native_name << " *>(behavior);\n"
                << "            typed->_gdpp_set_" << name << "("
-               << emit_conversion(variable.type, {TypeKind::variant, "Variant"}, "value") << ");\n"
+               << emit_conversion(variable.type, {TypeKind::variant, "Variant"}, "value",
+                                  &variable.span)
+               << ");\n"
                << "            return true;\n"
                << "        };\n";
         if (!variable.initializer || editor_safe_initializer(*variable.initializer)) {
@@ -6214,7 +6273,8 @@ void CodeGenerator::emit_attached_descriptor_definition(
                    << "        property.default_value = gdpp::runtime::to_variant(";
             if (variable.initializer) {
                 source << emit_conversion(variable.type, variable.initializer->type,
-                                          emit_expression(*variable.initializer));
+                                          emit_expression(*variable.initializer),
+                                          &variable.initializer->span);
             } else {
                 const auto native_type = cpp_type(variable.type);
                 source << (!native_type.empty() && native_type.back() == '*'
@@ -6750,7 +6810,8 @@ void CodeGenerator::emit_inner_class_definition(const ir::Class& declaration,
                << "        "
                << emit_storage_assignment(field.type, storage,
                                           emit_conversion(field.type, field.initializer->type,
-                                                          emit_expression(*field.initializer)))
+                                                          emit_expression(*field.initializer),
+                                                          &field.initializer->span))
                << ";\n"
                << "        if (gdpp::runtime::script_function_failed()) return " << storage << ";\n"
                << "        _gdpp_constant_" << name << "_ready() = true;\n"
@@ -6792,7 +6853,8 @@ void CodeGenerator::emit_inner_class_definition(const ir::Class& declaration,
                        << emit_storage_assignment(
                               field.type, "*value",
                               emit_conversion(field.type, field.initializer->type,
-                                              emit_expression(*field.initializer)))
+                                              emit_expression(*field.initializer),
+                                              &field.initializer->span))
                        << ";\n";
             }
             source << "    }\n"
@@ -6814,7 +6876,8 @@ void CodeGenerator::emit_inner_class_definition(const ir::Class& declaration,
                     value = "_gdpp_preloaded_" + sanitize_identifier(field.name) + "()";
                 } else {
                     value = emit_conversion(field.type, field.initializer->type,
-                                            emit_expression(*field.initializer));
+                                            emit_expression(*field.initializer),
+                                            &field.initializer->span);
                 }
                 source << (editor_safe || tool_mode ? "    " : "        ")
                        << emit_storage_assignment(field.type, sanitize_identifier(field.name),
@@ -6866,7 +6929,8 @@ void CodeGenerator::emit_inner_class_definition(const ir::Class& declaration,
             source << "    "
                    << emit_storage_assignment(field.type, sanitize_identifier(field.name),
                                               emit_conversion(field.type, field.initializer->type,
-                                                              emit_expression(*field.initializer)))
+                                                              emit_expression(*field.initializer),
+                                                              &field.initializer->span))
                    << ";\n"
                    << "    if (gdpp::runtime::script_function_failed()) return;\n";
         }
@@ -6939,7 +7003,8 @@ void CodeGenerator::emit_inner_class_definition(const ir::Class& declaration,
         source << prefix
                << emit_storage_assignment(field.type, std::move(target),
                                           emit_conversion(field.type, field.initializer->type,
-                                                          emit_expression(*field.initializer)))
+                                                          emit_expression(*field.initializer),
+                                                          &field.initializer->span))
                << ";\n"
                << prefix << "if (gdpp::runtime::script_function_failed()) return;\n";
     }
@@ -7149,7 +7214,7 @@ void CodeGenerator::emit_inner_class_definition(const ir::Class& declaration,
                     call += "gdpp::runtime::to_variant(" + argument_name + ")";
                 } else if (const auto* argument = api_.argument(*engine_virtual, index)) {
                     call += emit_conversion(parameter.type, type_from_godot_api(argument->type),
-                                            argument_name);
+                                            argument_name, &parameter.span);
                 }
             }
             if (function.rest_parameter) {
@@ -8095,7 +8160,8 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
                    << " = ";
             if (variable.initializer && !variable.onready) {
                 source << emit_conversion(variable.type, variable.initializer->type,
-                                          emit_expression(*variable.initializer));
+                                          emit_expression(*variable.initializer),
+                                          &variable.initializer->span);
             } else {
                 source << "{}";
             }
@@ -8124,7 +8190,8 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
         std::string constant_value;
         if (variable.initializer && !variable.onready) {
             constant_value = emit_conversion(variable.type, variable.initializer->type,
-                                             emit_expression(*variable.initializer));
+                                             emit_expression(*variable.initializer),
+                                             &variable.initializer->span);
         } else {
             constant_value = "{}";
         }
@@ -8174,7 +8241,8 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
                        << emit_storage_assignment(
                               variable.type, "*value",
                               emit_conversion(variable.type, variable.initializer->type,
-                                              emit_expression(*variable.initializer)))
+                                              emit_expression(*variable.initializer),
+                                              &variable.initializer->span))
                        << ";\n";
             }
             source << "    }\n"
@@ -8201,7 +8269,8 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
                     value = "_gdpp_preloaded_" + sanitize_identifier(variable.name) + "()";
                 } else {
                     value = emit_conversion(variable.type, variable.initializer->type,
-                                            emit_expression(*variable.initializer));
+                                            emit_expression(*variable.initializer),
+                                            &variable.initializer->span);
                 }
                 source << (editor_safe || module.is_tool ? "    " : "        ")
                        << emit_storage_assignment(variable.type, sanitize_identifier(variable.name),
@@ -8273,7 +8342,8 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
                        << emit_storage_assignment(
                               field.type, sanitize_identifier(field.name),
                               emit_conversion(field.type, field.initializer->type,
-                                              emit_expression(*field.initializer)))
+                                              emit_expression(*field.initializer),
+                                              &field.initializer->span))
                        << ";\n"
                        << "    if (gdpp::runtime::script_function_failed()) return;\n";
             }
@@ -8439,7 +8509,8 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
         source << prefix
                << emit_storage_assignment(variable.type, std::move(target),
                                           emit_conversion(variable.type, variable.initializer->type,
-                                                          emit_expression(*variable.initializer)))
+                                                          emit_expression(*variable.initializer),
+                                                          &variable.initializer->span))
                << ";\n"
                << prefix << "if (gdpp::runtime::script_function_failed()) return;\n";
     }
@@ -8682,7 +8753,7 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
                     call += "gdpp::runtime::to_variant(" + argument_name + ")";
                 } else if (const auto* argument = api_.argument(*engine_virtual, index)) {
                     call += emit_conversion(parameter.type, type_from_godot_api(argument->type),
-                                            argument_name);
+                                            argument_name, &parameter.span);
                 }
             }
             if (function.rest_parameter) {
@@ -8764,7 +8835,8 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
                            << emit_storage_assignment(
                                   field.type, sanitize_identifier(field.name),
                                   emit_conversion(field.type, field.initializer->type,
-                                                  emit_expression(*field.initializer)))
+                                                  emit_expression(*field.initializer),
+                                                  &field.initializer->span))
                            << ";\n"
                            << emit_script_failure_return(1, false);
                 }
@@ -8813,7 +8885,8 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
                        << emit_storage_assignment(
                               field.type, sanitize_identifier(field.name),
                               emit_conversion(field.type, field.initializer->type,
-                                              emit_expression(*field.initializer)))
+                                              emit_expression(*field.initializer),
+                                              &field.initializer->span))
                        << ";\n";
             }
         }
