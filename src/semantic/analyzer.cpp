@@ -397,6 +397,16 @@ const Symbol* SemanticModel::symbol_of(const ast::Expression& expression) const 
     return found == referenced_symbols_.end() ? nullptr : &found->second;
 }
 
+const Symbol* SemanticModel::symbol_of(const ast::Statement& statement) const noexcept {
+    const auto found = local_symbols_.find(&statement);
+    return found == local_symbols_.end() ? nullptr : &found->second;
+}
+
+const Symbol* SemanticModel::symbol_of(const ast::MatchPattern& pattern) const noexcept {
+    const auto found = match_pattern_symbols_.find(&pattern);
+    return found == match_pattern_symbols_.end() ? nullptr : &found->second;
+}
+
 const ApiResolution*
 SemanticModel::api_resolution_of(const ast::Expression& expression) const noexcept {
     const auto found = api_resolutions_.find(&expression);
@@ -441,7 +451,7 @@ std::vector<DebugVariable> SemanticAnalyzer::visible_debug_variables() const {
                 (symbol.kind == SymbolKind::parameter || symbol.kind == SymbolKind::local ||
                  symbol.kind == SymbolKind::constant);
             if (function_value && shadowed.insert(name).second)
-                result.push_back({name, symbol.type, symbol.declaration});
+                result.push_back({name, symbol.type, symbol.declaration, symbol.identity});
         }
     }
     std::sort(result.begin(), result.end(), [](const auto& left, const auto& right) {
@@ -3912,6 +3922,8 @@ void SemanticAnalyzer::analyze_match_pattern(const ast::MatchPattern& pattern,
                                pattern.span);
         }
         declare({SymbolKind::local, pattern.name(), matched_type, pattern.span, false});
+        if (const auto* declared = resolve(pattern.name()))
+            model_.match_pattern_symbols_.insert_or_assign(&pattern, *declared);
         return;
     case ast::MatchPatternKind::wildcard:
         return;
@@ -4076,6 +4088,8 @@ SemanticAnalyzer::FlowResult SemanticAnalyzer::analyze_statement(const ast::Stat
         declare({statement.is_constant() ? SymbolKind::constant : SymbolKind::local,
                  statement.name(), type, statement.span, statement.is_constant(), constant_string,
                  SymbolStorage::function_local, constant_integer, 0, constant_value_type});
+        if (const auto* declared = resolve(statement.name()))
+            model_.local_symbols_.insert_or_assign(&statement, *declared);
         return FlowResult{true, false, false, false};
     }
     case ast::StatementKind::assignment: {
@@ -4350,6 +4364,8 @@ SemanticAnalyzer::FlowResult SemanticAnalyzer::analyze_statement(const ast::Stat
                                "invalid iterator variable type");
         model_.local_types_[&statement] = element_type;
         declare({SymbolKind::local, statement.name(), element_type, iterator_span, false});
+        if (const auto* declared = resolve(statement.name()))
+            model_.local_symbols_.insert_or_assign(&statement, *declared);
         const auto body_flow = analyze_statements(statement.body());
         scopes_.pop_back();
         --loop_depth_;

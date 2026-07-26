@@ -401,6 +401,7 @@ void normalize_await_block(std::vector<ir::Statement>& statements, std::size_t& 
                 prefix.back().name = statement.name;
                 prefix.back().declared_type = statement.declared_type;
                 prefix.back().is_constant = statement.is_constant;
+                prefix.back().symbol_identity = statement.symbol_identity;
                 normalized.insert(normalized.end(), std::make_move_iterator(prefix.begin()),
                                   std::make_move_iterator(prefix.end()));
                 continue;
@@ -426,6 +427,8 @@ ir::ExpressionPtr IrLowerer::lower_expression(const ast::Expression& expression)
     lowered->span = expression.span;
     lowered->value = expression.value();
     lowered->coroutine_call = semantic_.is_coroutine_call(expression);
+    if (const auto* symbol = semantic_.symbol_of(expression))
+        lowered->symbol_identity = symbol->identity;
     if (const auto* contract = semantic_.call_contract_of(expression)) {
         lowered->call_contract = ir::CallContract{
             contract->parameters,
@@ -581,6 +584,8 @@ ir::MatchPattern IrLowerer::lower_match_pattern(const ast::MatchPattern& pattern
     }
     lowered.name = pattern.name();
     lowered.type = semantic_.type_of(pattern);
+    if (const auto* symbol = semantic_.symbol_of(pattern))
+        lowered.symbol_identity = symbol->identity;
     lowered.span = pattern.span;
     if (pattern.expression())
         lowered.expression = lower_expression(*pattern.expression());
@@ -604,11 +609,13 @@ ir::Statement IrLowerer::lower_statement(const ast::Statement& statement) const 
                                 : Type{TypeKind::unknown, "unknown"};
     lowered.operation = statement.operation();
     lowered.is_constant = statement.is_constant();
+    if (const auto* symbol = semantic_.symbol_of(statement))
+        lowered.symbol_identity = symbol->identity;
     if (statement.kind() == ast::StatementKind::for_statement)
         lowered.iteration = semantic_.iteration_plan_of(statement);
     if (statement.kind() == ast::StatementKind::breakpoint_statement) {
         for (const auto& variable : semantic_.debug_variables_at(statement))
-            lowered.debug_variables.push_back({variable.name, variable.type});
+            lowered.debug_variables.push_back({variable.name, variable.type, variable.identity});
     }
     if (statement.expression())
         lowered.expression = lower_expression(*statement.expression());

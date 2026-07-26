@@ -2,6 +2,7 @@
 
 #include "gdpp/core/source.hpp"
 #include "gdpp/semantic/default_argument.hpp"
+#include "gdpp/semantic/flow.hpp"
 #include "gdpp/semantic/intrinsics.hpp"
 #include "gdpp/semantic/iteration.hpp"
 #include "gdpp/semantic/rpc.hpp"
@@ -99,6 +100,7 @@ struct Expression {
     bool direct_access{false};
     bool coroutine_call{false};
     std::int64_t indexed_argument{-1};
+    FlowSymbolId symbol_identity{0};
     IntrinsicKind intrinsic{IntrinsicKind::none};
     std::optional<CallContract> call_contract;
     std::vector<std::unique_ptr<Expression>> operands;
@@ -132,6 +134,7 @@ struct MatchPattern {
     MatchPatternKind kind{MatchPatternKind::value};
     std::string name;
     Type type;
+    FlowSymbolId symbol_identity{0};
     ExpressionPtr expression;
     std::vector<MatchPattern> elements;
     std::vector<ExpressionPtr> keys;
@@ -141,6 +144,7 @@ struct MatchPattern {
 struct DebugVariable {
     std::string name;
     Type type;
+    FlowSymbolId symbol_identity{0};
 };
 
 struct Statement {
@@ -150,6 +154,7 @@ struct Statement {
     Type declared_type;
     std::string operation;
     bool is_constant{false};
+    FlowSymbolId symbol_identity{0};
     IterationPlan iteration;
     ExpressionPtr expression;
     ExpressionPtr condition;
