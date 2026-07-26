@@ -154,7 +154,8 @@ class CodeGenerator final {
     [[nodiscard]] std::string async_return(std::size_t indent, bool continuation_context) const;
     [[nodiscard]] std::string coroutine_return(std::size_t indent, std::string value,
                                                bool continuation_context) const;
-    [[nodiscard]] std::string emit_script_function_scope(std::size_t indent) const;
+    [[nodiscard]] std::string emit_script_function_scope(std::size_t indent,
+                                                         bool inherit_existing = false) const;
     [[nodiscard]] std::string emit_script_failure_return(std::size_t indent,
                                                          bool continuation_context) const;
     [[nodiscard]] bool can_emit_flat_async(const ir::Function& function,

@@ -48,7 +48,9 @@ bool contains_preload(const ir::Expression& expression) {
 }
 
 bool cached_preload_field(const ir::Field& field) {
-    return !field.is_constant && !field.onready && field.initializer &&
+    // Static fields and constants already own class-lifetime transactional storage. Only instance
+    // fields need a separate class-level preload cache before their per-instance assignment.
+    return !field.is_constant && !field.is_static && !field.onready && field.initializer &&
            contains_preload(*field.initializer);
 }
 
@@ -4441,9 +4443,15 @@ std::string CodeGenerator::coroutine_return(const std::size_t indentation, std::
            ");\n";
 }
 
-std::string CodeGenerator::emit_script_function_scope(const std::size_t indentation) const {
+std::string CodeGenerator::emit_script_function_scope(const std::size_t indentation,
+                                                      const bool inherit_existing) const {
+    std::string constructor;
+    if (current_coroutine_abi_)
+        constructor = "(" + current_coroutine_state_ + ")";
+    else if (inherit_existing)
+        constructor = "(gdpp::runtime::ScriptFaultPolicy::inherit_existing)";
     return indent(indentation) + "gdpp::runtime::ScriptFunctionScope _gdpp_script_function_scope" +
-           (current_coroutine_abi_ ? "(" + current_coroutine_state_ + ")" : std::string{}) + ";\n";
+           constructor + ";\n";
 }
 
 std::string CodeGenerator::emit_script_failure_return(const std::size_t indentation,
@@ -6441,10 +6449,13 @@ void CodeGenerator::emit_inner_class_declaration(const ir::Class& declaration,
                << "    static std::mutex& _gdpp_constant_" << name << "_mutex();\n";
     }
     if (has_static_initialization) {
-        header << "    static std::atomic<std::uint8_t>& _gdpp_static_initialization_state();\n"
-               << "    static std::mutex& _gdpp_static_initialization_mutex();\n"
-               << "    static bool& _gdpp_static_initialization_active();\n"
-               << "    static void _gdpp_ensure_static_initialized();\n";
+        header << "    static gdpp::runtime::ScriptInitializationState& "
+                  "_gdpp_static_initialization();\n"
+               << "    static bool _gdpp_ensure_static_initialized();\n";
+    }
+    if (std::any_of(declaration.fields.begin(), declaration.fields.end(), cached_preload_field)) {
+        header << "    static gdpp::runtime::ScriptInitializationState& "
+                  "_gdpp_preload_initialization();\n";
     }
     if (!fields)
         header << "    // No internal class fields.\n";
@@ -6650,35 +6661,48 @@ void CodeGenerator::emit_inner_class_definition(const ir::Class& declaration,
         std::any_of(declaration.functions.begin(), declaration.functions.end(),
                     [](const auto& function) { return function.name == "_static_init"; });
     if (has_static_initialization) {
-        source << "std::atomic<std::uint8_t>& " << native_name
-               << "::_gdpp_static_initialization_state() {\n"
-               << "    static std::atomic<std::uint8_t> state{0};\n"
+        source << "gdpp::runtime::ScriptInitializationState& " << native_name
+               << "::_gdpp_static_initialization() {\n"
+               << "    static gdpp::runtime::ScriptInitializationState state;\n"
                << "    return state;\n}\n\n"
-               << "std::mutex& " << native_name << "::_gdpp_static_initialization_mutex() {\n"
-               << "    static std::mutex mutex;\n"
-               << "    return mutex;\n}\n\n"
-               << "bool& " << native_name << "::_gdpp_static_initialization_active() {\n"
-               << "    static thread_local bool active = false;\n"
-               << "    return active;\n}\n\n"
-               << "void " << native_name << "::_gdpp_ensure_static_initialized() {\n";
+               << "bool " << native_name << "::_gdpp_ensure_static_initialized() {\n";
         if (!tool_mode)
-            source << "    if (gdpp::runtime::is_editor_hint()) return;\n";
-        source << "    auto& state = _gdpp_static_initialization_state();\n"
-               << "    if (state.load(std::memory_order_acquire) == 2 || "
-                  "_gdpp_static_initialization_active()) return;\n"
-               << "    std::lock_guard<std::mutex> lock(_gdpp_static_initialization_mutex());\n"
-               << "    if (state.load(std::memory_order_relaxed) == 2) return;\n"
-               << "    _gdpp_static_initialization_active() = true;\n";
+            source << "    if (gdpp::runtime::is_editor_hint()) return true;\n";
+        source << "    return _gdpp_static_initialization().run(\n"
+               << "        \"Static initialization previously failed for " << native_name
+               << ".\",\n"
+               << "        []() {\n";
         for (const auto& field : declaration.fields) {
             if (!field.is_constant && field.is_static) {
-                source << "    (void)_gdpp_static_" << sanitize_identifier(field.name)
-                       << "_storage();\n";
+                source << "            (void)_gdpp_static_" << sanitize_identifier(field.name)
+                       << "_storage();\n"
+                       << "            if (gdpp::runtime::script_function_failed()) return;\n";
             }
         }
         if (has_static_initializer)
-            source << "    _static_init();\n";
-        source << "    _gdpp_static_initialization_active() = false;\n"
-               << "    state.store(2, std::memory_order_release);\n"
+            source << "            _static_init();\n";
+        source << "        },\n"
+               << "        []() {\n";
+        for (const auto& field : declaration.fields) {
+            if (managed_constant_field(field)) {
+                const auto name = sanitize_identifier(field.name);
+                const auto storage = "_gdpp_constant_" + name + "_storage()";
+                source << "            {\n"
+                       << "                std::lock_guard<std::mutex> lock(_gdpp_constant_" << name
+                       << "_mutex());\n"
+                       << "                "
+                       << emit_storage_assignment(field.type, storage,
+                                                  "std::remove_reference_t<decltype(" + storage +
+                                                      ")>{}")
+                       << ";\n"
+                       << "                _gdpp_constant_" << name << "_ready() = false;\n"
+                       << "            }\n";
+            } else if (!field.is_constant && field.is_static) {
+                source << "            _gdpp_static_" << sanitize_identifier(field.name)
+                       << "_release();\n";
+            }
+        }
+        source << "        });\n"
                << "}\n\n";
     }
     for (const auto& field : declaration.fields) {
@@ -6699,7 +6723,13 @@ void CodeGenerator::emit_inner_class_definition(const ir::Class& declaration,
                << "std::mutex& " << native_name << "::_gdpp_constant_" << name
                << "_mutex() {\n    static std::mutex value;\n    return value;\n}\n\n"
                << "const " << type << "& " << native_name << "::" << name << "() {\n"
-               << (has_static_initialization ? "    _gdpp_ensure_static_initialized();\n" : "")
+               << "    gdpp::runtime::ScriptFunctionScope _gdpp_script_initialization_scope("
+                  "gdpp::runtime::ScriptFaultPolicy::inherit_existing);\n"
+               << (has_static_initialization
+                       ? "    (void)_gdpp_ensure_static_initialized();\n"
+                         "    if (gdpp::runtime::script_function_failed()) return " +
+                             storage + ";\n"
+                       : "")
                << "    std::lock_guard<std::mutex> lock(_gdpp_constant_" << name << "_mutex());\n"
                << "    if (!_gdpp_constant_" << name << "_ready()) {\n"
                << "        "
@@ -6707,6 +6737,7 @@ void CodeGenerator::emit_inner_class_definition(const ir::Class& declaration,
                                           emit_conversion(field.type, field.initializer->type,
                                                           emit_expression(*field.initializer)))
                << ";\n"
+               << "        if (gdpp::runtime::script_function_failed()) return " << storage << ";\n"
                << "        _gdpp_constant_" << name << "_ready() = true;\n"
                << "    }\n"
                << "    return _gdpp_constant_" << name << "_storage();\n}\n\n";
@@ -6727,7 +6758,10 @@ void CodeGenerator::emit_inner_class_definition(const ir::Class& declaration,
                        << "        return editor_value;\n"
                        << "    }\n";
             }
-            source << "    _gdpp_ensure_static_initialized();\n"
+            source << "    if (!_gdpp_ensure_static_initialized()) {\n"
+                   << "        static thread_local " << type << " failed_value{};\n"
+                   << "        return failed_value;\n"
+                   << "    }\n"
                    << "    auto* value = _gdpp_static_" << name
                    << "_pointer().load(std::memory_order_acquire);\n"
                    << "    if (value) return *value;\n"
@@ -6770,7 +6804,9 @@ void CodeGenerator::emit_inner_class_definition(const ir::Class& declaration,
                 source << (editor_safe || tool_mode ? "    " : "        ")
                        << emit_storage_assignment(field.type, sanitize_identifier(field.name),
                                                   std::move(value))
-                       << ";\n";
+                       << ";\n"
+                       << (editor_safe || tool_mode ? "    " : "        ")
+                       << "if (gdpp::runtime::script_function_failed()) return;\n";
                 if (!editor_safe && !tool_mode)
                     source << "    }\n";
             }
@@ -6784,27 +6820,40 @@ void CodeGenerator::emit_inner_class_definition(const ir::Class& declaration,
                     !editor_safe_initializer(*field.initializer);
          }));
     in_function_body_ = true;
-    source << native_name << "::" << native_name << "() {\n";
-    if (has_static_initialization)
-        source << "    _gdpp_ensure_static_initialized();\n";
-    if (std::any_of(declaration.fields.begin(), declaration.fields.end(), cached_preload_field))
-        source << "    _gdpp_preload_resources();\n";
+    source << native_name << "::" << native_name << "() {\n"
+           << "    gdpp::runtime::ScriptFunctionScope _gdpp_script_initialization_scope("
+              "gdpp::runtime::ScriptFaultPolicy::inherit_existing);\n";
+    if (has_static_initialization) {
+        source << "    (void)_gdpp_ensure_static_initialized();\n"
+               << "    if (gdpp::runtime::script_function_failed()) return;\n";
+    }
+    if (std::any_of(declaration.fields.begin(), declaration.fields.end(), cached_preload_field)) {
+        source << "    _gdpp_preload_resources();\n"
+               << "    if (gdpp::runtime::script_function_failed()) return;\n";
+    }
     source << "}\n\n"
            << "void " << native_name << "::_gdpp_initialize_instance() {\n"
-           << "    " << base_cpp << "::_gdpp_initialize_instance();\n";
+           << "    gdpp::runtime::ScriptFunctionScope _gdpp_script_initialization_scope("
+              "gdpp::runtime::ScriptFaultPolicy::inherit_existing);\n"
+           << "    " << base_cpp << "::_gdpp_initialize_instance();\n"
+           << "    if (gdpp::runtime::script_function_failed()) return;\n";
     if (needs_editor_hint)
         source << "    const bool gdpp_editor_hint = gdpp::runtime::is_editor_hint();\n";
     emit_instance_initializers();
     source << "}\n\n"
            << "void " << native_name << "::_gdpp_initialize_onready() {\n"
-           << "    " << base_cpp << "::_gdpp_initialize_onready();\n";
+           << "    gdpp::runtime::ScriptFunctionScope _gdpp_script_initialization_scope("
+              "gdpp::runtime::ScriptFaultPolicy::inherit_existing);\n"
+           << "    " << base_cpp << "::_gdpp_initialize_onready();\n"
+           << "    if (gdpp::runtime::script_function_failed()) return;\n";
     for (const auto& field : declaration.fields) {
         if (field.onready && field.initializer) {
             source << "    "
                    << emit_storage_assignment(field.type, sanitize_identifier(field.name),
                                               emit_conversion(field.type, field.initializer->type,
                                                               emit_expression(*field.initializer)))
-                   << ";\n";
+                   << ";\n"
+                   << "    if (gdpp::runtime::script_function_failed()) return;\n";
         }
     }
     source << "}\n\n";
@@ -6829,18 +6878,43 @@ void CodeGenerator::emit_inner_class_definition(const ir::Class& declaration,
                    << " value{};\n    return value;\n}\n\n";
         }
     }
-    source << "void " << native_name << "::_gdpp_preload_resources() {\n";
     const bool has_cached_preloads =
         std::any_of(declaration.fields.begin(), declaration.fields.end(), cached_preload_field);
+    const auto emit_cached_preload_cleanup = [&](const std::string& prefix) {
+        for (const auto& field : declaration.fields) {
+            if (!cached_preload_field(field))
+                continue;
+            if (field.is_static) {
+                source << prefix << "_gdpp_static_" << sanitize_identifier(field.name)
+                       << "_release();\n";
+                continue;
+            }
+            const auto target = "_gdpp_preloaded_" + sanitize_identifier(field.name) + "()";
+            source << prefix
+                   << emit_storage_assignment(field.type, target,
+                                              "std::remove_reference_t<decltype(" + target + ")>{}")
+                   << ";\n";
+        }
+    };
+    if (has_cached_preloads) {
+        source << "gdpp::runtime::ScriptInitializationState& " << native_name
+               << "::_gdpp_preload_initialization() {\n"
+               << "    static gdpp::runtime::ScriptInitializationState state;\n"
+               << "    return state;\n}\n\n";
+    }
+    source << "void " << native_name << "::_gdpp_preload_resources() {\n";
     if (has_cached_preloads) {
         if (!tool_mode)
             source << "    if (gdpp::runtime::is_editor_hint()) return;\n";
-        source << "    static std::once_flag once;\n    std::call_once(once, []() {\n";
+        source << "    (void)_gdpp_preload_initialization().run(\n"
+               << "        \"Preload initialization previously failed for " << native_name
+               << ".\",\n"
+               << "        []() {\n";
     }
     for (const auto& field : declaration.fields) {
         if (!cached_preload_field(field))
             continue;
-        const auto prefix = has_cached_preloads ? "        " : "    ";
+        const auto prefix = has_cached_preloads ? "            " : "    ";
         std::string target;
         if (!field.is_static)
             target = "_gdpp_preloaded_";
@@ -6851,46 +6925,61 @@ void CodeGenerator::emit_inner_class_definition(const ir::Class& declaration,
                << emit_storage_assignment(field.type, std::move(target),
                                           emit_conversion(field.type, field.initializer->type,
                                                           emit_expression(*field.initializer)))
-               << ";\n";
+               << ";\n"
+               << prefix << "if (gdpp::runtime::script_function_failed()) return;\n";
     }
-    if (has_cached_preloads)
-        source << "    });\n";
+    if (has_cached_preloads) {
+        source << "        },\n"
+               << "        []() {\n";
+        emit_cached_preload_cleanup("            ");
+        source << "        });\n";
+    }
     source << "}\n\n";
     source << "void " << native_name << "::_gdpp_release_preloaded_resources() {\n";
-    for (const auto& field : declaration.fields) {
-        if (managed_constant_field(field)) {
+    if (has_cached_preloads) {
+        source << "    _gdpp_preload_initialization().reset([]() {\n";
+        emit_cached_preload_cleanup("        ");
+        source << "    });\n";
+    }
+    if (has_static_initialization) {
+        source << "    _gdpp_static_initialization().reset([]() {\n";
+        for (const auto& field : declaration.fields) {
+            if (managed_constant_field(field)) {
+                const auto name = sanitize_identifier(field.name);
+                const auto storage = "_gdpp_constant_" + name + "_storage()";
+                source << "        {\n"
+                       << "            std::lock_guard<std::mutex> lock(_gdpp_constant_" << name
+                       << "_mutex());\n"
+                       << "            "
+                       << emit_storage_assignment(field.type, storage,
+                                                  "std::remove_reference_t<decltype(" + storage +
+                                                      ")>{}")
+                       << ";\n"
+                       << "            _gdpp_constant_" << name << "_ready() = false;\n"
+                       << "        }\n";
+            } else if (!field.is_constant && field.is_static) {
+                source << "        _gdpp_static_" << sanitize_identifier(field.name)
+                       << "_release();\n";
+            }
+        }
+        source << "    });\n";
+    } else {
+        for (const auto& field : declaration.fields) {
+            if (!managed_constant_field(field))
+                continue;
             const auto name = sanitize_identifier(field.name);
             const auto storage = "_gdpp_constant_" + name + "_storage()";
             source << "    {\n"
                    << "        std::lock_guard<std::mutex> lock(_gdpp_constant_" << name
                    << "_mutex());\n"
-                   << "        if (_gdpp_constant_" << name << "_ready()) {\n"
-                   << "            "
+                   << "        "
                    << emit_storage_assignment(field.type, storage,
                                               "std::remove_reference_t<decltype(" + storage +
                                                   ")>{}")
                    << ";\n"
-                   << "            _gdpp_constant_" << name << "_ready() = false;\n"
-                   << "        }\n"
+                   << "        _gdpp_constant_" << name << "_ready() = false;\n"
                    << "    }\n";
-            continue;
         }
-        if (!cached_preload_field(field) && !(field.is_static && !field.is_constant))
-            continue;
-        const auto target = field.is_static
-                                ? "_gdpp_static_" + sanitize_identifier(field.name) + "_storage()"
-                                : "_gdpp_preloaded_" + sanitize_identifier(field.name) + "()";
-        if (field.is_static)
-            source << "    _gdpp_static_" << sanitize_identifier(field.name) << "_release();\n";
-        else
-            source << "    "
-                   << emit_storage_assignment(field.type, target,
-                                              "std::remove_reference_t<decltype(" + target + ")>{}")
-                   << ";\n";
-    }
-    if (has_static_initialization) {
-        source << "    _gdpp_static_initialization_state().store(0, "
-                  "std::memory_order_release);\n";
     }
     source << "}\n\n";
     source << "void " << native_name << "::_bind_methods() {\n";
@@ -6948,8 +7037,12 @@ void CodeGenerator::emit_inner_class_definition(const ir::Class& declaration,
             continue;
         const auto name = sanitize_identifier(field.name);
         source << cpp_type(field.type) << ' ' << native_name << "::_gdpp_get_" << name << "() {\n";
-        if (field.is_static && has_static_initialization)
-            source << "    _gdpp_ensure_static_initialized();\n";
+        if (field.is_static && has_static_initialization) {
+            source << "    gdpp::runtime::ScriptFunctionScope _gdpp_script_initialization_scope("
+                      "gdpp::runtime::ScriptFaultPolicy::inherit_existing);\n"
+                   << "    (void)_gdpp_ensure_static_initialized();\n"
+                   << "    if (gdpp::runtime::script_function_failed()) return {};\n";
+        }
         if (field.getter && !field.getter->method.empty()) {
             source << "    return " << sanitize_identifier(field.getter->method) << "();\n";
         } else if (field.getter) {
@@ -6972,8 +7065,12 @@ void CodeGenerator::emit_inner_class_definition(const ir::Class& declaration,
                        ? sanitize_identifier(field.setter->parameter)
                        : "value")
                << ") {\n";
-        if (field.is_static && has_static_initialization)
-            source << "    _gdpp_ensure_static_initialized();\n";
+        if (field.is_static && has_static_initialization) {
+            source << "    gdpp::runtime::ScriptFunctionScope _gdpp_script_initialization_scope("
+                      "gdpp::runtime::ScriptFaultPolicy::inherit_existing);\n"
+                   << "    (void)_gdpp_ensure_static_initialized();\n"
+                   << "    if (gdpp::runtime::script_function_failed()) return;\n";
+        }
         if (field.setter && !field.setter->method.empty()) {
             source << "    " << sanitize_identifier(field.setter->method) << "(value);\n";
         } else if (field.setter) {
@@ -7075,14 +7172,16 @@ void CodeGenerator::emit_inner_class_definition(const ir::Class& declaration,
         }
         source << ')';
         source << " {\n";
-        if (function.is_static && function.name != "_static_init" && has_static_initialization)
-            source << "    _gdpp_ensure_static_initialized();\n";
         if (current_coroutine_abi_) {
             source << "    const auto " << current_coroutine_state_
                    << " = gdpp::runtime::begin_coroutine("
                    << (function.is_static ? "nullptr" : self_object_expression()) << ");\n";
         }
-        source << emit_script_function_scope(1);
+        source << emit_script_function_scope(1, function.name == "_static_init");
+        if (function.is_static && function.name != "_static_init" && has_static_initialization) {
+            source << "    (void)_gdpp_ensure_static_initialized();\n";
+            source << emit_script_failure_return(1, false);
+        }
         source << emit_parameter_default_initializers(function.parameters, 1);
         source << emit_debug_frame(function.span.begin.line, 1);
         source << emit_statements(
@@ -7774,10 +7873,13 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
                << "    static std::mutex& _gdpp_constant_" << name << "_mutex();\n";
     }
     if (has_static_initialization) {
-        header << "    static std::atomic<std::uint8_t>& _gdpp_static_initialization_state();\n"
-               << "    static std::mutex& _gdpp_static_initialization_mutex();\n"
-               << "    static bool& _gdpp_static_initialization_active();\n"
-               << "    static void _gdpp_ensure_static_initialized();\n";
+        header << "    static gdpp::runtime::ScriptInitializationState& "
+                  "_gdpp_static_initialization();\n"
+               << "    static bool _gdpp_ensure_static_initialized();\n";
+    }
+    if (std::any_of(module.fields.begin(), module.fields.end(), cached_preload_field)) {
+        header << "    static gdpp::runtime::ScriptInitializationState& "
+                  "_gdpp_preload_initialization();\n";
     }
     header << "\npublic:\n"
            << "    static void _gdpp_preload_resources();\n"
@@ -7925,35 +8027,48 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
         std::any_of(module.functions.begin(), module.functions.end(),
                     [](const auto& function) { return function.name == "_static_init"; });
     if (has_static_initialization) {
-        source << "std::atomic<std::uint8_t>& " << unit.class_name
-               << "::_gdpp_static_initialization_state() {\n"
-               << "    static std::atomic<std::uint8_t> state{0};\n"
+        source << "gdpp::runtime::ScriptInitializationState& " << unit.class_name
+               << "::_gdpp_static_initialization() {\n"
+               << "    static gdpp::runtime::ScriptInitializationState state;\n"
                << "    return state;\n}\n\n"
-               << "std::mutex& " << unit.class_name << "::_gdpp_static_initialization_mutex() {\n"
-               << "    static std::mutex mutex;\n"
-               << "    return mutex;\n}\n\n"
-               << "bool& " << unit.class_name << "::_gdpp_static_initialization_active() {\n"
-               << "    static thread_local bool active = false;\n"
-               << "    return active;\n}\n\n"
-               << "void " << unit.class_name << "::_gdpp_ensure_static_initialized() {\n";
+               << "bool " << unit.class_name << "::_gdpp_ensure_static_initialized() {\n";
         if (!module.is_tool)
-            source << "    if (gdpp::runtime::is_editor_hint()) return;\n";
-        source << "    auto& state = _gdpp_static_initialization_state();\n"
-               << "    if (state.load(std::memory_order_acquire) == 2 || "
-                  "_gdpp_static_initialization_active()) return;\n"
-               << "    std::lock_guard<std::mutex> lock(_gdpp_static_initialization_mutex());\n"
-               << "    if (state.load(std::memory_order_relaxed) == 2) return;\n"
-               << "    _gdpp_static_initialization_active() = true;\n";
+            source << "    if (gdpp::runtime::is_editor_hint()) return true;\n";
+        source << "    return _gdpp_static_initialization().run(\n"
+               << "        \"Static initialization previously failed for " << unit.class_name
+               << ".\",\n"
+               << "        []() {\n";
         for (const auto& variable : module.fields) {
             if (!variable.is_constant && variable.is_static) {
-                source << "    (void)_gdpp_static_" << sanitize_identifier(variable.name)
-                       << "_storage();\n";
+                source << "            (void)_gdpp_static_" << sanitize_identifier(variable.name)
+                       << "_storage();\n"
+                       << "            if (gdpp::runtime::script_function_failed()) return;\n";
             }
         }
         if (has_static_initializer)
-            source << "    _static_init();\n";
-        source << "    _gdpp_static_initialization_active() = false;\n"
-               << "    state.store(2, std::memory_order_release);\n"
+            source << "            _static_init();\n";
+        source << "        },\n"
+               << "        []() {\n";
+        for (const auto& variable : module.fields) {
+            if (managed_constant_field(variable)) {
+                const auto name = sanitize_identifier(variable.name);
+                const auto storage = "_gdpp_constant_" + name + "_storage()";
+                source << "            {\n"
+                       << "                std::lock_guard<std::mutex> lock(_gdpp_constant_" << name
+                       << "_mutex());\n"
+                       << "                "
+                       << emit_storage_assignment(variable.type, storage,
+                                                  "std::remove_reference_t<decltype(" + storage +
+                                                      ")>{}")
+                       << ";\n"
+                       << "                _gdpp_constant_" << name << "_ready() = false;\n"
+                       << "            }\n";
+            } else if (!variable.is_constant && variable.is_static) {
+                source << "            _gdpp_static_" << sanitize_identifier(variable.name)
+                       << "_release();\n";
+            }
+        }
+        source << "        });\n"
                << "}\n\n";
     }
     for (const auto& variable : module.fields) {
@@ -7981,7 +8096,13 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
                << "std::mutex& " << unit.class_name << "::_gdpp_constant_" << name
                << "_mutex() {\n    static std::mutex value;\n    return value;\n}\n\n"
                << "const " << type << "& " << unit.class_name << "::" << name << "() {\n"
-               << (has_static_initialization ? "    _gdpp_ensure_static_initialized();\n" : "")
+               << "    gdpp::runtime::ScriptFunctionScope _gdpp_script_initialization_scope("
+                  "gdpp::runtime::ScriptFaultPolicy::inherit_existing);\n"
+               << (has_static_initialization
+                       ? "    (void)_gdpp_ensure_static_initialized();\n"
+                         "    if (gdpp::runtime::script_function_failed()) return " +
+                             storage + ";\n"
+                       : "")
                << "    std::lock_guard<std::mutex> lock(_gdpp_constant_" << name << "_mutex());\n"
                << "    if (!_gdpp_constant_" << name << "_ready()) {\n"
                << "        ";
@@ -7994,6 +8115,7 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
         }
         source << emit_storage_assignment(variable.type, storage, std::move(constant_value))
                << ";\n"
+               << "        if (gdpp::runtime::script_function_failed()) return " << storage << ";\n"
                << "        _gdpp_constant_" << name << "_ready() = true;\n"
                << "    }\n"
                << "    return _gdpp_constant_" << name << "_storage();\n}\n\n";
@@ -8018,7 +8140,10 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
                        << "        return editor_value;\n"
                        << "    }\n";
             }
-            source << "    _gdpp_ensure_static_initialized();\n"
+            source << "    if (!_gdpp_ensure_static_initialized()) {\n"
+                   << "        static thread_local " << type << " failed_value{};\n"
+                   << "        return failed_value;\n"
+                   << "    }\n"
                    << "    auto* value = _gdpp_static_" << name
                    << "_pointer().load(std::memory_order_acquire);\n"
                    << "    if (value) return *value;\n"
@@ -8066,7 +8191,9 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
                 source << (editor_safe || module.is_tool ? "    " : "        ")
                        << emit_storage_assignment(variable.type, sanitize_identifier(variable.name),
                                                   std::move(value))
-                       << ";\n";
+                       << ";\n"
+                       << (editor_safe || module.is_tool ? "    " : "        ")
+                       << "if (gdpp::runtime::script_function_failed()) return;\n";
                 if (!editor_safe && !module.is_tool)
                     source << "    }\n";
             }
@@ -8097,21 +8224,34 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
     };
     if (attached_script) {
         in_function_body_ = true;
-        source << unit.class_name << "::" << unit.class_name << "() {\n";
-        if (has_static_initialization)
-            source << "    _gdpp_ensure_static_initialized();\n";
-        if (std::any_of(module.fields.begin(), module.fields.end(), cached_preload_field))
-            source << "    _gdpp_preload_resources();\n";
-        source << "}\n\nvoid " << unit.class_name << "::_gdpp_initialize_instance() {\n";
-        if (!native_base_class.empty())
-            source << "    " << native_base_class << "::_gdpp_initialize_instance();\n";
+        source << unit.class_name << "::" << unit.class_name << "() {\n"
+               << "    gdpp::runtime::ScriptFunctionScope _gdpp_script_initialization_scope("
+                  "gdpp::runtime::ScriptFaultPolicy::inherit_existing);\n";
+        if (has_static_initialization) {
+            source << "    (void)_gdpp_ensure_static_initialized();\n"
+                   << "    if (gdpp::runtime::script_function_failed()) return;\n";
+        }
+        if (std::any_of(module.fields.begin(), module.fields.end(), cached_preload_field)) {
+            source << "    _gdpp_preload_resources();\n"
+                   << "    if (gdpp::runtime::script_function_failed()) return;\n";
+        }
+        source << "}\n\nvoid " << unit.class_name << "::_gdpp_initialize_instance() {\n"
+               << "    gdpp::runtime::ScriptFunctionScope _gdpp_script_initialization_scope("
+                  "gdpp::runtime::ScriptFaultPolicy::inherit_existing);\n";
+        if (!native_base_class.empty()) {
+            source << "    " << native_base_class << "::_gdpp_initialize_instance();\n"
+                   << "    if (gdpp::runtime::script_function_failed()) return;\n";
+        }
         if (needs_editor_hint)
             source << "    const bool gdpp_editor_hint = gdpp::runtime::is_editor_hint();\n";
         emit_autoload_registration();
         emit_instance_initializers();
         source << "}\n\n"
                << "void " << unit.class_name << "::_gdpp_initialize_onready() {\n"
-               << "    " << base_cpp << "::_gdpp_initialize_onready();\n";
+               << "    gdpp::runtime::ScriptFunctionScope _gdpp_script_initialization_scope("
+                  "gdpp::runtime::ScriptFaultPolicy::inherit_existing);\n"
+               << "    " << base_cpp << "::_gdpp_initialize_onready();\n"
+               << "    if (gdpp::runtime::script_function_failed()) return;\n";
         for (const auto& field : module.fields) {
             if (field.onready && field.initializer) {
                 source << "    "
@@ -8119,7 +8259,8 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
                               field.type, sanitize_identifier(field.name),
                               emit_conversion(field.type, field.initializer->type,
                                               emit_expression(*field.initializer)))
-                       << ";\n";
+                       << ";\n"
+                       << "    if (gdpp::runtime::script_function_failed()) return;\n";
             }
         }
         source << "}\n\n";
@@ -8147,15 +8288,21 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
                 (initializer == module.functions.end() || required != 0)) ||
                default_calls_initializer) {
         in_function_body_ = true;
-        source << unit.class_name << "::" << unit.class_name << "() {\n";
-        if (has_static_initialization)
-            source << "    _gdpp_ensure_static_initialized();\n";
+        source << unit.class_name << "::" << unit.class_name << "() {\n"
+               << "    gdpp::runtime::ScriptFunctionScope _gdpp_script_initialization_scope("
+                  "gdpp::runtime::ScriptFaultPolicy::inherit_existing);\n";
+        if (has_static_initialization) {
+            source << "    (void)_gdpp_ensure_static_initialized();\n"
+                   << "    if (gdpp::runtime::script_function_failed()) return;\n";
+        }
         if (needs_editor_hint || (default_calls_initializer && !module.is_tool))
             source << "    const bool gdpp_editor_hint = gdpp::runtime::is_editor_hint();\n";
         emit_autoload_registration();
-        if (std::any_of(module.fields.begin(), module.fields.end(), cached_preload_field))
+        if (std::any_of(module.fields.begin(), module.fields.end(), cached_preload_field)) {
             source << (module.is_tool ? "    _gdpp_preload_resources();\n"
                                       : "    if (!gdpp_editor_hint) _gdpp_preload_resources();\n");
+            source << "    if (gdpp::runtime::script_function_failed()) return;\n";
+        }
         emit_instance_initializers();
         if (has_native_rpc)
             emit_rpc_configurations(source, module.functions, 1);
@@ -8190,14 +8337,20 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
             source << "godot::Array " << sanitize_identifier(initializer->rest_parameter->name);
         }
         source << ") {\n";
-        if (has_static_initialization)
-            source << "    _gdpp_ensure_static_initialized();\n";
+        source << "    gdpp::runtime::ScriptFunctionScope _gdpp_script_initialization_scope("
+                  "gdpp::runtime::ScriptFaultPolicy::inherit_existing);\n";
+        if (has_static_initialization) {
+            source << "    (void)_gdpp_ensure_static_initialized();\n"
+                   << "    if (gdpp::runtime::script_function_failed()) return;\n";
+        }
         if (!module.is_tool || is_autoload)
             source << "    const bool gdpp_editor_hint = gdpp::runtime::is_editor_hint();\n";
         emit_autoload_registration();
-        if (std::any_of(module.fields.begin(), module.fields.end(), cached_preload_field))
+        if (std::any_of(module.fields.begin(), module.fields.end(), cached_preload_field)) {
             source << (module.is_tool ? "    _gdpp_preload_resources();\n"
                                       : "    if (!gdpp_editor_hint) _gdpp_preload_resources();\n");
+            source << "    if (gdpp::runtime::script_function_failed()) return;\n";
+        }
         emit_instance_initializers();
         if (has_native_rpc)
             emit_rpc_configurations(source, module.functions, 1);
@@ -8225,18 +8378,43 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
                    << cpp_type(variable.type) << " value{};\n    return value;\n}\n\n";
         }
     }
-    source << "void " << unit.class_name << "::_gdpp_preload_resources() {\n";
     const bool has_cached_preloads =
         std::any_of(module.fields.begin(), module.fields.end(), cached_preload_field);
+    const auto emit_cached_preload_cleanup = [&](const std::string& prefix) {
+        for (const auto& variable : module.fields) {
+            if (!cached_preload_field(variable))
+                continue;
+            if (variable.is_static) {
+                source << prefix << "_gdpp_static_" << sanitize_identifier(variable.name)
+                       << "_release();\n";
+                continue;
+            }
+            const auto target = "_gdpp_preloaded_" + sanitize_identifier(variable.name) + "()";
+            source << prefix
+                   << emit_storage_assignment(variable.type, target,
+                                              "std::remove_reference_t<decltype(" + target + ")>{}")
+                   << ";\n";
+        }
+    };
+    if (has_cached_preloads) {
+        source << "gdpp::runtime::ScriptInitializationState& " << unit.class_name
+               << "::_gdpp_preload_initialization() {\n"
+               << "    static gdpp::runtime::ScriptInitializationState state;\n"
+               << "    return state;\n}\n\n";
+    }
+    source << "void " << unit.class_name << "::_gdpp_preload_resources() {\n";
     if (has_cached_preloads) {
         if (!module.is_tool)
             source << "    if (gdpp::runtime::is_editor_hint()) return;\n";
-        source << "    static std::once_flag once;\n    std::call_once(once, []() {\n";
+        source << "    (void)_gdpp_preload_initialization().run(\n"
+               << "        \"Preload initialization previously failed for " << unit.class_name
+               << ".\",\n"
+               << "        []() {\n";
     }
     for (const auto& variable : module.fields) {
         if (!cached_preload_field(variable))
             continue;
-        const auto prefix = has_cached_preloads ? "        " : "    ";
+        const auto prefix = has_cached_preloads ? "            " : "    ";
         std::string target;
         if (!variable.is_static)
             target = "_gdpp_preloaded_";
@@ -8247,46 +8425,61 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
                << emit_storage_assignment(variable.type, std::move(target),
                                           emit_conversion(variable.type, variable.initializer->type,
                                                           emit_expression(*variable.initializer)))
-               << ";\n";
+               << ";\n"
+               << prefix << "if (gdpp::runtime::script_function_failed()) return;\n";
     }
-    if (has_cached_preloads)
-        source << "    });\n";
+    if (has_cached_preloads) {
+        source << "        },\n"
+               << "        []() {\n";
+        emit_cached_preload_cleanup("            ");
+        source << "        });\n";
+    }
     source << "}\n\n";
     source << "void " << unit.class_name << "::_gdpp_release_preloaded_resources() {\n";
-    for (const auto& variable : module.fields) {
-        if (managed_constant_field(variable)) {
+    if (has_cached_preloads) {
+        source << "    _gdpp_preload_initialization().reset([]() {\n";
+        emit_cached_preload_cleanup("        ");
+        source << "    });\n";
+    }
+    if (has_static_initialization) {
+        source << "    _gdpp_static_initialization().reset([]() {\n";
+        for (const auto& variable : module.fields) {
+            if (managed_constant_field(variable)) {
+                const auto name = sanitize_identifier(variable.name);
+                const auto storage = "_gdpp_constant_" + name + "_storage()";
+                source << "        {\n"
+                       << "            std::lock_guard<std::mutex> lock(_gdpp_constant_" << name
+                       << "_mutex());\n"
+                       << "            "
+                       << emit_storage_assignment(variable.type, storage,
+                                                  "std::remove_reference_t<decltype(" + storage +
+                                                      ")>{}")
+                       << ";\n"
+                       << "            _gdpp_constant_" << name << "_ready() = false;\n"
+                       << "        }\n";
+            } else if (!variable.is_constant && variable.is_static) {
+                source << "        _gdpp_static_" << sanitize_identifier(variable.name)
+                       << "_release();\n";
+            }
+        }
+        source << "    });\n";
+    } else {
+        for (const auto& variable : module.fields) {
+            if (!managed_constant_field(variable))
+                continue;
             const auto name = sanitize_identifier(variable.name);
             const auto storage = "_gdpp_constant_" + name + "_storage()";
             source << "    {\n"
                    << "        std::lock_guard<std::mutex> lock(_gdpp_constant_" << name
                    << "_mutex());\n"
-                   << "        if (_gdpp_constant_" << name << "_ready()) {\n"
-                   << "            "
+                   << "        "
                    << emit_storage_assignment(variable.type, storage,
                                               "std::remove_reference_t<decltype(" + storage +
                                                   ")>{}")
                    << ";\n"
-                   << "            _gdpp_constant_" << name << "_ready() = false;\n"
-                   << "        }\n"
+                   << "        _gdpp_constant_" << name << "_ready() = false;\n"
                    << "    }\n";
-            continue;
         }
-        if (!cached_preload_field(variable) && !(variable.is_static && !variable.is_constant))
-            continue;
-        const auto target =
-            variable.is_static ? "_gdpp_static_" + sanitize_identifier(variable.name) + "_storage()"
-                               : "_gdpp_preloaded_" + sanitize_identifier(variable.name) + "()";
-        if (variable.is_static)
-            source << "    _gdpp_static_" << sanitize_identifier(variable.name) << "_release();\n";
-        else
-            source << "    "
-                   << emit_storage_assignment(variable.type, target,
-                                              "std::remove_reference_t<decltype(" + target + ")>{}")
-                   << ";\n";
-    }
-    if (has_static_initialization) {
-        source << "    _gdpp_static_initialization_state().store(0, "
-                  "std::memory_order_release);\n";
     }
     source << "}\n\n";
     source << "void " << unit.class_name << "::_bind_methods() {\n";
@@ -8370,8 +8563,12 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
         const auto name = sanitize_identifier(variable.name);
         source << cpp_type(variable.type) << ' ' << unit.class_name << "::_gdpp_get_" << name
                << "() {\n";
-        if (variable.is_static && has_static_initialization)
-            source << "    _gdpp_ensure_static_initialized();\n";
+        if (variable.is_static && has_static_initialization) {
+            source << "    gdpp::runtime::ScriptFunctionScope _gdpp_script_initialization_scope("
+                      "gdpp::runtime::ScriptFaultPolicy::inherit_existing);\n"
+                   << "    (void)_gdpp_ensure_static_initialized();\n"
+                   << "    if (gdpp::runtime::script_function_failed()) return {};\n";
+        }
         if (variable.getter) {
             if (!variable.getter->method.empty()) {
                 source << "    return " << sanitize_identifier(variable.getter->method) << "();\n";
@@ -8398,8 +8595,12 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
         source << "}\n\nvoid " << unit.class_name << "::_gdpp_set_" << name << '('
                << "[[maybe_unused]] " << cpp_type(variable.type) << ' ' << setter_parameter
                << ") {\n";
-        if (variable.is_static && has_static_initialization)
-            source << "    _gdpp_ensure_static_initialized();\n";
+        if (variable.is_static && has_static_initialization) {
+            source << "    gdpp::runtime::ScriptFunctionScope _gdpp_script_initialization_scope("
+                      "gdpp::runtime::ScriptFaultPolicy::inherit_existing);\n"
+                   << "    (void)_gdpp_ensure_static_initialized();\n"
+                   << "    if (gdpp::runtime::script_function_failed()) return;\n";
+        }
         if (variable.setter) {
             if (!variable.setter->method.empty()) {
                 source << "    " << sanitize_identifier(variable.setter->method) << '('
@@ -8529,14 +8730,16 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
         }
         source << ')';
         source << " {\n";
-        if (function.is_static && function.name != "_static_init" && has_static_initialization)
-            source << "    _gdpp_ensure_static_initialized();\n";
         if (current_coroutine_abi_) {
             source << "    const auto " << current_coroutine_state_
                    << " = gdpp::runtime::begin_coroutine("
                    << (function.is_static ? "nullptr" : self_object_expression()) << ");\n";
         }
-        source << emit_script_function_scope(1);
+        source << emit_script_function_scope(1, function.name == "_static_init");
+        if (function.is_static && function.name != "_static_init" && has_static_initialization) {
+            source << "    (void)_gdpp_ensure_static_initialized();\n";
+            source << emit_script_failure_return(1, false);
+        }
         source << emit_parameter_default_initializers(function.parameters, 1);
         source << emit_debug_frame(function.span.begin.line, 1);
         if (function.name == "_ready" && !attached_script) {
@@ -8547,7 +8750,8 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
                                   field.type, sanitize_identifier(field.name),
                                   emit_conversion(field.type, field.initializer->type,
                                                   emit_expression(*field.initializer)))
-                           << ";\n";
+                           << ";\n"
+                           << emit_script_failure_return(1, false);
                 }
             }
         }
