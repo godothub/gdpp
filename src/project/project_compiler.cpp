@@ -909,7 +909,8 @@ std::string generated_registration(const std::vector<CompiledProjectScript>& scr
         // behavior classes retain their own tool/runtime registration policy below.
         output << "    GDREGISTER_CLASS(gdpp::runtime::AttachedScriptBehavior);\n"
                << "    GDREGISTER_CLASS(gdpp::runtime::AttachedCompiledLanguage);\n"
-               << "    GDREGISTER_CLASS(gdpp::runtime::AttachedCompiledScript);\n";
+               << "    GDREGISTER_CLASS(gdpp::runtime::AttachedCompiledScript);\n"
+               << "    GDREGISTER_CLASS(gdpp::runtime::AttachedScriptResourceLoader);\n";
     }
     for (const auto& script : scripts) {
         for (const auto& inner_class_name : script.inner_class_names) {
@@ -961,6 +962,8 @@ std::string generated_registration(const std::vector<CompiledProjectScript>& scr
                << "        godot::String error;\n"
                << "        ERR_FAIL_COND_MSG(!gdpp::runtime::AttachedCompiledLanguage::"
                   "register_singleton(&error), error);\n"
+               << "        ERR_FAIL_COND_MSG(!gdpp::runtime::"
+                  "register_attached_script_resource_loader(&error), error);\n"
                << "    }\n";
     }
     output << "}\n"
@@ -978,7 +981,8 @@ std::string generated_registration(const std::vector<CompiledProjectScript>& scr
         }
     }
     if (has_attached_scripts) {
-        output << "    gdpp::runtime::AttachedCompiledLanguage::unregister_singleton();\n"
+        output << "    gdpp::runtime::unregister_attached_script_resource_loader();\n"
+               << "    gdpp::runtime::AttachedCompiledLanguage::unregister_singleton();\n"
                << "    gdpp::runtime::unregister_all_attached_scripts();\n";
     }
     output << "}\n"

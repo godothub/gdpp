@@ -2,6 +2,7 @@
 
 #include <godot_cpp/classes/ref.hpp>
 #include <godot_cpp/classes/ref_counted.hpp>
+#include <godot_cpp/classes/resource_format_loader.hpp>
 #include <godot_cpp/classes/script_extension.hpp>
 #include <godot_cpp/classes/script_language_extension.hpp>
 #include <godot_cpp/core/object.hpp>
@@ -131,6 +132,10 @@ struct AttachedScriptDescriptor {
 void unregister_all_attached_scripts();
 [[nodiscard]] std::optional<AttachedScriptDescriptor>
 find_attached_script(const godot::String& source_path);
+// Canonicalizes `res://`, `uid://`, and project-root-relative resource identities using Godot's
+// active UID table. An unresolved UID or a non-project path returns an empty String.
+[[nodiscard]] godot::String
+resolve_attached_script_resource_path(const godot::String& resource_path);
 // Resolves a complete script view, with derived declarations shadowing inherited ones. A missing
 // or cyclic base chain fails closed and returns no descriptor.
 [[nodiscard]] std::optional<AttachedScriptDescriptor>
@@ -142,6 +147,34 @@ resolve_attached_script(const godot::String& source_path, godot::String* error =
 materialize_attached_script_constants(const AttachedScriptDescriptor& descriptor);
 
 class AttachedCompiledScript;
+
+// Binary-only exports retain the source `res://*.gd` identity even though the source bytes are
+// deliberately absent. This loader makes every ResourceLoader entry point resolve that identity
+// to the process-local canonical AttachedCompiledScript. It is registered only by generated
+// project libraries, never by the editor compiler bridge, so ordinary editor GDScript loading is
+// unaffected. Unknown `.gd` paths fail closed instead of falling through to a source loader.
+class AttachedScriptResourceLoader : public godot::ResourceFormatLoader {
+    GDCLASS(AttachedScriptResourceLoader, godot::ResourceFormatLoader)
+
+  public:
+    godot::PackedStringArray _get_recognized_extensions() const override;
+    bool _recognize_path(const godot::String& path, const godot::StringName& type) const override;
+    bool _handles_type(const godot::StringName& type) const override;
+    godot::String _get_resource_type(const godot::String& path) const override;
+    godot::String _get_resource_script_class(const godot::String& path) const override;
+    bool _exists(const godot::String& path) const override;
+    godot::Variant _load(const godot::String& path, const godot::String& original_path,
+                         bool use_sub_threads, std::int32_t cache_mode) const override;
+
+  protected:
+    static void _bind_methods();
+};
+
+// Registration owns one strong Ref for the complete scene-level lifetime and is idempotent.
+// Callers must register AttachedScriptResourceLoader with ClassDB first. Removal must happen
+// before descriptors are cleared so ResourceLoader can never observe a half-torn-down registry.
+[[nodiscard]] bool register_attached_script_resource_loader(godot::String* error = nullptr);
+void unregister_attached_script_resource_loader();
 
 // Returns the process-local canonical Script resource for a registered source identity. Godot
 // uses resource identity as part of typed Array/Dictionary compatibility, so all generated
@@ -168,9 +201,9 @@ set_attached_editor_storage_state(godot::Object* object,
                                   const godot::PackedStringArray& stored_properties);
 [[nodiscard]] godot::Object* cast_attached_script(const godot::Variant& value,
                                                   const godot::String& source_path);
-[[nodiscard]] godot::Object*
-strict_attached_script_storage(const godot::Variant& value, const godot::String& source_path,
-                               const ScriptSourceLocation& location);
+[[nodiscard]] godot::Object* strict_attached_script_storage(const godot::Variant& value,
+                                                            const godot::String& source_path,
+                                                            const ScriptSourceLocation& location);
 // Returns the opaque ScriptInstance handle Godot expects from debugger callbacks. The handle is
 // valid only while the owner retains the attached compiled script.
 [[nodiscard]] void* attached_script_instance_handle(godot::Object* object);

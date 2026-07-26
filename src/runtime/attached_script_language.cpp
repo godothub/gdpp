@@ -3,6 +3,8 @@
 #include <godot_cpp/classes/engine.hpp>
 #include <godot_cpp/classes/engine_debugger.hpp>
 #include <godot_cpp/classes/expression.hpp>
+#include <godot_cpp/classes/resource_loader.hpp>
+#include <godot_cpp/classes/resource_uid.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/core/error_macros.hpp>
 #include <godot_cpp/variant/array.hpp>
@@ -19,6 +21,32 @@ namespace {
 AttachedCompiledLanguage*& language_singleton() {
     static AttachedCompiledLanguage* value{nullptr};
     return value;
+}
+
+godot::Ref<AttachedScriptResourceLoader>& resource_loader_singleton() {
+    static godot::Ref<AttachedScriptResourceLoader> value;
+    return value;
+}
+
+godot::String canonical_script_path(const godot::String& value) {
+    auto path = value.simplify_path();
+    if (path.begins_with("uid://")) {
+        const auto* resource_uid = godot::ResourceUID::get_singleton();
+        if (!resource_uid)
+            return {};
+        const auto id = resource_uid->text_to_id(path);
+        if (id == godot::ResourceUID::INVALID_ID || !resource_uid->has_id(id))
+            return {};
+        path = resource_uid->get_id_path(id).simplify_path();
+    } else if (!path.contains("://") && !path.is_absolute_path()) {
+        path = (godot::String{"res://"} + path).simplify_path();
+    }
+    return path;
+}
+
+bool is_script_resource_request(const godot::String& value) {
+    const auto path = canonical_script_path(value);
+    return !path.is_empty() && path.get_extension().to_lower() == "gd";
 }
 
 godot::TypedArray<godot::Dictionary> method_list(const std::vector<godot::MethodInfo>& methods) {
@@ -79,6 +107,10 @@ godot::Dictionary debug_values(const char* names_key, const godot::PackedStringA
 }
 
 } // namespace
+
+godot::String resolve_attached_script_resource_path(const godot::String& resource_path) {
+    return canonical_script_path(resource_path);
+}
 
 ScriptDebugFrame::ScriptDebugFrame(const godot::String& source, const godot::StringName& function,
                                    const std::int32_t line, godot::Object* instance) {
@@ -395,6 +427,84 @@ AttachedCompiledLanguage::_get_global_class_name(const godot::String& path) cons
 }
 
 void AttachedCompiledLanguage::_bind_methods() {}
+
+godot::PackedStringArray AttachedScriptResourceLoader::_get_recognized_extensions() const {
+    godot::PackedStringArray result;
+    result.push_back("gd");
+    return result;
+}
+
+bool AttachedScriptResourceLoader::_recognize_path(const godot::String& path,
+                                                   const godot::StringName& type) const {
+    return is_script_resource_request(path) &&
+           (type.is_empty() || type == godot::StringName{"Script"});
+}
+
+bool AttachedScriptResourceLoader::_handles_type(const godot::StringName& type) const {
+    return type.is_empty() || type == godot::StringName{"Script"};
+}
+
+godot::String AttachedScriptResourceLoader::_get_resource_type(const godot::String& path) const {
+    return is_script_resource_request(path) ? godot::String{"Script"} : godot::String{};
+}
+
+godot::String
+AttachedScriptResourceLoader::_get_resource_script_class(const godot::String& path) const {
+    const auto descriptor = find_attached_script(canonical_script_path(path));
+    return descriptor ? godot::String{descriptor->global_name} : godot::String{};
+}
+
+bool AttachedScriptResourceLoader::_exists(const godot::String& path) const {
+    return find_attached_script(canonical_script_path(path)).has_value();
+}
+
+godot::Variant AttachedScriptResourceLoader::_load(const godot::String& path,
+                                                   const godot::String& original_path, bool,
+                                                   std::int32_t) const {
+    auto canonical = canonical_script_path(path);
+    if (canonical.is_empty())
+        canonical = canonical_script_path(original_path);
+    godot::String error;
+    const auto script = attached_script_resource(canonical, &error);
+    if (script.is_null()) {
+        godot::UtilityFunctions::push_error(
+            "GDPP: dynamic script path is absent from the compiled AOT manifest: '" +
+            (original_path.is_empty() ? path : original_path) + "' (" + error + ")");
+        return godot::Variant{static_cast<std::int64_t>(godot::ERR_FILE_NOT_FOUND)};
+    }
+    return godot::Variant{static_cast<const godot::Object*>(script.ptr())};
+}
+
+void AttachedScriptResourceLoader::_bind_methods() {}
+
+bool register_attached_script_resource_loader(godot::String* error) {
+    auto& loader = resource_loader_singleton();
+    if (loader.is_valid())
+        return true;
+    auto* resources = godot::ResourceLoader::get_singleton();
+    if (!resources) {
+        if (error)
+            *error = "Godot ResourceLoader singleton is unavailable";
+        return false;
+    }
+    loader.instantiate();
+    if (loader.is_null()) {
+        if (error)
+            *error = "cannot instantiate the GDPP attached script resource loader";
+        return false;
+    }
+    resources->add_resource_format_loader(loader, true);
+    return true;
+}
+
+void unregister_attached_script_resource_loader() {
+    auto& loader = resource_loader_singleton();
+    if (loader.is_null())
+        return;
+    if (auto* resources = godot::ResourceLoader::get_singleton())
+        resources->remove_resource_format_loader(loader);
+    loader.unref();
+}
 
 void AttachedCompiledScript::set_source_path(const godot::String& source_path) {
     source_path_ = source_path.simplify_path();

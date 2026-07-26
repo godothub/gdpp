@@ -18,10 +18,10 @@ void initialize_gdpp(godot::ModuleInitializationLevel level) {
     GDREGISTER_CLASS(gdpp::runtime::AttachedScriptBehavior);
     GDREGISTER_CLASS(gdpp::runtime::AttachedCompiledLanguage);
     GDREGISTER_CLASS(gdpp::runtime::AttachedCompiledScript);
+    GDREGISTER_CLASS(gdpp::runtime::AttachedScriptResourceLoader);
     GDREGISTER_CLASS(gdpp::extension::GDPPCompiler);
     godot::String error;
-    ERR_FAIL_COND_MSG(
-        !gdpp::runtime::AttachedCompiledLanguage::register_singleton(&error), error);
+    ERR_FAIL_COND_MSG(!gdpp::runtime::AttachedCompiledLanguage::register_singleton(&error), error);
 }
 
 void uninitialize_gdpp(godot::ModuleInitializationLevel level) {
