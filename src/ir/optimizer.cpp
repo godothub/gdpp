@@ -143,6 +143,7 @@ void IrOptimizer::optimize_expression(ir::Expression& expression, OptimizationSt
         optimize_expression(*operand, stats);
     if (expression.lambda) {
         for (auto& parameter : expression.lambda->parameters) {
+            optimize_statements(parameter.default_prefix, stats);
             if (parameter.default_value)
                 optimize_expression(*parameter.default_value, stats);
         }
@@ -312,6 +313,7 @@ void IrOptimizer::optimize_class(ir::Class& declaration, OptimizationStats& stat
     }
     for (auto& function : declaration.functions) {
         for (auto& parameter : function.parameters) {
+            optimize_statements(parameter.default_prefix, stats);
             if (parameter.default_value)
                 optimize_expression(*parameter.default_value, stats);
         }
@@ -396,12 +398,14 @@ OptimizationStats IrOptimizer::optimize(ir::Module& module) const {
     }
     for (auto& signal : module.signals) {
         for (auto& parameter : signal.parameters) {
+            optimize_statements(parameter.default_prefix, stats);
             if (parameter.default_value)
                 optimize_expression(*parameter.default_value, stats);
         }
     }
     for (auto& function : module.functions) {
         for (auto& parameter : function.parameters) {
+            optimize_statements(parameter.default_prefix, stats);
             if (parameter.default_value)
                 optimize_expression(*parameter.default_value, stats);
         }

@@ -444,6 +444,16 @@ void normalize_await_block(std::vector<ir::Statement>& statements, std::size_t& 
     statements = std::move(normalized);
 }
 
+void normalize_parameter_defaults(std::vector<ir::Parameter>& parameters,
+                                  std::size_t& temporary_counter) {
+    for (auto& parameter : parameters) {
+        if (!parameter.default_value)
+            continue;
+        parameter.default_value = normalize_await_expression(
+            std::move(parameter.default_value), parameter.default_prefix, temporary_counter);
+    }
+}
+
 } // namespace
 
 ir::ExpressionPtr IrLowerer::lower_expression(const ast::Expression& expression) const {
@@ -579,6 +589,7 @@ ir::ExpressionPtr IrLowerer::lower_expression(const ast::Expression& expression)
         for (const auto& statement : lambda->body)
             lowered->lambda->body.push_back(lower_statement(statement));
         std::size_t temporary_counter = 0;
+        normalize_parameter_defaults(lowered->lambda->parameters, temporary_counter);
         normalize_await_block(lowered->lambda->body, temporary_counter);
     }
     return lowered;
@@ -590,6 +601,8 @@ ir::Parameter IrLowerer::lower_parameter(const ast::Parameter& parameter) const 
     lowered.type = semantic_.type_of(parameter);
     lowered.ownership = lowered.type.ownership();
     lowered.default_evaluation = semantic_.default_argument_evaluation_of(parameter);
+    if (const auto* symbol = semantic_.symbol_of(parameter))
+        lowered.symbol_identity = symbol->identity;
     if (parameter.default_value)
         lowered.default_value = lower_expression(*parameter.default_value);
     lowered.span = parameter.span;
@@ -757,6 +770,7 @@ ir::Class IrLowerer::lower_class(const ast::ClassDeclaration& declaration) const
         for (const auto& statement : function.body)
             result.body.push_back(lower_statement(statement));
         std::size_t temporary_counter = 0;
+        normalize_parameter_defaults(result.parameters, temporary_counter);
         normalize_await_block(result.body, temporary_counter);
         lowered.functions.push_back(std::move(result));
     }
@@ -916,6 +930,7 @@ ir::Module IrLowerer::lower(const ast::Script& script) const {
             lowered.body.push_back(lower_statement(statement));
         }
         std::size_t temporary_counter = 0;
+        normalize_parameter_defaults(lowered.parameters, temporary_counter);
         normalize_await_block(lowered.body, temporary_counter);
         module.functions.push_back(std::move(lowered));
     }
@@ -942,6 +957,14 @@ bool IrVerifier::verify_parameter(const ir::Parameter& parameter) {
                            parameter.span);
         valid = false;
     }
+    if (!has_default && !parameter.default_prefix.empty()) {
+        diagnostics_.error("GDS5055",
+                           "parameter without a default carries default evaluation statements",
+                           parameter.span);
+        valid = false;
+    }
+    for (const auto& statement : parameter.default_prefix)
+        valid = verify_statement(statement) && valid;
     if (parameter.default_value)
         valid = verify_expression(*parameter.default_value) && valid;
     return valid;
@@ -957,7 +980,7 @@ bool IrVerifier::verify_rest_parameter(const ir::Parameter& parameter) {
         diagnostics_.error("GDS5043", "rest parameter IR must have Array type", parameter.span);
         valid = false;
     }
-    if (parameter.default_value ||
+    if (parameter.default_value || !parameter.default_prefix.empty() ||
         parameter.default_evaluation != DefaultArgumentEvaluation::absent) {
         diagnostics_.error("GDS5044", "rest parameter IR cannot carry a default value",
                            parameter.span);

@@ -180,6 +180,8 @@ struct Parameter {
     std::string name;
     Type type;
     OwnershipKind ownership{OwnershipKind::value};
+    FlowSymbolId symbol_identity{0};
+    std::vector<Statement> default_prefix;
     ExpressionPtr default_value;
     DefaultArgumentEvaluation default_evaluation{DefaultArgumentEvaluation::absent};
     SourceSpan span{};
