@@ -7,6 +7,7 @@ const BINARY_DIRECTORY := "res://addons/gdpp/binary"
 const COMPILER_DESCRIPTOR := "res://addons/gdpp/gdpp.gdextension"
 const ADDON_PREFIX := "res://addons/gdpp/"
 const RUNTIME_RESOURCE_PREFIX := "res://addons/gdpp/runtime/"
+const PROJECT_LIBRARY_ENTRY_SYMBOL := "gdpp_library_init"
 const COMPILER_SETTING := "gdpp/build/cpp_compiler"
 const SDK_SETTING := "gdpp/build/sdk_root"
 const ANDROID_NDK_SETTING := "gdpp/build/android_ndk_root"
@@ -620,7 +621,7 @@ func _prepare_export_impl(features: PackedStringArray, is_debug: bool) -> bool:
     _runtime_library_path = library_path
     _runtime_descriptor = (
         "[configuration]\n\n"
-        + "entry_symbol = \"gdpp_project_library_init\"\n"
+        + 'entry_symbol = "%s"\n' % PROJECT_LIBRARY_ENTRY_SYMBOL
         + "compatibility_minimum = \"%s\"\n" % target_version
         + "reloadable = false\n\n"
         + "[libraries]\n\n"
@@ -948,7 +949,7 @@ func _register_runtime_library() -> bool:
             or _runtime_library_path.ends_with(".xcframework")
         )
     ):
-        return _register_apple_embedded_entry("gdpp_project_library_init")
+        return _register_apple_embedded_entry(PROJECT_LIBRARY_ENTRY_SYMBOL)
     return true
 
 

@@ -494,6 +494,21 @@ foreach(required_web_implementation IN ITEMS
     endif()
 endforeach()
 
+foreach(required_project_entry_implementation IN ITEMS
+        "const PROJECT_LIBRARY_ENTRY_SYMBOL := \"gdpp_library_init\""
+        "'entry_symbol = \"%s\"\\n' % PROJECT_LIBRARY_ENTRY_SYMBOL"
+        "_register_apple_embedded_entry(PROJECT_LIBRARY_ENTRY_SYMBOL)")
+    string(FIND "${export_plugin}" "${required_project_entry_implementation}" required_offset)
+    if(required_offset EQUAL -1)
+        message(FATAL_ERROR
+            "Project entry ABI implementation is missing: ${required_project_entry_implementation}")
+    endif()
+endforeach()
+string(FIND "${export_plugin}" "gdpp_project_library_init" legacy_project_entry_offset)
+if(NOT legacy_project_entry_offset EQUAL -1)
+    message(FATAL_ERROR "Export plugin still references the retired project entry symbol")
+endif()
+
 foreach(required_ios_option IN ITEMS
         "name=\"iOS AOT\""
         "name=\"iOS GDScript Fallback\""
