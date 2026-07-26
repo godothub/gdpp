@@ -114,12 +114,11 @@ const godot::MethodInfo* find_method(const AttachedScriptDescriptor& descriptor,
     return found == descriptor.methods.end() ? nullptr : &*found;
 }
 
-const AttachedScriptMethodDispatch*
-find_method_dispatch(const AttachedScriptInstance* instance, const godot::StringName& name) {
-    const auto found = std::find_if(
-        instance->descriptor.method_dispatches.begin(),
-        instance->descriptor.method_dispatches.end(),
-        [&](const auto& item) { return item.name == name; });
+const AttachedScriptMethodDispatch* find_method_dispatch(const AttachedScriptInstance* instance,
+                                                         const godot::StringName& name) {
+    const auto found = std::find_if(instance->descriptor.method_dispatches.begin(),
+                                    instance->descriptor.method_dispatches.end(),
+                                    [&](const auto& item) { return item.name == name; });
     return found == instance->descriptor.method_dispatches.end() ? nullptr : &*found;
 }
 
@@ -137,10 +136,9 @@ godot::Variant call_behavior(AttachedScriptInstance* instance,
         return {};
     }
     godot::Variant result;
-    dispatch->call(
-        nullptr, instance->behavior.ptr(),
-        reinterpret_cast<const GDExtensionConstVariantPtr*>(arguments), argument_count,
-        result._native_ptr(), &error);
+    dispatch->call(nullptr, instance->behavior.ptr(),
+                   reinterpret_cast<const GDExtensionConstVariantPtr*>(arguments), argument_count,
+                   result._native_ptr(), &error);
     return result;
 }
 
@@ -583,6 +581,14 @@ bool is_attached_script_instance(godot::Object* object, const godot::String& sou
         current_path = descriptor->base_script_path.simplify_path();
     }
     return false;
+}
+
+void* attached_script_instance_handle(godot::Object* object) {
+    if (!object)
+        return nullptr;
+    std::lock_guard<std::mutex> lock{AttachedScriptInstance::instances_mutex()};
+    const auto found = AttachedScriptInstance::instances().find(object);
+    return found == AttachedScriptInstance::instances().end() ? nullptr : found->second;
 }
 
 bool set_attached_editor_storage_state(godot::Object* object,

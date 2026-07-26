@@ -1,13 +1,17 @@
 #include "gdpp/runtime/attached_script.hpp"
 
 #include <godot_cpp/classes/engine.hpp>
+#include <godot_cpp/classes/engine_debugger.hpp>
+#include <godot_cpp/classes/expression.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/core/error_macros.hpp>
 #include <godot_cpp/variant/array.hpp>
 
 #include <algorithm>
 #include <cstdint>
+#include <limits>
 #include <utility>
+#include <vector>
 
 namespace gdpp::runtime {
 namespace {
@@ -38,7 +42,99 @@ const AttachedScriptProperty* find_property(const AttachedScriptDescriptor& desc
     return found == descriptor.properties.end() ? nullptr : &*found;
 }
 
+struct DebugFrameRecord {
+    std::uint64_t token{0};
+    godot::String source;
+    godot::StringName function;
+    std::int32_t line{-1};
+    godot::Object* instance{nullptr};
+    godot::PackedStringArray local_names;
+    godot::Array local_values;
+    godot::PackedStringArray member_names;
+    godot::Array member_values;
+};
+
+struct ThreadDebugState {
+    std::vector<DebugFrameRecord> frames;
+    godot::String error;
+    std::uint64_t next_token{1};
+    bool breaking{false};
+};
+
+thread_local ThreadDebugState thread_debug_state;
+
+DebugFrameRecord* debug_frame_at(const std::int32_t level) {
+    if (level < 0 || static_cast<std::size_t>(level) >= thread_debug_state.frames.size())
+        return nullptr;
+    return &thread_debug_state
+                .frames[thread_debug_state.frames.size() - static_cast<std::size_t>(level) - 1U];
+}
+
+godot::Dictionary debug_values(const char* names_key, const godot::PackedStringArray& names,
+                               const godot::Array& values) {
+    godot::Dictionary result;
+    result[names_key] = names;
+    result["values"] = values;
+    return result;
+}
+
 } // namespace
+
+ScriptDebugFrame::ScriptDebugFrame(const godot::String& source, const godot::StringName& function,
+                                   const std::int32_t line, godot::Object* instance) {
+    auto& state = thread_debug_state;
+    token_ = state.next_token++;
+    if (token_ == 0)
+        token_ = state.next_token++;
+    state.frames.push_back({token_, source, function, line, instance, {}, {}, {}, {}});
+}
+
+ScriptDebugFrame::~ScriptDebugFrame() {
+    if (token_ == 0)
+        return;
+    auto& frames = thread_debug_state.frames;
+    const auto found = std::find_if(frames.rbegin(), frames.rend(),
+                                    [&](const auto& frame) { return frame.token == token_; });
+    if (found != frames.rend())
+        frames.erase(std::next(found).base());
+}
+
+void debug_breakpoint(const godot::String& source, const godot::StringName& function,
+                      const std::int32_t line, godot::Object* instance,
+                      const godot::PackedStringArray& local_names, const godot::Array& local_values,
+                      const godot::PackedStringArray& member_names,
+                      const godot::Array& member_values) {
+    auto* debugger = godot::EngineDebugger::get_singleton();
+    auto* language = AttachedCompiledLanguage::get_singleton();
+    auto& state = thread_debug_state;
+    if (!debugger || !language || !debugger->is_active() || state.breaking)
+        return;
+
+    const auto matches = [&](const DebugFrameRecord& frame) {
+        return frame.source == source && frame.function == function && frame.instance == instance;
+    };
+    auto found = std::find_if(state.frames.rbegin(), state.frames.rend(), matches);
+    const bool temporary = found == state.frames.rend();
+    if (temporary) {
+        state.frames.push_back({0, source, function, line, instance, local_names, local_values,
+                                member_names, member_values});
+        found = state.frames.rbegin();
+    }
+
+    auto& frame = *found;
+    frame.line = line;
+    frame.local_names = local_names;
+    frame.local_values = local_values;
+    frame.member_names = member_names;
+    frame.member_values = member_values;
+    state.error = "Breakpoint Statement";
+    state.breaking = true;
+    debugger->script_debug(language, true, true);
+    state.breaking = false;
+    state.error = godot::String{};
+    if (temporary)
+        state.frames.pop_back();
+}
 
 AttachedCompiledLanguage* AttachedCompiledLanguage::get_singleton() { return language_singleton(); }
 
@@ -164,37 +260,77 @@ void AttachedCompiledLanguage::_add_named_global_constant(const godot::StringNam
 void AttachedCompiledLanguage::_remove_named_global_constant(const godot::StringName&) {}
 void AttachedCompiledLanguage::_thread_enter() {}
 void AttachedCompiledLanguage::_thread_exit() {}
-godot::String AttachedCompiledLanguage::_debug_get_error() const { return {}; }
-std::int32_t AttachedCompiledLanguage::_debug_get_stack_level_count() const { return 0; }
-std::int32_t AttachedCompiledLanguage::_debug_get_stack_level_line(std::int32_t) const {
-    return -1;
+godot::String AttachedCompiledLanguage::_debug_get_error() const {
+    return thread_debug_state.error;
 }
-godot::String AttachedCompiledLanguage::_debug_get_stack_level_function(std::int32_t) const {
-    return {};
+std::int32_t AttachedCompiledLanguage::_debug_get_stack_level_count() const {
+    const auto size = thread_debug_state.frames.size();
+    return size > static_cast<std::size_t>(std::numeric_limits<std::int32_t>::max())
+               ? std::numeric_limits<std::int32_t>::max()
+               : static_cast<std::int32_t>(size);
 }
-godot::String AttachedCompiledLanguage::_debug_get_stack_level_source(std::int32_t) const {
-    return {};
+std::int32_t AttachedCompiledLanguage::_debug_get_stack_level_line(const std::int32_t level) const {
+    const auto* frame = debug_frame_at(level);
+    return frame ? frame->line : -1;
 }
-godot::Dictionary
-AttachedCompiledLanguage::_debug_get_stack_level_locals(std::int32_t, std::int32_t, std::int32_t) {
-    return {};
+godot::String
+AttachedCompiledLanguage::_debug_get_stack_level_function(const std::int32_t level) const {
+    const auto* frame = debug_frame_at(level);
+    return frame ? godot::String{frame->function} : godot::String{};
 }
-godot::Dictionary
-AttachedCompiledLanguage::_debug_get_stack_level_members(std::int32_t, std::int32_t, std::int32_t) {
-    return {};
+godot::String
+AttachedCompiledLanguage::_debug_get_stack_level_source(const std::int32_t level) const {
+    const auto* frame = debug_frame_at(level);
+    return frame ? frame->source : godot::String{};
 }
-void* AttachedCompiledLanguage::_debug_get_stack_level_instance(std::int32_t) { return nullptr; }
+godot::Dictionary AttachedCompiledLanguage::_debug_get_stack_level_locals(const std::int32_t level,
+                                                                          std::int32_t,
+                                                                          std::int32_t) {
+    const auto* frame = debug_frame_at(level);
+    return frame ? debug_values("locals", frame->local_names, frame->local_values)
+                 : godot::Dictionary{};
+}
+godot::Dictionary AttachedCompiledLanguage::_debug_get_stack_level_members(const std::int32_t level,
+                                                                           std::int32_t,
+                                                                           std::int32_t) {
+    const auto* frame = debug_frame_at(level);
+    return frame ? debug_values("members", frame->member_names, frame->member_values)
+                 : godot::Dictionary{};
+}
+void* AttachedCompiledLanguage::_debug_get_stack_level_instance(const std::int32_t level) {
+    const auto* frame = debug_frame_at(level);
+    return frame ? attached_script_instance_handle(frame->instance) : nullptr;
+}
 godot::Dictionary AttachedCompiledLanguage::_debug_get_globals(std::int32_t, std::int32_t) {
     return {};
 }
-godot::String AttachedCompiledLanguage::_debug_parse_stack_level_expression(std::int32_t,
-                                                                            const godot::String&,
-                                                                            std::int32_t,
-                                                                            std::int32_t) {
-    return {};
+godot::String AttachedCompiledLanguage::_debug_parse_stack_level_expression(
+    const std::int32_t level, const godot::String& source, std::int32_t, std::int32_t) {
+    const auto* frame = debug_frame_at(level);
+    if (!frame)
+        return {};
+    godot::Ref<godot::Expression> expression;
+    expression.instantiate();
+    if (expression.is_null() || expression->parse(source, frame->local_names) != godot::OK)
+        return {};
+    const auto value = expression->execute(frame->local_values, frame->instance, false);
+    if (expression->has_execute_failed())
+        return {};
+    return value.stringify();
 }
 godot::TypedArray<godot::Dictionary> AttachedCompiledLanguage::_debug_get_current_stack_info() {
-    return {};
+    godot::TypedArray<godot::Dictionary> result;
+    for (std::size_t level = 0; level < thread_debug_state.frames.size(); ++level) {
+        const auto* frame = debug_frame_at(static_cast<std::int32_t>(level));
+        if (!frame)
+            continue;
+        godot::Dictionary entry;
+        entry["file"] = frame->source;
+        entry["func"] = frame->function;
+        entry["line"] = frame->line;
+        result.push_back(entry);
+    }
+    return result;
 }
 void AttachedCompiledLanguage::_reload_all_scripts() {}
 void AttachedCompiledLanguage::_reload_scripts(const godot::Array&, bool) {}

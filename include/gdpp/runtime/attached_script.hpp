@@ -166,6 +166,9 @@ set_attached_editor_storage_state(godot::Object* object,
                                   const godot::PackedStringArray& stored_properties);
 [[nodiscard]] godot::Object* cast_attached_script(const godot::Variant& value,
                                                   const godot::String& source_path);
+// Returns the opaque ScriptInstance handle Godot expects from debugger callbacks. The handle is
+// valid only while the owner retains the attached compiled script.
+[[nodiscard]] void* attached_script_instance_handle(godot::Object* object);
 
 // Constructs the provider-owned native object, attaches the compiled script and invokes _init
 // with the supplied arguments. The Variant preserves RefCounted ownership when applicable.
@@ -300,6 +303,31 @@ call_attached_native_base(godot::Object* owner, const godot::StringName& native_
                                          pointers.data(),
                                          static_cast<std::int64_t>(pointers.size()));
 }
+
+// Debug frames are emitted only for debug export profiles. They give ScriptLanguageExtension the
+// same top-first stack shape as interpreted GDScript while keeping all debugger state
+// thread-local. A resumed coroutine can enter at a breakpoint after its original native frame has
+// returned; debug_breakpoint() creates a temporary frame in that case.
+class ScriptDebugFrame final {
+  public:
+    ScriptDebugFrame(const godot::String& source, const godot::StringName& function,
+                     std::int32_t line, godot::Object* instance);
+    ~ScriptDebugFrame();
+
+    ScriptDebugFrame(const ScriptDebugFrame&) = delete;
+    ScriptDebugFrame& operator=(const ScriptDebugFrame&) = delete;
+    ScriptDebugFrame(ScriptDebugFrame&&) = delete;
+    ScriptDebugFrame& operator=(ScriptDebugFrame&&) = delete;
+
+  private:
+    std::uint64_t token_{0};
+};
+
+void debug_breakpoint(const godot::String& source, const godot::StringName& function,
+                      std::int32_t line, godot::Object* instance,
+                      const godot::PackedStringArray& local_names, const godot::Array& local_values,
+                      const godot::PackedStringArray& member_names = {},
+                      const godot::Array& member_values = {});
 
 class AttachedCompiledLanguage : public godot::ScriptLanguageExtension {
     GDCLASS(AttachedCompiledLanguage, godot::ScriptLanguageExtension)
