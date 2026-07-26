@@ -230,19 +230,28 @@ void report_script_failure(const godot::String& message, const char* source_path
 }
 
 void emit_local_signal_variants(godot::Object* owner, const godot::Variant** arguments,
-                                const std::int64_t argument_count) {
+                                const std::int64_t argument_count,
+                                const ScriptSourceLocation location) {
     static const godot::StringName method_name{"emit_signal"};
     static GDExtensionMethodBindPtr method_bind =
         godot::gdextension_interface::classdb_get_method_bind(
             godot::Object::get_class_static()._native_ptr(), method_name._native_ptr(), 4047867050);
-    ERR_FAIL_NULL_MSG(owner, "GDPP: cannot emit a local signal on a null object.");
-    ERR_FAIL_NULL_MSG(method_bind, "GDPP: cannot resolve Object.emit_signal.");
+    if (!owner) {
+        report_script_failure("Cannot emit a local signal on a null instance.", location);
+        return;
+    }
+    if (!method_bind) {
+        report_script_failure("Cannot resolve the Object.emit_signal runtime method.", location);
+        return;
+    }
 
     GDExtensionCallError error{};
     godot::Variant result;
     godot::gdextension_interface::object_method_bind_call(
         method_bind, owner->_owner, reinterpret_cast<GDExtensionConstVariantPtr*>(arguments),
         argument_count, result._native_ptr(), &error);
+    if (error.error != GDEXTENSION_CALL_OK)
+        report_script_failure("Local signal emission failed.", location);
 }
 
 namespace {
@@ -376,6 +385,32 @@ const char* operator_name(const godot::Variant::Operator operation) noexcept {
         break;
     }
     return "<unknown>";
+}
+
+godot::String call_error_message(const godot::String& subject, const GDExtensionCallError& error) {
+    switch (error.error) {
+    case GDEXTENSION_CALL_ERROR_INVALID_METHOD:
+        return subject + godot::String{" has no callable method."};
+    case GDEXTENSION_CALL_ERROR_INVALID_ARGUMENT:
+        return subject + godot::String{" rejected argument "} +
+               godot::String::num_int64(error.argument + 1) + godot::String{"; expected "} +
+               godot::Variant::get_type_name(static_cast<godot::Variant::Type>(error.expected)) +
+               godot::String{"."};
+    case GDEXTENSION_CALL_ERROR_TOO_MANY_ARGUMENTS:
+        return subject + godot::String{" received too many arguments; expected "} +
+               godot::String::num_int64(error.expected) + godot::String{"."};
+    case GDEXTENSION_CALL_ERROR_TOO_FEW_ARGUMENTS:
+        return subject + godot::String{" received too few arguments; expected "} +
+               godot::String::num_int64(error.expected) + godot::String{"."};
+    case GDEXTENSION_CALL_ERROR_INSTANCE_IS_NULL:
+        return subject + godot::String{" targets a null or freed instance."};
+    case GDEXTENSION_CALL_ERROR_METHOD_NOT_CONST:
+        return subject + godot::String{" cannot call a non-const method in this context."};
+    case GDEXTENSION_CALL_OK:
+        break;
+    }
+    return subject + godot::String{" failed with call error "} +
+           godot::String::num_int64(static_cast<std::int64_t>(error.error)) + godot::String{"."};
 }
 
 class AwaitCallable final : public godot::CallableCustom {
@@ -862,6 +897,30 @@ godot::Variant script_identity(godot::Object* object) {
     if (native_class.begins_with("GDPPNative_"))
         return godot::StringName(native_class);
     return object->get_script();
+}
+
+godot::Variant call_callable_impl(const godot::Callable& callable, const godot::Variant** arguments,
+                                  const std::size_t argument_count,
+                                  const ScriptSourceLocation location) {
+    if (!callable.is_valid()) {
+        report_script_failure("Attempt to call a null or freed Callable.", location);
+        return {};
+    }
+
+    // Calling through Variant::callp is the public GDExtension path that preserves the
+    // Callable's CallError. godot-cpp's variadic Callable::call() deliberately discards that
+    // error, which would let generated execution continue after invalid arity, invalid argument,
+    // unbind, and freed-target failures even though GDScript stops the current function.
+    static const godot::StringName call_method{"call"};
+    godot::Variant callable_value{callable};
+    godot::Variant result;
+    GDExtensionCallError error{GDEXTENSION_CALL_OK, 0, 0};
+    callable_value.callp(call_method, arguments, static_cast<int>(argument_count), result, error);
+    if (error.error != GDEXTENSION_CALL_OK) {
+        report_script_failure(call_error_message("Callable", error), location);
+        return {};
+    }
+    return result;
 }
 
 godot::Variant instantiate_external_class(const godot::StringName& name) {
