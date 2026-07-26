@@ -142,6 +142,7 @@ func _on_ready() -> void:
         and validate_inheritance() == true
         and validate_latest_literals() == true
         and validate_typed_containers() == true
+        and validate_static_unload_marker() == true
         and assertion_evaluation_count() == (1 if OS.is_debug_build() else 0)
     ):
         print("GDPP_EXPORTED_PROPERTIES_OK")
@@ -230,6 +231,10 @@ func validate_typed_containers() -> bool:
         and local_weights.is_typed_key()
         and local_weights.is_typed_value()
     )
+
+
+func validate_static_unload_marker() -> bool:
+    return StaticUnloadCase.next() == 41 and StaticUnloadCase.next() == 42
 
 
 func typed_container_roundtrip(values: Array[int]) -> Dictionary[String, int]:
