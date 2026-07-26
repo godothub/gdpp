@@ -174,6 +174,7 @@ struct PropertyAccessor {
     std::string method;
     std::vector<Statement> body;
     SourceSpan span{};
+    bool is_coroutine{false};
 };
 
 struct Parameter {

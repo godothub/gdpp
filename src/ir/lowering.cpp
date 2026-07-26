@@ -726,6 +726,7 @@ ir::Class IrLowerer::lower_class(const ast::ClassDeclaration& declaration) const
             ir::PropertyAccessor accessor;
             accessor.method = variable.getter->method;
             accessor.span = variable.getter->span;
+            accessor.is_coroutine = semantic_.is_coroutine(*variable.getter);
             for (const auto& statement : variable.getter->body)
                 accessor.body.push_back(lower_statement(statement));
             std::size_t temporary_counter = 0;
@@ -737,6 +738,7 @@ ir::Class IrLowerer::lower_class(const ast::ClassDeclaration& declaration) const
             accessor.parameter = variable.setter->parameter;
             accessor.method = variable.setter->method;
             accessor.span = variable.setter->span;
+            accessor.is_coroutine = semantic_.is_coroutine(*variable.setter);
             for (const auto& statement : variable.setter->body)
                 accessor.body.push_back(lower_statement(statement));
             std::size_t temporary_counter = 0;
@@ -823,6 +825,7 @@ ir::Module IrLowerer::lower(const ast::Script& script) const {
             ir::PropertyAccessor getter;
             getter.method = variable.getter->method;
             getter.span = variable.getter->span;
+            getter.is_coroutine = semantic_.is_coroutine(*variable.getter);
             getter.body.reserve(variable.getter->body.size());
             for (const auto& statement : variable.getter->body)
                 getter.body.push_back(lower_statement(statement));
@@ -835,6 +838,7 @@ ir::Module IrLowerer::lower(const ast::Script& script) const {
             setter.parameter = variable.setter->parameter;
             setter.method = variable.setter->method;
             setter.span = variable.setter->span;
+            setter.is_coroutine = semantic_.is_coroutine(*variable.setter);
             setter.body.reserve(variable.setter->body.size());
             for (const auto& statement : variable.setter->body)
                 setter.body.push_back(lower_statement(statement));
