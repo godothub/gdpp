@@ -26,6 +26,7 @@ func run() -> String:
         integer_modulo_zero,
         invalid_operator,
         invalid_implicit_conversion,
+        required_object_argument,
         invalid_explicit_conversion,
         invalid_typed_array_append,
         invalid_typed_dictionary_set,
@@ -194,6 +195,12 @@ func invalid_implicit_conversion() -> void:
     var source: Variant = "bad"
     var value: int = source
     after("invalid_implicit_conversion:" + str(value))
+
+
+func required_object_argument() -> void:
+    before("required_object_argument")
+    Input.parse_input_event(null)
+    after("required_object_argument")
 
 
 func invalid_explicit_conversion() -> void:
