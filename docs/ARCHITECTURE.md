@@ -74,10 +74,12 @@ HIR 拥有解析后的类型、成员身份、调用契约、迭代计划、RPC 
 - `while` 条件每轮重新计算；
 - match 先绑定模式，再执行可挂起 guard；
 - assert 条件和惰性消息使用独立 debug-only 前缀；
+- breakpoint 携带精确词法作用域快照，不由 C++ emitter 重新推断可见绑定；
 - 跨挂起写入的循环局部值和参数提升到共享状态。
 
 MIR 为每个方法、getter、setter 和 lambda 建立显式基本块、前驱、终止指令与副作用。分支通过
-`BranchRole` 区分普通条件、迭代协议、match 模式、guard 和断言。verifier 在优化前后检查：
+`BranchRole` 区分普通条件、迭代协议、match 模式、guard 和断言；`debug_breakpoint` 以
+`observes_debugger` 副作用阻止优化器错误删除或跨越调试点。verifier 在优化前后检查：
 
 - 唯一入口、有效目标和精确前驱；
 - return/jump/branch/suspend/stop 的合法形状；
@@ -112,6 +114,20 @@ GDExtension 创建，生成行为通过下列层附着：
 
 该设计避免 Godot 尚不支持的跨 GDExtension C++ 继承，也不需要供应商头文件或链接库。
 
+### 调试器桥接
+
+Debug 生成代码在函数入口登记轻量原生帧，并在语句边界更新原始 `.gd` 行号。只有 Godot
+`EngineDebugger` 已连接并注册当前语言时帧才进入线程局部栈；Release 编译不包含这些调用。
+执行 `breakpoint` 时，runtime 通过 `ScriptLanguageExtension` 提供：
+
+- 原始脚本路径、函数名、当前行和规范 `ScriptInstance`；
+- 当前词法作用域内的参数、局部变量和常量，内部遮蔽优先；
+- 当前脚本及继承脚本字段；
+- 以同一 Attached owner 为宿主的调试表达式求值。
+
+静态函数没有实例宿主；协程在原生入口帧已经返回后可为恢复点建立临时顶层帧。当前没有把编辑器
+gutter 行断点和全部单步协议冒充为已完成能力。
+
 ## 项目编译
 
 `ProjectCompiler` 一次扫描项目范围内全部客户 GDScript，包括第三方 addon 的 `.gd`，只排除
@@ -144,7 +160,7 @@ ProjectCompiler 后台只消费快照，不访问实时 ClassDB。离线 CLI 可
 ## NativeBuilder
 
 客户导出不调用 CMake、Ninja、Python 或 SCons。NativeBuilder 验证 SDK schema 11/runtime
-ABI 13 后，直接生成系统工具链命令：
+ABI 14 后，直接生成系统工具链命令：
 
 - Windows：MSVC/Windows SDK、x86_64、静态 CRT；
 - macOS：AppleClang、arm64/x86_64/Universal 2；
@@ -162,14 +178,14 @@ ABI 13 后，直接生成系统工具链命令：
 
 ## 描述符与导出事务
 
-源项目中只有 `addons/gdpp/gdpp.gdextension` 一个活动物理描述符。导出器：
+源项目中只有 `addons/gdpp/gdpp.gdextension` 一个活动物理描述符。标准 AOT 导出不改写该文件：
 
-1. 备份 compiler 描述符、extension registry、Autoload 和必要的供应商扫描描述；
-2. 生成并构建当前目标的一个项目库；
-3. 临时把同一描述符切换为目标扫描内容；
-4. 用 metadata-only Script 描述转换场景、Resource 和 Autoload；
-5. 把项目运行描述符写入 PCK 同一路径并剥离客户 `.gd/.gdc`；
-6. 成功、失败或下次插件启动时恢复源工程字节。
+1. 生成并构建当前目标的一个项目库；
+2. 在导出文件回调中跳过 editor-only 物理描述符，并向包内同一路径写入 runtime 描述符字节；
+3. 由 GDPP 通过公开导出 API 只注册一次项目库，避免内置 GDExtension scanner 重复加入；
+4. 对需要 Universal 2 归一化的 provider 验证真实 Mach-O 切片，只虚拟化包内描述符；
+5. 用 metadata-only Script 描述转换场景、Resource 和 Autoload，并剥离客户 `.gd/.gdc`；
+6. 成功或失败时恢复临时 Autoload/兼容回退状态；启动时仍可恢复 1.7.8 及更旧版本留下的备份。
 
 项目库标记为不可热重载。重新导出/重启是当前安全边界，不尝试让现有 Attached 实例跨动态库
 世代迁移。
