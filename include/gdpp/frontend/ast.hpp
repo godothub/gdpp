@@ -227,11 +227,12 @@ struct ForStatement {
 struct PassStatement {};
 struct BreakStatement {};
 struct ContinueStatement {};
+struct BreakpointStatement {};
 
 using StatementNode =
     std::variant<ExpressionStatement, ReturnStatement, AssertStatement, VariableStatement,
                  AssignmentStatement, IfStatement, MatchStatement, WhileStatement, ForStatement,
-                 PassStatement, BreakStatement, ContinueStatement>;
+                 PassStatement, BreakStatement, ContinueStatement, BreakpointStatement>;
 
 enum class StatementKind {
     expression,
@@ -246,6 +247,7 @@ enum class StatementKind {
     pass_statement,
     break_statement,
     continue_statement,
+    breakpoint_statement,
 };
 
 struct Statement {

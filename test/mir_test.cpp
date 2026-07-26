@@ -276,6 +276,26 @@ TEST_CASE("MIR keeps awaited assert messages on the failure-only edge") {
                         }));
 }
 
+TEST_CASE("MIR keeps breakpoints as ordered debugger-observing instructions") {
+    gdpp::ir::Module hir;
+    gdpp::ir::Function function;
+    function.name = "inspect";
+    function.body.push_back(marker(gdpp::ir::StatementKind::pass_statement));
+    function.body.push_back(marker(gdpp::ir::StatementKind::breakpoint_statement));
+    function.body.push_back(marker(gdpp::ir::StatementKind::pass_statement));
+    hir.functions.push_back(std::move(function));
+
+    const auto mir = gdpp::MirLowerer{}.lower(hir);
+    gdpp::DiagnosticBag diagnostics;
+    REQUIRE(gdpp::MirVerifier{diagnostics}.verify(mir));
+    const auto& instructions = mir.functions.front().blocks.front().instructions;
+    REQUIRE_EQ(instructions.size(), std::size_t{1});
+    REQUIRE_EQ(instructions.front().kind, gdpp::mir::InstructionKind::debug_breakpoint);
+    REQUIRE(
+        gdpp::mir::has_effect(instructions.front().effects, gdpp::mir::Effect::observes_debugger));
+    REQUIRE(!gdpp::mir::has_effect(instructions.front().effects, gdpp::mir::Effect::writes_state));
+}
+
 TEST_CASE("MIR verifier rejects corrupt edge and predecessor metadata") {
     gdpp::ir::Module hir;
     gdpp::ir::Function function;

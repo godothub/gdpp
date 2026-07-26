@@ -123,6 +123,7 @@ enum class StatementKind {
     pass_statement,
     break_statement,
     continue_statement,
+    breakpoint_statement,
 };
 
 enum class MatchPatternKind { value, wildcard, binding, rest, array, dictionary };

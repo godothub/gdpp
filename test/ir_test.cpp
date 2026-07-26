@@ -13,9 +13,9 @@
 
 namespace {
 
-gdpp::ir::Module lower_source(
-    const std::string& text, gdpp::DiagnosticBag& diagnostics,
-    const gdpp::GodotVersion target_version = gdpp::minimum_godot_version) {
+gdpp::ir::Module
+lower_source(const std::string& text, gdpp::DiagnosticBag& diagnostics,
+             const gdpp::GodotVersion target_version = gdpp::minimum_godot_version) {
     const gdpp::SourceFile source{"ir_test.gd", text};
     gdpp::Lexer lexer{source, diagnostics};
     const auto tokens = lexer.scan();
@@ -104,11 +104,11 @@ TEST_CASE("typed IR preserves Godot default argument evaluation contracts") {
 
 TEST_CASE("typed IR owns function and lambda rest parameters") {
     gdpp::DiagnosticBag diagnostics;
-    auto module = lower_source(
-        "func collect(prefix: String, ...values: Array) -> int:\n"
-        "    var count := func(...parts: Array) -> int: return parts.size()\n"
-        "    return values.size() + count.call(prefix)\n",
-        diagnostics, gdpp::GodotVersion::v4_6);
+    auto module =
+        lower_source("func collect(prefix: String, ...values: Array) -> int:\n"
+                     "    var count := func(...parts: Array) -> int: return parts.size()\n"
+                     "    return values.size() + count.call(prefix)\n",
+                     diagnostics, gdpp::GodotVersion::v4_6);
 
     REQUIRE(!diagnostics.has_errors());
     REQUIRE_EQ(module.functions.size(), std::size_t{1});
@@ -166,11 +166,11 @@ TEST_CASE("typed IR owns resolved script call contracts") {
 
 TEST_CASE("typed IR preserves shared container ownership through parameters") {
     gdpp::DiagnosticBag diagnostics;
-    auto module = lower_source(
-        "func mutate(bytes: PackedByteArray, values: Array, scalar: int) -> void:\n"
-        "    bytes.append(1)\n"
-        "    values.append(2)\n",
-        diagnostics);
+    auto module =
+        lower_source("func mutate(bytes: PackedByteArray, values: Array, scalar: int) -> void:\n"
+                     "    bytes.append(1)\n"
+                     "    values.append(2)\n",
+                     diagnostics);
 
     REQUIRE(!diagnostics.has_errors());
     REQUIRE_EQ(module.functions.front().parameters.at(0).ownership,
@@ -779,6 +779,23 @@ TEST_CASE("typed IR preserves assert condition and optional message") {
     REQUIRE_EQ(assertion.kind, gdpp::ir::StatementKind::assert_statement);
     REQUIRE_EQ(assertion.condition->type.kind, gdpp::TypeKind::boolean);
     REQUIRE_EQ(assertion.expression->type.kind, gdpp::TypeKind::string);
+    gdpp::IrVerifier verifier{diagnostics};
+    REQUIRE(verifier.verify(module));
+}
+
+TEST_CASE("typed IR preserves debugger breakpoints as observable statements") {
+    gdpp::DiagnosticBag diagnostics;
+    const auto module = lower_source("func inspect(value: int) -> int:\n"
+                                     "    breakpoint\n"
+                                     "    return value\n",
+                                     diagnostics);
+
+    REQUIRE(!diagnostics.has_errors());
+    const auto& breakpoint = module.functions.front().body.front();
+    REQUIRE_EQ(breakpoint.kind, gdpp::ir::StatementKind::breakpoint_statement);
+    REQUIRE_EQ(breakpoint.span.begin.line, std::size_t{2});
+    REQUIRE(!breakpoint.expression);
+    REQUIRE(!breakpoint.condition);
     gdpp::IrVerifier verifier{diagnostics};
     REQUIRE(verifier.verify(module));
 }

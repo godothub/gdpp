@@ -18,6 +18,7 @@ enum class InstructionKind : std::uint8_t {
     declare_variable,
     assign,
     assert_condition,
+    debug_breakpoint,
     loop_test,
     match_test,
     suspend_value,
@@ -30,6 +31,7 @@ enum class Effect : std::uint8_t {
     may_fail = 1U << 2U,
     may_allocate = 1U << 3U,
     suspends = 1U << 4U,
+    observes_debugger = 1U << 5U,
 };
 
 constexpr Effect operator|(Effect left, Effect right) noexcept {

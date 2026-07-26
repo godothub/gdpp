@@ -181,6 +181,10 @@ class FunctionBuilder final {
             append(current, mir::InstructionKind::assert_condition,
                    mir::Effect::reads_state | mir::Effect::may_fail, statement);
             return current;
+        case ir::StatementKind::breakpoint_statement:
+            append(current, mir::InstructionKind::debug_breakpoint,
+                   mir::Effect::reads_state | mir::Effect::observes_debugger, statement);
+            return current;
         case ir::StatementKind::return_statement:
             terminate(current, mir::TerminatorKind::return_value, {}, statement.expression.get(),
                       statement.span);

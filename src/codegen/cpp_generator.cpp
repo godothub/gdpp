@@ -235,6 +235,7 @@ bool flat_async_statement_supported(const ir::Statement& statement) {
     case ir::StatementKind::assignment:
     case ir::StatementKind::await_statement:
     case ir::StatementKind::pass_statement:
+    case ir::StatementKind::breakpoint_statement:
         break;
     case ir::StatementKind::assert_statement:
         return statement.assert_condition_prefix.empty() && statement.assert_message_prefix.empty();
@@ -3580,8 +3581,8 @@ std::string CodeGenerator::emit_expression(const ir::Expression& expression) con
             if (local_signal) {
                 const auto suffix = std::to_string(temporary_counter_++);
                 const auto signal_name = "_gdpp_signal_name_" + suffix;
-                std::string result = "([&]() { static const godot::Variant " + signal_name +
-                                     " = " + godot_string_name(signal.value) + "; ";
+                std::string result = "([&]() { static const godot::Variant " + signal_name + " = " +
+                                     godot_string_name(signal.value) + "; ";
                 for (std::size_t index = 1; index < expression.operands.size(); ++index) {
                     result += "const auto _gdpp_signal_argument_" + suffix + "_" +
                               std::to_string(index - 1) + " = " +
@@ -3590,8 +3591,7 @@ std::string CodeGenerator::emit_expression(const ir::Expression& expression) con
                 result += "gdpp::runtime::emit_local_signal(" + self_object_expression() + ", " +
                           signal_name;
                 for (std::size_t index = 1; index < expression.operands.size(); ++index) {
-                    result += ", _gdpp_signal_argument_" + suffix + "_" +
-                              std::to_string(index - 1);
+                    result += ", _gdpp_signal_argument_" + suffix + "_" + std::to_string(index - 1);
                 }
                 return result + "); }())";
             }
@@ -5601,8 +5601,7 @@ std::string CodeGenerator::emit_statement(const ir::Statement& statement,
                 prefix + "{\n" + nested_prefix + "auto &&" + iterable_name + " = " +
                 emit_expression(*statement.condition) + ";\n" + nested_prefix + "for (int64_t " +
                 index_name + " = 0; " + index_name + " < " + iterable_name +
-                ".native().size(); ++" + index_name + ") {\n" + body_prefix +
-                "[[maybe_unused]] " +
+                ".native().size(); ++" + index_name + ") {\n" + body_prefix + "[[maybe_unused]] " +
                 (statement.declared_type.is_dynamic() ? std::string{"godot::Variant"}
                                                       : cpp_type(statement.declared_type)) +
                 " " + sanitize_identifier(statement.name) + " = " +
@@ -5696,6 +5695,10 @@ std::string CodeGenerator::emit_statement(const ir::Statement& statement,
         return prefix + "break;\n";
     case ir::StatementKind::continue_statement:
         return prefix + "continue;\n";
+    case ir::StatementKind::breakpoint_statement:
+        return prefix + "#ifdef GDPP_SCRIPT_DEBUG_ENABLED\n" + prefix +
+               "/* GDPP debugger bridge is emitted in the runtime integration stage. */;\n" +
+               prefix + "#endif\n";
     }
     return {};
 }
@@ -5785,8 +5788,8 @@ void CodeGenerator::emit_attached_descriptor_definition(
         }
         source << "        descriptor.methods.push_back(std::move(method));\n"
                << "        descriptor.method_dispatches.push_back({"
-               << godot_string_name(function.name) << ", &" << native_name << "::"
-               << method_callback_name(function) << "});\n"
+               << godot_string_name(function.name) << ", &" << native_name
+               << "::" << method_callback_name(function) << "});\n"
                << "    }\n";
     }
     for (const auto& signal : signals) {

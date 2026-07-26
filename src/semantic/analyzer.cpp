@@ -1445,9 +1445,8 @@ Type SemanticAnalyzer::analyze_binary_tree(const ast::Expression& expression) {
 
 Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
     Type result = unknown_type;
-    const auto property_resolution =
-        [this](const ApiResolutionKind kind,
-               const GodotPropertyRecord& property) -> ApiResolution {
+    const auto property_resolution = [this](const ApiResolutionKind kind,
+                                            const GodotPropertyRecord& property) -> ApiResolution {
         ApiResolution resolution{kind,
                                  property.owner,
                                  property.getter,
@@ -4343,6 +4342,7 @@ SemanticAnalyzer::FlowResult SemanticAnalyzer::analyze_statement(const ast::Stat
                    : FlowResult{false, false, false, true};
     }
     case ast::StatementKind::pass_statement:
+    case ast::StatementKind::breakpoint_statement:
         return FlowResult{true, false, false, false};
     }
     return FlowResult{true, false, false, false};

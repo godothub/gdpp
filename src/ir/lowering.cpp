@@ -87,6 +87,8 @@ ir::StatementKind lower_statement_kind(ast::StatementKind kind) {
         return ir::StatementKind::break_statement;
     case ast::StatementKind::continue_statement:
         return ir::StatementKind::continue_statement;
+    case ast::StatementKind::breakpoint_statement:
+        return ir::StatementKind::breakpoint_statement;
     }
     return ir::StatementKind::pass_statement;
 }
@@ -1186,6 +1188,7 @@ bool IrVerifier::verify_statement(const ir::Statement& statement) {
     case ir::StatementKind::pass_statement:
     case ir::StatementKind::break_statement:
     case ir::StatementKind::continue_statement:
+    case ir::StatementKind::breakpoint_statement:
         break;
     }
     if (statement.kind == ir::StatementKind::for_statement) {

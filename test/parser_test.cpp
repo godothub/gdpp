@@ -211,6 +211,23 @@ TEST_CASE("parser builds assert statements with optional messages") {
                gdpp::ast::LiteralKind::string);
 }
 
+TEST_CASE("parser preserves standalone breakpoint statements in every suite form") {
+    const gdpp::SourceFile source{"breakpoint.gd", "func inspect(value: int) -> int:\n"
+                                                   "    breakpoint\n"
+                                                   "    if value > 0: breakpoint; value += 1\n"
+                                                   "    return value\n"};
+    gdpp::DiagnosticBag diagnostics;
+    const auto tokens = gdpp::Lexer{source, diagnostics}.scan();
+    const auto script = gdpp::Parser{tokens, diagnostics}.parse_script();
+
+    REQUIRE(!diagnostics.has_errors());
+    REQUIRE_EQ(script.functions.front().body.front().kind(),
+               gdpp::ast::StatementKind::breakpoint_statement);
+    const auto& conditional = script.functions.front().body.at(1);
+    REQUIRE_EQ(conditional.body().front().kind(), gdpp::ast::StatementKind::breakpoint_statement);
+    REQUIRE_EQ(conditional.body().at(1).kind(), gdpp::ast::StatementKind::assignment);
+}
+
 TEST_CASE("parser builds await as a precedence-aware expression") {
     const gdpp::SourceFile source{"await.gd", "func wait_for(timer: Timer) -> void:\n"
                                               "    await timer.timeout\n"
@@ -735,8 +752,7 @@ TEST_CASE("parser preserves function and lambda rest parameters") {
     REQUIRE_EQ(script.functions.front().parameters.size(), std::size_t{2});
     REQUIRE(script.functions.front().rest_parameter.has_value());
     REQUIRE_EQ(script.functions.front().rest_parameter->name, std::string{"values"});
-    REQUIRE_EQ(script.functions.front().rest_parameter->type,
-               std::optional<std::string>{"Array"});
+    REQUIRE_EQ(script.functions.front().rest_parameter->type, std::optional<std::string>{"Array"});
     REQUIRE(script.functions.at(1).is_static);
     REQUIRE(script.functions.at(1).rest_parameter.has_value());
     const auto* lambda = script.functions.back().body.front().expression()->lambda();
@@ -748,15 +764,14 @@ TEST_CASE("parser preserves function and lambda rest parameters") {
 }
 
 TEST_CASE("parser rejects invalid rest parameter placement and defaults") {
-    const gdpp::SourceFile source{
-        "invalid_rest_parameters.gd",
-        "signal changed(...values)\n"
-        "func after_rest(...values, trailing):\n"
-        "    pass\n"
-        "func default_rest(...values = []):\n"
-        "    pass\n"
-        "func duplicate(value, ...value):\n"
-        "    pass\n"};
+    const gdpp::SourceFile source{"invalid_rest_parameters.gd",
+                                  "signal changed(...values)\n"
+                                  "func after_rest(...values, trailing):\n"
+                                  "    pass\n"
+                                  "func default_rest(...values = []):\n"
+                                  "    pass\n"
+                                  "func duplicate(value, ...value):\n"
+                                  "    pass\n"};
     gdpp::DiagnosticBag diagnostics;
     const auto tokens = gdpp::Lexer{source, diagnostics}.scan();
     const auto script = gdpp::Parser{tokens, diagnostics}.parse_script();

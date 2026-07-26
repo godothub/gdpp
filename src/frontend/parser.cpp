@@ -524,9 +524,9 @@ Parser::ParsedParameters Parser::parse_parameters(const std::string_view owner,
         const bool has_default = parameter.default_value != nullptr;
         bool accepted = true;
         if (parameters.rest) {
-            diagnostics_.error("GDS2037", "parameters cannot follow the rest parameter in a " +
-                                               std::string{owner},
-                               parameter.span);
+            diagnostics_.error(
+                "GDS2037", "parameters cannot follow the rest parameter in a " + std::string{owner},
+                parameter.span);
             accepted = false;
         }
         if (is_rest && !allow_rest) {
@@ -1104,6 +1104,8 @@ ast::Statement Parser::parse_statement() {
         return ast::Statement{ast::BreakStatement{}, previous().span};
     if (match(TokenKind::kw_continue))
         return ast::Statement{ast::ContinueStatement{}, previous().span};
+    if (match(TokenKind::kw_breakpoint))
+        return ast::Statement{ast::BreakpointStatement{}, previous().span};
 
     const auto begin = current().span;
     auto expression = parse_expression();
