@@ -134,6 +134,7 @@ jobs:
                   raise SystemExit(result.returncode)
           PY
           grep -q '^GDPP_EXPORTED_PROPERTIES_OK$' "$root/runtime.log"
+          grep -q '^GDPP_ASYNC_VIRTUAL_OK$' "$root/runtime.log"
           grep -q '^GDPP_COROUTINE_LOOP_OK$' "$root/coroutine-loop.log"
           grep -q 'GDPP_AOT_SUMMARY scenes=' "$root/export.log"
 
