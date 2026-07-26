@@ -1,13 +1,31 @@
-extends Node
+extends "res://rpc_runtime_probe_base.gd"
 
 static var static_events: Array[int] = []
-
-var events: Array[Dictionary] = []
-
 
 @rpc
 func defaults() -> void:
     pass
+
+
+func inherited_override(value: String) -> void:
+    events.push_back(
+        {
+            "kind": "inherited_override",
+            "value": value,
+            "sender": multiplayer.get_remote_sender_id(),
+        },
+    )
+
+
+@rpc("any_peer", "call_remote", "reliable", 7)
+func reconfigured_remote(value: String) -> void:
+    events.push_back(
+        {
+            "kind": "reconfigured",
+            "value": value,
+            "sender": multiplayer.get_remote_sender_id(),
+        },
+    )
 
 
 @rpc("any_peer", "call_remote", "reliable", 0)

@@ -5,6 +5,7 @@ const CONTAINER_OWNER := preload("res://a_container_owner.gd")
 const CONTAINER_VALUE := preload("res://z_container_value.gd")
 const INNER_DATA := preload("res://inner_data.gd")
 const NETWORK_IMAGE := preload("res://network_image.gd")
+const RPC_RUNTIME_HARNESS := preload("res://rpc_runtime_harness.gd")
 const RUNTIME_SHADER := preload("res://runtime_shader.gdshader")
 const ATTACHED_SCENE := preload("res://attached_scene.tscn")
 
@@ -94,6 +95,13 @@ func _verify_export_runtime() -> void:
     if factorial.call(5) != 120:
         _fail("recursive lambda capture did not preserve shared container identity")
         return
+
+    var rpc_harness: Variant = RPC_RUNTIME_HARNESS.new()
+    var rpc_failure: String = await rpc_harness.verify(get_tree())
+    if not rpc_failure.is_empty():
+        _fail(rpc_failure)
+        return
+    print("GDPP_RPC_RUNTIME_OK")
 
     var captured_array := [3]
     var captured_dictionary := {"value": 4}
