@@ -55,7 +55,7 @@ lexer/parser 仍缺持续 coverage-guided fuzz、完整错误恢复和所有节�
 | `@abstract` | 完成 | 脚本/内部类/方法、跨脚本义务和动态分派 |
 | `@tool` | 完成 | 工具脚本与 runtime 脚本执行域隔离；编辑器专用脚本不能进入 runtime 图 |
 | `@icon` | 完成 | `res://`/`uid://`、路径逃逸拒绝和 ClassDB 图标描述 |
-| `@static_unload` | 未实现 | 语法已登记，但没有独立可观察生命周期语义 |
+| `@static_unload` | 完成（当前目标） | 保留注解与缓存身份；4.4～4.7 按当前 Godot 行为保持静态状态到语言/扩展关闭 |
 
 类型系统覆盖：
 
@@ -98,15 +98,21 @@ lexer/parser 仍缺持续 coverage-guided fuzz、完整错误恢复和所有节�
 |---|---|---|
 | 脚本方法 Callable | 完成 | 实例/静态方法、默认参数、`.call()`、bind/unbind、有效性、相等性和 Signal 生命周期 |
 | lambda | 完成 | 创建时值快照、共享容器/Object 身份、嵌套/返回/递归闭包和每次调用独立局部帧 |
-| 实例协程 | 完成 | 同步立即值或每次调用独有完成 Signal；类型化返回、并发调用和跨脚本 await |
+| 实例协程 | 完成 | 同步立即值或逐次调用独有 FunctionState；类型化返回、并发调用和跨脚本 await |
 | 结构化 await | 完成 | 赋值、参数、容器、短路、三元、循环、match、assert |
 | 大型恢复链 | 完成 | MIR 扁平状态机和共享帧路径，4996 项/每帧 200 项批处理运行 oracle |
-| 静态函数协程 | 完成 | 无实例宿主的独立完成 owner、真正挂起、类型化返回和 Signal 恢复 |
+| 静态函数协程 | 完成 | 无实例宿主的独立 FunctionState、真正挂起、类型化返回和 Signal 恢复 |
 | lambda 协程 | 完成 | 类型化返回、捕获值、每次调用独立挂起状态及并发逆序恢复 |
-| 异步引擎虚函数 | 主路径 | `void` continuation 与受检立即返回已运行；外部调用者等待非立即返回值的全部 ABI 未闭合 |
+| 异步引擎虚函数 | 完成 | 与 GDScript 一样立即返回 FunctionState，并由 Godot 转换为虚函数声明的原生返回类型 |
 
 已知协程的返回值被消费时必须写 `await`；故意丢弃返回值的 detached 调用可以执行。协程身份进入
 项目公开 ABI 和精确增量失效，不能把同步旧对象误用于新协程实现。
+
+真正挂起的调用返回引用计数 FunctionState 对象。它公开 `completed(result)`、`resume(arg)`、
+`is_valid(extended_check)`，折叠零个/一个/多个 Signal 参数，并在手动恢复或完成时断开旧的一次性
+连接。GDPP 的 `await` 同时识别自身状态和 Godot 的 `GDScriptFunctionState`。异步引擎虚函数
+没有额外的“等待引擎”协议：官方 Godot 也会把挂起状态立即交给虚函数 Variant→native 转换；
+GDPP 在官方 4.7.1 中对状态对象、恢复、完成信号、即时字符串和 continuation 做相同差分。
 
 lambda 与 GDScript 一样在创建 Callable 时捕获当前局部值；标量在每次调用中获得独立工作副本，
 Array、Dictionary 与 Object 仍保持共享身份。因此递归通过捕获的共享 `Array[Callable]` 建立，
@@ -128,8 +134,9 @@ Array、Dictionary 与 Object 仍保持共享身份。因此递归通过捕获�
 - `@onready`、`@rpc`、`@abstract`、`@tool`、`@icon`；
 - `@warning_ignore`、`@warning_ignore_start`、`@warning_ignore_restore` 和 Godot 4.7 warning 名表。
 
-未支持注解会产生诊断，不会只接受语法后忽略行为。`@static_unload` 是当前唯一已知的稳定语法
-登记但没有独立 runtime 语义的注解。
+未支持注解会产生诊断，不会只接受语法后忽略行为。`@static_unload` 保留到生成 metadata；当前
+4.4～4.7 目标跟随 Godot 已记录的“脚本不因引用归零卸载”行为，并在扩展终止时清理。若未来
+目标 Godot 改变该行为，版本能力表和运行差分必须一起更新。
 
 ## 标准库与 Godot API
 
