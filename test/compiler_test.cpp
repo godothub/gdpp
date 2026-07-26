@@ -326,6 +326,23 @@ TEST_CASE("compiler emits debugger frames and exact breakpoint snapshots") {
     REQUIRE(result.unit.source.find("debugger bridge is emitted") == std::string::npos);
 }
 
+TEST_CASE("compiler preserves legal lexical shadowing under native warning policies") {
+    const auto result =
+        gdpp::Compiler{}.compile("shadowing.gd", "func inspect(label: String) -> int:\n"
+                                                 "    if not label.is_empty():\n"
+                                                 "        var label := 42\n"
+                                                 "        return label\n"
+                                                 "    return 0\n");
+
+    REQUIRE(result.success);
+    REQUIRE(result.unit.source.find("#pragma clang diagnostic ignored \"-Wshadow\"") !=
+            std::string::npos);
+    REQUIRE(result.unit.source.find("#pragma GCC diagnostic ignored \"-Wshadow\"") !=
+            std::string::npos);
+    REQUIRE(result.unit.source.find("#pragma warning(disable : 4456 4457 4458 4459)") !=
+            std::string::npos);
+}
+
 TEST_CASE("compiler emits nil fallthrough only for dynamic functions that need it") {
     const gdpp::Compiler compiler;
     const auto result = compiler.compile("dynamic_returns.gd", "func side_effect(value):\n"
