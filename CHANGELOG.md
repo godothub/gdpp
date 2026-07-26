@@ -19,6 +19,7 @@
 - Allow macOS Universal debug exports to reuse a verified Release-only third-party provider fat binary when the provider does not ship a distinct debug binary. GDPP adds debug aliases only to the descriptor bytes packaged into the export and never mutates the customer's source descriptor or library.
 - Compile generated breakpoint fixtures against real godot-cpp and export and run attached third-party GDExtension projects with official Godot 4.6.2 in both Debug and Release profiles.
 - Add bounded multi-error parser recovery, complete source-span AST serialization goldens, coverage-guided frontend fuzzing, and an official Godot 4.7.1 stable-language drift report covering all 114 accepted and 76 rejected parser fixtures.
+- Keep exhaustive AST visitor sentinels warning-clean in the Clang 14 fuzzer-only build while retaining compile-time rejection of every unhandled node kind.
 - Assign stable, address-free identities to MIR values and operations, serialize versioned control-flow snapshots, validate source ownership and dense predecessor metadata, and make optimization budgets and failures transactional.
 - Remove dead MIR values with complete operand remapping while preserving observable debugger, allocation, fault, and suspension operations; keep CSE, inlining, escape, and loop transformations disabled until they have independent equivalence proofs.
 - Validate every generated Godot API metadata record, argument range, property read/write ABI, Signal contract, enum/bitfield, scalar return, and forbidden native pointer boundary across the 4.4-4.7 tables.
