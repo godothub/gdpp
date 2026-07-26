@@ -55,7 +55,7 @@ runtime ABI、API 版本、平台、架构、profile 或 binding 摘要任一不
 
 ## 官方 API 之外的边界
 
-正式包只认证官方标准精度 Godot 与包内匹配的 godot-cpp。下列情况不能直接复用标准 SDK：
+三个通用正式包认证官方标准精度 Godot 与包内匹配的 godot-cpp。下列情况不能直接复用标准 SDK：
 
 - `precision=double` 的自定义引擎；
 - 修改过 `extension_api.json` 或 GDExtension ABI 的引擎；
@@ -67,6 +67,19 @@ runtime ABI、API 版本、平台、架构、profile 或 binding 摘要任一不
 运行时桥接保持原项目调用方式；它不需要修改自身源码。未注册的私有 C++ API 不属于 GDExtension
 公共契约，任何 ScriptLanguageExtension 也无法可靠发现。
 
-为自定义 Godot 提供商业支持前，需要一条独立的 SDK 生产流程：从目标引擎导出 API，使用相同
-精度与编译选项构建 godot-cpp，生成并校验新的 API/SDK 身份，再跑完整平台门禁。当前仓库尚未把
-这条流程产品化，不能把手工替换 JSON 或静态库描述成受支持方案。
+仓库提供独立 custom SDK 生产流程。配置时传入
+`GDPP_CUSTOM_GDEXTENSION_API_FILE=<目标引擎导出的 extension_api.json>`，并让
+`GDPP_GODOT_PRECISION` 与目标的 `single`/`double` 一致；构建只允许打包该 API 所属的一个
+Godot minor。编译器、editor 插件、fallback、godot-cpp `template_release`、生成 API 表和
+runtime 使用同一输入，不允许把标准包的任一静态库混入。
+
+custom 包与 SDK manifest 固定：
+
+- 完整 API 文件 SHA-256、Godot major/minor 和 precision；
+- SDK schema、runtime ABI、godot-cpp binding profile 和优化配置；
+- compiler/fallback 与 descriptor 的 exact precision feature；
+- 唯一匹配 precision 的 editor 和 `template_release` 二进制，不接受另一精度的文件。
+
+CI 会从一个 4.7 double API 干净构建完整 custom add-on，并用独立审计器检查上述字段、文件名、
+descriptor、插件版本和运行时哈希。客户定制引擎仍需要针对其实际平台重新执行同等级门禁；
+“流程已产品化”不表示标准发行 ZIP 能直接加载任意定制引擎，也不允许手工替换 JSON 或静态库。

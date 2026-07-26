@@ -34,13 +34,14 @@ ClassDB 方法仍会在生成 C++ 前报错。
 |---|---|
 | Godot 4.7 官方合法 parser 语料 | 114 / 114 未被 lexer/parser 拒绝 |
 | Godot 4.7 官方非法 parser 语料 | 76 / 76 最终拒绝；接受、超时、崩溃均阻断 CI |
-| 固定编译器单元测试 | 507 / 507 |
+| 固定编译器单元测试 | 543 / 543 |
 | 恶意输入 | 非法 UTF-8、NUL、超深递归、超长链、诊断风暴和资源上限均失败关闭 |
 | Unicode | Unicode 17.0 XID、关键字 confusable 防护、稳定 ASCII C++ 标识符 |
 | 字面量 | 整数基数/边界、浮点非有限值、raw/三引号字符串和 Unicode 转义 |
 
-lexer/parser 仍缺持续 coverage-guided fuzz、完整错误恢复和所有节点的源范围 golden。当前固定
-恶意语料只能证明已覆盖输入不会崩溃，不能替代长期模糊测试。
+lexer/parser 已有持续 coverage-guided fuzz、同文件多错误恢复、每类 AST 节点的完整源范围
+golden 和资源预算。模糊测试是持续门禁而不是一次性“完成率”；新 stable 仍需刷新官方语料和
+漂移快照。
 
 ## 声明与类型
 
@@ -66,8 +67,10 @@ lexer/parser 仍缺持续 coverage-guided fuzz、完整错误恢复和所有节�
 - 流敏感 `is`/`is not`、`null`、真值与短路分支收窄；
 - 编译期不变容器赋值和运行时容器元数据守卫。
 
-嵌套强类型容器按 Godot 自身规则拒绝。动态容器转换失败的源位置、错误文本和函数终止时序还没有
-对全部组合完成 VM 差分。
+嵌套强类型容器按 Godot 自身规则拒绝。动态容器转换、普通/强类型 Array/Dictionary、十种
+PackedArray、Object/Ref 与所有 Variant 值家族已进入官方源码/AOT fault 差分；错误包含源码
+位置并终止当前函数。Godot 自己跨 patch 会调整诊断措辞，因此兼容合同锁定错误类别、位置、
+求值顺序和中止边界，不承诺不同引擎 patch 的日志逐字节恒定。
 
 ## 表达式与控制流
 
@@ -84,8 +87,9 @@ lexer/parser 仍缺持续 coverage-guided fuzz、完整错误恢复和所有节�
 | `assert` | 完成 | Debug 保留、Release 完全移除条件与消息求值 |
 | `breakpoint` | 完成 | Debug 进入 Godot 调试器并保留源码帧；Release 不生成调试插桩 |
 
-错误路径采用安全 runtime，目标是避免未定义行为和进程崩溃。除零、越界、失效对象和错误键读取
-等全部 VM 中止时序尚未认证，不能声称错误日志逐字节等同 GDScript。
+错误路径采用安全 runtime，避免未定义行为和进程崩溃。除零、模零、越界、失效对象、错误键、
+Callable、强类型存储和第三方调用均验证接收者/参数的左到右求值及当前函数中止；调用者继续执行
+与官方 GDScript 对照。诊断不承诺跨 Godot patch 逐字节相同。
 
 `breakpoint` 覆盖普通函数、访问器、静态函数、lambda、Attached 第三方 GDExtension 基类和
 协程恢复点。调试器可读取原始 `.gd` 路径、函数、当前行、按词法遮蔽后的当前帧局部变量，以及
@@ -100,6 +104,8 @@ lexer/parser 仍缺持续 coverage-guided fuzz、完整错误恢复和所有节�
 | lambda | 完成 | 创建时值快照、共享容器/Object 身份、嵌套/返回/递归闭包和每次调用独立局部帧 |
 | 实例协程 | 完成 | 同步立即值或逐次调用独有 FunctionState；类型化返回、并发调用和跨脚本 await |
 | 结构化 await | 完成 | 赋值、参数、容器、短路、三元、循环、match、assert |
+| await 默认参数 | 完成 | 按实参缺失顺序在调用帧中求值，可挂起并保留已求值参数 |
+| 协程属性访问器 | 完成 | 内联/绑定、实例/静态/内部类，跨脚本 ABI 与缓存失效 |
 | 大型恢复链 | 完成 | MIR 扁平状态机和共享帧路径，4996 项/每帧 200 项批处理运行 oracle |
 | 静态函数协程 | 完成 | 无实例宿主的独立 FunctionState、真正挂起、类型化返回和 Signal 恢复 |
 | lambda 协程 | 完成 | 类型化返回、捕获值、每次调用独立挂起状态及并发逆序恢复 |
@@ -141,8 +147,9 @@ Array、Dictionary 与 Object 仍保持共享身份。因此递归通过捕获�
 ## 标准库与 Godot API
 
 4.7 能力表索引全部非空 Variant 内建类型、构造器、方法、成员、常量、运算符、全局工具函数、
-全局 enum 和整数常量。解析、重载选择和 C++ 生成已经统一进入版本化 API 数据，仍缺每个表项在
-4.4～4.7 的逐重载运行矩阵。
+全局 enum 和整数常量。四版本元数据的每条范围、native meta、参数、属性读写、Signal、enum/
+bitfield 和 pointer 禁用规则均自动验证；运行门禁覆盖各 ABI 家族与边界代表。逐 patch、逐重载
+的穷举实机组合属于持续认证，不是缺失的编译器语义分支。
 
 专用 GDScript intrinsic 已覆盖：
 
@@ -153,7 +160,8 @@ API 规则：
 
 - 目标 patch 版本归一到对应 minor 能力表，但不支持的 minor 会明确拒绝；
 - 类型、构造器、方法、属性、虚函数、单例、工具函数、enum 和默认参数均从同一快照生成；
-- custom engine、double precision 和用户 extension API 合并层尚无正式发行流程；
+- custom engine/double precision 使用独立构建产物，绑定目标 API SHA-256、precision、版本、
+  godot-cpp 与 runtime ABI；标准包不会与 custom SDK 混用；
 - 静态强类型调用使用精确 native meta，动态对象仍通过 Godot ABI，不猜测 C++ 布局。
 
 ## 项目级能力
@@ -168,12 +176,16 @@ API 规则：
 | 动态 ShaderMaterial/Shader 参数 | 完成主路径并有 Attached 集成 fixture |
 | HTTP/WebSocket、二进制消息、网络图片 | 完成主路径并有 Windows 端到端 fixture |
 | 字面量 `.gd` preload/load 与脚本 `.new()` | 完成 |
-| 动态拼接 `.gd` 路径 | 未实现保留清单；无源码导出前需要可证明路径 |
+| 动态拼接 `.gd` 路径 | 完成；从全项目编译清单解析，清单外路径确定失败 |
 | 第三方 addon 内 `.gd` | 与项目脚本统一 AOT，不按目录跳过 |
 | 第三方 `.gdextension` | Godot 原样加载和导出 |
 
 脚本发现以项目根为边界，忽略 GDPP 自己的受控构建/SDK 目录，不会因为位于 `addons/` 就跳过
 客户或第三方 GDScript。
+
+每个已编译脚本还登记唯一规范 `Script` 资源身份。`load()`、`ResourceLoader`、相对路径、
+`uid://`、线程加载、缓存、`exists()`、`get_script()` 和 `.new()` 即使路径在运行时拼接也使用
+同一二进制清单；不存在的路径返回确定错误，成品无需保留 `.gd`。
 
 ## 第三方 GDExtension
 

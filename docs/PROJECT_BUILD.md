@@ -139,13 +139,13 @@ GDPP 通过 `AttachedCompiledScript` 提供生成行为。
 
 ## SDK 与项目库
 
-SDK schema 11 固定以下契约：
+SDK schema 12 固定以下契约：
 
 - Godot API、平台、架构和最低系统；
 - C++17、异常关闭、工具链族和 MSVC 静态 CRT；
 - `debug,release` 项目 profile；
 - 唯一 `distribution_binding template_release`；
-- runtime ABI 15 和所有 runtime 文件 SHA-256；
+- runtime ABI 18 和所有 runtime 文件 SHA-256；
 - Android API/STL、iOS slices、Web threads 等目标字段。
 
 NativeBuilder 在创建第一条编译命令前验证完整 manifest。旧 schema、错误 API/架构、损坏
@@ -187,7 +187,9 @@ depfile、SDK/runtime、第三方 bridge、工具链绝对路径、profile 和�
 NativeBuilder 直接命令；这些旧文件既不会参与构建，也不会以旧入口 ABI 留在诊断现场。
 
 当前缓存事务在单进程内安全；多个编辑器或 CLI 同时写同一项目尚无跨进程锁，不属于支持用法。
-新进程仍需重新执行前端，持久化 AST/符号摘要尚未实现。
+新进程仍需重新执行前端，持久化 AST/符号摘要尚未实现。动态 `.gd` 资源不依赖静态调用点分析：
+项目编译清单登记每个可交付脚本的规范路径、UID 与唯一 `Script` 身份，运行时拼接路径和线程
+ResourceLoader 从该清单解析；清单外路径确定返回不存在。
 
 ## 产物边界
 
@@ -224,7 +226,6 @@ source-fallback extension registry 状态。标准 AOT 导出不改写 compiler/
 - 多进程同时导出；
 - 用户取消和编辑器关闭期间的子进程终止；
 - 断电、低磁盘、只读目录和跨卷原子提交；
-- 动态拼接 `.gd` 路径的无源码保留策略；
 - 运行期热重载（明确不提供）。
 
 需要普通 GDScript 包时必须显式启用 source fallback 或使用独立非剥离预设，不能把 AOT 失败
