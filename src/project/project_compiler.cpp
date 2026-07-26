@@ -660,6 +660,21 @@ bool function_contains_await(const ast::FunctionDeclaration& function) {
     return statements_contain_await(function.body);
 }
 
+bool accessor_contains_await(
+    const std::optional<ast::PropertyAccessor>& accessor,
+    const std::vector<ast::FunctionDeclaration>& functions) {
+    if (!accessor)
+        return false;
+    if (accessor->method.empty())
+        return statements_contain_await(accessor->body);
+    const auto method = std::find_if(functions.begin(), functions.end(),
+                                     [&](const auto& function) {
+                                         return function.name == accessor->method;
+                                     });
+    return method != functions.end() && method->name != "_init" &&
+           method->name != "_static_init" && function_contains_await(*method);
+}
+
 ScriptInnerClassSymbol inner_class_symbol(const ast::ClassDeclaration& declaration,
                                           const GodotApi& api) {
     ScriptInnerClassSymbol symbol;
@@ -679,6 +694,10 @@ ScriptInnerClassSymbol inner_class_symbol(const ast::ClassDeclaration& declarati
             api);
         member.is_static = variable.is_constant || variable.is_static;
         member.has_accessor = variable.getter.has_value() || variable.setter.has_value();
+        member.getter_is_coroutine =
+            accessor_contains_await(variable.getter, declaration.functions);
+        member.setter_is_coroutine =
+            accessor_contains_await(variable.setter, declaration.functions);
         symbol.members.push_back(std::move(member));
     }
     for (const auto& function : declaration.functions) {
@@ -1380,6 +1399,10 @@ ProjectCompileResult ProjectCompiler::compile_impl(const ProjectCompileOptions& 
                 target_api);
             member.is_static = variable.is_constant || variable.is_static;
             member.has_accessor = variable.getter.has_value() || variable.setter.has_value();
+            member.getter_is_coroutine =
+                accessor_contains_await(variable.getter, script.functions);
+            member.setter_is_coroutine =
+                accessor_contains_await(variable.setter, script.functions);
             for (const auto& annotation : variable.annotations) {
                 if (annotation.name == "export_storage") {
                     member.property_storage = true;
@@ -2052,7 +2075,8 @@ ProjectCompileResult ProjectCompiler::compile_impl(const ProjectCompileOptions& 
             identity << static_cast<int>(member.kind) << ':' << member.name << ':'
                      << static_cast<int>(member.type.kind) << ':' << member.type.name << ':'
                      << member.required_arguments << ':' << member.is_static << ':'
-                     << member.has_accessor << ':' << member.has_explicit_type << ':'
+                     << member.has_accessor << ':' << member.getter_is_coroutine << ':'
+                     << member.setter_is_coroutine << ':' << member.has_explicit_type << ':'
                      << member.is_vararg << ':' << member.is_coroutine << ':' << member.is_abstract
                      << ':' << member.property_storage << ':' << member.property_editor;
             if (const auto bridge = bridge_classes.find(member.type.name);
@@ -2092,7 +2116,8 @@ ProjectCompileResult ProjectCompiler::compile_impl(const ProjectCompileOptions& 
                 identity << "inner-member:" << static_cast<int>(member.kind) << ':' << member.name
                          << ':' << static_cast<int>(member.type.kind) << ':' << member.type.name
                          << ':' << member.required_arguments << ':' << member.is_static << ':'
-                         << member.has_accessor << ':' << member.is_vararg << ':'
+                         << member.has_accessor << ':' << member.getter_is_coroutine << ':'
+                         << member.setter_is_coroutine << ':' << member.is_vararg << ':'
                          << member.is_coroutine << ':' << member.is_abstract;
                 if (const auto bridge = bridge_classes.find(member.type.name);
                     bridge != bridge_classes.end()) {
@@ -2428,7 +2453,34 @@ ProjectCompileResult ProjectCompiler::compile_impl(const ProjectCompileOptions& 
                                                  coroutine);
                 }
             };
+            const auto refine_accessors =
+                [&](auto& members, const std::vector<ast::VariableDeclaration>& variables,
+                    const std::string& inner_name) {
+                    for (const auto& variable : variables) {
+                        const auto member =
+                            std::find_if(members.begin(), members.end(), [&](const auto& candidate) {
+                                return candidate.kind == ScriptMemberKind::field &&
+                                       candidate.name == variable.name;
+                            });
+                        if (member == members.end())
+                            continue;
+                        const bool getter_coroutine =
+                            variable.getter && semantic.is_coroutine(*variable.getter);
+                        const bool setter_coroutine =
+                            variable.setter && semantic.is_coroutine(*variable.setter);
+                        if (member->getter_is_coroutine != getter_coroutine ||
+                            member->setter_is_coroutine != setter_coroutine) {
+                            member->getter_is_coroutine = getter_coroutine;
+                            member->setter_is_coroutine = setter_coroutine;
+                            changed = true;
+                        }
+                        script_symbols.set_accessor_coroutines(
+                            input.relative, inner_name, variable.name, getter_coroutine,
+                            setter_coroutine);
+                    }
+                };
             refine_members(input.members, input.script.functions, "");
+            refine_accessors(input.members, input.script.variables, "");
             const auto refine_inner = [&](const auto& self,
                                           const std::vector<ast::ClassDeclaration>& classes,
                                           const std::string& parent) -> void {
@@ -2438,8 +2490,10 @@ ProjectCompileResult ProjectCompiler::compile_impl(const ProjectCompileOptions& 
                     const auto symbol = std::find_if(
                         input.inner_classes.begin(), input.inner_classes.end(),
                         [&](const auto& candidate) { return candidate.name == qualified; });
-                    if (symbol != input.inner_classes.end())
+                    if (symbol != input.inner_classes.end()) {
                         refine_members(symbol->members, declaration.functions, qualified);
+                        refine_accessors(symbol->members, declaration.variables, qualified);
+                    }
                     self(self, declaration.classes, qualified);
                 }
             };
