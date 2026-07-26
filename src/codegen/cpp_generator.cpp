@@ -4148,9 +4148,14 @@ std::string CodeGenerator::emit_expression(const ir::Expression& expression) con
         const auto saved_return = current_return_type_;
         const auto saved_callable = in_callable_lambda_;
         const auto saved_function = in_function_body_;
+        const auto saved_debug_function = current_debug_function_;
+        const auto saved_debug_instance = current_debug_instance_;
         current_return_type_ = lambda.return_type;
         in_callable_lambda_ = true;
         in_function_body_ = true;
+        current_debug_function_ = lambda.name.empty() ? "<lambda>" : lambda.name;
+        current_debug_instance_ = lambda.owner_bound ? saved_debug_instance : "nullptr";
+        result += emit_debug_frame(lambda.span.begin.line, 1);
         result += emit_statements(lambda.body, 1, 0,
                                   parameter_locals(lambda.parameters, lambda.rest_parameter
                                                                           ? &*lambda.rest_parameter
@@ -4158,6 +4163,8 @@ std::string CodeGenerator::emit_expression(const ir::Expression& expression) con
         current_return_type_ = saved_return;
         in_callable_lambda_ = saved_callable;
         in_function_body_ = saved_function;
+        current_debug_function_ = saved_debug_function;
+        current_debug_instance_ = saved_debug_instance;
         // Typed non-void lambdas have already passed semantic all-path return
         // analysis. Adding a defensive return here creates unreachable C++ and
         // fails warning-clean MSVC builds. A void GDScript lambda still needs a
@@ -4859,8 +4866,76 @@ std::string CodeGenerator::emit_match_pattern(const ir::MatchPattern& pattern,
     return "false";
 }
 
+std::string CodeGenerator::emit_debug_frame(const std::size_t line,
+                                            const std::size_t indentation) const {
+    if (current_debug_source_.empty() || current_debug_function_.empty() ||
+        current_debug_instance_.empty()) {
+        return {};
+    }
+    const auto prefix = indent(indentation);
+    return prefix + "#ifdef GDPP_SCRIPT_DEBUG_ENABLED\n" + prefix +
+           "[[maybe_unused]] gdpp::runtime::ScriptDebugFrame _gdpp_debug_frame(" +
+           godot_string(current_debug_source_) + ", " + godot_string_name(current_debug_function_) +
+           ", " + std::to_string(line) + ", " + current_debug_instance_ + ");\n" + prefix +
+           "#endif\n";
+}
+
+std::string CodeGenerator::emit_debug_line(const std::size_t line,
+                                           const std::size_t indentation) const {
+    if (current_debug_source_.empty() || current_debug_function_.empty() ||
+        current_debug_instance_.empty() || in_async_continuation_) {
+        return {};
+    }
+    const auto prefix = indent(indentation);
+    return prefix + "#ifdef GDPP_SCRIPT_DEBUG_ENABLED\n" + prefix + "_gdpp_debug_frame.set_line(" +
+           std::to_string(line) + ");\n" + prefix + "#endif\n";
+}
+
+std::string CodeGenerator::emit_debug_breakpoint(const ir::Statement& statement,
+                                                 const std::size_t indentation) const {
+    const auto prefix = indent(indentation);
+    const auto body = indent(indentation + 1);
+    const auto suffix = std::to_string(temporary_counter_++);
+    const auto local_names = "_gdpp_debug_local_names_" + suffix;
+    const auto local_values = "_gdpp_debug_local_values_" + suffix;
+    const auto member_names = "_gdpp_debug_member_names_" + suffix;
+    const auto member_values = "_gdpp_debug_member_values_" + suffix;
+    std::string result = prefix + "#ifdef GDPP_SCRIPT_DEBUG_ENABLED\n" + prefix + "{\n" + body +
+                         "godot::PackedStringArray " + local_names + ";\n" + body +
+                         "godot::Array " + local_values + ";\n";
+    for (const auto& variable : statement.debug_variables) {
+        const auto override = local_expression_overrides_.find(variable.name);
+        const auto expression = override == local_expression_overrides_.end()
+                                    ? sanitize_identifier(variable.name)
+                                    : override->second;
+        result += body + local_names + ".push_back(" + godot_string(variable.name) + ");\n" + body +
+                  local_values + ".push_back(gdpp::runtime::to_variant(" + expression + "));\n";
+    }
+    result += body + "godot::PackedStringArray " + member_names + ";\n" + body + "godot::Array " +
+              member_values + ";\n";
+    if (current_debug_instance_ != "nullptr") {
+        for (const auto& [name, expression] : current_debug_members_) {
+            result += body + member_names + ".push_back(" + godot_string(name) + ");\n" + body +
+                      member_values + ".push_back(gdpp::runtime::to_variant(" + expression +
+                      "));\n";
+        }
+    }
+    result += body + "gdpp::runtime::debug_breakpoint(" + godot_string(current_debug_source_) +
+              ", " + godot_string_name(current_debug_function_) + ", " +
+              std::to_string(statement.span.begin.line) + ", " + current_debug_instance_ + ", " +
+              local_names + ", " + local_values + ", " + member_names + ", " + member_values +
+              ");\n" + prefix + "}\n" + prefix + "#endif\n";
+    return result;
+}
+
 std::string CodeGenerator::emit_statement(const ir::Statement& statement,
-                                          std::size_t indentation) const {
+                                          const std::size_t indentation) const {
+    return emit_debug_line(statement.span.begin.line, indentation) +
+           emit_statement_body(statement, indentation);
+}
+
+std::string CodeGenerator::emit_statement_body(const ir::Statement& statement,
+                                               std::size_t indentation) const {
     const auto prefix = indent(indentation);
     switch (statement.kind) {
     case ir::StatementKind::expression:
@@ -5696,9 +5771,7 @@ std::string CodeGenerator::emit_statement(const ir::Statement& statement,
     case ir::StatementKind::continue_statement:
         return prefix + "continue;\n";
     case ir::StatementKind::breakpoint_statement:
-        return prefix + "#ifdef GDPP_SCRIPT_DEBUG_ENABLED\n" + prefix +
-               "/* GDPP debugger bridge is emitted in the runtime integration stage. */;\n" +
-               prefix + "#endif\n";
+        return emit_debug_breakpoint(statement, indentation);
     }
     return {};
 }
@@ -6096,9 +6169,23 @@ void CodeGenerator::emit_inner_class_definition(const ir::Class& declaration,
     const auto previous_native_class_name = current_native_class_name_;
     const auto previous_godot_base_type = current_godot_base_type_;
     const auto previous_attached_godot_base_type = attached_godot_base_type_;
+    const auto previous_debug_source = current_debug_source_;
+    const auto previous_debug_function = current_debug_function_;
+    const auto previous_debug_instance = current_debug_instance_;
+    const auto previous_debug_members = current_debug_members_;
     local_function_parameters_.clear();
     local_functions_.clear();
     current_native_class_name_ = native_name;
+    current_debug_source_ = "res://" + current_source_path_ + "::" + source_name;
+    current_debug_function_.clear();
+    current_debug_instance_.clear();
+    current_debug_members_.clear();
+    for (const auto& field : declaration.fields) {
+        if (!field.is_constant && !field.is_static) {
+            current_debug_members_.emplace_back(field.name,
+                                                "this->" + sanitize_identifier(field.name));
+        }
+    }
     for (const auto& function : declaration.functions) {
         local_functions_.emplace(function.name, &function);
         auto& parameters = local_function_parameters_[function.name];
@@ -6478,6 +6565,9 @@ void CodeGenerator::emit_inner_class_definition(const ir::Class& declaration,
         } else if (field.getter) {
             current_return_type_ = field.type;
             in_function_body_ = true;
+            current_debug_function_ = "@" + field.name + "_getter";
+            current_debug_instance_ = field.is_static ? "nullptr" : "owner()";
+            source << emit_debug_frame(field.getter->span.begin.line, 1);
             source << emit_statements(field.getter->body, 1);
             if (requires_native_fallback(field.getter->body))
                 source << "    return {};\n";
@@ -6498,6 +6588,9 @@ void CodeGenerator::emit_inner_class_definition(const ir::Class& declaration,
         } else if (field.setter) {
             current_return_type_ = {TypeKind::void_type, "void"};
             in_function_body_ = true;
+            current_debug_function_ = "@" + field.name + "_setter";
+            current_debug_instance_ = field.is_static ? "nullptr" : "owner()";
+            source << emit_debug_frame(field.setter->span.begin.line, 1);
             source << emit_statements(field.setter->body, 1, 0,
                                       {{field.setter->parameter, field.type}});
         } else {
@@ -6515,6 +6608,8 @@ void CodeGenerator::emit_inner_class_definition(const ir::Class& declaration,
         current_coroutine_abi_ = coroutine_abi_for(function);
         current_coroutine_state_ = current_coroutine_abi_ ? "_gdpp_coroutine_state" : "";
         in_function_body_ = true;
+        current_debug_function_ = function.name;
+        current_debug_instance_ = function.is_static ? "nullptr" : "owner()";
         const auto* engine_virtual = engine_virtual_for(function);
         const auto native_function_name = function_native_name(function);
         if (engine_virtual) {
@@ -6591,6 +6686,7 @@ void CodeGenerator::emit_inner_class_definition(const ir::Class& declaration,
         if (function.is_static && function.name != "_static_init" && has_static_initialization)
             source << "    _gdpp_ensure_static_initialized();\n";
         source << emit_parameter_default_initializers(function.parameters, 1);
+        source << emit_debug_frame(function.span.begin.line, 1);
         if (current_coroutine_abi_) {
             source << "    const auto " << current_coroutine_state_
                    << " = gdpp::runtime::begin_coroutine(" << self_object_expression() << ");\n";
@@ -6625,6 +6721,10 @@ void CodeGenerator::emit_inner_class_definition(const ir::Class& declaration,
     current_native_class_name_ = previous_native_class_name;
     current_godot_base_type_ = previous_godot_base_type;
     attached_godot_base_type_ = previous_attached_godot_base_type;
+    current_debug_source_ = previous_debug_source;
+    current_debug_function_ = previous_debug_function;
+    current_debug_instance_ = previous_debug_instance;
+    current_debug_members_ = previous_debug_members;
     current_inner_script_ = previous_inner_script;
 }
 
@@ -6652,6 +6752,16 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
     match_counter_ = 0;
     temporary_counter_ = 0;
     current_source_path_ = source_path;
+    current_debug_source_ = "res://" + source_path;
+    current_debug_function_.clear();
+    current_debug_instance_.clear();
+    current_debug_members_.clear();
+    for (const auto& field : module.fields) {
+        if (!field.is_constant && !field.is_static) {
+            current_debug_members_.emplace_back(field.name,
+                                                "this->" + sanitize_identifier(field.name));
+        }
+    }
     current_return_type_ = {TypeKind::void_type, "void"};
     in_function_body_ = false;
     attached_script_ = attached_script;
@@ -7845,6 +7955,10 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
             } else {
                 current_return_type_ = variable.type;
                 in_function_body_ = true;
+                current_debug_function_ = "@" + variable.name + "_getter";
+                current_debug_instance_ =
+                    variable.is_static ? "nullptr" : (attached_script ? "owner()" : "this");
+                source << emit_debug_frame(variable.getter->span.begin.line, 1);
                 source << emit_statements(variable.getter->body, 1);
                 in_function_body_ = false;
                 if (requires_native_fallback(variable.getter->body))
@@ -7869,6 +7983,10 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
             } else {
                 current_return_type_ = {TypeKind::void_type, "void"};
                 in_function_body_ = true;
+                current_debug_function_ = "@" + variable.name + "_setter";
+                current_debug_instance_ =
+                    variable.is_static ? "nullptr" : (attached_script ? "owner()" : "this");
+                source << emit_debug_frame(variable.setter->span.begin.line, 1);
                 source << emit_statements(variable.setter->body, 1, 0,
                                           {{variable.setter->parameter, variable.type}});
                 in_function_body_ = false;
@@ -7889,6 +8007,9 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
         current_coroutine_abi_ = coroutine_abi_for(function);
         current_coroutine_state_ = current_coroutine_abi_ ? "_gdpp_coroutine_state" : "";
         in_function_body_ = true;
+        current_debug_function_ = function.name;
+        current_debug_instance_ =
+            function.is_static ? "nullptr" : (attached_script ? "owner()" : "this");
         const auto* engine_virtual = virtual_method_for(function);
         if (engine_virtual) {
             source << virtual_return_type(*engine_virtual) << ' ' << unit.class_name
@@ -7973,6 +8094,7 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
         if (function.is_static && function.name != "_static_init" && has_static_initialization)
             source << "    _gdpp_ensure_static_initialized();\n";
         source << emit_parameter_default_initializers(function.parameters, 1);
+        source << emit_debug_frame(function.span.begin.line, 1);
         if (current_coroutine_abi_) {
             source << "    const auto " << current_coroutine_state_
                    << " = gdpp::runtime::begin_coroutine(" << self_object_expression() << ");\n";

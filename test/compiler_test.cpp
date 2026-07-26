@@ -105,10 +105,9 @@ TEST_CASE("compiler centralizes packed values at every generated Variant boundar
     REQUIRE(result.success);
     REQUIRE(result.unit.source.find("] = gdpp::runtime::to_variant(_gdpp_call_argument_") !=
             std::string::npos);
-    REQUIRE(result.unit.source.find(
-                "static const godot::Variant _gdpp_signal_name_") != std::string::npos);
-    REQUIRE(result.unit.source.find(
-                "gdpp::runtime::emit_local_signal(this, _gdpp_signal_name_") !=
+    REQUIRE(result.unit.source.find("static const godot::Variant _gdpp_signal_name_") !=
+            std::string::npos);
+    REQUIRE(result.unit.source.find("gdpp::runtime::emit_local_signal(this, _gdpp_signal_name_") !=
             std::string::npos);
     REQUIRE(result.unit.source.find(".call(gdpp::runtime::variant_constructor_argument("
                                     "_gdpp_callable_argument_") != std::string::npos);
@@ -290,6 +289,41 @@ TEST_CASE("compiler generates debug-only typed assert control flow") {
     REQUIRE(result.unit.source.find("Assertion failed at res://assertions.gd:3") !=
             std::string::npos);
     REQUIRE(result.unit.source.find("positive value required") != std::string::npos);
+}
+
+TEST_CASE("compiler emits debugger frames and exact breakpoint snapshots") {
+    const gdpp::Compiler compiler;
+    const auto result =
+        compiler.compile("debug_scope.gd", "extends Node\n"
+                                           "var state := 3\n"
+                                           "func inspect(value: int) -> void:\n"
+                                           "    var label := \"ready\"\n"
+                                           "    if value > 0:\n"
+                                           "        var label := value\n"
+                                           "        breakpoint\n"
+                                           "static func inspect_static(value: int) -> void:\n"
+                                           "    breakpoint\n"
+                                           "func make_callback() -> Callable:\n"
+                                           "    return func named_callback(value: int) -> void:\n"
+                                           "        breakpoint\n");
+
+    REQUIRE(result.success);
+    REQUIRE(result.unit.source.find("gdpp::runtime::ScriptDebugFrame _gdpp_debug_frame(") !=
+            std::string::npos);
+    REQUIRE(result.unit.source.find(
+                "gdpp::runtime::debug_breakpoint(godot::String(\"res://debug_scope.gd\"), "
+                "godot::StringName(\"inspect\"), 7, this") != std::string::npos);
+    REQUIRE(result.unit.source.find(".push_back(godot::String(\"value\"));") != std::string::npos);
+    REQUIRE(result.unit.source.find(".push_back(godot::String(\"label\"));") != std::string::npos);
+    REQUIRE(result.unit.source.find(".push_back(gdpp::runtime::to_variant(label));") !=
+            std::string::npos);
+    REQUIRE(result.unit.source.find(".push_back(godot::String(\"state\"));") != std::string::npos);
+    REQUIRE(result.unit.source.find(".push_back(gdpp::runtime::to_variant(this->state));") !=
+            std::string::npos);
+    REQUIRE(result.unit.source.find("godot::StringName(\"inspect_static\"), 9, nullptr") !=
+            std::string::npos);
+    REQUIRE(result.unit.source.find("godot::StringName(\"named_callback\")") != std::string::npos);
+    REQUIRE(result.unit.source.find("debugger bridge is emitted") == std::string::npos);
 }
 
 TEST_CASE("compiler emits nil fallthrough only for dynamic functions that need it") {
@@ -1061,8 +1095,7 @@ TEST_CASE("compiler emits local signals through their owner without temporary Si
     REQUIRE(result.success);
     REQUIRE(result.unit.source.find("static const godot::Variant _gdpp_signal_name_") !=
             std::string::npos);
-    REQUIRE(result.unit.source.find(
-                "gdpp::runtime::emit_local_signal(this, _gdpp_signal_name_") !=
+    REQUIRE(result.unit.source.find("gdpp::runtime::emit_local_signal(this, _gdpp_signal_name_") !=
             std::string::npos);
     REQUIRE(result.unit.source.find("godot::Signal(this, godot::StringName(\"pulse\")).emit") ==
             std::string::npos);
@@ -1608,16 +1641,16 @@ TEST_CASE("compiler lowers short-circuit conditional and loop-condition awaits t
 
 TEST_CASE("compiler shares suspended while condition state with loop body mutations") {
     const gdpp::Compiler compiler;
-    const auto result = compiler.compile(
-        "await_batch_loop.gd", "extends Node\n"
-                               "func fill(limit: int) -> void:\n"
-                               "    var added: int = 0\n"
-                               "    while added < limit:\n"
-                               "        var batch: int = min(200, limit - added)\n"
-                               "        for index in range(batch):\n"
-                               "            added += 1\n"
-                               "        await get_tree().process_frame\n"
-                               "    print(added)\n");
+    const auto result =
+        compiler.compile("await_batch_loop.gd", "extends Node\n"
+                                                "func fill(limit: int) -> void:\n"
+                                                "    var added: int = 0\n"
+                                                "    while added < limit:\n"
+                                                "        var batch: int = min(200, limit - added)\n"
+                                                "        for index in range(batch):\n"
+                                                "            added += 1\n"
+                                                "        await get_tree().process_frame\n"
+                                                "    print(added)\n");
 
     REQUIRE(result.success);
     const auto declaration = result.unit.source.find("std::make_shared<int64_t>(added)");
@@ -1641,14 +1674,14 @@ TEST_CASE("compiler shares suspended while condition state with loop body mutati
 
 TEST_CASE("compiler keeps valid unused source bindings warning clean in native builds") {
     const gdpp::Compiler compiler;
-    const auto result = compiler.compile(
-        "await_unused_bindings.gd", "extends Node\n"
-                                    "signal resumed\n"
-                                    "func run(_unused: int) -> void:\n"
-                                    "    var _local: int = 1\n"
-                                    "    var _callback := func(_value: int): pass\n"
-                                    "    for _index in range(2):\n"
-                                    "        await resumed\n");
+    const auto result = compiler.compile("await_unused_bindings.gd",
+                                         "extends Node\n"
+                                         "signal resumed\n"
+                                         "func run(_unused: int) -> void:\n"
+                                         "    var _local: int = 1\n"
+                                         "    var _callback := func(_value: int): pass\n"
+                                         "    for _index in range(2):\n"
+                                         "        await resumed\n");
 
     REQUIRE(result.success);
     REQUIRE(result.unit.source.find("[[maybe_unused]] int64_t _unused") != std::string::npos);
@@ -2305,8 +2338,8 @@ TEST_CASE("compiler preserves typed subscript and builtin component scalar seman
                                     "_gdpp_subscript_container_") != std::string::npos);
     REQUIRE(result.unit.source.find("gdpp::runtime::checked_packed_array_set("
                                     "_gdpp_subscript_container_") != std::string::npos);
-    REQUIRE(result.unit.source.find(
-                "to_variant(gdpp::runtime::checked_packed_array_get(") == std::string::npos);
+    REQUIRE(result.unit.source.find("to_variant(gdpp::runtime::checked_packed_array_get(") ==
+            std::string::npos);
     REQUIRE(result.unit.source.find("static_cast<double>(vector.x)") != std::string::npos);
     REQUIRE(result.unit.source.find("gdpp::runtime::binary") == std::string::npos);
 }

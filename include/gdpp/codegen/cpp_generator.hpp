@@ -120,6 +120,12 @@ class CodeGenerator final {
                                                  const std::vector<MatchBinding>& bindings) const;
     [[nodiscard]] std::string emit_statement(const ir::Statement& statement,
                                              std::size_t indent) const;
+    [[nodiscard]] std::string emit_statement_body(const ir::Statement& statement,
+                                                  std::size_t indent) const;
+    [[nodiscard]] std::string emit_debug_frame(std::size_t line, std::size_t indent) const;
+    [[nodiscard]] std::string emit_debug_line(std::size_t line, std::size_t indent) const;
+    [[nodiscard]] std::string emit_debug_breakpoint(const ir::Statement& statement,
+                                                    std::size_t indent) const;
     [[nodiscard]] std::string
     emit_statements(const std::vector<ir::Statement>& statements, std::size_t indent,
                     std::size_t begin = 0,
@@ -167,8 +173,8 @@ class CodeGenerator final {
     [[nodiscard]] std::string inner_cpp_type(std::string_view name) const;
     [[nodiscard]] std::string inner_godot_base_type(std::string_view name) const;
     [[nodiscard]] std::string inner_attached_native_base_type(std::string_view name) const;
-    [[nodiscard]] std::string attached_script_source_path(
-        const Type& type, std::string_view resolved_owner = {}) const;
+    [[nodiscard]] std::string
+    attached_script_source_path(const Type& type, std::string_view resolved_owner = {}) const;
     [[nodiscard]] std::string emit_attached_script_cast(const Type& target,
                                                         std::string value) const;
     [[nodiscard]] bool is_ref_counted_object(const Type& type) const noexcept;
@@ -199,9 +205,8 @@ class CodeGenerator final {
     [[nodiscard]] InnerMethodDeclaration
     find_inner_method_declaration(const ScriptInnerClassSymbol& owner, std::string_view method,
                                   bool include_owner) const noexcept;
-    [[nodiscard]] std::string
-    inner_method_native_name(const ScriptInnerClassSymbol& owner,
-                             const ScriptMemberSymbol& method) const;
+    [[nodiscard]] std::string inner_method_native_name(const ScriptInnerClassSymbol& owner,
+                                                       const ScriptMemberSymbol& method) const;
     [[nodiscard]] std::string
     inner_method_implementation_name(const ScriptInnerClassSymbol& owner,
                                      const ScriptMemberSymbol& method) const;
@@ -216,12 +221,12 @@ class CodeGenerator final {
                                      const std::string& native_name, const std::string& source_name,
                                      bool tool_mode) const;
     void emit_attached_descriptor_definition(
-        std::ostringstream& source, const std::string& native_name,
-        const std::string& source_path, const std::string& global_name,
-        const std::string& native_base_type, const std::string& base_script_path,
-        const std::string& contract_hash, bool tool_mode, bool is_abstract,
-        const std::vector<ir::Field>& fields, const std::vector<ir::Function>& functions,
-        const std::vector<ir::Signal>& signals, const std::vector<ir::Enum>& enums) const;
+        std::ostringstream& source, const std::string& native_name, const std::string& source_path,
+        const std::string& global_name, const std::string& native_base_type,
+        const std::string& base_script_path, const std::string& contract_hash, bool tool_mode,
+        bool is_abstract, const std::vector<ir::Field>& fields,
+        const std::vector<ir::Function>& functions, const std::vector<ir::Signal>& signals,
+        const std::vector<ir::Enum>& enums) const;
     [[nodiscard]] static std::string sanitize_identifier(const std::string& value);
     [[nodiscard]] static std::string sanitize_qualified_identifier(std::string_view value);
     [[nodiscard]] static std::string enum_identifier(const std::string& value);
@@ -255,6 +260,10 @@ class CodeGenerator final {
     mutable std::unordered_map<std::string, Type> current_local_types_;
     mutable std::unordered_set<std::string> ambiguous_local_names_;
     mutable std::unordered_map<std::string, std::string> local_expression_overrides_;
+    mutable std::string current_debug_source_;
+    mutable std::string current_debug_function_;
+    mutable std::string current_debug_instance_;
+    mutable std::vector<std::pair<std::string, std::string>> current_debug_members_;
     mutable std::string current_native_class_name_;
     mutable std::string current_godot_base_type_;
     mutable std::size_t match_counter_{0};
