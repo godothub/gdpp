@@ -19,6 +19,7 @@
 - macOS Universal Debug 导出可以复用经过验证、仅提供 Release 的第三方 provider fat binary；GDPP 只在导出包内的描述符字节中增加 Debug 别名，不修改客户源码目录中的描述符或动态库。
 - 生成的 breakpoint fixture 会与真实 godot-cpp 一同编译，并使用官方 Godot 4.6.2 对附着第三方 GDExtension 的 Debug、Release 项目执行导出和运行验证。
 - 前端新增有界多错误恢复、完整源码范围 AST 序列化 golden、coverage-guided fuzz 和 Godot 4.7.1 stable 语言漂移报告，覆盖官方 114 个合法及 76 个非法 parser fixture。
+- 前端 AST visitor 的穷举哨兵兼容 Clang 14 的 fuzzer-only 严格告警构建，同时继续在编译期拒绝任何未处理的节点类型。
 - MIR 的 value/operation 使用稳定且不含地址的身份，支持版本化控制流快照序列化、source ownership 与密集前驱校验；优化预算和失败均保持事务，不会破坏输入。
 - 在完整重映射 operand 的前提下删除无效 MIR value，同时保留调试器、分配、故障和挂起等可观察操作；CSE、内联、逃逸与循环变换在取得独立等价证明前不会默认启用。
 - 穷举验证 Godot 4.4～4.7 API 表中的每条生成元数据、参数范围、属性读写 ABI、Signal 契约、enum/bitfield、标量返回和禁止的原生指针边界。
