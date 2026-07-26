@@ -4,6 +4,59 @@ class_name RuntimeFailureCase
 var markers: Array[String] = []
 
 
+class BrokenFieldInitialization extends RefCounted:
+    var markers: Array[String] = []
+    var first := record("field-first")
+    var values := [1]
+    var failed: Variant = values[9]
+    var after := record("field-after")
+
+    func record(value: String) -> int:
+        markers.push_back(value)
+        return markers.size()
+
+    func _init() -> void:
+        markers.push_back("init-body")
+
+
+class BrokenConversionInitialization extends RefCounted:
+    var markers: Array[String] = []
+    var source: Variant = "invalid"
+    var typed: int = source
+    var after := record("conversion-after")
+
+    func record(value: String) -> int:
+        markers.push_back(value)
+        return markers.size()
+
+    func _init() -> void:
+        markers.push_back("conversion-init")
+
+
+class BrokenOnreadyInitialization extends Node:
+    var markers: Array[String] = []
+    @onready var first := record("onready-first")
+    @onready var values := [1]
+    @onready var failed: Variant = values[9]
+    @onready var after := record("onready-after")
+
+    func record(value: String) -> int:
+        markers.push_back(value)
+        return markers.size()
+
+    func _ready() -> void:
+        markers.push_back("ready-body")
+
+
+class OnreadyOnly extends Node:
+    var markers: Array[String] = []
+    @onready var initialized := record("onready-only")
+
+    func record(value: String) -> int:
+        markers.push_back(value)
+        return markers.size()
+
+
 func _side_effect(marker: String) -> int:
     markers.push_back(marker)
     return 1
@@ -108,6 +161,37 @@ func _null_signal_emit_continues() -> void:
     markers.push_back("null-emit-after")
 
 
+func _instance_initialization_failure_continues() -> bool:
+    var field_instance := BrokenFieldInitialization.new()
+    var conversion_instance := BrokenConversionInitialization.new()
+    return (
+        field_instance != null
+        and field_instance.markers == ["field-first", "init-body"]
+        and conversion_instance != null
+        and conversion_instance.markers == ["conversion-init"]
+    )
+
+
+func _onready_initialization_failure_continues() -> bool:
+    var broken := BrokenOnreadyInitialization.new()
+    add_child(broken)
+    if broken.markers != ["onready-first", "ready-body"]:
+        broken.free()
+        return false
+    remove_child(broken)
+    broken.request_ready()
+    add_child(broken)
+    if broken.markers != ["onready-first", "ready-body", "onready-first", "ready-body"]:
+        broken.free()
+        return false
+    broken.free()
+    var onready_only := OnreadyOnly.new()
+    add_child(onready_only)
+    var valid := onready_only.markers == ["onready-only"]
+    onready_only.free()
+    return valid
+
+
 func run_contract() -> bool:
     markers.clear()
     _direct_bounds_failure()
@@ -156,4 +240,9 @@ func run_contract() -> bool:
         return false
     markers.clear()
     _null_signal_emit_continues()
-    return markers == ["null-emit-before", "null-emit-argument", "null-emit-after"]
+    if markers != ["null-emit-before", "null-emit-argument", "null-emit-after"]:
+        return false
+    return (
+        _instance_initialization_failure_continues()
+        and _onready_initialization_failure_continues()
+    )
