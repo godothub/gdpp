@@ -60,3 +60,52 @@ jobs:
           path: example/addons/gdpp
           if-no-files-found: error
           retention-days: 7
+
+  custom-double:
+    name: Plugin / Custom Godot double
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          submodules: recursive
+      - name: Create an exact custom double-precision API
+        shell: bash
+        run: |
+          mkdir -p build/ci-custom-double-input
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          source = Path("third/godot-cpp/gdextension/extension_api.json")
+          output = Path("build/ci-custom-double-input/extension_api.json")
+          api = json.loads(source.read_text(encoding="utf-8"))
+          api["header"]["version_build"] = "gdpp_ci_custom_double"
+          api["header"]["precision"] = "double"
+          output.write_text(
+              json.dumps(api, ensure_ascii=False, separators=(",", ":")),
+              encoding="utf-8",
+          )
+          PY
+      - name: Configure the custom compiler, SDK and add-on
+        shell: bash
+        run: |
+          cmake -S . -B build/ci-custom-double -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DGDPP_BUILD_TESTS=OFF \
+            -DGDPP_BUILD_CLI=ON \
+            -DGDPP_BUILD_EXTENSION=ON \
+            -DGDPP_GODOT_PRECISION=double \
+            -DGDPP_CUSTOM_GDEXTENSION_API_FILE="$PWD/build/ci-custom-double-input/extension_api.json" \
+            -DGDPP_PACKAGE_GODOT_VERSIONS=4.7
+      - name: Build the complete custom add-on
+        run: cmake --build build/ci-custom-double --target gdpp_custom_addon --parallel
+      - name: Audit the custom ABI package
+        shell: bash
+        run: |
+          python3 tools/audit_custom_addon.py \
+            --addon build/ci-custom-double/custom-addon/addons/gdpp \
+            --api build/ci-custom-double-input/extension_api.json \
+            --version 1.8.0 \
+            --godot-version 4.7 \
+            --precision double
