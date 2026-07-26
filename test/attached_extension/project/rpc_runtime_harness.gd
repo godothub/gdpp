@@ -101,6 +101,22 @@ func _configuration_matches(probe: Variant) -> bool:
 
 
 func _cleanup() -> void:
+    # SceneTree retains custom MultiplayerAPI instances by root path. Detach those mappings while
+    # both roots and their replicated children are still alive so every SceneMultiplayer version
+    # can remove its object configuration and signal connections exactly once.
+    if _tree != null:
+        if (
+            _client_root != null
+            and is_instance_valid(_client_root)
+            and _client_root.is_inside_tree()
+        ):
+            _tree.set_multiplayer(null, _client_root.get_path())
+        if (
+            _server_root != null
+            and is_instance_valid(_server_root)
+            and _server_root.is_inside_tree()
+        ):
+            _tree.set_multiplayer(null, _server_root.get_path())
     if _replacement_peer != null:
         _replacement_peer.close()
     if _client_peer != null:
