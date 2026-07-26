@@ -7,6 +7,8 @@
 
 #include <algorithm>
 #include <string>
+#include <tuple>
+#include <vector>
 
 TEST_CASE("parser builds declarations and structured function body") {
     const gdpp::SourceFile source{"player.gd", "extends Node\n"
@@ -661,6 +663,40 @@ TEST_CASE("parser recovery always advances past unexpected indentation") {
     REQUIRE(diagnostics.has_errors());
     REQUIRE_EQ(script.variables.size(), std::size_t{2});
     REQUIRE_EQ(script.variables.back().name, std::string{"second"});
+}
+
+TEST_CASE("parser recovery reports independent declaration failures in source order") {
+    const gdpp::SourceFile source{"independent_recovery.gd", "var first = 1, second = 2\n"
+                                                             "signal changed() trailing\n"
+                                                             "enum Kind { A } trailing\n"
+                                                             "func calculate() -> int:\n"
+                                                             "    var local = 3, other = 4\n"
+                                                             "    return local\n"
+                                                             "var recovered := 5\n"};
+    gdpp::DiagnosticBag diagnostics;
+    const auto tokens = gdpp::Lexer{source, diagnostics}.scan();
+    const auto script = gdpp::Parser{tokens, diagnostics}.parse_script();
+
+    const std::vector<std::tuple<std::string, std::size_t, std::size_t>> expected{
+        {"GDS2032", 1, 14},
+        {"GDS2004", 2, 18},
+        {"GDS2010", 3, 17},
+        {"GDS2032", 5, 18},
+    };
+    REQUIRE_EQ(diagnostics.items().size(), expected.size());
+    for (std::size_t index = 0; index < expected.size(); ++index) {
+        REQUIRE_EQ(diagnostics.items()[index].code, std::get<0>(expected[index]));
+        REQUIRE_EQ(diagnostics.items()[index].span.begin.line, std::get<1>(expected[index]));
+        REQUIRE_EQ(diagnostics.items()[index].span.begin.column, std::get<2>(expected[index]));
+    }
+    REQUIRE_EQ(script.variables.size(), std::size_t{2});
+    REQUIRE_EQ(script.variables.back().name, std::string{"recovered"});
+    REQUIRE_EQ(script.signals.size(), std::size_t{1});
+    REQUIRE_EQ(script.enums.size(), std::size_t{1});
+    REQUIRE_EQ(script.functions.size(), std::size_t{1});
+    REQUIRE_EQ(script.functions.front().body.size(), std::size_t{2});
+    REQUIRE_EQ(script.functions.front().body.back().kind(),
+               gdpp::ast::StatementKind::return_statement);
 }
 
 TEST_CASE("parser balances large logical chains without changing source order") {

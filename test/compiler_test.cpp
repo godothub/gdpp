@@ -3595,6 +3595,32 @@ TEST_CASE("compiler rejects malformed literal source transactionally") {
     REQUIRE(unicode.unit.source.empty());
 }
 
+TEST_CASE("compiler reports all recovered syntax failures without emitting partial units") {
+    const auto result =
+        gdpp::Compiler{}.compile("independent_failures.gd", "var first = 1, second = 2\n"
+                                                            "signal changed() trailing\n"
+                                                            "enum Kind { A } trailing\n"
+                                                            "func calculate() -> int:\n"
+                                                            "    var local = 3, other = 4\n"
+                                                            "    return local\n"
+                                                            "var recovered := 5\n");
+
+    REQUIRE(!result.success);
+    REQUIRE_EQ(result.diagnostics.size(), std::size_t{4});
+    REQUIRE(result.unit.script_class_name.empty());
+    REQUIRE(result.unit.class_name.empty());
+    REQUIRE(result.unit.header_file_name.empty());
+    REQUIRE(result.unit.source_file_name.empty());
+    REQUIRE(result.unit.symbol_file_name.empty());
+    REQUIRE(result.unit.header.empty());
+    REQUIRE(result.unit.source.empty());
+    REQUIRE(result.unit.symbol_map.empty());
+    REQUIRE(result.unit.symbols.empty());
+    REQUIRE(result.unit.inner_class_names.empty());
+    REQUIRE(result.unit.abstract_inner_class_names.empty());
+    REQUIRE(!result.unit.icon_path.has_value());
+}
+
 TEST_CASE("compiler omits ambiguous native reflection entries for duplicate enum members") {
     const gdpp::Compiler compiler;
     const auto result =
