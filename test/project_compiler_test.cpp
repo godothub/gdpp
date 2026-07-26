@@ -2273,6 +2273,15 @@ TEST_CASE("attached internal classes dispatch self locally and other instances t
     REQUIRE(source.find("property.getter = [](") != std::string::npos);
     REQUIRE(source.find("typed->_gdpp_get_value()") != std::string::npos);
     REQUIRE(source.find("property.setter = [](") != std::string::npos);
+    const auto setter = source.find("property.setter = [](");
+    const auto scope = source.find("ScriptFaultPolicy::inherit_existing", setter);
+    const auto conversion = source.find("const auto converted =", scope);
+    const auto rejected = source.find("if (storage_scope.failed()) return false", conversion);
+    const auto write = source.find("typed->_gdpp_set_value(converted)", rejected);
+    REQUIRE(scope > setter);
+    REQUIRE(conversion > scope);
+    REQUIRE(rejected > conversion);
+    REQUIRE(write > rejected);
     REQUIRE(source.find("typed->_gdpp_set_value(") != std::string::npos);
 }
 

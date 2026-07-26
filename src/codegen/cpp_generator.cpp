@@ -6261,12 +6261,16 @@ void CodeGenerator::emit_attached_descriptor_definition(
                   "const godot::Variant &value) -> bool {\n"
                << "            if (!behavior || !behavior->is_class(" << native_name
                << "::get_class_static())) return false;\n"
+               << "            gdpp::runtime::ScriptFunctionScope storage_scope("
+                  "gdpp::runtime::ScriptFaultPolicy::inherit_existing);\n"
                << "            auto *typed = static_cast<" << native_name << " *>(behavior);\n"
-               << "            typed->_gdpp_set_" << name << "("
+               << "            const auto converted = "
                << emit_conversion(variable.type, {TypeKind::variant, "Variant"}, "value",
                                   &variable.span)
-               << ");\n"
-               << "            return true;\n"
+               << ";\n"
+               << "            if (storage_scope.failed()) return false;\n"
+               << "            typed->_gdpp_set_" << name << "(converted);\n"
+               << "            return !storage_scope.failed();\n"
                << "        };\n";
         if (!variable.initializer || editor_safe_initializer(*variable.initializer)) {
             source << "        property.has_default = true;\n"
