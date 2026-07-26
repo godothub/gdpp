@@ -1109,6 +1109,42 @@ TEST_CASE("compiler preserves instance defaults and explicit null through native
             std::string::npos);
 }
 
+TEST_CASE("compiler lowers awaited function and lambda defaults through one continuation chain") {
+    const gdpp::Compiler compiler;
+    const auto result = compiler.compile(
+        "await_defaults.gd", "extends Node\n"
+                             "signal selected(value)\n"
+                             "func mark(value: int) -> int:\n"
+                             "    return value\n"
+                             "func ordered(first: int = mark(1), second: int = await selected, "
+                             "third: int = mark(first + second)) -> void:\n"
+                             "    print(first, second, third)\n"
+                             "func default_only(value: int = await selected) -> int:\n"
+                             "    return value\n"
+                             "func await_default_only() -> int:\n"
+                             "    return await default_only()\n"
+                             "func make_callback() -> Callable:\n"
+                             "    return func(value: int = await selected) -> void:\n"
+                             "        print(value)\n");
+
+    REQUIRE(result.success);
+    const auto first = result.unit.source.find("int64_t first =");
+    const auto after = result.unit.source.find("auto _gdpp_after_parameter_", first);
+    const auto third = result.unit.source.find("int64_t third =", after);
+    const auto commit = result.unit.source.find("auto _gdpp_commit_parameter_", third);
+    REQUIRE(first < after);
+    REQUIRE(after < third);
+    REQUIRE(third < commit);
+    REQUIRE(result.unit.source.find("!gdpp::runtime::is_default_argument(_gdpp_argument_second)") !=
+            std::string::npos);
+    REQUIRE(result.unit.source.find(".size() > 0", commit) != std::string::npos);
+    REQUIRE(result.unit.source.find("std::make_shared<int64_t>()") != std::string::npos);
+    REQUIRE(result.unit.header.find("godot::Variant default_only(") != std::string::npos);
+    REQUIRE(result.unit.header.find("godot::Variant await_default_only()") != std::string::npos);
+    REQUIRE(result.unit.source.find("unlowered await expression") == std::string::npos);
+    REQUIRE(result.unit.source.find("unsupported structured await") == std::string::npos);
+}
+
 TEST_CASE("compiler gives dynamic conditional branches an unambiguous native common type") {
     const gdpp::Compiler compiler;
     const auto result =

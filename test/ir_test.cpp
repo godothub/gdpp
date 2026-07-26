@@ -102,6 +102,44 @@ TEST_CASE("typed IR preserves Godot default argument evaluation contracts") {
     REQUIRE(verifier.verify(module));
 }
 
+TEST_CASE("typed IR isolates awaited defaults into ordered callable prologues") {
+    gdpp::DiagnosticBag diagnostics;
+    const auto module = lower_source("signal selected(value)\n"
+                                     "func ordered(first: int = 1, second: int = await selected, "
+                                     "third: int = first + second) -> void:\n"
+                                     "    pass\n"
+                                     "func await_ordered() -> void:\n"
+                                     "    await ordered()\n"
+                                     "func make_callback() -> Callable:\n"
+                                     "    return func(value: int = await selected) -> void:\n"
+                                     "        pass\n",
+                                     diagnostics);
+
+    REQUIRE(!diagnostics.has_errors());
+    const auto& ordered = module.functions.at(0);
+    REQUIRE(ordered.is_coroutine);
+    REQUIRE_EQ(ordered.parameters.size(), std::size_t{3});
+    REQUIRE(ordered.parameters.at(0).default_prefix.empty());
+    REQUIRE(!ordered.parameters.at(1).default_prefix.empty());
+    REQUIRE_EQ(ordered.parameters.at(1).default_prefix.back().kind,
+               gdpp::ir::StatementKind::await_variable);
+    REQUIRE_EQ(ordered.parameters.at(1).default_value->kind, gdpp::ir::ExpressionKind::identifier);
+    REQUIRE(ordered.parameters.at(1).symbol_identity != 0);
+    REQUIRE(ordered.parameters.at(2).default_prefix.empty());
+
+    REQUIRE(module.functions.at(1).is_coroutine);
+
+    const auto& lambda = module.functions.at(2).body.front().expression->lambda;
+    REQUIRE(lambda != nullptr);
+    REQUIRE(lambda->is_coroutine);
+    REQUIRE_EQ(lambda->parameters.size(), std::size_t{1});
+    REQUIRE(!lambda->parameters.front().default_prefix.empty());
+    REQUIRE(lambda->parameters.front().symbol_identity != 0);
+
+    gdpp::IrVerifier verifier{diagnostics};
+    REQUIRE(verifier.verify(module));
+}
+
 TEST_CASE("typed IR owns function and lambda rest parameters") {
     gdpp::DiagnosticBag diagnostics;
     auto module =
