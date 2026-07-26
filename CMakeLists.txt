@@ -540,6 +540,7 @@ set(GDPP_CORE_SOURCES
     src/core/source.cpp
 )
 set(GDPP_FRONTEND_SOURCES
+    src/frontend/ast_serializer.cpp
     src/frontend/constant_evaluator.cpp
     src/frontend/language_features.cpp
     src/frontend/lexer.cpp
