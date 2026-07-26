@@ -4872,6 +4872,33 @@ TEST_CASE("typed Godot object parameters generate pointer calls") {
     REQUIRE(result.unit.source.find("->queue_free()") != std::string::npos);
 }
 
+TEST_CASE("compiler validates every reflected engine signal argument contract") {
+    const gdpp::Compiler compiler;
+    const auto valid = compiler.compile(
+        "engine_signal.gd",
+        "extends Control\n"
+        "func relay(event: InputEvent) -> void:\n"
+        "    gui_input.emit(event)\n");
+    const auto wrong_count = compiler.compile(
+        "engine_signal_count.gd",
+        "extends Control\n"
+        "func relay() -> void:\n"
+        "    gui_input.emit()\n");
+    const auto wrong_type = compiler.compile(
+        "engine_signal_type.gd",
+        "extends Control\n"
+        "func relay() -> void:\n"
+        "    gui_input.emit(42)\n");
+
+    REQUIRE(valid.success);
+    REQUIRE(!wrong_count.success);
+    REQUIRE(std::any_of(wrong_count.diagnostics.begin(), wrong_count.diagnostics.end(),
+                        [](const auto& diagnostic) { return diagnostic.code == "GDS4164"; }));
+    REQUIRE(!wrong_type.success);
+    REQUIRE(std::any_of(wrong_type.diagnostics.begin(), wrong_type.diagnostics.end(),
+                        [](const auto& diagnostic) { return diagnostic.code == "GDS4002"; }));
+}
+
 TEST_CASE("non-RefCounted object storage preserves weak identity in every generated frame") {
     const gdpp::Compiler compiler;
     const auto result = compiler.compile(

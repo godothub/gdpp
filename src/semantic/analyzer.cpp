@@ -2496,6 +2496,31 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
         } else if (callee.kind() == ast::ExpressionKind::member) {
             const auto object_type = analyze_expression(*callee.operand(0));
             const auto* object_resolution = model_.api_resolution_of(*callee.operand(0));
+            if (callee.value() == "emit" && object_resolution &&
+                object_resolution->kind == ApiResolutionKind::script_signal) {
+                if (const auto* signal =
+                        api_.find_signal(object_resolution->owner, callee.operand(0)->value())) {
+                    if (argument_count != signal->argument_count) {
+                        diagnostics_.error(
+                            "GDS4164",
+                            "signal '" + std::string{signal->name} + "' expects " +
+                                std::to_string(signal->argument_count) + " argument(s), got " +
+                                std::to_string(argument_count),
+                            expression.span);
+                    }
+                    const auto checked = std::min(
+                        argument_count, static_cast<std::size_t>(signal->argument_count));
+                    for (std::size_t index = 0; index < checked; ++index) {
+                        if (const auto* argument = api_.argument(*signal, index)) {
+                            require_assignable(
+                                type_from_godot_api(argument->type), argument_types[index],
+                                expression.operand(index + 1)->span,
+                                "argument " + std::to_string(index + 1) + " of signal '" +
+                                    signal->name + "'");
+                        }
+                    }
+                }
+            }
             const bool called_on_super =
                 object_resolution && object_resolution->kind == ApiResolutionKind::script_super;
             const auto* project_super = called_on_super && script_symbols_ && current_script_
