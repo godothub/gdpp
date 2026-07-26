@@ -4,12 +4,12 @@
 
 | 项目 | 值 |
 |---|---|
-| GDPP | 1.7.10 |
-| 提交 | `d77fb4629ce860bfb382f6198b5d09372cb7d2ae` |
-| 正式发布运行 | `https://github.com/abandoft/gdpp/actions/runs/30170732292` |
-| 结果 | 46 个作业成功，0 失败 |
-| 发行资产 | `gdpp-mac.zip`、`gdpp-linux.zip`、`gdpp-win.zip`、`SHA256SUMS` |
-| 编译器单元测试 | 488 / 488 |
+| GDPP | 1.8.0 |
+| 功能审计提交 | `b69c26cb4799190f9aaa4fadb8576550772bc71a` |
+| 最近正式发布运行 | 1.7.10 / `https://github.com/abandoft/gdpp/actions/runs/30170732292` |
+| 1.8.0 发布状态 | 候选；正式发布矩阵尚待执行 |
+| 目标发行资产 | `gdpp-mac.zip`、`gdpp-linux.zip`、`gdpp-win.zip`、`SHA256SUMS` |
+| 本地编译器单元测试 | 495 / 495 |
 
 本报告只描述可重复证据。内部商业语料和客户项目不按名称公开；它们只能补充发现问题，不能替代
 产品级 fixture 与 CI。
@@ -20,7 +20,7 @@
 
 | 门禁 | 环境 | 验证 |
 |---|---|---|
-| Compiler core | Ubuntu 22.04、macOS 15、Windows 2025 | C++17、严格 warning、488 项单元 |
+| Compiler core | Ubuntu 22.04、macOS 15、Windows 2025 | C++17、严格 warning、495 项单元 |
 | ASan | Ubuntu 22.04 | 地址错误和 leak 阻断 |
 | UBSan | Ubuntu 22.04 | 未定义行为阻断 |
 | TSan | Ubuntu 22.04 | 线程数据竞争阻断 |
@@ -120,6 +120,11 @@ Linux 最终 ZIP 目前有完整结构/内容测试和 host component 实跑，�
 
 Godot 4.4.1～4.7.1 均执行 Linux 导出/运行；Godot 4.6.2 另执行 macOS Universal 2 provider 路径。
 这证明公开 ClassDB/Attached 主路径，不证明所有供应商私有 ABI。
+
+1.8.0 候选另将包含 `breakpoint` 的普通、静态、lambda、词法遮蔽和 await 脚本与真实
+godot-cpp 一同编译。本地使用官方 Godot 4.6.2 完成 Attached provider 的 macOS Universal 2
+Debug/Release 无源码导出和独立运行；Release-only provider 由 Debug 导出复用时，源描述符保持
+不变。编辑器 gutter 断点和完整单步调试尚未列为已认证能力。
 
 ## Windows 补充端到端审计
 
