@@ -66,6 +66,7 @@ struct CompiledProjectScript {
     std::vector<ScriptMemberSymbol> reflection_members;
     bool is_abstract{false};
     bool is_tool{false};
+    bool static_unload{false};
     bool is_attached{false};
     bool is_editor_only{false};
     bool cache_hit{false};

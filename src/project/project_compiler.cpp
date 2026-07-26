@@ -1190,6 +1190,7 @@ ProjectCompileResult ProjectCompiler::compile_impl(const ProjectCompileOptions& 
         std::vector<ScriptInnerClassSymbol> inner_classes;
         std::optional<std::string> icon_path;
         bool is_abstract{false};
+        bool static_unload{false};
     };
     std::vector<SourceInput> inputs;
     inputs.reserve(source_paths.size());
@@ -1320,6 +1321,9 @@ ProjectCompileResult ProjectCompiler::compile_impl(const ProjectCompileOptions& 
         input.is_abstract = std::any_of(
             script.annotations.begin(), script.annotations.end(),
             [](const ast::Annotation& annotation) { return annotation.name == "abstract"; });
+        input.static_unload = std::any_of(
+            script.annotations.begin(), script.annotations.end(),
+            [](const ast::Annotation& annotation) { return annotation.name == "static_unload"; });
         if (const auto icon = script_icon_literal(script)) {
             auto resolved = resolve_script_icon_path(input.relative, *icon);
             if (!resolved.resource_path) {
@@ -2003,7 +2007,8 @@ ProjectCompileResult ProjectCompiler::compile_impl(const ProjectCompileOptions& 
                  << ":api-base:" << input.semantic_base_type << ":autoload:" << input.autoload_name
                  << ":external-base:" << input.external_base_name << ":attached:" << input.attached
                  << ":attached-native-base:" << input.attached_native_base
-                 << ":abstract:" << input.is_abstract << ":tool:" << input.script.tool << ':';
+                 << ":abstract:" << input.is_abstract << ":tool:" << input.script.tool
+                 << ":static_unload:" << input.static_unload << ':';
         append_annotation_identity(identity, input.script.annotations);
         identity << '\n';
         if (input.extension_base.bridge && input.extension_base.type) {
@@ -2548,6 +2553,7 @@ ProjectCompileResult ProjectCompiler::compile_impl(const ProjectCompileOptions& 
         script.reflection_members = input.members;
         script.is_abstract = input.is_abstract;
         script.is_tool = input.script.tool;
+        script.static_unload = input.static_unload;
         script.is_attached = input.attached;
         script.is_editor_only = editor_only_inputs[input_index];
         const auto expected_class_name =
@@ -2624,6 +2630,7 @@ ProjectCompileResult ProjectCompiler::compile_impl(const ProjectCompileOptions& 
             script.abstract_inner_class_names = compilation.unit.abstract_inner_class_names;
             script.is_abstract = compilation.unit.is_abstract;
             script.is_tool = compilation.unit.is_tool;
+            script.static_unload = compilation.unit.static_unload;
             pending.push_back({result.scripts.size(), std::move(compilation.unit.header),
                                std::move(compilation.unit.source)});
             ++result.compiled_count;

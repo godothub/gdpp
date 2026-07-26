@@ -326,6 +326,27 @@ TEST_CASE("project compiler preserves tool mode across incremental cache hits") 
     REQUIRE(registration.find("GDREGISTER_RUNTIME_CLASS") == std::string::npos);
 }
 
+TEST_CASE("project compiler preserves static unload metadata across cache hits") {
+    const auto root = fixture_root("project-static-unload-metadata");
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
+    write_text(root / "static_state.gd", "@static_unload\n"
+                                         "extends Node\n"
+                                         "static var value := 42\n");
+    const auto options = project_options(root);
+    const gdpp::ProjectCompiler compiler;
+
+    const auto first = compiler.compile(options);
+    REQUIRE(first.success);
+    REQUIRE_EQ(first.scripts.size(), std::size_t{1});
+    REQUIRE(first.scripts.front().static_unload);
+
+    const auto cached = compiler.compile(options);
+    REQUIRE(cached.success);
+    REQUIRE_EQ(cached.cache_hit_count, std::size_t{1});
+    REQUIRE(cached.scripts.front().static_unload);
+}
+
 TEST_CASE("project compiler excludes editor class hierarchies from runtime registration") {
     const auto root = fixture_root("project-editor-only-registration");
     std::error_code error;
