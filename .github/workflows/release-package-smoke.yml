@@ -100,12 +100,13 @@ jobs:
             exit 1
           fi
 
-          python3 - "$runtime" "$root/runtime.log" "$root/coroutine-loop.log" <<'PY'
+          python3 - "$runtime" "$root/runtime.log" "$root/coroutine-loop.log" \
+            "$root/runtime-failure.log" <<'PY'
           from pathlib import Path
           import subprocess
           import sys
 
-          executable, runtime_log, coroutine_log = sys.argv[1:]
+          executable, runtime_log, coroutine_log, failure_log = sys.argv[1:]
           cases = (
               (["--headless", "--quit-after", "2"], runtime_log),
               (
@@ -117,6 +118,16 @@ jobs:
                       "--gdpp-coroutine-loop",
                   ],
                   coroutine_log,
+              ),
+              (
+                  [
+                      "--headless",
+                      "--audio-driver",
+                      "Dummy",
+                      "--",
+                      "--gdpp-runtime-failure",
+                  ],
+                  failure_log,
               ),
           )
           for arguments, log_path in cases:
@@ -133,6 +144,7 @@ jobs:
               if result.returncode:
                   raise SystemExit(result.returncode)
           PY
+          grep -q '^GDPP_RUNTIME_FAILURE_OK$' "$root/runtime-failure.log"
           grep -q '^GDPP_EXPORTED_PROPERTIES_OK$' "$root/runtime.log"
           grep -q '^GDPP_ASYNC_VIRTUAL_OK$' "$root/runtime.log"
           grep -q '^GDPP_COROUTINE_LOOP_OK$' "$root/coroutine-loop.log"
