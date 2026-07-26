@@ -857,8 +857,7 @@ bool SemanticAnalyzer::script_function_is_static(const std::string& name) const 
     return false;
 }
 
-bool SemanticAnalyzer::accessor_is_coroutine(
-    const ast::PropertyAccessor& accessor) const noexcept {
+bool SemanticAnalyzer::accessor_is_coroutine(const ast::PropertyAccessor& accessor) const noexcept {
     if (accessor.method.empty())
         return contains_await_syntax(accessor.body);
     if (const auto found = functions_.find(accessor.method); found != functions_.end()) {
@@ -1727,16 +1726,20 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                 accessor_fields_.find(expression.value()) != accessor_fields_.end() &&
                 current_accessor_fields_.find(expression.value()) == current_accessor_fields_.end();
             const auto property_assignment_type = result;
-            if (accessor_field &&
-                coroutine_getter_fields_.find(expression.value()) !=
-                    coroutine_getter_fields_.end()) {
+            if (accessor_field && coroutine_getter_fields_.find(expression.value()) !=
+                                      coroutine_getter_fields_.end()) {
                 result = variant_type;
             }
             if (static_field && accessor_field) {
-                auto resolution =
-                    ApiResolution{ApiResolutionKind::script_property, "",
-                                  "_gdpp_get_" + expression.value(),
-                                  "_gdpp_set_" + expression.value(), result, 0, 0, false, true};
+                auto resolution = ApiResolution{ApiResolutionKind::script_property,
+                                                "",
+                                                "_gdpp_get_" + expression.value(),
+                                                "_gdpp_set_" + expression.value(),
+                                                result,
+                                                0,
+                                                0,
+                                                false,
+                                                true};
                 resolution.assignment_type = property_assignment_type;
                 model_.api_resolutions_.emplace(&expression, std::move(resolution));
             } else if (static_field) {
@@ -1744,10 +1747,15 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                     &expression, ApiResolution{ApiResolutionKind::script_static_field, "", "", "",
                                                result, 0, 0, false, true});
             } else if (accessor_field) {
-                auto resolution =
-                    ApiResolution{ApiResolutionKind::script_property, "",
-                                  "_gdpp_get_" + expression.value(),
-                                  "_gdpp_set_" + expression.value(), result, 0, 0, false, false};
+                auto resolution = ApiResolution{ApiResolutionKind::script_property,
+                                                "",
+                                                "_gdpp_get_" + expression.value(),
+                                                "_gdpp_set_" + expression.value(),
+                                                result,
+                                                0,
+                                                0,
+                                                false,
+                                                false};
                 resolution.assignment_type = property_assignment_type;
                 model_.api_resolutions_.emplace(&expression, std::move(resolution));
             }
@@ -1977,8 +1985,8 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
         } else if (!await_expression_allowed_) {
             diagnostics_.error(
                 "GDS4090",
-                "await in this expression context requires a dedicated coroutine control-flow "
-                "lowering that is not implemented yet",
+                "await is not permitted in annotation arguments, which must be compile-time "
+                "constants",
                 expression.span);
         }
         if (can_suspend && current_function_name_ == "_init") {
@@ -3301,12 +3309,18 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                 const bool runtime_static_field =
                     current_script_ && current_script_->is_tool && !target->is_tool;
                 result = runtime_static_field || member->getter_is_coroutine ? variant_type
-                                                                            : member->type;
-                auto resolution = ApiResolution{
-                    runtime_static_field ? ApiResolutionKind::script_runtime_static_field
-                                         : ApiResolutionKind::script_property,
-                    target->native_class_name, "_gdpp_get_" + expression.value(),
-                    "_gdpp_set_" + expression.value(), result, 0, 0, false, true};
+                                                                             : member->type;
+                auto resolution = ApiResolution{runtime_static_field
+                                                    ? ApiResolutionKind::script_runtime_static_field
+                                                    : ApiResolutionKind::script_property,
+                                                target->native_class_name,
+                                                "_gdpp_get_" + expression.value(),
+                                                "_gdpp_set_" + expression.value(),
+                                                result,
+                                                0,
+                                                0,
+                                                false,
+                                                true};
                 resolution.assignment_type = member->type;
                 model_.api_resolutions_.emplace(&expression, std::move(resolution));
                 break;
@@ -3442,10 +3456,15 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                 break;
             }
             result = found->getter_is_coroutine ? variant_type : found->type;
-            auto resolution =
-                ApiResolution{ApiResolutionKind::script_property, inner->name,
-                              "_gdpp_get_" + expression.value(), "_gdpp_set_" + expression.value(),
-                              result, 0, 0, false, false};
+            auto resolution = ApiResolution{ApiResolutionKind::script_property,
+                                            inner->name,
+                                            "_gdpp_get_" + expression.value(),
+                                            "_gdpp_set_" + expression.value(),
+                                            result,
+                                            0,
+                                            0,
+                                            false,
+                                            false};
             resolution.assignment_type = found->type;
             model_.api_resolutions_.emplace(&expression, std::move(resolution));
             break;
@@ -3611,14 +3630,20 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                                               member->is_static;
             const bool attached_instance_field =
                 script_owner->attached && !accessed_on_type && !member->is_static;
-            result = runtime_static_field || member->getter_is_coroutine ? variant_type
-                                                                         : member->type;
-            auto resolution = ApiResolution{
-                runtime_static_field ? ApiResolutionKind::script_runtime_static_field
-                : attached_instance_field ? ApiResolutionKind::dynamic_property
-                                          : ApiResolutionKind::script_property,
-                script_owner->native_class_name, "_gdpp_get_" + expression.value(),
-                "_gdpp_set_" + expression.value(), result, 0, 0, false, false};
+            result =
+                runtime_static_field || member->getter_is_coroutine ? variant_type : member->type;
+            auto resolution =
+                ApiResolution{runtime_static_field ? ApiResolutionKind::script_runtime_static_field
+                              : attached_instance_field ? ApiResolutionKind::dynamic_property
+                                                        : ApiResolutionKind::script_property,
+                              script_owner->native_class_name,
+                              "_gdpp_get_" + expression.value(),
+                              "_gdpp_set_" + expression.value(),
+                              result,
+                              0,
+                              0,
+                              false,
+                              false};
             resolution.assignment_type = member->type;
             model_.api_resolutions_.emplace(&expression, std::move(resolution));
             break;
@@ -6073,12 +6098,13 @@ SemanticModel SemanticAnalyzer::analyze(const ast::Script& script) {
                             return false;
                         if (accessor->method.empty())
                             return contains_await_syntax(accessor->body);
-                        const auto method = std::find_if(
-                            declaration.functions.begin(), declaration.functions.end(),
-                            [&](const auto& function) { return function.name == accessor->method; });
-                        return method != declaration.functions.end() &&
-                               method->name != "_init" && method->name != "_static_init" &&
-                               contains_await_syntax(*method);
+                        const auto method =
+                            std::find_if(declaration.functions.begin(), declaration.functions.end(),
+                                         [&](const auto& function) {
+                                             return function.name == accessor->method;
+                                         });
+                        return method != declaration.functions.end() && method->name != "_init" &&
+                               method->name != "_static_init" && contains_await_syntax(*method);
                     };
                 member.getter_is_coroutine = accessor_suspends(variable.getter);
                 member.setter_is_coroutine = accessor_suspends(variable.setter);
@@ -6087,14 +6113,11 @@ SemanticModel SemanticAnalyzer::analyze(const ast::Script& script) {
                             script_symbols_->find_inner(*current_script_, qualified)) {
                         if (const auto* published_member =
                                 script_symbols_->find_inner_member(*published, variable.name);
-                            published_member &&
-                            published_member->kind == ScriptMemberKind::field) {
+                            published_member && published_member->kind == ScriptMemberKind::field) {
                             member.getter_is_coroutine =
-                                member.getter_is_coroutine ||
-                                published_member->getter_is_coroutine;
+                                member.getter_is_coroutine || published_member->getter_is_coroutine;
                             member.setter_is_coroutine =
-                                member.setter_is_coroutine ||
-                                published_member->setter_is_coroutine;
+                                member.setter_is_coroutine || published_member->setter_is_coroutine;
                         }
                     }
                 }

@@ -1409,11 +1409,15 @@ TEST_CASE("compiler rejects malformed and ambiguous RPC configurations") {
                                                               "@rpc\n"
                                                               "func synchronize() -> void:\n"
                                                               "    pass\n");
+    const auto awaited = compiler.compile("awaited_rpc.gd", "@rpc(await \"authority\")\n"
+                                                            "func synchronize() -> void:\n"
+                                                            "    pass\n");
 
     REQUIRE(!duplicate.success);
     REQUIRE(!invalid.success);
     REQUIRE(!channel.success);
     REQUIRE(!repeated.success);
+    REQUIRE(!awaited.success);
     REQUIRE(std::any_of(duplicate.diagnostics.begin(), duplicate.diagnostics.end(),
                         [](const auto& diagnostic) { return diagnostic.code == "GDS4136"; }));
     REQUIRE(std::any_of(invalid.diagnostics.begin(), invalid.diagnostics.end(),
@@ -1422,6 +1426,11 @@ TEST_CASE("compiler rejects malformed and ambiguous RPC configurations") {
                         [](const auto& diagnostic) { return diagnostic.code == "GDS4137"; }));
     REQUIRE(std::any_of(repeated.diagnostics.begin(), repeated.diagnostics.end(),
                         [](const auto& diagnostic) { return diagnostic.code == "GDS4133"; }));
+    REQUIRE(std::any_of(
+        awaited.diagnostics.begin(), awaited.diagnostics.end(), [](const auto& diagnostic) {
+            return diagnostic.code == "GDS4090" &&
+                   diagnostic.message.find("annotation arguments") != std::string::npos;
+        }));
 }
 
 TEST_CASE("compiler initializes onready fields immediately before ready") {
