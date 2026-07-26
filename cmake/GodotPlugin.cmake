@@ -63,11 +63,16 @@ function(gdpp_add_sdk_binding target_name api_version godot_target output_variab
     set(configure_arguments
         -DCMAKE_BUILD_TYPE=${binding_build_type}
         -DGODOTCPP_API_VERSION=${api_version}
+        -DGODOTCPP_PRECISION=${GDPP_GODOT_PRECISION}
         -DGODOTCPP_TARGET=${godot_target}
         -DGODOTCPP_ENABLE_TESTING=OFF
         -DGODOTCPP_SYSTEM_HEADERS=ON
         ${GDPP_NATIVE_CMAKE_CONTRACT_ARGS}
     )
+    if(GDPP_CUSTOM_GDEXTENSION_API_FILE)
+        list(APPEND configure_arguments
+            "-DGODOTCPP_CUSTOM_API_FILE=${GDPP_CUSTOM_GDEXTENSION_API_FILE}")
+    endif()
     if(CMAKE_OSX_ARCHITECTURES)
         string(REPLACE ";" "|" escaped_osx_architectures "${CMAKE_OSX_ARCHITECTURES}")
         list(APPEND configure_arguments
@@ -436,6 +441,12 @@ else()
 endif()
 foreach(GDPP_SDK_VERSION IN LISTS GDPP_PACKAGE_GODOT_VERSIONS)
     string(REPLACE "." "_" GDPP_SDK_SUFFIX "${GDPP_SDK_VERSION}")
+    set(GDPP_SDK_API_KIND_VARIABLE "GDPP_GODOT_API_KIND_${GDPP_SDK_SUFFIX}")
+    set(GDPP_SDK_API_PRECISION_VARIABLE "GDPP_GODOT_API_PRECISION_${GDPP_SDK_SUFFIX}")
+    set(GDPP_SDK_API_SHA256_VARIABLE "GDPP_GODOT_API_SHA256_${GDPP_SDK_SUFFIX}")
+    set(GDPP_SDK_API_KIND "${${GDPP_SDK_API_KIND_VARIABLE}}")
+    set(GDPP_SDK_API_PRECISION "${${GDPP_SDK_API_PRECISION_VARIABLE}}")
+    set(GDPP_SDK_API_SHA256 "${${GDPP_SDK_API_SHA256_VARIABLE}}")
     set(GDPP_SDK_DIRECTORY "${GDPP_PACKAGED_SDK}/${GDPP_SDK_VERSION}")
     set(GDPP_PACKAGED_SDK_${GDPP_SDK_SUFFIX} "${GDPP_SDK_DIRECTORY}")
     set(GDPP_SDK_MANIFEST
@@ -443,7 +454,7 @@ foreach(GDPP_SDK_VERSION IN LISTS GDPP_PACKAGE_GODOT_VERSIONS)
     file(GENERATE
         OUTPUT "${GDPP_SDK_MANIFEST}"
         CONTENT
-            "GDPP_SDK ${GDPP_NATIVE_SDK_SCHEMA}\napi ${GDPP_SDK_VERSION}\nplatform ${GDPP_PLATFORM}\narch ${GDPP_ARCH}\nprofiles debug,release\ndistribution_binding template_release\ndistribution_optimization Release\nplatform_minimum ${GDPP_PLATFORM_MINIMUM}\ngdpp_version ${PROJECT_VERSION}\ncxx_standard 17\nexceptions disabled\nmsvc_runtime ${GDPP_SDK_MSVC_RUNTIME}\nruntime_abi ${GDPP_NATIVE_RUNTIME_ABI}\nruntime_header_sha256 ${GDPP_NATIVE_RUNTIME_HEADER_SHA256}\nreference_semantics_header_sha256 ${GDPP_REFERENCE_SEMANTICS_HEADER_SHA256}\nruntime_source_sha256 ${GDPP_NATIVE_RUNTIME_SOURCE_SHA256}\nattached_runtime_header_sha256 ${GDPP_ATTACHED_RUNTIME_HEADER_SHA256}\nattached_runtime_registry_source_sha256 ${GDPP_ATTACHED_RUNTIME_REGISTRY_SOURCE_SHA256}\nattached_runtime_instance_source_sha256 ${GDPP_ATTACHED_RUNTIME_INSTANCE_SOURCE_SHA256}\nattached_runtime_language_source_sha256 ${GDPP_ATTACHED_RUNTIME_LANGUAGE_SOURCE_SHA256}\ninteger_semantics_header_sha256 ${GDPP_INTEGER_SEMANTICS_HEADER_SHA256}\ncompiler ${CMAKE_CXX_COMPILER_ID}\ncompiler_version ${CMAKE_CXX_COMPILER_VERSION}\n"
+            "GDPP_SDK ${GDPP_NATIVE_SDK_SCHEMA}\napi ${GDPP_SDK_VERSION}\napi_kind ${GDPP_SDK_API_KIND}\napi_sha256 ${GDPP_SDK_API_SHA256}\nprecision ${GDPP_SDK_API_PRECISION}\nplatform ${GDPP_PLATFORM}\narch ${GDPP_ARCH}\nprofiles debug,release\ndistribution_binding template_release\ndistribution_optimization Release\nplatform_minimum ${GDPP_PLATFORM_MINIMUM}\ngdpp_version ${PROJECT_VERSION}\ncxx_standard 17\nexceptions disabled\nmsvc_runtime ${GDPP_SDK_MSVC_RUNTIME}\nruntime_abi ${GDPP_NATIVE_RUNTIME_ABI}\nruntime_header_sha256 ${GDPP_NATIVE_RUNTIME_HEADER_SHA256}\nreference_semantics_header_sha256 ${GDPP_REFERENCE_SEMANTICS_HEADER_SHA256}\nruntime_source_sha256 ${GDPP_NATIVE_RUNTIME_SOURCE_SHA256}\nattached_runtime_header_sha256 ${GDPP_ATTACHED_RUNTIME_HEADER_SHA256}\nattached_runtime_registry_source_sha256 ${GDPP_ATTACHED_RUNTIME_REGISTRY_SOURCE_SHA256}\nattached_runtime_instance_source_sha256 ${GDPP_ATTACHED_RUNTIME_INSTANCE_SOURCE_SHA256}\nattached_runtime_language_source_sha256 ${GDPP_ATTACHED_RUNTIME_LANGUAGE_SOURCE_SHA256}\ninteger_semantics_header_sha256 ${GDPP_INTEGER_SEMANTICS_HEADER_SHA256}\ncompiler ${CMAKE_CXX_COMPILER_ID}\ncompiler_version ${CMAKE_CXX_COMPILER_VERSION}\n"
     )
 
     set(GDPP_SDK_PACKAGE_COMMANDS
@@ -494,8 +505,12 @@ foreach(GDPP_SDK_VERSION IN LISTS GDPP_PACKAGE_GODOT_VERSIONS)
     if(NOT GDPP_GODOT_CPP_LIBRARY_PREFIX)
         message(FATAL_ERROR "godot-cpp must declare its static-library PREFIX")
     endif()
+    set(GDPP_GODOT_CPP_PRECISION_SUFFIX "")
+    if(GDPP_SDK_API_PRECISION STREQUAL "double")
+        set(GDPP_GODOT_CPP_PRECISION_SUFFIX ".double")
+    endif()
     set(GDPP_RELEASE_LIBRARY_NAME
-        "${GDPP_GODOT_CPP_LIBRARY_PREFIX}godot-cpp.${GDPP_PLATFORM}.template_release.${GDPP_ARCH}${CMAKE_STATIC_LIBRARY_SUFFIX}")
+        "${GDPP_GODOT_CPP_LIBRARY_PREFIX}godot-cpp.${GDPP_PLATFORM}.template_release${GDPP_GODOT_CPP_PRECISION_SUFFIX}.${GDPP_ARCH}${CMAKE_STATIC_LIBRARY_SUFFIX}")
     list(APPEND GDPP_SDK_PACKAGE_COMMANDS
         COMMAND "${CMAKE_COMMAND}" -E copy_if_different
                 "${GDPP_SDK_RELEASE_BUILD_${GDPP_SDK_SUFFIX}}/bin/${GDPP_RELEASE_LIBRARY_NAME}"

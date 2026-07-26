@@ -104,6 +104,68 @@ set(GDPP_MIN_GODOT_VERSION "4.4")
 set(GDPP_SUPPORTED_GODOT_VERSIONS "4.4;4.5;4.6;4.7")
 set(GDPP_PACKAGE_GODOT_VERSIONS "${GDPP_SUPPORTED_GODOT_VERSIONS}" CACHE STRING
     "Godot SDK versions included in the end-user plugin package")
+set(GDPP_GODOT_PRECISION "single" CACHE STRING
+    "Godot real_t ABI used by the compiler plugin and every packaged SDK (single|double)")
+set_property(CACHE GDPP_GODOT_PRECISION PROPERTY STRINGS "single;double")
+set(GDPP_CUSTOM_GDEXTENSION_API_FILE "" CACHE FILEPATH
+    "Custom Godot extension_api.json used to build an exact single-version GDPP package")
+if(NOT GDPP_GODOT_PRECISION MATCHES "^(single|double)$")
+    message(FATAL_ERROR
+        "GDPP_GODOT_PRECISION must be 'single' or 'double', got '${GDPP_GODOT_PRECISION}'")
+endif()
+
+set(GDPP_GODOT_API_KIND "official")
+if(GDPP_CUSTOM_GDEXTENSION_API_FILE)
+    file(REAL_PATH "${GDPP_CUSTOM_GDEXTENSION_API_FILE}" GDPP_CUSTOM_GDEXTENSION_API_FILE
+        BASE_DIRECTORY "${CMAKE_SOURCE_DIR}")
+    if(NOT EXISTS "${GDPP_CUSTOM_GDEXTENSION_API_FILE}")
+        message(FATAL_ERROR
+            "Custom Godot extension API does not exist: ${GDPP_CUSTOM_GDEXTENSION_API_FILE}")
+    endif()
+    file(READ "${GDPP_CUSTOM_GDEXTENSION_API_FILE}" GDPP_CUSTOM_GDEXTENSION_API_JSON)
+    string(JSON GDPP_CUSTOM_API_MAJOR ERROR_VARIABLE GDPP_CUSTOM_API_MAJOR_ERROR
+        GET "${GDPP_CUSTOM_GDEXTENSION_API_JSON}" header version_major)
+    string(JSON GDPP_CUSTOM_API_MINOR ERROR_VARIABLE GDPP_CUSTOM_API_MINOR_ERROR
+        GET "${GDPP_CUSTOM_GDEXTENSION_API_JSON}" header version_minor)
+    if(NOT GDPP_CUSTOM_API_MAJOR_ERROR STREQUAL "NOTFOUND" OR
+            NOT GDPP_CUSTOM_API_MINOR_ERROR STREQUAL "NOTFOUND")
+        message(FATAL_ERROR
+            "Custom Godot extension API is missing header.version_major/version_minor")
+    endif()
+    set(GDPP_CUSTOM_API_VERSION "${GDPP_CUSTOM_API_MAJOR}.${GDPP_CUSTOM_API_MINOR}")
+    if(NOT GDPP_CUSTOM_API_VERSION IN_LIST GDPP_SUPPORTED_GODOT_VERSIONS)
+        message(FATAL_ERROR
+            "Custom Godot extension API ${GDPP_CUSTOM_API_VERSION} is outside the supported "
+            "4.4-4.7 ABI matrix")
+    endif()
+    string(JSON GDPP_CUSTOM_API_PRECISION ERROR_VARIABLE GDPP_CUSTOM_API_PRECISION_ERROR
+        GET "${GDPP_CUSTOM_GDEXTENSION_API_JSON}" header precision)
+    if(GDPP_CUSTOM_API_PRECISION_ERROR STREQUAL "NOTFOUND" AND
+            NOT GDPP_CUSTOM_API_PRECISION STREQUAL GDPP_GODOT_PRECISION)
+        message(FATAL_ERROR
+            "Custom Godot extension API precision is '${GDPP_CUSTOM_API_PRECISION}', but "
+            "GDPP_GODOT_PRECISION is '${GDPP_GODOT_PRECISION}'")
+    endif()
+    unset(GDPP_CUSTOM_GDEXTENSION_API_JSON)
+    set(GDPP_GODOT_API_KIND "custom")
+    set(GDPP_GODOT_API_VERSION "${GDPP_CUSTOM_API_VERSION}" CACHE STRING
+        "Godot API used to build the compiler extension" FORCE)
+    set(GODOTCPP_CUSTOM_API_FILE "${GDPP_CUSTOM_GDEXTENSION_API_FILE}" CACHE FILEPATH
+        "Exact custom Godot API shared by GDPP and godot-cpp" FORCE)
+else()
+    if(GDPP_GODOT_PRECISION STREQUAL "double")
+        message(FATAL_ERROR
+            "Double-precision GDPP builds require GDPP_CUSTOM_GDEXTENSION_API_FILE exported "
+            "by the matching double-precision Godot build")
+    endif()
+    set(GDPP_GODOT_API_VERSION "${GDPP_MIN_GODOT_VERSION}" CACHE STRING
+        "Godot API used to build the compiler extension" FORCE)
+    set(GODOTCPP_CUSTOM_API_FILE "" CACHE FILEPATH
+        "Exact custom Godot API shared by GDPP and godot-cpp" FORCE)
+endif()
+set(GODOTCPP_PRECISION "${GDPP_GODOT_PRECISION}" CACHE STRING
+    "Godot real_t precision shared by every GDPP native target" FORCE)
+
 if(NOT GDPP_PACKAGE_GODOT_VERSIONS)
     message(FATAL_ERROR "GDPP_PACKAGE_GODOT_VERSIONS must contain at least one supported version")
 endif()
@@ -115,14 +177,50 @@ foreach(GDPP_PACKAGE_VERSION IN LISTS GDPP_PACKAGE_GODOT_VERSIONS)
             "${GDPP_SUPPORTED_GODOT_VERSIONS}")
     endif()
 endforeach()
-set(GDPP_GODOT_API_VERSION "${GDPP_MIN_GODOT_VERSION}" CACHE STRING
-    "Godot API used to build the compiler extension" FORCE)
+if(GDPP_CUSTOM_GDEXTENSION_API_FILE)
+    list(LENGTH GDPP_PACKAGE_GODOT_VERSIONS GDPP_CUSTOM_PACKAGE_VERSION_COUNT)
+    if(NOT GDPP_CUSTOM_PACKAGE_VERSION_COUNT EQUAL 1 OR
+            NOT GDPP_CUSTOM_API_VERSION IN_LIST GDPP_PACKAGE_GODOT_VERSIONS)
+        message(FATAL_ERROR
+            "A custom Godot build must package exactly its own ${GDPP_CUSTOM_API_VERSION} SDK; "
+            "set GDPP_PACKAGE_GODOT_VERSIONS=${GDPP_CUSTOM_API_VERSION}")
+    endif()
+endif()
 set(GDPP_GODOT_EXECUTABLE "" CACHE FILEPATH "Optional Godot executable used for integration tests")
+
+# Resolve every semantic API table before deriving the compiler fingerprint and version header.
+# A custom snapshot replaces exactly its matching minor; all other tables remain the pinned
+# official corpus so repository tests can still audit the complete supported version matrix.
+foreach(GDPP_API_VERSION IN LISTS GDPP_SUPPORTED_GODOT_VERSIONS)
+    string(REPLACE "." "_" GDPP_API_SUFFIX "${GDPP_API_VERSION}")
+    if(GDPP_CUSTOM_GDEXTENSION_API_FILE AND
+            GDPP_API_VERSION STREQUAL GDPP_CUSTOM_API_VERSION)
+        set(GDPP_API_JSON "${GDPP_CUSTOM_GDEXTENSION_API_FILE}")
+        set(GDPP_API_KIND "custom")
+        set(GDPP_API_PRECISION "${GDPP_GODOT_PRECISION}")
+    elseif(GDPP_API_VERSION STREQUAL "4.7")
+        set(GDPP_API_JSON
+            "${CMAKE_SOURCE_DIR}/third/godot-cpp/gdextension/extension_api.json")
+        set(GDPP_API_KIND "official")
+        set(GDPP_API_PRECISION "single")
+    else()
+        string(REPLACE "." "-" GDPP_API_DASHED "${GDPP_API_VERSION}")
+        set(GDPP_API_JSON
+            "${CMAKE_SOURCE_DIR}/third/godot-cpp/gdextension/extension_api-${GDPP_API_DASHED}.json")
+        set(GDPP_API_KIND "official")
+        set(GDPP_API_PRECISION "single")
+    endif()
+    file(SHA256 "${GDPP_API_JSON}" GDPP_API_SHA256)
+    set(GDPP_GODOT_API_FILE_${GDPP_API_SUFFIX} "${GDPP_API_JSON}")
+    set(GDPP_GODOT_API_KIND_${GDPP_API_SUFFIX} "${GDPP_API_KIND}")
+    set(GDPP_GODOT_API_PRECISION_${GDPP_API_SUFFIX} "${GDPP_API_PRECISION}")
+    set(GDPP_GODOT_API_SHA256_${GDPP_API_SUFFIX} "${GDPP_API_SHA256}")
+endforeach()
 
 # The generated C++ and the compiler-only SDK form one native runtime contract.  Keep exact
 # content hashes in the compiler as well as every packaged SDK so an old or partially copied SDK
 # is rejected during preflight instead of failing later with thousands of C++ diagnostics.
-set(GDPP_NATIVE_SDK_SCHEMA 11)
+set(GDPP_NATIVE_SDK_SCHEMA 12)
 set(GDPP_NATIVE_RUNTIME_ABI 17)
 set(GDPP_NATIVE_RUNTIME_HEADER
     "${CMAKE_SOURCE_DIR}/include/gdpp/runtime/variant_ops.hpp")
@@ -197,6 +295,9 @@ file(GLOB_RECURSE GDPP_CODEGEN_CONTRACT_FILES CONFIGURE_DEPENDS
     "${CMAKE_SOURCE_DIR}/src/support/*.cpp"
     "${CMAKE_SOURCE_DIR}/third/godot-cpp/gdextension/extension_api*.json"
 )
+if(GDPP_CUSTOM_GDEXTENSION_API_FILE)
+    list(APPEND GDPP_CODEGEN_CONTRACT_FILES "${GDPP_CUSTOM_GDEXTENSION_API_FILE}")
+endif()
 list(APPEND GDPP_CODEGEN_CONTRACT_FILES
     "${CMAKE_SOURCE_DIR}/include/gdpp/version.hpp.in"
     "${CMAKE_SOURCE_DIR}/tools/generate_godot_api.py"
@@ -388,13 +489,8 @@ endif()
 set(GDPP_API_DATA_FILES)
 foreach(GDPP_API_VERSION IN LISTS GDPP_SUPPORTED_GODOT_VERSIONS)
     string(REPLACE "." "_" GDPP_API_SUFFIX "${GDPP_API_VERSION}")
-    if(GDPP_API_VERSION STREQUAL "4.7")
-        set(GDPP_API_JSON "${CMAKE_SOURCE_DIR}/third/godot-cpp/gdextension/extension_api.json")
-    else()
-        string(REPLACE "." "-" GDPP_API_DASHED "${GDPP_API_VERSION}")
-        set(GDPP_API_JSON
-            "${CMAKE_SOURCE_DIR}/third/godot-cpp/gdextension/extension_api-${GDPP_API_DASHED}.json")
-    endif()
+    set(GDPP_API_FILE_VARIABLE "GDPP_GODOT_API_FILE_${GDPP_API_SUFFIX}")
+    set(GDPP_API_JSON "${${GDPP_API_FILE_VARIABLE}}")
     set(GDPP_API_DATA
         "${CMAKE_BINARY_DIR}/generated/gdpp/godot_api_data_${GDPP_API_SUFFIX}.inc")
     add_custom_command(
