@@ -1,7 +1,10 @@
 extends Node
 class_name RuntimeFailureCase
 
+signal resume_lambda_loop
+
 var markers: Array[String] = []
+var async_lambda_values: Array[int] = []
 
 
 class BrokenFieldInitialization extends RefCounted:
@@ -192,6 +195,66 @@ func _onready_initialization_failure_continues() -> bool:
     return valid
 
 
+func _lambda_capture_semantics_match() -> bool:
+    var scalar := 1
+    var mutate_scalar := func() -> int:
+        scalar += 1
+        return scalar
+    scalar = 10
+    if mutate_scalar.call() != 2 or mutate_scalar.call() != 2 or scalar != 10:
+        return false
+
+    var factorial: Callable
+    factorial = func(number: int) -> int:
+        return 1 if number <= 1 else number * factorial.call(number - 1)
+    if factorial.call(5) != 0:
+        return false
+
+    var nested_scalar := 1
+    var factory := func() -> Callable:
+        nested_scalar += 1
+        return func() -> int:
+            nested_scalar += 10
+            return nested_scalar
+    var first: Callable = factory.call()
+    var second: Callable = factory.call()
+    if (
+        first.call() != 12
+        or first.call() != 12
+        or second.call() != 12
+        or nested_scalar != 1
+    ):
+        return false
+
+    var shared := [1]
+    var mutate_shared := func() -> int:
+        shared.push_back(shared.size() + 1)
+        return shared.size()
+    return mutate_shared.call() == 2 and mutate_shared.call() == 3 and shared == [1, 2, 3]
+
+
+func _record_async_lambda_capture() -> void:
+    var scalar := 1
+    var iteration := 0
+    while iteration < 1:
+        await resume_lambda_loop
+        var mutate_scalar := func() -> int:
+            scalar += 1
+            return scalar
+        scalar = 10
+        async_lambda_values.assign(
+            [mutate_scalar.call(), scalar, mutate_scalar.call(), scalar]
+        )
+        iteration += 1
+
+
+func _async_lambda_capture_semantics_match() -> bool:
+    async_lambda_values.clear()
+    _record_async_lambda_capture()
+    resume_lambda_loop.emit()
+    return async_lambda_values == [2, 10, 2, 10]
+
+
 func run_contract() -> bool:
     markers.clear()
     _direct_bounds_failure()
@@ -245,4 +308,6 @@ func run_contract() -> bool:
     return (
         _instance_initialization_failure_continues()
         and _onready_initialization_failure_continues()
+        and _lambda_capture_semantics_match()
+        and _async_lambda_capture_semantics_match()
     )
