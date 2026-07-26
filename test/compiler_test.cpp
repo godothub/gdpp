@@ -24,8 +24,9 @@ TEST_CASE("compiler generates bindable GDExtension C++") {
     REQUIRE(result.unit.header.find("GDCLASS(GDPPNative_Counter, godot::Node)") !=
             std::string::npos);
     REQUIRE(result.unit.source.find("ClassDB::bind_method") != std::string::npos);
-    REQUIRE(result.unit.source.find("value = ([&]() { const auto _gdpp_property_current_") !=
-            std::string::npos);
+    REQUIRE(result.unit.source.find("const auto _gdpp_assignment_value_") != std::string::npos);
+    REQUIRE(result.unit.source.find("const auto _gdpp_assignment_result_") != std::string::npos);
+    REQUIRE(result.unit.source.find("value = _gdpp_assignment_result_") != std::string::npos);
     REQUIRE(result.unit.source.find("const auto _gdpp_property_right_") != std::string::npos);
     REQUIRE(result.unit.source.find("gdpp::integer::add(") != std::string::npos);
     REQUIRE(result.unit.source.find("ADD_SIGNAL") != std::string::npos);
@@ -135,7 +136,8 @@ TEST_CASE("compiler centralizes packed values at every generated Variant boundar
                 ", gdpp::runtime::variant_constructor_argument(_gdpp_call_argument_") !=
             std::string::npos);
     REQUIRE(result.unit.source.find("const auto _gdpp_array_value_") != std::string::npos);
-    REQUIRE(result.unit.source.find(" = gdpp::runtime::to_variant(bytes); _gdpp_array_") !=
+    REQUIRE(result.unit.source.find(" = gdpp::runtime::to_variant(bytes);") != std::string::npos);
+    REQUIRE(result.unit.source.find("gdpp::runtime::script_function_failed()") !=
             std::string::npos);
     REQUIRE(result.unit.source.find(".set(_gdpp_dictionary_key_") != std::string::npos);
 }
@@ -1024,7 +1026,8 @@ TEST_CASE("compiler defers scalar Godot constants until after extension initiali
     REQUIRE(result.unit.header.find("static const double& MAX_ANGLE();") != std::string::npos);
     REQUIRE(result.unit.source.find("_gdpp_constant_MAX_ANGLE_storage()") != std::string::npos);
     REQUIRE(result.unit.source.find("::MAX_ANGLE =") == std::string::npos);
-    REQUIRE(result.unit.source.find("return MAX_ANGLE();") != std::string::npos);
+    REQUIRE(result.unit.source.find("const auto _gdpp_return_value_") != std::string::npos);
+    REQUIRE(result.unit.source.find(" = MAX_ANGLE();") != std::string::npos);
 }
 
 TEST_CASE("compiler completes coroutine state inside structured await continuations") {
@@ -1041,16 +1044,18 @@ TEST_CASE("compiler completes coroutine state inside structured await continuati
                            "    print(\"done\")\n");
 
     REQUIRE(result.success);
-    const auto cancelled_branch =
-        result.unit.source.find("if ((gdpp::runtime::to_variant(cancelled)).booleanize()) {");
+    const auto cancelled_branch = result.unit.source.find("const bool _gdpp_if_condition_");
     REQUIRE(cancelled_branch != std::string::npos);
+    REQUIRE(result.unit.source.find("(gdpp::runtime::to_variant(cancelled)).booleanize()",
+                                    cancelled_branch) != std::string::npos);
     REQUIRE(result.unit.source.find("gdpp::runtime::complete_coroutine(", cancelled_branch) !=
             std::string::npos);
     REQUIRE(result.unit.source.find("return;", cancelled_branch) != std::string::npos);
     REQUIRE(result.unit.source.find("mutable -> godot::Variant {\n"
                                     "    [[maybe_unused]] godot::Variant value =") !=
             std::string::npos);
-    REQUIRE(result.unit.source.find("return gdpp::runtime::to_variant(([&]() -> bool") !=
+    REQUIRE(result.unit.source.find("const auto _gdpp_return_value_") != std::string::npos);
+    REQUIRE(result.unit.source.find("return gdpp::runtime::to_variant(_gdpp_return_value_") !=
             std::string::npos);
 }
 
@@ -1370,7 +1375,7 @@ TEST_CASE("compiler safely assigns every reference-backed Godot storage family")
     for (const auto* storage :
          {"state", "typed_state", "labels", "bytes", "title", "key", "path", "callback"}) {
         REQUIRE(result.unit.source.find("gdpp::runtime::assign_native_storage(" +
-                                        std::string{storage} + ", " + storage + ")") !=
+                                        std::string{storage} + ", _gdpp_assignment_result_") !=
                 std::string::npos);
     }
 }
@@ -1658,7 +1663,9 @@ TEST_CASE("compiler lowers short-circuit conditional and loop-condition awaits t
     REQUIRE(conditional.success);
     REQUIRE(loop_condition.success);
     REQUIRE(short_circuit.unit.source.find("gdpp::runtime::await_signal") != std::string::npos);
-    REQUIRE(short_circuit.unit.source.find("if (static_cast<bool>(true))") != std::string::npos);
+    REQUIRE(short_circuit.unit.source.find(
+                "const bool _gdpp_async_if_condition_0 = static_cast<bool>(true);") !=
+            std::string::npos);
     REQUIRE(conditional.unit.source.find("gdpp::runtime::await_signal") != std::string::npos);
     REQUIRE(conditional.unit.source.find("unlowered await expression") == std::string::npos);
     REQUIRE(loop_condition.unit.source.find("std::weak_ptr<std::function<void()>>") !=
@@ -1778,7 +1785,8 @@ TEST_CASE("compiler lifts entry parameters through suspended loop recovery") {
     REQUIRE(function.unit.source.find("_gdpp_utility_argument_") != std::string::npos);
     REQUIRE(function.unit.source.find(" = (*_gdpp_async_cell_") != std::string::npos);
     REQUIRE(setter.unit.source.find("std::make_shared<int64_t>(value)") != std::string::npos);
-    REQUIRE(setter.unit.source.find("score = (*_gdpp_async_cell_") != std::string::npos);
+    REQUIRE(setter.unit.source.find("const auto _gdpp_assignment_value_") != std::string::npos);
+    REQUIRE(setter.unit.source.find("score = _gdpp_assignment_result_") != std::string::npos);
     const auto nested_parameter = nested.unit.source.find("std::make_shared<int64_t>(count)");
     REQUIRE(nested_parameter != std::string::npos);
     REQUIRE(nested.unit.source.find("std::make_shared<int64_t>(count)", nested_parameter + 1) !=
@@ -1888,7 +1896,8 @@ TEST_CASE("compiler preserves typed returns for non-suspending awaited asserts")
     REQUIRE(assertion.success);
     REQUIRE(assertion.unit.source.find("gdpp::runtime::await_signal") == std::string::npos);
     REQUIRE(assertion.unit.source.find("ERR_FAIL_V_EDMSG") != std::string::npos);
-    REQUIRE(assertion.unit.source.find("return static_cast<int64_t>(7);") != std::string::npos);
+    REQUIRE(assertion.unit.source.find("const auto _gdpp_return_value_") != std::string::npos);
+    REQUIRE(assertion.unit.source.find(" = static_cast<int64_t>(7);") != std::string::npos);
 }
 
 TEST_CASE("compiler applies truthiness to typed containers with short circuiting") {
@@ -2021,8 +2030,9 @@ TEST_CASE("compiler preserves dynamic coroutine return values through the native
     REQUIRE(result.success);
     REQUIRE(result.unit.header.find("godot::Variant spawn()") != std::string::npos);
     REQUIRE(result.unit.source.find("gdpp::runtime::begin_coroutine(this)") != std::string::npos);
+    REQUIRE(result.unit.source.find("const auto _gdpp_return_value_") != std::string::npos);
     REQUIRE(result.unit.source.find("gdpp::runtime::complete_coroutine(_gdpp_coroutine_state, "
-                                    "gdpp::runtime::to_variant(static_cast<int64_t>(42)))") !=
+                                    "gdpp::runtime::to_variant(_gdpp_return_value_") !=
             std::string::npos);
 }
 
@@ -2554,7 +2564,7 @@ TEST_CASE("compiler preserves owner-free static fields methods lambdas and super
             std::string::npos);
     REQUIRE(result.unit.source.find("GDPPNative_StaticContext__Child::_gdpp_get_total()") !=
             std::string::npos);
-    REQUIRE(result.unit.source.find("return GDPPNative_StaticContext__Child::_gdpp_get_total();") !=
+    REQUIRE(result.unit.source.find(" = GDPPNative_StaticContext__Child::_gdpp_get_total();") !=
             std::string::npos);
 }
 
@@ -2805,9 +2815,11 @@ TEST_CASE("compiler assigns shader resources through the property accessor base 
                                                "    return material\n");
 
     REQUIRE(result.success);
-    REQUIRE(
-        result.unit.source.find("set_material(godot::Ref<godot::Material>(godot::Object::cast_to<"
-                                "godot::Material>((effect).ptr())))") != std::string::npos);
+    REQUIRE(result.unit.source.find("godot::Ref<godot::Material>(godot::Object::cast_to<"
+                                    "godot::Material>((_gdpp_assignment_value_") !=
+            std::string::npos);
+    REQUIRE(result.unit.source.find("set_material(_gdpp_assignment_result_") !=
+            std::string::npos);
     REQUIRE(result.unit.source.find("cast_to<godot::CanvasItemMaterial>") == std::string::npos);
     REQUIRE(result.unit.source.find("godot::Ref<godot::Material>") != std::string::npos);
 }
@@ -2845,13 +2857,13 @@ TEST_CASE("compiler applies Material ABI across every shader-capable property fa
     REQUIRE(result.unit.source.find("cast_to<godot::CanvasItemMaterial>") == std::string::npos);
     REQUIRE(result.unit.source.find("cast_to<godot::FogMaterial>") == std::string::npos);
     REQUIRE(result.unit.source.find("cast_to<godot::PanoramaSkyMaterial>") == std::string::npos);
-    REQUIRE(result.unit.source.find("set_process_material(godot::Ref<godot::Material>") !=
+    REQUIRE(result.unit.source.find("set_process_material(_gdpp_property_assigned_") !=
             std::string::npos);
-    REQUIRE(result.unit.source.find("set_material(godot::Ref<godot::Material>") !=
+    REQUIRE(result.unit.source.find("set_material(_gdpp_property_assigned_") !=
             std::string::npos);
-    REQUIRE(result.unit.source.find("set_material_override(godot::Ref<godot::Material>") !=
+    REQUIRE(result.unit.source.find("set_material_override(_gdpp_property_assigned_") !=
             std::string::npos);
-    REQUIRE(result.unit.source.find("set_material_overlay(godot::Ref<godot::Material>") !=
+    REQUIRE(result.unit.source.find("set_material_overlay(_gdpp_property_assigned_") !=
             std::string::npos);
     REQUIRE(result.unit.source.find("set_shader_parameter") != std::string::npos);
     REQUIRE(result.unit.source.find("godot::String(\"shader_parameter/pulse\")") !=
@@ -2867,9 +2879,10 @@ TEST_CASE("compiler applies Godot-compatible numeric and builtin conversions") {
                                          "    return randi_range(bounds.x, bounds.y)\n");
 
     REQUIRE(result.success);
-    REQUIRE(result.unit.source.find("static_cast<godot::Color>("
-                                    "gdpp::runtime::to_variant(godot::String(\"bcbcbc\")))") !=
+    REQUIRE(result.unit.source.find("static_cast<godot::Color>(gdpp::runtime::to_variant("
+                                    "_gdpp_assignment_value_") !=
             std::string::npos);
+    REQUIRE(result.unit.source.find("godot::String(\"bcbcbc\")") != std::string::npos);
     REQUIRE(result.unit.source.find("static_cast<int64_t>") != std::string::npos);
 }
 
@@ -3318,7 +3331,8 @@ TEST_CASE("compiler resolves inherited engine constants and qualified class enum
     REQUIRE(result.unit.source.find("find_engine_singleton") == std::string::npos);
     REQUIRE(result.unit.source.find(" = 2000;") != std::string::npos);
     REQUIRE(result.unit.source.find(" = 1007;") != std::string::npos);
-    REQUIRE(result.unit.source.find("return (_gdpp_integer_left_") != std::string::npos);
+    REQUIRE(result.unit.source.find("const auto _gdpp_return_value_") != std::string::npos);
+    REQUIRE(result.unit.source.find("_gdpp_integer_left_") != std::string::npos);
     REQUIRE(result.unit.source.find("static_cast<int64_t>(gdpp::runtime::to_variant(0))") !=
             std::string::npos);
 }
@@ -3508,7 +3522,9 @@ TEST_CASE("dynamic nested value assignments write every changed value back to it
     REQUIRE(source.find("godot::StringName(\"y\")") != std::string::npos);
     REQUIRE(source.find("godot::StringName(\"position\"), _gdpp_dynamic_child_") !=
             std::string::npos);
-    REQUIRE(source.find("target = _gdpp_dynamic_root_") != std::string::npos);
+    REQUIRE(source.find("_gdpp_dynamic_root_") != std::string::npos);
+    REQUIRE(source.find("_gdpp_assignment_receiver_0 = _gdpp_dynamic_root_") !=
+            std::string::npos);
 
     // Deeper Transform3D.origin.x-style chains must reverse through every value layer.
     REQUIRE(source.find("godot::StringName(\"origin\"), _gdpp_dynamic_child_") !=
@@ -3517,7 +3533,8 @@ TEST_CASE("dynamic nested value assignments write every changed value back to it
             std::string::npos);
 
     // Variant-held value roots and Array[index] records exercise the two distinct final stores.
-    REQUIRE(source.find("local_variant = _gdpp_dynamic_root_") != std::string::npos);
+    REQUIRE(source.find("_gdpp_assignment_receiver_2 = _gdpp_dynamic_root_") !=
+            std::string::npos);
     REQUIRE(source.find("gdpp::runtime::set_key(_gdpp_dynamic_root_") != std::string::npos);
     REQUIRE(source.find("godot::StringName(\"tint\"), _gdpp_dynamic_child_") != std::string::npos);
 }
@@ -3705,9 +3722,10 @@ TEST_CASE("compiler generates nonrecursive Godot 4 property accessors") {
     REQUIRE(result.unit.header.find("int64_t _gdpp_get_health()") != std::string::npos);
     REQUIRE(result.unit.source.find("int64_t GDPPNative_Health::_gdpp_get_health()") !=
             std::string::npos);
-    REQUIRE(result.unit.source.find("health = value;") != std::string::npos);
-    REQUIRE(result.unit.source.find("_gdpp_set_health(value);") != std::string::npos);
-    REQUIRE(result.unit.source.find("return _gdpp_get_health();") != std::string::npos);
+    REQUIRE(result.unit.source.find("health = _gdpp_assignment_result_") != std::string::npos);
+    REQUIRE(result.unit.source.find("_gdpp_set_health(_gdpp_assignment_result_") !=
+            std::string::npos);
+    REQUIRE(result.unit.source.find(" = _gdpp_get_health();") != std::string::npos);
     REQUIRE(result.unit.source.find("return health;\n    return health;") == std::string::npos);
     REQUIRE(result.unit.source.find("return _gdpp_get_health();\n    return {};") ==
             std::string::npos);
@@ -3730,9 +3748,11 @@ TEST_CASE("compiler generates validated method-bound property accessors") {
     REQUIRE(result.success);
     REQUIRE(result.unit.source.find("return is_active();") != std::string::npos);
     REQUIRE(result.unit.source.find("set_active(value);") != std::string::npos);
-    REQUIRE(result.unit.source.find("active = value;") != std::string::npos);
-    REQUIRE(result.unit.source.find("_gdpp_set_active(false);") != std::string::npos);
-    REQUIRE(result.unit.source.find("return _gdpp_get_active();") != std::string::npos);
+    REQUIRE(result.unit.source.find("active = _gdpp_assignment_result_") != std::string::npos);
+    REQUIRE(result.unit.source.find(" = false;") != std::string::npos);
+    REQUIRE(result.unit.source.find("_gdpp_set_active(_gdpp_assignment_result_") !=
+            std::string::npos);
+    REQUIRE(result.unit.source.find(" = _gdpp_get_active();") != std::string::npos);
 }
 
 TEST_CASE("compiler rejects invalid bound property accessor signatures") {
@@ -3853,11 +3873,10 @@ TEST_CASE("generated object method calls reject null and freed receivers") {
     REQUIRE(result.success);
     REQUIRE(result.unit.source.find("gdpp::runtime::is_instance_valid") != std::string::npos);
     REQUIRE(result.unit.source.find(
-                "Cannot call 'get_child_count' on a null or freed object at safe_receiver.gd:3") !=
+                "Cannot call method 'get_child_count' on a null or freed value.") !=
             std::string::npos);
-    REQUIRE(result.unit.source.find(
-                "Cannot call 'get_child_count' on a null or freed object at safe_receiver.gd:6") !=
-            std::string::npos);
+    REQUIRE(result.unit.source.find("_gdpp_source_path, 3, 12") != std::string::npos);
+    REQUIRE(result.unit.source.find("_gdpp_source_path, 6, 16") != std::string::npos);
 }
 
 TEST_CASE("generated object property reads reject null and freed receivers") {
@@ -3874,11 +3893,10 @@ TEST_CASE("generated object property reads reject null and freed receivers") {
     REQUIRE(result.success);
     REQUIRE(result.unit.source.find("_gdpp_property_receiver_") != std::string::npos);
     REQUIRE(result.unit.source.find(
-                "Cannot access member 'name' on a null or freed object at safe_property.gd:3") !=
+                "Cannot access member 'name' on a null or freed value.") !=
             std::string::npos);
-    REQUIRE(result.unit.source.find(
-                "Cannot access member 'name' on a null or freed object at safe_property.gd:6") !=
-            std::string::npos);
+    REQUIRE(result.unit.source.find("_gdpp_source_path, 3, 12") != std::string::npos);
+    REQUIRE(result.unit.source.find("_gdpp_source_path, 6, 16") != std::string::npos);
 }
 
 TEST_CASE("generated object property writes reject null and freed receivers") {
@@ -4392,7 +4410,8 @@ TEST_CASE("compiler optimization can be enabled or disabled without changing the
     REQUIRE(unoptimized.success);
     REQUIRE_EQ(optimized.optimization.constants_folded, std::size_t{1});
     REQUIRE_EQ(unoptimized.optimization.constants_folded, std::size_t{0});
-    REQUIRE(optimized.unit.source.find("return static_cast<int64_t>(42);") != std::string::npos);
+    REQUIRE(optimized.unit.source.find("const auto _gdpp_return_value_") != std::string::npos);
+    REQUIRE(optimized.unit.source.find(" = static_cast<int64_t>(42);") != std::string::npos);
     REQUIRE(unoptimized.unit.source.find("gdpp::integer::add(") != std::string::npos);
     REQUIRE(unoptimized.unit.source.find(" = static_cast<int64_t>(40);") != std::string::npos);
     REQUIRE(unoptimized.unit.source.find(" = static_cast<int64_t>(2);") != std::string::npos);
@@ -4440,7 +4459,7 @@ TEST_CASE("Godot API inheritance resolves native methods properties and builtin 
     REQUIRE(result.unit.header.find("#include <godot_cpp/variant/vector2.hpp>") !=
             std::string::npos);
     REQUIRE(result.unit.header.find("godot::Vector2 delta") != std::string::npos);
-    REQUIRE(result.unit.source.find("set_position(([&]() { const auto _gdpp_property_current_") !=
+    REQUIRE(result.unit.source.find("set_position(_gdpp_assignment_result_") !=
             std::string::npos);
     REQUIRE(result.unit.source.find("= get_position(); const auto _gdpp_property_right_") !=
             std::string::npos);
@@ -4466,7 +4485,7 @@ TEST_CASE("builtin unary operators use Variant evaluation when godot-cpp has no 
     REQUIRE(result.unit.source.find("static_cast<godot::Vector2>("
                                     "gdpp::runtime::to_variant(gdpp::runtime::unary(") !=
             std::string::npos);
-    REQUIRE(result.unit.source.find("return (+value);") != std::string::npos);
+    REQUIRE(result.unit.source.find(" = (+value);") != std::string::npos);
 }
 
 TEST_CASE("static function values use owner-free callables with default argument semantics") {
@@ -4570,7 +4589,8 @@ TEST_CASE("Godot builtin constructors resolve overloads and native value types")
                                                        "    return value.distance_to(origin)\n");
 
     REQUIRE(result.success);
-    REQUIRE(result.unit.source.find("return godot::Vector2(static_cast<godot::real_t>(") !=
+    REQUIRE(result.unit.source.find("const auto _gdpp_call_result_") != std::string::npos);
+    REQUIRE(result.unit.source.find(" = godot::Vector2(static_cast<godot::real_t>(") !=
             std::string::npos);
     REQUIRE(result.unit.source.find("static_cast<godot::real_t>(_gdpp_call_argument_") !=
             std::string::npos);
@@ -4637,7 +4657,7 @@ TEST_CASE("Godot builtin static methods lower to native scope calls") {
                                                       "var accent := Color.html(\"ff8800\")\n");
 
     REQUIRE(result.success);
-    REQUIRE(result.unit.source.find("return godot::Color::html(_gdpp_call_argument_") !=
+    REQUIRE(result.unit.source.find(" = godot::Color::html(_gdpp_call_argument_") !=
             std::string::npos);
 }
 
@@ -4709,7 +4729,8 @@ TEST_CASE("compiler matches zero-arity varargs constant preload and warning rang
     REQUIRE(static_instance.success);
     REQUIRE(utilities.unit.source.find("godot::UtilityFunctions::print(godot::String())") !=
             std::string::npos);
-    REQUIRE(utilities.unit.source.find("return godot::String()") != std::string::npos);
+    REQUIRE(utilities.unit.source.find("const auto _gdpp_return_value_") != std::string::npos);
+    REQUIRE(utilities.unit.source.find(" = godot::String();") != std::string::npos);
     REQUIRE(preload.unit.source.find("gdpp::runtime::load_resource(") != std::string::npos);
     REQUIRE(preload.unit.source.find("PATH") != std::string::npos);
     REQUIRE(preload.unit.source.find("ROOT()") == std::string::npos);
@@ -4836,6 +4857,63 @@ TEST_CASE("compiler sequences every eager binary operand before evaluation") {
         REQUIRE(result.unit.source.find(operation) != std::string::npos);
     REQUIRE(result.unit.source.find("gdpp::runtime::binary(godot::Variant::OP_IN, "
                                     "mark_variant(") == std::string::npos);
+}
+
+TEST_CASE("compiler contains fatal expression faults and preserves Godot assignment order") {
+    const gdpp::Compiler compiler;
+    const auto result = compiler.compile(
+        "failure_order.gd",
+        "extends RefCounted\n"
+        "func marker(name: String) -> int:\n"
+        "    return 1\n"
+        "func target(values: Array[int]) -> Array[int]:\n"
+        "    marker(\"target\")\n"
+        "    return values\n"
+        "func index() -> int:\n"
+        "    marker(\"index\")\n"
+        "    return 0\n"
+        "func direct() -> void:\n"
+        "    var values := [1]\n"
+        "    var result = marker(\"left\") + values[4] + marker(\"right\")\n"
+        "    marker(str(result))\n"
+        "func callee() -> int:\n"
+        "    var values := [1]\n"
+        "    return values[4]\n"
+        "func caller() -> int:\n"
+        "    return marker(\"before\") + callee() + marker(\"after\")\n"
+        "func assign() -> void:\n"
+        "    var values: Array[int] = [0]\n"
+        "    target(values)[index()] = marker(\"rhs\")\n");
+
+    REQUIRE(result.success);
+    const auto& source = result.unit.source;
+
+    const auto direct = source.find("::direct()");
+    const auto bounds = source.find("gdpp::runtime::checked_array_get", direct);
+    const auto bounds_failure = source.find("gdpp::runtime::script_function_failed()", bounds);
+    const auto right = source.find("godot::String(\"right\")", bounds);
+    REQUIRE(direct != std::string::npos);
+    REQUIRE(bounds != std::string::npos);
+    REQUIRE(bounds < bounds_failure);
+    REQUIRE(bounds_failure < right);
+
+    const auto callee = source.find("::callee()");
+    const auto caller = source.find("::caller()");
+    REQUIRE(source.find("gdpp::runtime::ScriptFunctionScope", callee) < caller);
+    REQUIRE(source.find("gdpp::runtime::ScriptFunctionScope", caller) != std::string::npos);
+    const auto callee_call = source.find("callee()", caller + 1);
+    const auto caller_after = source.find("godot::String(\"after\")", callee_call);
+    REQUIRE(callee_call < caller_after);
+
+    const auto assignment = source.find("::assign()");
+    const auto target_call = source.find("target(", assignment + 1);
+    const auto rhs_call = source.find("godot::String(\"rhs\")", target_call);
+    const auto index_call = source.find("index()", rhs_call);
+    const auto write = source.find("gdpp::runtime::checked_array_set", index_call);
+    REQUIRE(assignment != std::string::npos);
+    REQUIRE(target_call < rhs_call);
+    REQUIRE(rhs_call < index_call);
+    REQUIRE(index_call < write);
 }
 
 TEST_CASE("compiler handles generated logical guard chains with bounded stack depth") {
