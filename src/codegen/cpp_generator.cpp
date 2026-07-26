@@ -3900,7 +3900,9 @@ std::string CodeGenerator::emit_expression(const typed::Expression& expression) 
             return result + "; }())";
         }
         if (callee.resolution == typed::ResolutionKind::script_free)
-            return "memdelete(" + emit_expression(*callee.operands.at(0)) + ")";
+            return "gdpp::runtime::free_object_at(gdpp::runtime::to_variant(" +
+                   emit_expression(*callee.operands.at(0)) + "), " +
+                   script_location(expression.span) + ")";
         if (godot_method && callee.value == "get_script" && expression.operands.size() == 1) {
             std::string object = self_object_expression();
             if (callee.kind == typed::ExpressionKind::member) {

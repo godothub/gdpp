@@ -374,6 +374,7 @@ void assign_native_storage(Target& target, Value&& value) {
 [[nodiscard]] std::int64_t integer_modulo(std::int64_t left, std::int64_t right,
                                           ScriptSourceLocation location = {});
 [[nodiscard]] bool is_instance_valid(const godot::Variant& value) noexcept;
+void free_object_at(const godot::Variant& value, ScriptSourceLocation location = {});
 [[nodiscard]] godot::Array make_range(std::int64_t stop);
 [[nodiscard]] godot::Array make_range(std::int64_t start, std::int64_t stop);
 [[nodiscard]] godot::Array make_range(std::int64_t start, std::int64_t stop, std::int64_t step);

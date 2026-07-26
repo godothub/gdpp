@@ -804,6 +804,37 @@ bool is_instance_valid(const godot::Variant& value) noexcept {
     return value.get_type() == godot::Variant::OBJECT && value.get_validated_object() != nullptr;
 }
 
+void free_object_at(const godot::Variant& value, const ScriptSourceLocation location) {
+    if (script_function_failed())
+        return;
+    if (value.get_type() != godot::Variant::OBJECT) {
+        report_script_failure("Attempted to free a non-Object value.", location);
+        return;
+    }
+    auto* object = value.get_validated_object();
+    if (!object) {
+        const auto identity = static_cast<godot::ObjectID>(value);
+        report_script_failure(identity.is_valid() ? "Attempted to free a previously freed Object."
+                                                  : "Attempted to free a null Object.",
+                              location);
+        return;
+    }
+    godot::Variant target = value;
+    godot::Variant ignored;
+    GDExtensionCallError error{};
+    target.callp(godot::StringName{"free"}, nullptr, 0, ignored, error);
+    if (error.error == GDEXTENSION_CALL_OK)
+        return;
+    if (error.error == GDEXTENSION_CALL_ERROR_INVALID_METHOD) {
+        report_script_failure(godot::Object::cast_to<godot::RefCounted>(object)
+                                  ? "Attempted to free a RefCounted object."
+                                  : "Attempted to free a locked object (calling or emitting).",
+                              location);
+        return;
+    }
+    report_script_failure(call_error_message("Object.free()", error), location);
+}
+
 godot::Array make_range(std::int64_t stop) { return make_range(0, stop, 1); }
 
 godot::Array make_range(std::int64_t start, std::int64_t stop) {
