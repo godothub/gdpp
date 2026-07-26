@@ -176,6 +176,16 @@ strict_native_pointer_storage(const godot::Variant& value,
 }
 
 template <typename ObjectType>
+[[nodiscard]] ObjectStorage<ObjectType>
+strict_native_object_value_storage(const godot::Variant& value,
+                                   const godot::StringName& expected_class,
+                                   const ScriptSourceLocation location = {}) {
+    if (!strict_native_object_storage(value, expected_class, location))
+        return {};
+    return ObjectStorage<ObjectType>(value);
+}
+
+template <typename ObjectType>
 [[nodiscard]] godot::Ref<ObjectType>
 strict_native_ref_storage(const godot::Variant& value, const godot::StringName& expected_class,
                           const ScriptSourceLocation location = {}) {

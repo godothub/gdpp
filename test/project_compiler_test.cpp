@@ -1203,9 +1203,11 @@ TEST_CASE("project compiler resolves class and path inheritance in parent-first 
     REQUIRE(child_header.find("#include \"project_middle.gd.hpp\"") != std::string::npos);
     REQUIRE(child_header.find("GDCLASS(" + child_class + ", " + middle_class + ")") !=
             std::string::npos);
-    REQUIRE(child_header.find("godot::Object* linked") != std::string::npos);
-    REQUIRE(child_header.find("godot::Object* typed_identity(godot::Object* value)") !=
+    REQUIRE(child_header.find("gdpp::runtime::ObjectStorage<godot::Object> linked") !=
             std::string::npos);
+    REQUIRE(child_header.find(
+                "gdpp::runtime::ObjectStorage<godot::Object> typed_identity("
+                "gdpp::runtime::ObjectStorage<godot::Object> value)") != std::string::npos);
     REQUIRE(child_source.find(base_class + "::static_answer()") != std::string::npos);
     REQUIRE(child_source.find("get_named(value, godot::StringName(\"base_value\"), "
                               "gdpp::runtime::ScriptSourceLocation{") != std::string::npos);
@@ -1373,9 +1375,10 @@ TEST_CASE("project compiler dynamically dispatches ABI-changing internal overrid
         read_text(options.output_directory / "generated" / result.scripts.front().header_file_name);
     const auto source =
         read_text(options.output_directory / "generated" / result.scripts.front().source_file_name);
-    REQUIRE(header.find("_gdpp_native_override_transform(godot::Object* value)") !=
+    REQUIRE(header.find("_gdpp_native_override_transform("
+                        "gdpp::runtime::ObjectStorage<godot::Object> value)") !=
             std::string::npos);
-    REQUIRE(header.find("_gdpp_native_override_transform(godot::Object* value) override") ==
+    REQUIRE(header.find("gdpp::runtime::ObjectStorage<godot::Object> value) override") ==
             std::string::npos);
     REQUIRE(source.find("gdpp::runtime::call_dynamic_at(") != std::string::npos);
     REQUIRE(source.find("_gdpp_native_override_transform(") != std::string::npos);

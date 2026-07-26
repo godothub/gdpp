@@ -518,8 +518,9 @@ TEST_CASE("compiler applies internal call contracts to every native storage fami
     REQUIRE(result.unit.source.find(
                 "gdpp::runtime::strict_typed_storage<godot::TypedDictionary<godot::String, "
                 "int64_t>>(gdpp::runtime::to_variant(_gdpp_call_argument_") != std::string::npos);
-    REQUIRE(result.unit.source.find("gdpp::runtime::strict_native_pointer_storage<godot::Node>("
-                                    "gdpp::runtime::to_variant(_gdpp_call_argument_") !=
+    REQUIRE(result.unit.source.find(
+                "gdpp::runtime::strict_native_object_value_storage<godot::Node>("
+                "gdpp::runtime::to_variant(_gdpp_call_argument_") !=
             std::string::npos);
     REQUIRE(result.unit.source.find("gdpp::runtime::strict_builtin_storage<godot::String>("
                                     "gdpp::runtime::to_variant(_gdpp_call_argument_") !=
@@ -1092,9 +1093,10 @@ TEST_CASE("compiler preserves instance defaults and explicit null through native
                 "method.default_arguments.push_back(gdpp::runtime::default_argument())") !=
             std::string::npos);
     REQUIRE(result.unit.source.find("DEFVAL(godot::Variant())") == std::string::npos);
-    REQUIRE(result.unit.source.find("? static_cast<godot::Control*>(nullptr) : "
-                                    "gdpp::runtime::strict_native_pointer_storage<"
-                                    "godot::Control>") != std::string::npos);
+    REQUIRE(result.unit.source.find(
+                "? gdpp::runtime::ObjectStorage<godot::Control>{} : "
+                "gdpp::runtime::strict_native_object_value_storage<godot::Control>") !=
+            std::string::npos);
 }
 
 TEST_CASE("compiler gives dynamic conditional branches an unambiguous native common type") {
@@ -1386,7 +1388,9 @@ TEST_CASE("compiler initializes onready fields immediately before ready") {
                                    "    node_label.text = \"ready\"\n");
 
     REQUIRE(result.success);
-    REQUIRE(result.unit.header.find("godot::Label* node_label{}") != std::string::npos);
+    REQUIRE(result.unit.header.find(
+                "gdpp::runtime::ObjectStorage<godot::Label> node_label{}") !=
+            std::string::npos);
     const auto initialization = result.unit.source.find("node_label =");
     const auto user_body = result.unit.source.find("->set_text");
     REQUIRE(initialization != std::string::npos);
@@ -1483,7 +1487,8 @@ TEST_CASE("compiler releases script static storage before Godot servers stop") {
             std::string::npos);
     REQUIRE(result.unit.source.find("static std::atomic<godot::Array*> value{nullptr}") !=
             std::string::npos);
-    REQUIRE(result.unit.source.find("static std::atomic<godot::Node**> value{nullptr}") !=
+    REQUIRE(result.unit.source.find(
+                "static std::atomic<gdpp::runtime::ObjectStorage<godot::Node>*> value{nullptr}") !=
             std::string::npos);
 }
 
@@ -2648,7 +2653,8 @@ TEST_CASE("uninitialized locals preserve Godot default initialization") {
     REQUIRE(result.success);
     REQUIRE(result.unit.source.find("int64_t typed{};") != std::string::npos);
     REQUIRE(result.unit.source.find("godot::Variant dynamic{};") != std::string::npos);
-    REQUIRE(result.unit.source.find("godot::Node* object{};") != std::string::npos);
+    REQUIRE(result.unit.source.find(
+                "gdpp::runtime::ObjectStorage<godot::Node> object{};") != std::string::npos);
 }
 
 TEST_CASE("compiler preserves typed subscript and builtin component scalar semantics") {
@@ -3487,7 +3493,9 @@ TEST_CASE("code generation uses the selected Godot API for new object types") {
     REQUIRE(result.success);
     REQUIRE(result.unit.header.find("godot_cpp/classes/accessibility_server.hpp") !=
             std::string::npos);
-    REQUIRE(result.unit.header.find("godot::AccessibilityServer* server{}") != std::string::npos);
+    REQUIRE(result.unit.header.find(
+                "gdpp::runtime::ObjectStorage<godot::AccessibilityServer> server{}") !=
+            std::string::npos);
 }
 
 TEST_CASE("compiler generates typed named and anonymous enum constants") {
@@ -4859,8 +4867,38 @@ TEST_CASE("typed Godot object parameters generate pointer calls") {
                                                        "    node.queue_free()\n");
 
     REQUIRE(result.success);
-    REQUIRE(result.unit.header.find("godot::Node* node") != std::string::npos);
+    REQUIRE(result.unit.header.find(
+                "gdpp::runtime::ObjectStorage<godot::Node> node") != std::string::npos);
     REQUIRE(result.unit.source.find("->queue_free()") != std::string::npos);
+}
+
+TEST_CASE("non-RefCounted object storage preserves weak identity in every generated frame") {
+    const gdpp::Compiler compiler;
+    const auto result = compiler.compile(
+        "weak_objects.gd",
+        "extends Node\n"
+        "var retained: Node\n"
+        "func exercise(parameter: Node, signal_value: Signal) -> Callable:\n"
+        "    var local := Node.new()\n"
+        "    retained = local\n"
+        "    return func() -> int:\n"
+        "        retained = parameter\n"
+        "        return local.get_child_count()\n"
+        "func suspend(signal_value: Signal) -> int:\n"
+        "    var suspended := Node.new()\n"
+        "    await signal_value\n"
+        "    return suspended.get_child_count()\n");
+
+    REQUIRE(result.success);
+    const std::string storage = "gdpp::runtime::ObjectStorage<godot::Node>";
+    REQUIRE(result.unit.header.find(storage + " retained{}") != std::string::npos);
+    REQUIRE(result.unit.header.find(storage + " parameter") != std::string::npos);
+    REQUIRE(result.unit.source.find(storage + " local") != std::string::npos);
+    REQUIRE(result.unit.source.find("[=]() mutable -> godot::Variant") != std::string::npos);
+    REQUIRE(result.unit.source.find(storage + " suspended") != std::string::npos);
+    REQUIRE(result.unit.source.find("gdpp::runtime::to_variant(_gdpp_call_receiver_") !=
+            std::string::npos);
+    REQUIRE(result.unit.source.find("godot::Node* local") == std::string::npos);
 }
 
 TEST_CASE("Godot builtin constructors resolve overloads and native value types") {

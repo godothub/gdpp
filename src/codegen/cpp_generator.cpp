@@ -1166,35 +1166,35 @@ std::string CodeGenerator::cpp_type(const Type& type) const {
                 const auto godot_base = inner_godot_base_type(type.name);
                 if (api_.inherits(godot_base, "RefCounted"))
                     return "godot::Ref<godot::RefCounted>";
-                return "godot::Object*";
+                return "gdpp::runtime::ObjectStorage<godot::Object>";
             }
             if (script_symbols_) {
                 if (const auto* symbol = script_symbols_->find_class(type.name)) {
                     if (symbol->attached) {
                         if (api_.inherits(symbol->godot_base_type, "RefCounted"))
                             return "godot::Ref<godot::RefCounted>";
-                        return "godot::Object*";
+                        return "gdpp::runtime::ObjectStorage<godot::Object>";
                     }
                     if (api_.inherits(symbol->godot_base_type, "RefCounted"))
                         return "godot::Ref<" + symbol->native_class_name + ">";
-                    return symbol->native_class_name + "*";
+                    return "gdpp::runtime::ObjectStorage<" + symbol->native_class_name + ">";
                 }
                 if (const auto* symbol = script_symbols_->find_native_class(type.name)) {
                     if (symbol->attached) {
                         if (api_.inherits(symbol->godot_base_type, "RefCounted"))
                             return "godot::Ref<godot::RefCounted>";
-                        return "godot::Object*";
+                        return "gdpp::runtime::ObjectStorage<godot::Object>";
                     }
                     if (api_.inherits(symbol->godot_base_type, "RefCounted"))
                         return "godot::Ref<" + symbol->native_class_name + ">";
-                    return symbol->native_class_name + "*";
+                    return "gdpp::runtime::ObjectStorage<" + symbol->native_class_name + ">";
                 }
             }
             return "godot::Variant";
         }
         if (api_.inherits(type.name, "RefCounted"))
             return "godot::Ref<godot::" + godot_cpp_class_name(type.name) + ">";
-        return "godot::" + godot_cpp_class_name(type.name) + "*";
+        return "gdpp::runtime::ObjectStorage<godot::" + godot_cpp_class_name(type.name) + ">";
     default:
         return "godot::Variant";
     }
@@ -1931,9 +1931,7 @@ std::string CodeGenerator::emit_conversion(const Type& target, const Type& sourc
         return value;
     if (source.kind == TypeKind::nil && target.kind == TypeKind::object) {
         const auto target_cpp = cpp_type(target);
-        return !target_cpp.empty() && target_cpp.back() == '*'
-                   ? "static_cast<" + target_cpp + ">(nullptr)"
-                   : target_cpp + "{}";
+        return target_cpp + "{}";
     }
     if (describe_container_type(target)) {
         if (is_explicitly_typed_container(target) && target != source) {
@@ -1968,10 +1966,7 @@ std::string CodeGenerator::emit_conversion(const Type& target, const Type& sourc
             return target_cpp + "(godot::Object::cast_to<" + object_cpp + ">(" + source_object +
                    "))";
         }
-        auto object_cpp = target_cpp;
-        if (!object_cpp.empty() && object_cpp.back() == '*')
-            object_cpp.pop_back();
-        return "godot::Object::cast_to<" + object_cpp + ">(" + source_object + ")";
+        return target_cpp + "(gdpp::runtime::to_variant(" + value + "))";
     }
     if (target.kind == TypeKind::object) {
         const auto target_cpp = cpp_type(target);
@@ -1983,10 +1978,10 @@ std::string CodeGenerator::emit_conversion(const Type& target, const Type& sourc
                    ">(gdpp::runtime::to_variant(" + value + "), " + godot_string_name(target.name) +
                    location + ")";
         }
-        auto object_cpp = target_cpp;
-        if (!object_cpp.empty() && object_cpp.back() == '*')
-            object_cpp.pop_back();
-        return "gdpp::runtime::strict_native_pointer_storage<" + object_cpp +
+        const std::string storage_prefix{"gdpp::runtime::ObjectStorage<"};
+        const auto object_cpp = target_cpp.substr(
+            storage_prefix.size(), target_cpp.size() - storage_prefix.size() - 1);
+        return "gdpp::runtime::strict_native_object_value_storage<" + object_cpp +
                ">(gdpp::runtime::to_variant(" + value + "), " + godot_string_name(target.name) +
                location + ")";
     }
