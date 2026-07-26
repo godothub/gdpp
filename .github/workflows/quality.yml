@@ -65,6 +65,8 @@ jobs:
           test "$validation_status" -eq 0
       - name: Validate module layout and dependency direction
         run: python3 tools/check_architecture.py
+      - name: Validate documentation contracts
+        run: python3 tools/check_docs.py
       - name: Validate GitHub Actions semantics
         shell: bash
         run: |

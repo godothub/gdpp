@@ -35,6 +35,11 @@ add_test(
 )
 
 add_test(
+    NAME gdpp.documentation
+    COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tools/check_docs.py"
+)
+
+add_test(
     NAME gdpp.release.packaging
     COMMAND
         "${Python3_EXECUTABLE}"
