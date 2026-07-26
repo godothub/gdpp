@@ -8,6 +8,9 @@ const NETWORK_IMAGE := preload("res://network_image.gd")
 const RUNTIME_SHADER := preload("res://runtime_shader.gdshader")
 const ATTACHED_SCENE := preload("res://attached_scene.tscn")
 
+signal first_lambda_resume
+signal second_lambda_resume
+
 var _network_server: TCPServer
 var _network_peer: StreamPeerTCP
 var _network_png: PackedByteArray
@@ -37,6 +40,12 @@ static func _await_static_result(signal_value: Signal) -> int:
     return 42
 
 
+func _make_delayed_adder(captured: int) -> Callable:
+    return func delayed(signal_value: Signal, addend: int) -> int:
+        await signal_value
+        return captured + addend
+
+
 func _ready() -> void:
     super._ready()
     call_deferred(&"_verify_export_runtime")
@@ -48,6 +57,58 @@ func _verify_export_runtime() -> void:
     )
     if static_result != 42:
         _fail("static coroutine lost its completion owner or typed return value")
+        return
+    var delayed_adder := _make_delayed_adder(38)
+    var lambda_result: int = await delayed_adder.call(
+        get_tree().create_timer(0.001).timeout,
+        4,
+    )
+    if lambda_result != 42:
+        _fail("typed coroutine lambda lost its captured value or completion result")
+        return
+
+    var completion_order: Array[int] = []
+    var concurrent_lambda := func(signal_value: Signal, value: int) -> int:
+        await signal_value
+        completion_order.push_back(value)
+        return value
+    concurrent_lambda.call(first_lambda_resume, 11)
+    concurrent_lambda.call(second_lambda_resume, 22)
+    second_lambda_resume.emit()
+    await get_tree().process_frame
+    if completion_order != [22]:
+        _fail("concurrent coroutine lambda calls shared suspension state")
+        return
+    first_lambda_resume.emit()
+    await get_tree().process_frame
+    if completion_order != [22, 11]:
+        _fail("coroutine lambda resumptions were lost or reordered")
+        return
+
+    var recursive_cell: Array[Callable] = []
+    var factorial := func(value: int) -> int:
+        if value <= 1:
+            return 1
+        return value * recursive_cell[0].call(value - 1)
+    recursive_cell.push_back(factorial)
+    if factorial.call(5) != 120:
+        _fail("recursive lambda capture did not preserve shared container identity")
+        return
+
+    var captured_array := [3]
+    var captured_dictionary := {"value": 4}
+    var captured_object := ContainerItem.new(5)
+    var callable_factory := func(delta: int) -> Callable:
+        return func() -> int:
+            return (
+                captured_array[0]
+                + captured_dictionary["value"]
+                + captured_object.value
+                + delta
+            )
+    var returned_lambda: Callable = callable_factory.call(30)
+    if returned_lambda.call() != 42:
+        _fail("returned nested lambda lost a container, object, or local capture")
         return
     if not is_class(&"VendorBase"):
         _fail("export changed the provider-owned Node type")
