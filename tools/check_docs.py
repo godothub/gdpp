@@ -223,6 +223,10 @@ def validate_claims(
             "PROJECT_BUILD.md",
             "libgdpp.release.macos.universal.dylib",
         ): "current macOS project-library name",
+        (
+            "PROJECT_BUILD.md",
+            "GDExtension C 入口固定为 `gdpp_library_init`",
+        ): "current project-library entry ABI",
     }
     for archive in archives:
         required_claims[("COMMERCIAL_DELIVERY.md", f"`{archive}`")] = (
@@ -248,6 +252,8 @@ def validate_claims(
             errors.append(
                 f"docs/{name}: retired project-library filename prefix remains"
             )
+        if "gdpp_project_library_init" in content:
+            errors.append(f"docs/{name}: retired project-library entry ABI remains")
 
 
 def validate_release_default(version: str, errors: list[str]) -> None:
