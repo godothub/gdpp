@@ -158,6 +158,9 @@ TEST_CASE("project compiler incrementally generates a unified native extension")
     REQUIRE(registration.find(native_class_for(first, "enemy.gd")) != std::string::npos);
     REQUIRE(registration.find("::_gdpp_preload_resources();") == std::string::npos);
     REQUIRE(registration.find("::_gdpp_release_preloaded_resources();") != std::string::npos);
+    REQUIRE(registration.find("gdpp_library_init(GDExtensionInterfaceGetProcAddress") !=
+            std::string::npos);
+    REQUIRE(registration.find("gdpp_project_library_init") == std::string::npos);
 
     std::filesystem::remove(root / "player.gd", error);
     const auto fourth = compiler.compile(options);

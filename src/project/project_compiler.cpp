@@ -6,6 +6,7 @@
 #include "gdpp/frontend/parser.hpp"
 #include "gdpp/project/extension_bridge.hpp"
 #include "gdpp/project/native_builder.hpp"
+#include "gdpp/project/native_contract.hpp"
 #include "gdpp/semantic/analyzer.hpp"
 #include "gdpp/semantic/godot_api.hpp"
 #include "gdpp/support/path_utf8.hpp"
@@ -980,7 +981,8 @@ std::string generated_registration(const std::vector<CompiledProjectScript>& scr
     output << "}\n"
            << "} // namespace\n\n"
            << "extern \"C\" GDExtensionBool GDE_EXPORT\n"
-           << "gdpp_project_library_init(GDExtensionInterfaceGetProcAddress address,\n"
+           << project_library_entry_symbol
+           << "(GDExtensionInterfaceGetProcAddress address,\n"
            << "                            GDExtensionClassLibraryPtr library,\n"
            << "                            GDExtensionInitialization* initialization) {\n"
            << "    godot::GDExtensionBinding::InitObject init{address, library, initialization};\n"
