@@ -57,13 +57,13 @@ compiler 动态库，不携带 editor 静态库。
 - 没有 editor 静态库；
 - Debug/Release 项目导出都复用同一绑定；
 - 一次导出只编译所选 profile 的客户翻译单元一次；
-- Debug 的 assert 等语义由 GDPP 代码生成开关保留。
+- Debug 的 assert、breakpoint 和源码调试帧由 GDPP 代码生成开关保留，Release 完全移除。
 
 这样避免插件包和客户编译因两套模板绑定重复。
 
 ## SDK 契约
 
-SDK schema 11、runtime ABI 13 由源码、打包器和发布门禁共同校验。manifest 包含：
+SDK schema 11、runtime ABI 14 由源码、打包器和发布门禁共同校验。manifest 包含：
 
 - GDPP/Godot 版本、平台、架构、最低系统；
 - C++17、异常关闭、工具链族/版本和 MSVC CRT；
@@ -117,9 +117,11 @@ GDPP 只在 AOT 导出时编译客户项目。普通编辑、导入和编辑器�
 
 ## 源码与描述符事务
 
-源工程中只有 `addons/gdpp/gdpp.gdextension` 一个活动 GDPP 描述符。导出器临时切换该物理路径
-用于目标扫描，并在成品同一路径写项目运行描述符。compiler 描述符、extension registry、
-Autoload 和必要的 provider 描述在成功、失败或下次启动恢复。
+源工程中只有 `addons/gdpp/gdpp.gdextension` 一个活动 GDPP 描述符。标准 AOT 导出保持该
+editor-only 物理文件不变，在导出回调中跳过它，并在成品同一路径提供项目 runtime 描述符字节。
+项目库由 GDPP 通过公开导出 API 注册一次；Universal 2 provider 的归一化或 Debug→Release
+选择也只存在于包内描述符。临时 Autoload 和必要的 source-fallback registry 状态会在成功或失败
+后恢复；启动恢复逻辑兼容 1.7.8 及更早版本留下的中断备份。
 
 这一模型防止：
 
@@ -147,7 +149,8 @@ Autoload 和必要的 provider 描述在成功、失败或下次启动恢复。
 
 ## 发布门禁
 
-1.7.10 正式发布运行包含 46 个成功作业：
+最近完成的 1.7.10 正式发布运行包含 46 个成功作业；1.8.0 候选在相同发布拓扑上增加
+breakpoint/godot-cpp 编译和 Attached Debug/Release 导出运行回归：
 
 - macOS/Linux/Windows 编译器核心和 plugin 集成；
 - ASan、UBSan、TSan；
