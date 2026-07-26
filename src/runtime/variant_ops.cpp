@@ -408,12 +408,16 @@ godot::Variant binary_integer(const godot::Variant::Operator operation, const st
 
 void compound_assign(godot::Variant& target, const godot::Variant::Operator operation,
                      const godot::Variant& value) {
-    target = binary(operation, target, value);
+    const auto result = binary(operation, target, value);
+    if (!script_function_failed())
+        target = result;
 }
 
 void compound_assign_integer(godot::Variant& target, const godot::Variant::Operator operation,
                              const std::int64_t value) {
-    target = binary_integer(operation, target, value);
+    const auto result = binary_integer(operation, target, value);
+    if (!script_function_failed())
+        target = result;
 }
 
 void assign_dictionary(godot::Dictionary& target, const godot::Dictionary& value) {

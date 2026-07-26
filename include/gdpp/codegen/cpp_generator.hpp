@@ -265,6 +265,8 @@ class CodeGenerator final {
     mutable std::unordered_map<std::string, Type> current_local_types_;
     mutable std::unordered_set<std::string> ambiguous_local_names_;
     mutable std::unordered_map<std::string, std::string> local_expression_overrides_;
+    mutable std::unordered_map<const ir::Expression*, std::string> exact_expression_overrides_;
+    mutable bool lowering_assignment_{false};
     mutable std::string current_debug_source_;
     mutable std::string current_debug_function_;
     mutable std::string current_debug_instance_;
