@@ -94,6 +94,15 @@ func _on_ready() -> void:
     if matrix_args.has("--gdpp-coroutine-loop"):
         _run_coroutine_loop_contract()
         return
+    if matrix_args.has("--gdpp-runtime-failure"):
+        var failure_case: Variant = get_node(NodePath("RuntimeFailureCase"))
+        if failure_case.run_contract():
+            print("GDPP_RUNTIME_FAILURE_OK")
+            get_tree().quit(0)
+        else:
+            push_error("GDPP_RUNTIME_FAILURE_INVALID")
+            get_tree().quit(2)
+        return
     if matrix_args.has("--gdpp-matrix-startup"):
         print("GDPP_MATRIX_STARTUP_OK")
         get_tree().quit(0)

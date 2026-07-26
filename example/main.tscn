@@ -1,9 +1,10 @@
-[gd_scene load_steps=5 format=3]
+[gd_scene load_steps=6 format=3]
 
 [ext_resource type="Script" path="res://hello.gd" id="1_hello"]
 [ext_resource type="Script" path="res://inheritance_child.gd" id="2_inheritance"]
 [ext_resource type="Script" path="res://matrix_workload.gd" id="3_matrix"]
 [ext_resource type="Script" path="res://async_virtual_case.gd" id="4_async_virtual"]
+[ext_resource type="Script" path="res://runtime_failure_case.gd" id="5_runtime_failure"]
 
 [node name="GDScriptAOTExample" type="Node2D" groups=["gdpp_example"]]
 script = ExtResource("1_hello")
@@ -20,6 +21,9 @@ script = ExtResource("3_matrix")
 
 [node name="AsyncVirtualCase" type="Control" parent="."]
 script = ExtResource("4_async_virtual")
+
+[node name="RuntimeFailureCase" type="Node" parent="."]
+script = ExtResource("5_runtime_failure")
 
 [node name="Title" type="Label" parent="."]
 offset_left = 48.0
