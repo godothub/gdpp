@@ -4196,32 +4196,7 @@ std::string CodeGenerator::emit_expression(const ir::Expression& expression) con
         if (lambda.rest_parameter)
             result += ", true";
         result += ", [=](const auto &" + arguments + ") mutable -> godot::Variant {\n";
-        for (std::size_t index = 0; index < lambda.parameters.size(); ++index) {
-            const auto& parameter = lambda.parameters[index];
-            result += "    [[maybe_unused]] " + cpp_type(parameter.type) + " " +
-                      sanitize_identifier(parameter.name) + " = ";
-            const auto converted = emit_conversion(parameter.type, {TypeKind::variant, "Variant"},
-                                                   arguments + "[" + std::to_string(index) + "]");
-            if (parameter.default_value) {
-                result += arguments + ".size() > " + std::to_string(index) + " ? " + converted +
-                          " : " + emit_expression(*parameter.default_value);
-            } else {
-                result += converted;
-            }
-            result += ";\n";
-        }
-        if (lambda.rest_parameter) {
-            const auto rest_name = sanitize_identifier(lambda.rest_parameter->name);
-            result += "    [[maybe_unused]] godot::Array " + rest_name + ";\n";
-            result += "    " + rest_name + ".resize(" + arguments + ".size() > " +
-                      std::to_string(lambda.parameters.size()) + " ? " + arguments + ".size() - " +
-                      std::to_string(lambda.parameters.size()) + " : 0);\n";
-            result += "    for (std::int64_t _gdpp_rest_index = " +
-                      std::to_string(lambda.parameters.size()) + "; _gdpp_rest_index < " +
-                      arguments + ".size(); ++_gdpp_rest_index) " + rest_name +
-                      "[_gdpp_rest_index - " + std::to_string(lambda.parameters.size()) +
-                      "] = " + arguments + "[static_cast<std::size_t>(_gdpp_rest_index)];\n";
-        }
+
         const auto saved_return = current_return_type_;
         const auto saved_callable = in_callable_lambda_;
         const auto saved_function = in_function_body_;
@@ -4244,8 +4219,39 @@ std::string CodeGenerator::emit_expression(const ir::Expression& expression) con
                       (lambda.owner_bound ? self_object_expression() : std::string{"nullptr"}) +
                       ");\n";
         }
+        // Parameter conversions and default expressions execute inside the called lambda, not in
+        // the caller's fault frame. Install the callee frame before evaluating any of them so a
+        // conversion/default failure terminates only this invocation and coroutine continuations
+        // retain the same failure state.
         result += emit_script_function_scope(1);
         result += emit_debug_frame(lambda.span.begin.line, 1);
+        for (std::size_t index = 0; index < lambda.parameters.size(); ++index) {
+            const auto& parameter = lambda.parameters[index];
+            result += "    [[maybe_unused]] " + cpp_type(parameter.type) + " " +
+                      sanitize_identifier(parameter.name) + " = ";
+            const auto converted = emit_conversion(parameter.type, {TypeKind::variant, "Variant"},
+                                                   arguments + "[" + std::to_string(index) + "]");
+            if (parameter.default_value) {
+                result += arguments + ".size() > " + std::to_string(index) + " ? " + converted +
+                          " : " + emit_expression(*parameter.default_value);
+            } else {
+                result += converted;
+            }
+            result += ";\n";
+            result += emit_script_failure_return(1, false);
+        }
+        if (lambda.rest_parameter) {
+            const auto rest_name = sanitize_identifier(lambda.rest_parameter->name);
+            result += "    [[maybe_unused]] godot::Array " + rest_name + ";\n";
+            result += "    " + rest_name + ".resize(" + arguments + ".size() > " +
+                      std::to_string(lambda.parameters.size()) + " ? " + arguments + ".size() - " +
+                      std::to_string(lambda.parameters.size()) + " : 0);\n";
+            result += "    for (std::int64_t _gdpp_rest_index = " +
+                      std::to_string(lambda.parameters.size()) + "; _gdpp_rest_index < " +
+                      arguments + ".size(); ++_gdpp_rest_index) " + rest_name +
+                      "[_gdpp_rest_index - " + std::to_string(lambda.parameters.size()) +
+                      "] = " + arguments + "[static_cast<std::size_t>(_gdpp_rest_index)];\n";
+        }
         result += emit_statements(lambda.body, 1, 0,
                                   parameter_locals(lambda.parameters, lambda.rest_parameter
                                                                           ? &*lambda.rest_parameter
@@ -4389,6 +4395,8 @@ std::string CodeGenerator::emit_script_failure_return(const std::size_t indentat
     std::string result = prefix + "if (gdpp::runtime::script_function_failed()) {\n";
     if (current_coroutine_abi_) {
         result += coroutine_return(indentation + 1, "godot::Variant{}", continuation_context);
+    } else if (in_callable_lambda_) {
+        result += indent(indentation + 1) + "return godot::Variant{};\n";
     } else if (continuation_context || current_return_type_.kind == TypeKind::void_type) {
         result += indent(indentation + 1) + "return;\n";
     } else {

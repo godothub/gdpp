@@ -950,6 +950,31 @@ TEST_CASE("static lambdas support defaults without binding an instance owner") {
     REQUIRE(result.unit.source.find("gdpp::runtime::make_local_callable(nullptr, 0, 1") !=
             std::string::npos);
     REQUIRE(result.unit.source.find(".size() > 0 ?") != std::string::npos);
+    const auto callable = result.unit.source.find("mutable -> godot::Variant {");
+    const auto scope = result.unit.source.find("gdpp::runtime::ScriptFunctionScope", callable);
+    const auto parameter = result.unit.source.find("int64_t value =", callable);
+    const auto parameter_check =
+        result.unit.source.find("gdpp::runtime::script_function_failed()", parameter);
+    REQUIRE(callable < scope);
+    REQUIRE(scope < parameter);
+    REQUIRE(parameter < parameter_check);
+}
+
+TEST_CASE("void lambdas return a Variant when argument conversion fails") {
+    const gdpp::Compiler compiler;
+    const auto result = compiler.compile(
+        "void_lambda.gd", "func make() -> Callable:\n"
+                          "    return func(value: Variant) -> void:\n"
+                          "        var values: Array[int] = value\n"
+                          "        print(values.size())\n");
+
+    REQUIRE(result.success);
+    const auto callable = result.unit.source.find("mutable -> godot::Variant {");
+    const auto failure = result.unit.source.find("if (gdpp::runtime::script_function_failed())",
+                                                 callable);
+    REQUIRE(callable != std::string::npos);
+    REQUIRE(failure != std::string::npos);
+    REQUIRE(result.unit.source.find("return godot::Variant{};", failure) != std::string::npos);
 }
 
 TEST_CASE("variadic lambdas receive excess arguments as a Godot Array") {
@@ -1051,9 +1076,13 @@ TEST_CASE("compiler completes coroutine state inside structured await continuati
     REQUIRE(result.unit.source.find("gdpp::runtime::complete_coroutine(", cancelled_branch) !=
             std::string::npos);
     REQUIRE(result.unit.source.find("return;", cancelled_branch) != std::string::npos);
-    REQUIRE(result.unit.source.find("mutable -> godot::Variant {\n"
-                                    "    [[maybe_unused]] godot::Variant value =") !=
-            std::string::npos);
+    const auto lambda = result.unit.source.find("mutable -> godot::Variant {");
+    const auto lambda_scope =
+        result.unit.source.find("gdpp::runtime::ScriptFunctionScope", lambda);
+    const auto lambda_parameter =
+        result.unit.source.find("[[maybe_unused]] godot::Variant value =", lambda_scope);
+    REQUIRE(lambda < lambda_scope);
+    REQUIRE(lambda_scope < lambda_parameter);
     REQUIRE(result.unit.source.find("const auto _gdpp_return_value_") != std::string::npos);
     REQUIRE(result.unit.source.find("return gdpp::runtime::to_variant(_gdpp_return_value_") !=
             std::string::npos);
