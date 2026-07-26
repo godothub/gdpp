@@ -216,7 +216,8 @@ def validate_local_signal_contract(errors: list[str]) -> None:
         ),
         generator: (
             "static const godot::Variant ",
-            '"gdpp::runtime::emit_local_signal("',
+            '"gdpp::runtime::emit_local_signal_at("',
+            "script_location(expression.span)",
         ),
     }
     for path, required in contracts.items():

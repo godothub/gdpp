@@ -3684,8 +3684,9 @@ std::string CodeGenerator::emit_expression(const ir::Expression& expression) con
                               emit_expression(*expression.operands[index]) + "; " +
                               expression_failure_return;
                 }
-                result += "gdpp::runtime::emit_local_signal(" + self_object_expression() + ", " +
-                          signal_name;
+                result += "gdpp::runtime::emit_local_signal_at(" +
+                          script_location(expression.span) + ", " + self_object_expression() +
+                          ", " + signal_name;
                 for (std::size_t index = 1; index < expression.operands.size(); ++index) {
                     result += ", _gdpp_signal_argument_" + suffix + "_" + std::to_string(index - 1);
                 }
@@ -3706,12 +3707,11 @@ std::string CodeGenerator::emit_expression(const ir::Expression& expression) con
                           emit_expression(*expression.operands[index]) +
                           "; if (gdpp::runtime::script_function_failed()) return {}; ";
             }
-            result += "const godot::Variant _gdpp_callable_result_" + suffix + " = " +
-                      callable_name + ".call(";
+            result += "const godot::Variant _gdpp_callable_result_" + suffix +
+                      " = gdpp::runtime::call_callable_at(" + script_location(expression.span) +
+                      ", " + callable_name;
             for (std::size_t index = 1; index < expression.operands.size(); ++index) {
-                if (index > 1)
-                    result += ", ";
-                result += "gdpp::runtime::variant_constructor_argument("
+                result += ", gdpp::runtime::variant_constructor_argument("
                           "_gdpp_callable_argument_" +
                           suffix + "_" + std::to_string(index - 1) + ")";
             }

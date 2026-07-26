@@ -108,9 +108,11 @@ TEST_CASE("compiler centralizes packed values at every generated Variant boundar
             std::string::npos);
     REQUIRE(result.unit.source.find("static const godot::Variant _gdpp_signal_name_") !=
             std::string::npos);
-    REQUIRE(result.unit.source.find("gdpp::runtime::emit_local_signal(this, _gdpp_signal_name_") !=
-            std::string::npos);
-    REQUIRE(result.unit.source.find(".call(gdpp::runtime::variant_constructor_argument("
+    REQUIRE(result.unit.source.find("gdpp::runtime::emit_local_signal_at(") != std::string::npos);
+    REQUIRE(result.unit.source.find(", this, _gdpp_signal_name_") != std::string::npos);
+    REQUIRE(result.unit.source.find("gdpp::runtime::call_callable_at(") != std::string::npos);
+    REQUIRE(result.unit.source.find(", _gdpp_callable_") != std::string::npos);
+    REQUIRE(result.unit.source.find("gdpp::runtime::variant_constructor_argument("
                                     "_gdpp_callable_argument_") != std::string::npos);
     REQUIRE(result.unit.source.find("const godot::Variant _gdpp_dynamic_argument_") !=
             std::string::npos);
@@ -1147,8 +1149,8 @@ TEST_CASE("compiler emits local signals through their owner without temporary Si
     REQUIRE(result.success);
     REQUIRE(result.unit.source.find("static const godot::Variant _gdpp_signal_name_") !=
             std::string::npos);
-    REQUIRE(result.unit.source.find("gdpp::runtime::emit_local_signal(this, _gdpp_signal_name_") !=
-            std::string::npos);
+    REQUIRE(result.unit.source.find("gdpp::runtime::emit_local_signal_at(") != std::string::npos);
+    REQUIRE(result.unit.source.find(", this, _gdpp_signal_name_") != std::string::npos);
     REQUIRE(result.unit.source.find("godot::Signal(this, godot::StringName(\"pulse\")).emit") ==
             std::string::npos);
 }
@@ -5051,16 +5053,17 @@ TEST_CASE("specialized calls stop argument evaluation at the first fatal fault")
         REQUIRE(last < call);
     };
     require_stopped_call("utility", "utility-last", "godot::UtilityFunctions::print(");
-    require_stopped_call("invoke_callable", "callable-last", ".call(");
+    require_stopped_call("invoke_callable", "callable-last", "gdpp::runtime::call_callable_at(");
     require_stopped_call("invoke_dynamic", "dynamic-last", "gdpp::runtime::call_dynamic_at(");
     require_stopped_call("emit_signal_arguments", "signal-last",
-                         "gdpp::runtime::emit_local_signal(");
+                         "gdpp::runtime::emit_local_signal_at(");
 }
 
 TEST_CASE("runtime failure boundaries retain precise script source locations") {
     const gdpp::Compiler compiler;
     const auto result =
         compiler.compile("runtime_locations.gd", "extends RefCounted\n"
+                                                 "signal completed(value)\n"
                                                  "func inspect(target: Variant) -> void:\n"
                                                  "    var property: Variant = target.value\n"
                                                  "    var keyed: Variant = target[\"key\"]\n"
@@ -5071,7 +5074,10 @@ TEST_CASE("runtime failure boundaries retain precise script source locations") {
                                                  "    var typed: Array[int] = target\n"
                                                  "    for entry in target:\n"
                                                  "        property = entry\n"
-                                                 "    var divided := converted / 0\n");
+                                                 "    var divided := converted / 0\n"
+                                                 "func invoke(callback: Callable) -> void:\n"
+                                                 "    callback.call(1)\n"
+                                                 "    completed.emit(2)\n");
 
     REQUIRE(result.success);
     const auto& source = result.unit.source;
@@ -5086,13 +5092,15 @@ TEST_CASE("runtime failure boundaries retain precise script source locations") {
             std::string::npos);
     REQUIRE(source.find("gdpp::runtime::iter_init(") != std::string::npos);
     REQUIRE(source.find("gdpp::runtime::integer_divide(") != std::string::npos);
+    REQUIRE(source.find("gdpp::runtime::call_callable_at(") != std::string::npos);
+    REQUIRE(source.find("gdpp::runtime::emit_local_signal_at(") != std::string::npos);
     REQUIRE(std::count(source.begin(), source.end(), '\n') > 10);
 
     std::size_t located_boundary_count = 0;
     for (auto position = source.find(location); position != std::string::npos;
          position = source.find(location, position + location.size()))
         ++located_boundary_count;
-    REQUIRE(located_boundary_count >= std::size_t{10});
+    REQUIRE(located_boundary_count >= std::size_t{12});
 }
 
 TEST_CASE("compiler handles generated logical guard chains with bounded stack depth") {
