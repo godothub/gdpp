@@ -7,6 +7,7 @@ const INNER_DATA := preload("res://inner_data.gd")
 const NETWORK_IMAGE := preload("res://network_image.gd")
 const RPC_RUNTIME_HARNESS := preload("res://rpc_runtime_harness.gd")
 const RUNTIME_FAULT_MATRIX := preload("res://runtime_fault_matrix.gd")
+const RUNTIME_VALUE_MATRIX := preload("res://runtime_value_matrix.gd")
 const RUNTIME_SHADER := preload("res://runtime_shader.gdshader")
 const ATTACHED_SCENE := preload("res://attached_scene.tscn")
 
@@ -69,6 +70,8 @@ func _ready() -> void:
 func _verify_fault_matrix() -> void:
     var matrix: Variant = RUNTIME_FAULT_MATRIX.new()
     print("GDPP_FAULT_MATRIX=" + matrix.run())
+    var value_matrix: Variant = RUNTIME_VALUE_MATRIX.new()
+    print("GDPP_VALUE_MATRIX=" + value_matrix.run())
     get_tree().quit(0)
 
 
