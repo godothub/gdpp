@@ -739,6 +739,35 @@ void complete_coroutine(const CoroutineStatePtr& state, const godot::Variant& re
         owner->remove_user_signal(state->signal);
 }
 
+bool validate_virtual_return(const godot::Variant& value, const godot::Variant::Type expected_type,
+                             const godot::StringName& method,
+                             const godot::StringName& expected_name,
+                             const godot::StringName& expected_class, const char* source_path,
+                             const std::int64_t line, const std::int64_t column) {
+    bool compatible = false;
+    if (expected_type == godot::Variant::OBJECT) {
+        compatible =
+            value.get_type() == godot::Variant::NIL || value.get_type() == godot::Variant::OBJECT;
+        if (compatible && value.get_type() == godot::Variant::OBJECT &&
+            !expected_class.is_empty()) {
+            auto* object = value.get_validated_object();
+            compatible = object && object->is_class(expected_class);
+        }
+    } else {
+        compatible = godot::Variant::can_convert_strict(value.get_type(), expected_type);
+    }
+    if (compatible)
+        return true;
+
+    const auto path = source_path ? godot::String::utf8(source_path) : godot::String{"<unknown>"};
+    godot::UtilityFunctions::push_error(
+        godot::String{"GDPP: virtual method '"} + godot::String(method) + "' returned " +
+        godot::Variant::get_type_name(value.get_type()) + ", expected " +
+        godot::String(expected_name) + " at " + path + ":" + godot::String::num_int64(line) + ":" +
+        godot::String::num_int64(column));
+    return false;
+}
+
 godot::Callable make_callable(godot::Object* owner, std::size_t required_arguments,
                               std::size_t maximum_arguments, CallableContinuation continuation) {
     return make_callable(owner, required_arguments, maximum_arguments, false,

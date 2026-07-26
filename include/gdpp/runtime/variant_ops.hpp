@@ -188,6 +188,11 @@ using CoroutineStatePtr = std::shared_ptr<CoroutineState>;
 [[nodiscard]] godot::Object* coroutine_owner(const CoroutineStatePtr& state);
 [[nodiscard]] godot::Variant coroutine_result(const CoroutineStatePtr& state);
 void complete_coroutine(const CoroutineStatePtr& state, const godot::Variant& result);
+[[nodiscard]] bool
+validate_virtual_return(const godot::Variant& value, godot::Variant::Type expected_type,
+                        const godot::StringName& method, const godot::StringName& expected_name,
+                        const godot::StringName& expected_class, const char* source_path,
+                        std::int64_t line, std::int64_t column);
 
 // Native method bindings cannot represent a GDScript default expression that depends on
 // the receiving instance.  A private marker preserves the distinction between an omitted
