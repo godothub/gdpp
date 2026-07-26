@@ -1,175 +1,173 @@
 # 类型化 AST、HIR 与 MIR
 
-GDPP 的语言核心采用三层表示：parser 生成强类型 AST，语义分析结果降低为类型化 HIR，再为每个
-方法、属性访问器和 lambda 建立显式 CFG/MIR。每层都有独立职责，禁止后端重新解释 token 或靠
-约定猜测通用子节点的位置。
+GDPP 使用三层语言表示：强类型 AST、语义化 HIR 和显式控制流 MIR。每层只承担自己的职责；
+C++ 后端不能重新解析 token、注解字符串或类型文本。
 
-## 不变量
+## AST
 
-- 每个表达式都携带解析后的 `Type` 与原始 `SourceSpan`。
-- `is` 节点的右操作数必须携带已解析的 Godot 类型或项目脚本类型，IR 验证器拒绝缺少
-  类型解析信息的类型测试。
-- Variant 动态方法与动态属性成员使用不同的 resolution；二者都必须拥有 Variant 接收者和
-  Variant 结果，后端据此选择调用或属性 runtime，而不是拼接 C++ 成员名。
-- `for` 节点携带语义阶段生成的 `IterationPlan`，明确区分 range、整数、String、Array、
-  PackedArray、Dictionary 和动态协议，并保存源元素类型；verifier 拒绝策略与条件类型不一致，
-  后端不得重新猜测容器语义。
-- 单目、双目、调用、成员、下标和字典节点具有验证过的操作数数量。
-- 局部变量和字段声明保存最终语义类型，包括 `:=` 的推断结果。
-- 常量必须具有初始化器。
-- 赋值节点分别保存目标表达式和值表达式。
-- 后端只接收优化前后均通过验证的模块。
-- 强类型容器的源签名必须完整保存在 `Type` 中；语义层通过统一容器描述器解析参数，递归验证类型、
-  记录项目/GDExtension 依赖并执行字面量上下文类型化。后端禁止把 `Array[T]` 或
-  `Dictionary[K,V]` 重新猜测为普通容器。
-- AST 表达式、语句和 match pattern 分别由 `std::variant` 保存强类型载荷；调用、二元表达式、
-  赋值、分支、循环和 match 等节点直接拥有具名字段。
-- 每个 MIR 函数都有入口块；每个基本块都有稳定 ID、指令序列、唯一终止指令和精确前驱集合，
-  后继由终止指令目标唯一决定。
-- `return`、普通跳转、条件分支、停止和协程挂起使用不同终止指令；挂起只允许一个恢复目标。
-- 每个分支终止指令都携带显式 `BranchRole`；普通条件、迭代协议、match 模式、match 守卫和
-  断言不可互换，verifier 拒绝缺失角色的 branch 和在非 branch 上残留的角色。
-- MIR 指令显式记录读取、写入、失败、分配和挂起副作用，验证器拒绝越界边、重复前驱、隐式
-  落出和非法终止指令形状。
-- AST 仅使用 `AwaitExpression` 表达等待；HIR lowering 必须消除全部原始 await 表达式，MIR 和
-  C++ 后端只接收独立挂起语句及其恢复值。
+parser 直接构造有名节点：
 
-违反不变量会产生 `GDS5xxx` 范围的编译诊断，而不是断言失败或崩溃。
+- 表达式：literal、identifier、unary、await、binary、call、member、subscript、conditional、
+  node reference、Array/Dictionary、lambda；
+- 语句：expression、return、variable/const、assert、assignment、if、match、while、for、
+  pass、break、continue；
+- match pattern：value、wildcard、binding、rest、Array、Dictionary；
+- 声明：字段、函数、Signal、enum、内部类、脚本注解。
 
-## 当前优化流程
+节点载荷存放在 `std::variant`，每个节点拥有 `SourceSpan`。`kind()/value()/operand()` 是只读迁移
+适配器，不决定实际布局。新增语法应增加明确结构和 visitor 分支，而不是扩充通用 children 约定。
 
-1. 折叠基础数字、布尔与字符串常量表达式。
-2. 移除显式 `pass` 节点。
-3. 移除同一代码块内无条件 return、break 或 continue 之后的语句。
-4. 在 HIR 中删除字面量 `false` 循环和 `if` 的未选分支，同时保留选中分支的原始作用域。
-5. 在 MIR 中仅折叠语义角色允许的常量布尔边，删除新产生的不可达块，密集重编号并重建前驱。
+## HIR
 
-优化默认开启，可用 `gdpp compile --no-optimize` 关闭以做差异调试。`CompileResult` 和
-Godot 编译服务都会公开优化统计。
+语义分析把 AST 降低为独立拥有数据的 HIR。每个表达式至少保留：
 
-HIR 与 MIR 优化分别公开简化分支、删除语句、块和指令的统计以及独立耗时。`match` selector
-和迭代协议即使使用布尔字面量也不会被当作普通真假条件；该负面契约由 verifier 与回归测试锁定。
+- 最终语义类型、存储类型和赋值类型；
+- null/非空证明；
+- 源码范围；
+- 静态/动态成员解析类别与 owner；
+- getter/setter、调用参数契约、coroutine call 标记；
+- Godot intrinsic、项目/第三方脚本身份和容器签名。
 
-长 `await` 链的第一阶段协程 lowering 已直接消费这份 MIR：满足安全条件且至少包含 8 个挂起点
-的函数会生成单一程序计数器分派器，而不是按恢复点递归嵌套 C++ lambda。后续的类型化容器
-专门化、调用去虚拟化、逃逸分析与完整协程帧 lowering 都将在同一份经过验证的表示上实现。
+声明保留字段所有权、Inspector 元数据、onready/static/const、Signal 参数、函数返回、rest/default
+参数、RPC 配置和脚本执行模式。项目符号、ClassDB 和目标 API 的解析结果只在语义阶段产生。
 
-## 强类型容器契约
+## HIR 不变量
 
-`Array[T]` 与 `Dictionary[K,V]` 的容器形状由 `semantic/type` 提供唯一解析入口。语义分析器负责：
+- 所有表达式操作数数量与节点种类一致。
+- 变量、字段、参数和返回值拥有最终类型；`:=` 不留给后端推断。
+- `is/as` 的目标是已解析 Godot/项目/Attached 类型。
+- 动态方法与动态属性是不同 resolution。
+- `for` 必须携带 `IterationPlan`，后端不得从 iterable 名称重新猜测。
+- `Array[T]`、`Dictionary[K,V]` 保存完整递归签名与项目/第三方依赖。
+- `@rpc` 已规范化为 `RpcConfiguration`，后端不再解释字符串参数。
+- 常量必须有初始化器，赋值必须分别保存 target/value。
+- 已知协程调用携带 coroutine ABI，消费结果时必须位于 await。
+- 所有原始 await 在进入 C++ emitter 前转换为独立挂起/恢复语句。
 
-- 递归解析元素、键和值类型，未知类型、`void` 和 Godot 官方禁止的嵌套强类型容器立即诊断；
-- 对字段、局部变量、默认参数、返回值、普通赋值和脚本调用参数中的字面量执行上下文类型化，按
-  源顺序逐元素或逐键值验证；
-- 对强类型容器采用不变赋值规则，并检查 Dictionary 下标以及 `append`、`insert`、`set`、
-  `append_array` 等常用变更入口；
-- 分离 Godot 分析器对 `as` 的宽松兼容规则与本地存储的不变规则：允许分析的参数化转换不会被
-  误当作可直接赋值；不同强类型签名的直接赋值在生成前失败关闭，分析器接受的普通容器、
-  PackedArray 和参数化转换则保留到运行时元数据检查；
-- 把容器参数引用的项目脚本和第三方 ClassDB 契约加入精确依赖图，使公开 ABI 变化只传播到真实
-  消费者。
+违反不变量产生 `GDS5xxx` 编译诊断，不依赖断言或无效 C++。
 
-C++ 后端将运行时受约束的容器映射为 godot-cpp `TypedArray`/`TypedDictionary`，覆盖字段、局部值、
-函数参数、返回值、Signal 和属性注册。内建值直接使用原生 C++ 类型；对象元素使用轻量 ClassDB
-标签保存真实注册类名，避免仅为容器元数据引入完整脚本头文件和互相引用环。项目脚本 ABI 变化后，
-标签中的原生类名随精确依赖失效重新生成。`Array[Variant]` 与
-`Dictionary[Variant,Variant]` 没有运行约束，按 Godot 行为落为普通容器；单侧 `Variant` 的
-Dictionary 仍使用强类型包装器保存另一侧约束。
+## await A-normal form
 
-从动态 `Variant`、普通 Array/Dictionary、PackedArray 或参数化 `as` 结果进入强类型容器时，
-后端不依赖 godot-cpp 的隐式转换构造器，而是调用统一的 runtime storage guard，逐项比较 Array
-的元素元数据或 Dictionary 的键值元数据。只有完全一致的 Godot `Variant::Type`、对象类名与
-脚本约束才能进入 `TypedArray`/`TypedDictionary` 原生存储；该检查与编译期存储矩阵共享同一
-类型描述，避免语义分析与 C++ 模板各自猜测可转换性。
+HIR lowering 在挂起点前稳定求值：
 
-该契约由四类证据锁定：类型描述/诊断单元测试、生成 C++ 快照、Godot 4.4 godot-cpp 严格编译，
-以及 Godot 4.5.2 的 ClassDB 属性、方法、Signal 反射检查与 Godot 4.7.1 的动态元数据
-GDScript/AOT 运行差分。
+- 普通赋值的接收者、索引和右值；
+- 调用接收者及每个参数；
+- Array/Dictionary 元素；
+- 算术与比较操作数；
+- if/while/for/match/assert 的控制表达式。
 
-## 已完成的 AST 迁移
+短路 `and/or` 和三元表达式建立分支前缀，未选分支不会执行。`while await` 的真实条件放在循环
+头，每次恢复后重新计算。match 的模式绑定先发生，随后执行 guard 前缀；guard 为假继续后续
+分支，正文恢复后进入 match 外层。assert 条件与消息分别降低，Release 可完整删除两者。
 
-AST 已删除以 `kind + value + children` 作为实际存储的模型。`CallExpression` 明确保存 callee
-和 arguments，`BinaryExpression` 保存 operator、left 和 right，控制流语句保存各自条件与代码
-块，match pattern 使用独立 variant。统一 `visit()`/`get_if()` 是新增语法节点的扩展入口。
+异步循环把跨挂起且会被写入的外层局部值、函数参数和 setter 参数提升到共享单元。break 与
+continue 选择明确的恢复出口。4996 项、每帧 200 项的批处理 oracle 用于锁定局部状态身份和循环
+结束条件，避免只证明生成代码能编译。
 
-`kind()`、`value()`、`operand()` 等方法暂时保留为只读兼容适配器，让 semantic 与 lowering 能
-分批迁移；它们不再拥有或决定节点布局。新 parser 代码必须直接构造强类型载荷，禁止新增依赖
-操作数位置的 AST 存储。
+## MIR
 
-## HIR 与显式 CFG/MIR
+MIR 为方法、getter、setter 和 lambda 建立 CFG：
 
-类型化 HIR 独立拥有字符串、类型、源码范围、解析后的成员/调用身份和表达式树，不引用 parser
-的 token 存储。MIR lowering 覆盖方法、getter、setter、内部类和 lambda，并执行：
+```text
+Function
+  entry: BlockId
+  blocks:
+    instructions[]
+    terminator
+    predecessors[]
+```
 
-- 先将常用 `await` 表达式转换为 A-normal form：挂起前按左到右顺序物化已有操作数、调用接收者
-  和赋值索引，再把恢复值写入不可与用户标识符碰撞的临时变量；
-- 为 `if`、`match`、`while`、`for`、`break`、`continue` 和 `return` 建立显式边；
-- 为 `await` 建立 `suspend` 终止指令和唯一恢复块；
-- 在 HIR 函数和已解析调用上保存协程身份；源逻辑返回类型保持不变，只有 C++ 绑定边界使用
-  `Variant` 表示立即值或完成 `Signal`，避免把运行协议污染进类型检查和优化 IR；
-- 删除不可达块并重新编号，再由边反向重建前驱集合；
-- 为求值、声明、赋值、断言、循环测试、match 测试和挂起保存副作用类别；
-- 在 C++ 生成前运行 MIR verifier，验证 CFG 完整性、前驱一致性和挂起不变量。
+指令记录 evaluate、declare、assign、assert、loop test、match test 和 suspend value；副作用标记
+区分读状态、写状态、可能失败、可能分配和挂起。
 
-当前 C++ emitter 只接受已验证的 `mir::Module`，表达式与语句的丰富载荷仍从 MIR 绑定的 HIR
-读取；这避免两套语义实现，但不等于已经完成 SSA。下一阶段会把可优化值、所有权和调用载荷
-逐步下沉到 MIR，在完成前不会把“存在 CFG”宣传为已完成高级优化器。
+终止指令包括 jump、branch、return、stop 和 suspend。branch 的 `BranchRole` 区分：
 
-对于不携带跨挂起局部变量、复杂循环或 `match` 状态的长协程，后端已经把 MIR 的 `jump`、
-`branch`、`suspend` 和 `stop` 终止指令直接映射为扁平状态分派。恢复闭包只在等待期间持有状态，
-回调完成后释放强引用，从而同时限制生成代码深度、MSVC 模板实例化内存和运行时生命周期。
-Castle Defense 中包含 37 个挂起点的真实脚本由 368,708 字节/1,416 行降至 156,157 字节/692 行，
-并通过 AppleClang 与 MSVC Release 原生链接以及 Godot 顺序恢复测试。包含跨挂起局部变量、异步
-循环、复杂 `match` 或返回值的函数仍走经过验证的结构化路径；返回值路径使用每次调用独立状态，
-同步完成直接返回，挂起完成通过单参数 Signal 恢复，`void` 映射为 `null`。在活跃变量分析和显式
-统一协程帧完成前不会错误套用扁平 lowering。
+- 普通 truthy condition；
+- iterator protocol；
+- match pattern；
+- match guard；
+- assertion。
 
-常用表达式挂起已不再走另一套语句 parser：变量初始化、普通赋值右值、算术、容器元素、调用
-参数和普通 `if`/`for`/`match` 主体都先进入同一 ANF/续体链。短路 `and/or` 与三元表达式生成
-分支 ANF，未选分支不会提前求值；`while await` 将真实条件计算放回每次迭代。异步循环会把
-被循环体写入的外层局部值、函数入口参数和属性 setter 参数提升为共享单元，`break`/`continue`
-直接选择恢复出口；循环函数自身
-只由 `weak_ptr` 回指，等待回调持有当前恢复期强引用。match 分支通过独立 `guard_prefix` 保证
-模式绑定先于守卫挂起；守卫恢复为假继续后续模式，正文恢复进入 match 外层续体。后端的单一
-弱回指索引调度器让每个分支和公共续体只生成一次，避免多守卫 match 指数展开。断言条件与消息
-分别使用 `assert_condition_prefix` 和 `assert_message_prefix`；MIR 让消息前缀只位于失败边，后端
-用单一公共续体避免嵌套断言重复展开，并把整个断言控制流限制在 `DEBUG_ENABLED` 内。同名 shadow
-局部仍明确诊断，等待稳定 SymbolID 与统一活跃变量协程帧。已知协程调用必须位于 `await` 操作数，
-项目级协程身份通过语义固定点进入公开 ABI；同步/异步覆盖发生 ABI 分歧时，派生实现改用独立原生
-符号并让基类类型调用经 ClassDB 动态派发。
+因此常量优化不会把迭代协议或模式测试误当普通布尔表达式。
 
-HIR 到 MIR lowering 是语言语义的唯一控制流出口。GDPP 扩展必须先降低为共同 MIR 或受版本
-管理的 runtime intrinsic，不能让 C++ 后端按扩展名称直接拼接实现。
+## MIR verifier
 
-`for` 在语义阶段生成不可由后端重新猜测的 `IterationPlan`。当前策略明确区分动态/对象协议、
-int/float 计数、`range()`、Vector2/Vector2i/Vector3/Vector3i 数学范围、String、Array、
-PackedArray 和 Dictionary。计划同时保存原始元素类型，显式循环变量类型只负责受检转换；HIR
-verifier 会逐类核对 iterable 类型与策略。同步数学范围直接降低为单次求值的原生标量循环，
-对象协议统一经审计过的 Variant runtime；异步路径在恢复状态机中使用同一 Godot 协议，因此
-行为一致但仍等待各静态策略的专用恢复帧优化。
+优化前后均验证：
 
-## Pass 管理
+- 入口块存在，ID 连续且目标有效；
+- 每个块只有一个合法终止指令；
+- 前驱集合与所有边精确一致；
+- branch 目标数量和 role 合法；
+- suspend 只有一个恢复目标；
+- return/stop 不残留目标；
+- HIR source、SourceSpan、iteration/coroutine 载荷仍可追踪；
+- 删除不可达块后完成重编号与前驱重建。
 
-优化 pass 需要统一接口和确定顺序，每个 pass 声明前置不变量、保持的不变量、允许的副作用、
-统计项和 profile。规划中的 pass 包括：
+## 当前优化
 
-- CFG 简化和不可达块删除已覆盖常量布尔安全子集；一般死存储删除仍待数据流表示；
-- 常量/复制传播、分支折叠与公共子表达式消除；
-- 静态调用专门化、去虚拟化与受预算约束的内联；
-- Variant 装箱消除、逃逸分析和临时容器优化；
-- 循环不变量外提、强度削弱和可证明安全的边界检查消除；
-- 完整协程帧 lowering：把现有实例方法返回协议与跨挂起活跃变量、循环/`match` 状态、lambda、
-  引擎虚函数和恢复点生命周期统一到显式帧。
+已进入默认管线：
 
-每个 pass 都必须在执行前后运行 verifier，并具备独立开关、IR golden、解释器/AOT 行为差分、
-代码尺寸和耗时统计。没有等价性证据的优化不得进入 release 默认流水线。
+1. 整数、浮点、布尔和字符串安全常量折叠；
+2. `pass` 删除；
+3. return/break/continue 后同块不可达语句删除；
+4. 字面量 false 循环和静态 if 未选分支删除；
+5. 仅对 `BranchRole::condition` 的常量布尔边折叠；
+6. 不可达块删除、密集重编号和前驱重建。
 
-## 性能边界
+`gdpp compile --no-optimize` 可关闭可选优化用于诊断。优化统计和阶段耗时通过 CompileResult 暴露。
 
-IR 性能目标既包含生成代码，也包含编译器自身：
+尚未完成：
 
-- 静态数值和类型化集合热路径不得无理由退化为 Variant、字符串方法查找或堆分配；
-- 动态路径集中进入 runtime intrinsic，便于统一缓存、测量和替换实现；
-- HIR/MIR 节点存储后续评估 arena、字符串驻留和稳定值 ID，减少大型项目的碎片分配与指针
-  哈希；
-- 基准分别记录 HIR 构建、MIR lowering、各 pass、C++ emission 的耗时、峰值内存和输出尺寸。
+- SSA 或等价稳定 Value ID；
+- 所有权/活跃变量完整下沉；
+- 一般死存储、复制传播、CSE；
+- 逃逸分析、装箱消除；
+- 受预算内联、去虚拟化和循环优化；
+- 版本化 MIR 打印/序列化；
+- 随机 IR 与优化前后运行差分。
+
+## 协程表示
+
+实例方法协程在源语义上保留原返回类型，在 native ABI 边界返回一个 Variant：
+
+- 同步完成：直接返回源值；
+- 真正挂起：返回本次调用独有的完成 Signal；
+- 恢复：Signal 携带一个返回值，`void` 映射为 `null`；
+- 并发调用：状态和 Signal 不共享；
+- 取消：等待对象失效时通过 ObjectID 防止悬空访问。
+
+简单长 await 链使用 MIR 程序计数器状态机，避免递归嵌套 C++ lambda。复杂循环/match 与跨挂起
+局部状态使用结构化共享帧。两条路径都由弱回指避免状态机自引用环。
+
+最终目标是统一显式协程帧。静态函数协程、递归/带返回 lambda 协程与异步引擎虚函数在该统一
+模型完成前仍是已知缺口。
+
+## 强类型容器
+
+`semantic/type` 是容器签名唯一解析入口。HIR 保存元素、键和值类型、对象类名和脚本约束。
+后端映射到 godot-cpp TypedArray/TypedDictionary；对象元素使用轻量 ClassDB 标签，不通过引入
+完整脚本头文件换取元数据。
+
+从 Variant、普通容器、PackedArray 或参数化 `as` 进入强类型存储时，runtime 比较真实
+Variant 类型、对象类和脚本约束。只有签名一致才进入 typed storage。编译期不变规则与 runtime
+guard 共用同一类型描述。
+
+完整的失败日志与函数中止时序尚未对全部容器组合完成 GDScript VM 差分。
+
+## 后端边界
+
+C++ emitter 只接收通过 verifier 的 MIR module。当前丰富表达式载荷仍由 MIR 绑定的 HIR 提供，
+因此“已有 CFG”不等于“已有完整 SSA”。后端允许：
+
+- 映射已解析类型和 ABI；
+- 发射已选择的静态调用或版本化 runtime intrinsic；
+- 实现 MIR 控制边和协程恢复；
+- 注册类、属性、Signal、RPC 与 Attached 行为。
+
+后端禁止：
+
+- 重新进行名字/重载/类型推断；
+- 根据源码字符串决定语言特性；
+- 绕过 runtime 直接制造未经审计的 Variant/容器转换；
+- 为未实现节点输出注释占位后继续成功；
+- 在没有等价性证据时删除可能失败或有副作用的表达式。
