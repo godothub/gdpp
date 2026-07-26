@@ -36,6 +36,12 @@ struct ScriptFaultState final {
     std::atomic_bool failed{false};
 };
 
+struct ScriptSourceLocation final {
+    const char* path{nullptr};
+    std::int64_t line{0};
+    std::int64_t column{0};
+};
+
 // GDScript runtime failures terminate only the currently executing script function. A nested
 // generated call therefore installs an independent frame, while every continuation of one
 // coroutine re-enters the state owned by that coroutine. This explicit model avoids C++ exceptions
@@ -59,20 +65,27 @@ class ScriptFunctionScope final {
 
 void mark_script_failure() noexcept;
 [[nodiscard]] bool script_function_failed() noexcept;
+[[nodiscard]] godot::String describe_variant_type(const godot::Variant& value);
+void report_script_failure(const godot::String& message, ScriptSourceLocation location = {});
 void report_script_failure(const godot::String& message, const char* source_path, std::int64_t line,
                            std::int64_t column);
 
 template <typename Target>
 [[nodiscard]] Target explicit_variant_cast(const godot::Variant& value,
-                                           const godot::Variant::Type target_type) {
+                                           const godot::Variant::Type target_type,
+                                           const ScriptSourceLocation location = {}) {
     bool compatible = godot::Variant::can_convert(value.get_type(), target_type);
     if (target_type == godot::Variant::STRING) {
         compatible = value.get_type() == godot::Variant::STRING ||
                      value.get_type() == godot::Variant::STRING_NAME ||
                      value.get_type() == godot::Variant::NODE_PATH;
     }
-    ERR_FAIL_COND_V_MSG(!compatible, Target{},
-                        "GDScript explicit cast has no compatible runtime constructor.");
+    if (!compatible) {
+        report_script_failure(godot::String{"Cannot convert "} + describe_variant_type(value) +
+                                  " to " + godot::Variant::get_type_name(target_type) + ".",
+                              location);
+        return {};
+    }
     return static_cast<Target>(value);
 }
 
@@ -81,31 +94,57 @@ template <typename Target>
 // dynamic boundaries through the strict base-container assignment operators to preserve that
 // contract.
 template <typename TypedContainer>
-[[nodiscard]] TypedContainer strict_typed_storage(const godot::Variant& value) {
+[[nodiscard]] TypedContainer strict_typed_storage(const godot::Variant& value,
+                                                  const ScriptSourceLocation location = {}) {
     TypedContainer result;
     if constexpr (std::is_base_of_v<godot::Array, TypedContainer>) {
-        ERR_FAIL_COND_V_MSG(value.get_type() != godot::Variant::ARRAY, result,
-                            "Cannot assign a non-Array value to typed Array storage.");
-        result = godot::Array(value);
+        if (value.get_type() != godot::Variant::ARRAY) {
+            report_script_failure(godot::String{"Cannot assign "} + describe_variant_type(value) +
+                                      " to " + describe_variant_type(godot::Variant(result)) + ".",
+                                  location);
+            return result;
+        }
+        const auto source = godot::Array(value);
+        if (!result.is_same_typed(source)) {
+            report_script_failure(godot::String{"Cannot assign "} + describe_variant_type(value) +
+                                      " to " + describe_variant_type(godot::Variant(result)) + ".",
+                                  location);
+            return result;
+        }
+        result = source;
     } else {
         static_assert(std::is_base_of_v<godot::Dictionary, TypedContainer>,
                       "strict_typed_storage requires a typed Godot container");
-        ERR_FAIL_COND_V_MSG(value.get_type() != godot::Variant::DICTIONARY, result,
-                            "Cannot assign a non-Dictionary value to typed Dictionary storage.");
-        result = godot::Dictionary(value);
+        if (value.get_type() != godot::Variant::DICTIONARY) {
+            report_script_failure(godot::String{"Cannot assign "} + describe_variant_type(value) +
+                                      " to " + describe_variant_type(godot::Variant(result)) + ".",
+                                  location);
+            return result;
+        }
+        const auto source = godot::Dictionary(value);
+        if (!result.is_same_typed(source)) {
+            report_script_failure(godot::String{"Cannot assign "} + describe_variant_type(value) +
+                                      " to " + describe_variant_type(godot::Variant(result)) + ".",
+                                  location);
+            return result;
+        }
+        result = source;
     }
     return result;
 }
 
 [[nodiscard]] godot::Variant binary(godot::Variant::Operator operation, const godot::Variant& left,
-                                    const godot::Variant& right);
+                                    const godot::Variant& right,
+                                    ScriptSourceLocation location = {});
 // Keep statically typed integer operands out of temporary Variant wrappers. These entry points are
 // particularly important for mixed expressions such as `dictionary.value & 3` and
 // `typed_total += callable.call()`, where only one side is genuinely dynamic.
 [[nodiscard]] godot::Variant binary_integer(godot::Variant::Operator operation,
-                                            const godot::Variant& left, std::int64_t right);
+                                            const godot::Variant& left, std::int64_t right,
+                                            ScriptSourceLocation location = {});
 [[nodiscard]] godot::Variant binary_integer(godot::Variant::Operator operation, std::int64_t left,
-                                            const godot::Variant& right);
+                                            const godot::Variant& right,
+                                            ScriptSourceLocation location = {});
 void compound_assign(godot::Variant& target, godot::Variant::Operator operation,
                      const godot::Variant& value);
 void compound_assign_integer(godot::Variant& target, godot::Variant::Operator operation,
@@ -128,8 +167,7 @@ void emit_local_signal(godot::Object* owner, const godot::Variant& signal_name,
     pointers[0] = &signal_name;
     for (std::size_t index = 0; index < values.size(); ++index)
         pointers[index + 1] = &values[index];
-    emit_local_signal_variants(owner, pointers.data(),
-                               static_cast<std::int64_t>(pointers.size()));
+    emit_local_signal_variants(owner, pointers.data(), static_cast<std::int64_t>(pointers.size()));
 }
 // godot-cpp 4.x generated built-in copy operators do not guard exact self-assignment. Dictionary
 // additionally cannot be move-assigned safely because its move operator constructs over the live
@@ -167,9 +205,12 @@ void assign_native_storage(Target& target, Value&& value) {
     target = std::forward<Value>(value);
 }
 [[nodiscard]] godot::Variant unary(godot::Variant::Operator operation,
-                                   const godot::Variant& operand);
-[[nodiscard]] std::int64_t integer_divide(std::int64_t left, std::int64_t right);
-[[nodiscard]] std::int64_t integer_modulo(std::int64_t left, std::int64_t right);
+                                   const godot::Variant& operand,
+                                   ScriptSourceLocation location = {});
+[[nodiscard]] std::int64_t integer_divide(std::int64_t left, std::int64_t right,
+                                          ScriptSourceLocation location = {});
+[[nodiscard]] std::int64_t integer_modulo(std::int64_t left, std::int64_t right,
+                                          ScriptSourceLocation location = {});
 [[nodiscard]] bool is_instance_valid(const godot::Variant& value) noexcept;
 [[nodiscard]] godot::Array make_range(std::int64_t stop);
 [[nodiscard]] godot::Array make_range(std::int64_t start, std::int64_t stop);
@@ -356,7 +397,8 @@ template <typename Callback>
 [[nodiscard]] godot::Variant call_dynamic_impl(godot::Variant& target,
                                                const godot::StringName& method,
                                                const godot::Variant** arguments,
-                                               std::size_t argument_count);
+                                               std::size_t argument_count,
+                                               ScriptSourceLocation location = {});
 
 template <typename... Arguments>
 [[nodiscard]] godot::Variant call_dynamic(godot::Variant& target, const godot::StringName& method,
@@ -369,11 +411,27 @@ template <typename... Arguments>
     return call_dynamic_impl(target, method, pointers.data(), pointers.size());
 }
 
-[[nodiscard]] godot::Variant get_named(const godot::Variant& target, const godot::StringName& name);
-void set_named(godot::Variant& target, const godot::StringName& name, const godot::Variant& value);
+template <typename... Arguments>
+[[nodiscard]] godot::Variant
+call_dynamic_at(const ScriptSourceLocation location, godot::Variant& target,
+                const godot::StringName& method, Arguments&&... arguments) {
+    std::array<godot::Variant, sizeof...(Arguments)> values{
+        godot::Variant(std::forward<Arguments>(arguments))...};
+    std::array<const godot::Variant*, sizeof...(Arguments)> pointers{};
+    for (std::size_t index = 0; index < values.size(); ++index)
+        pointers[index] = &values[index];
+    return call_dynamic_impl(target, method, pointers.data(), pointers.size(), location);
+}
 
-[[nodiscard]] godot::Variant get_key(const godot::Variant& target, const godot::Variant& key);
-void set_key(godot::Variant& target, const godot::Variant& key, const godot::Variant& value);
+[[nodiscard]] godot::Variant get_named(const godot::Variant& target, const godot::StringName& name,
+                                       ScriptSourceLocation location = {});
+void set_named(godot::Variant& target, const godot::StringName& name, const godot::Variant& value,
+               ScriptSourceLocation location = {});
+
+[[nodiscard]] godot::Variant get_key(const godot::Variant& target, const godot::Variant& key,
+                                     ScriptSourceLocation location = {});
+void set_key(godot::Variant& target, const godot::Variant& key, const godot::Variant& value,
+             ScriptSourceLocation location = {});
 void report_index_out_of_bounds(const char* container, const char* operation, std::int64_t index,
                                 std::int64_t size, const char* source_path, std::int64_t line,
                                 std::int64_t column);
@@ -403,9 +461,8 @@ template <typename Value>
     return godot::VariantCaster<Value>::cast(target[normalized]);
 }
 
-inline void checked_array_set(godot::Array& target, std::int64_t index,
-                              const godot::Variant& value, const char* source_path,
-                              std::int64_t line, std::int64_t column) {
+inline void checked_array_set(godot::Array& target, std::int64_t index, const godot::Variant& value,
+                              const char* source_path, std::int64_t line, std::int64_t column) {
     const auto size = target.size();
     const auto normalized = index < 0 ? index + size : index;
     if (normalized < 0 || normalized >= size) {
@@ -448,9 +505,12 @@ void checked_packed_array_set(SharedPackedArray<PackedArray>& target, std::int64
     target.native()[normalized] = std::forward<Value>(value);
 }
 
-[[nodiscard]] bool iter_init(const godot::Variant& iterable, godot::Variant& iterator);
-[[nodiscard]] bool iter_next(const godot::Variant& iterable, godot::Variant& iterator);
+[[nodiscard]] bool iter_init(const godot::Variant& iterable, godot::Variant& iterator,
+                             ScriptSourceLocation location = {});
+[[nodiscard]] bool iter_next(const godot::Variant& iterable, godot::Variant& iterator,
+                             ScriptSourceLocation location = {});
 [[nodiscard]] godot::Variant iter_get(const godot::Variant& iterable,
-                                      const godot::Variant& iterator);
+                                      const godot::Variant& iterator,
+                                      ScriptSourceLocation location = {});
 
 } // namespace gdpp::runtime

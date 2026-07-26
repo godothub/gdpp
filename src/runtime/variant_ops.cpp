@@ -66,28 +66,69 @@ ScriptFunctionScope::ScriptFunctionScope(const CoroutineStatePtr& coroutine) noe
 ScriptFunctionScope::~ScriptFunctionScope() { active_script_fault = previous_; }
 
 bool ScriptFunctionScope::failed() const noexcept {
-    return state_ && state_->failed.load(std::memory_order_acquire);
+    return state_ && state_->failed.load(std::memory_order_relaxed);
 }
 
 void mark_script_failure() noexcept {
     if (active_script_fault)
-        active_script_fault->failed.store(true, std::memory_order_release);
+        active_script_fault->failed.store(true, std::memory_order_relaxed);
 }
 
 bool script_function_failed() noexcept {
-    return active_script_fault && active_script_fault->failed.load(std::memory_order_acquire);
+    return active_script_fault && active_script_fault->failed.load(std::memory_order_relaxed);
+}
+
+godot::String describe_variant_type(const godot::Variant& value) {
+    if (value.get_type() == godot::Variant::ARRAY) {
+        const auto array = static_cast<godot::Array>(value);
+        if (!array.is_typed())
+            return "Array";
+        const auto builtin = static_cast<godot::Variant::Type>(array.get_typed_builtin());
+        const auto class_name = godot::String{array.get_typed_class_name()};
+        const auto element =
+            !class_name.is_empty() ? class_name : godot::Variant::get_type_name(builtin);
+        return godot::String{"Array["} + element + "]";
+    }
+    if (value.get_type() == godot::Variant::DICTIONARY) {
+        const auto dictionary = static_cast<godot::Dictionary>(value);
+        if (!dictionary.is_typed())
+            return "Dictionary";
+        const auto key_builtin =
+            static_cast<godot::Variant::Type>(dictionary.get_typed_key_builtin());
+        const auto value_builtin =
+            static_cast<godot::Variant::Type>(dictionary.get_typed_value_builtin());
+        const auto key_class = godot::String{dictionary.get_typed_key_class_name()};
+        const auto value_class = godot::String{dictionary.get_typed_value_class_name()};
+        const auto key =
+            !key_class.is_empty() ? key_class : godot::Variant::get_type_name(key_builtin);
+        const auto mapped =
+            !value_class.is_empty() ? value_class : godot::Variant::get_type_name(value_builtin);
+        return godot::String{"Dictionary["} + key + ", " + mapped + "]";
+    }
+    if (value.get_type() == godot::Variant::OBJECT) {
+        if (auto* object = value.get_validated_object())
+            return object->get_class();
+        const auto id = static_cast<godot::ObjectID>(value);
+        return id.is_valid() ? godot::String{"freed Object"} : godot::String{"null Object"};
+    }
+    return godot::Variant::get_type_name(value.get_type());
+}
+
+void report_script_failure(const godot::String& message, const ScriptSourceLocation location) {
+    mark_script_failure();
+    godot::String located = message;
+    if (location.path && *location.path != '\0') {
+        located +=
+            " at " + godot::String{location.path} + ":" + godot::String::num_int64(location.line);
+        if (location.column > 0)
+            located += ":" + godot::String::num_int64(location.column);
+    }
+    godot::UtilityFunctions::push_error(located);
 }
 
 void report_script_failure(const godot::String& message, const char* source_path,
                            const std::int64_t line, const std::int64_t column) {
-    mark_script_failure();
-    godot::String located = message;
-    if (source_path && *source_path != '\0') {
-        located += " at " + godot::String{source_path} + ":" + godot::String::num_int64(line);
-        if (column > 0)
-            located += ":" + godot::String::num_int64(column);
-    }
-    godot::UtilityFunctions::push_error(located);
+    report_script_failure(message, ScriptSourceLocation{source_path, line, column});
 }
 
 void emit_local_signal_variants(godot::Object* owner, const godot::Variant** arguments,
@@ -95,8 +136,7 @@ void emit_local_signal_variants(godot::Object* owner, const godot::Variant** arg
     static const godot::StringName method_name{"emit_signal"};
     static GDExtensionMethodBindPtr method_bind =
         godot::gdextension_interface::classdb_get_method_bind(
-            godot::Object::get_class_static()._native_ptr(), method_name._native_ptr(),
-            4047867050);
+            godot::Object::get_class_static()._native_ptr(), method_name._native_ptr(), 4047867050);
     ERR_FAIL_NULL_MSG(owner, "GDPP: cannot emit a local signal on a null object.");
     ERR_FAIL_NULL_MSG(method_bind, "GDPP: cannot resolve Object.emit_signal.");
 
@@ -149,18 +189,19 @@ std::optional<integer::Result> evaluate_integer_operator(const godot::Variant::O
     }
 }
 
-void report_integer_error(const integer::ArithmeticError error) {
-    mark_script_failure();
+void report_integer_error(const integer::ArithmeticError error,
+                          const ScriptSourceLocation location = {}) {
     if (error == integer::ArithmeticError::division_by_zero)
-        godot::UtilityFunctions::push_error("Division by zero error in operator '/'.");
+        report_script_failure("Division by zero error in operator '/'.", location);
     else if (error == integer::ArithmeticError::modulo_by_zero)
-        godot::UtilityFunctions::push_error("Modulo by zero error in operator '%'.");
+        report_script_failure("Modulo by zero error in operator '%'.", location);
 }
 
-std::int64_t integer_result_or_zero(const integer::Result result) {
+std::int64_t integer_result_or_zero(const integer::Result result,
+                                    const ScriptSourceLocation location = {}) {
     if (result)
         return result.value;
-    report_integer_error(result.error);
+    report_integer_error(result.error, location);
     return 0;
 }
 
@@ -179,6 +220,64 @@ std::unordered_map<std::string, std::uint64_t>& autoload_registry() {
 std::string autoload_key(const godot::StringName& name) {
     const auto utf8 = godot::String(name).utf8();
     return {utf8.get_data(), static_cast<std::size_t>(utf8.length())};
+}
+
+const char* operator_name(const godot::Variant::Operator operation) noexcept {
+    switch (operation) {
+    case godot::Variant::OP_EQUAL:
+        return "==";
+    case godot::Variant::OP_NOT_EQUAL:
+        return "!=";
+    case godot::Variant::OP_LESS:
+        return "<";
+    case godot::Variant::OP_LESS_EQUAL:
+        return "<=";
+    case godot::Variant::OP_GREATER:
+        return ">";
+    case godot::Variant::OP_GREATER_EQUAL:
+        return ">=";
+    case godot::Variant::OP_ADD:
+        return "+";
+    case godot::Variant::OP_SUBTRACT:
+        return "-";
+    case godot::Variant::OP_MULTIPLY:
+        return "*";
+    case godot::Variant::OP_DIVIDE:
+        return "/";
+    case godot::Variant::OP_NEGATE:
+        return "unary -";
+    case godot::Variant::OP_POSITIVE:
+        return "unary +";
+    case godot::Variant::OP_MODULE:
+        return "%";
+    case godot::Variant::OP_POWER:
+        return "**";
+    case godot::Variant::OP_SHIFT_LEFT:
+        return "<<";
+    case godot::Variant::OP_SHIFT_RIGHT:
+        return ">>";
+    case godot::Variant::OP_BIT_AND:
+        return "&";
+    case godot::Variant::OP_BIT_OR:
+        return "|";
+    case godot::Variant::OP_BIT_XOR:
+        return "^";
+    case godot::Variant::OP_BIT_NEGATE:
+        return "~";
+    case godot::Variant::OP_AND:
+        return "and";
+    case godot::Variant::OP_OR:
+        return "or";
+    case godot::Variant::OP_XOR:
+        return "xor";
+    case godot::Variant::OP_NOT:
+        return "not";
+    case godot::Variant::OP_IN:
+        return "in";
+    case godot::Variant::OP_MAX:
+        break;
+    }
+    return "<unknown>";
 }
 
 class AwaitCallable final : public godot::CallableCustom {
@@ -316,24 +415,32 @@ class LambdaCallable final : public godot::CallableCustom {
     CallableContinuation continuation_;
 };
 
-void report_invalid_member(const char* operation, const godot::StringName& name) {
-    report_script_failure(godot::String("Dynamic ") + operation + " '" + godot::String(name) +
-                              "' failed.",
-                          nullptr, 0, 0);
+void report_invalid_member(const char* operation, const godot::StringName& name,
+                           const ScriptSourceLocation location) {
+    report_script_failure(
+        godot::String("Dynamic ") + operation + " '" + godot::String(name) + "' failed.", location);
 }
 
-void report_invalid_key(const char* operation) {
-    report_script_failure(godot::String("Dynamic keyed ") + operation + " failed.", nullptr, 0, 0);
+void report_invalid_key(const char* operation, const godot::Variant& target,
+                        const godot::Variant& key, const ScriptSourceLocation location) {
+    report_script_failure(godot::String("Invalid keyed ") + operation + " on " +
+                              describe_variant_type(target) + " with key type " +
+                              describe_variant_type(key) + ".",
+                          location);
 }
 
 bool reject_invalid_object_target(const godot::Variant& target, const char* operation,
-                                  const godot::StringName* member = nullptr) {
+                                  const godot::StringName* member,
+                                  const ScriptSourceLocation location) {
     if (target.get_type() != godot::Variant::OBJECT || target.get_validated_object())
         return false;
-    auto message = godot::String{"GDPP: cannot "} + operation;
+    auto message = godot::String{"Cannot "} + operation;
     if (member)
         message += godot::String{" '"} + godot::String{*member} + "'";
-    report_script_failure(message + " on a null or freed dynamic object.", nullptr, 0, 0);
+    const auto id = static_cast<godot::ObjectID>(target);
+    report_script_failure(
+        message + (id.is_valid() ? " on a previously freed instance." : " on a null instance."),
+        location);
     return true;
 }
 
@@ -347,13 +454,13 @@ bool is_default_argument(const godot::Variant& value) {
 }
 
 godot::Variant binary(godot::Variant::Operator operation, const godot::Variant& left,
-                      const godot::Variant& right) {
+                      const godot::Variant& right, const ScriptSourceLocation location) {
     if (left.get_type() == godot::Variant::INT && right.get_type() == godot::Variant::INT) {
         const auto left_value = static_cast<std::int64_t>(left);
         const auto right_value = static_cast<std::int64_t>(right);
         if (const auto result = evaluate_integer_operator(operation, left_value, right_value)) {
             if (!*result) {
-                report_integer_error(result->error);
+                report_integer_error(result->error, location);
                 return {};
             }
             return result->value;
@@ -370,40 +477,43 @@ godot::Variant binary(godot::Variant::Operator operation, const godot::Variant& 
             return false;
         if (operation == godot::Variant::OP_NOT_EQUAL)
             return true;
-        report_script_failure("Invalid operands in dynamic binary operation.", nullptr, 0, 0);
+        report_script_failure(godot::String{"Invalid operands "} + describe_variant_type(left) +
+                                  " and " + describe_variant_type(right) + " for operator '" +
+                                  operator_name(operation) + "'.",
+                              location);
         return {};
     }
     return result;
 }
 
 godot::Variant binary_integer(const godot::Variant::Operator operation, const godot::Variant& left,
-                              const std::int64_t right) {
+                              const std::int64_t right, const ScriptSourceLocation location) {
     if (left.get_type() == godot::Variant::INT) {
         const auto left_value = static_cast<std::int64_t>(left);
         if (const auto result = evaluate_integer_operator(operation, left_value, right)) {
             if (!*result) {
-                report_integer_error(result->error);
+                report_integer_error(result->error, location);
                 return {};
             }
             return result->value;
         }
     }
-    return binary(operation, left, godot::Variant(right));
+    return binary(operation, left, godot::Variant(right), location);
 }
 
 godot::Variant binary_integer(const godot::Variant::Operator operation, const std::int64_t left,
-                              const godot::Variant& right) {
+                              const godot::Variant& right, const ScriptSourceLocation location) {
     if (right.get_type() == godot::Variant::INT) {
         const auto right_value = static_cast<std::int64_t>(right);
         if (const auto result = evaluate_integer_operator(operation, left, right_value)) {
             if (!*result) {
-                report_integer_error(result->error);
+                report_integer_error(result->error, location);
                 return {};
             }
             return result->value;
         }
     }
-    return binary(operation, godot::Variant(left), right);
+    return binary(operation, godot::Variant(left), right, location);
 }
 
 void compound_assign(godot::Variant& target, const godot::Variant::Operator operation,
@@ -426,7 +536,8 @@ void assign_dictionary(godot::Dictionary& target, const godot::Dictionary& value
     target = value;
 }
 
-godot::Variant unary(godot::Variant::Operator operation, const godot::Variant& operand) {
+godot::Variant unary(godot::Variant::Operator operation, const godot::Variant& operand,
+                     const ScriptSourceLocation location) {
     if (operand.get_type() == godot::Variant::INT) {
         const auto value = static_cast<std::int64_t>(operand);
         if (operation == godot::Variant::OP_POSITIVE)
@@ -440,18 +551,22 @@ godot::Variant unary(godot::Variant::Operator operation, const godot::Variant& o
     bool valid = false;
     godot::Variant::evaluate(operation, operand, godot::Variant{}, result, valid);
     if (!valid) {
-        report_script_failure("Invalid operand in dynamic unary operation.", nullptr, 0, 0);
+        report_script_failure(godot::String{"Invalid operand "} + describe_variant_type(operand) +
+                                  " for operator '" + operator_name(operation) + "'.",
+                              location);
         return {};
     }
     return result;
 }
 
-std::int64_t integer_divide(const std::int64_t left, const std::int64_t right) {
-    return integer_result_or_zero(integer::divide(left, right));
+std::int64_t integer_divide(const std::int64_t left, const std::int64_t right,
+                            const ScriptSourceLocation location) {
+    return integer_result_or_zero(integer::divide(left, right), location);
 }
 
-std::int64_t integer_modulo(const std::int64_t left, const std::int64_t right) {
-    return integer_result_or_zero(integer::modulo(left, right));
+std::int64_t integer_modulo(const std::int64_t left, const std::int64_t right,
+                            const ScriptSourceLocation location) {
+    return integer_result_or_zero(integer::modulo(left, right), location);
 }
 
 bool is_instance_valid(const godot::Variant& value) noexcept {
@@ -920,8 +1035,9 @@ void bind_variant_method(const godot::StringName& class_name, const godot::Metho
 }
 
 godot::Variant call_dynamic_impl(godot::Variant& target, const godot::StringName& method,
-                                 const godot::Variant** arguments, std::size_t argument_count) {
-    if (reject_invalid_object_target(target, "call", &method))
+                                 const godot::Variant** arguments, std::size_t argument_count,
+                                 const ScriptSourceLocation location) {
+    if (reject_invalid_object_target(target, "call method", &method, location))
         return {};
     static const godot::StringName get_script_method{"get_script"};
     static const godot::StringName set_script_method{"set_script"};
@@ -949,7 +1065,7 @@ godot::Variant call_dynamic_impl(godot::Variant& target, const godot::StringName
                 godot::String("GDPP: cannot attach native script class '") +
                     godot::String(requested_class) +
                     "' to an object that was not converted to that class during export",
-                nullptr, 0, 0);
+                location);
             return {};
         }
     }
@@ -957,14 +1073,15 @@ godot::Variant call_dynamic_impl(godot::Variant& target, const godot::StringName
     GDExtensionCallError error{GDEXTENSION_CALL_OK, 0, 0};
     target.callp(method, arguments, static_cast<int>(argument_count), result, error);
     if (error.error != GDEXTENSION_CALL_OK) {
-        report_invalid_member("call", method);
+        report_invalid_member("call", method, location);
         return {};
     }
     return result;
 }
 
-godot::Variant get_named(const godot::Variant& target, const godot::StringName& name) {
-    if (reject_invalid_object_target(target, "read property", &name))
+godot::Variant get_named(const godot::Variant& target, const godot::StringName& name,
+                         const ScriptSourceLocation location) {
+    if (reject_invalid_object_target(target, "read property", &name, location))
         return {};
     // GDScript defines `dictionary.identifier` as keyed Dictionary access, including
     // dictionaries returned through Variant boundaries such as JSON.parse() and HTTP APIs.
@@ -977,14 +1094,15 @@ godot::Variant get_named(const godot::Variant& target, const godot::StringName& 
     bool valid = false;
     auto result = target.get_named(name, valid);
     if (!valid) {
-        report_invalid_member("property read", name);
+        report_invalid_member("property read", name, location);
         return {};
     }
     return result;
 }
 
-void set_named(godot::Variant& target, const godot::StringName& name, const godot::Variant& value) {
-    if (reject_invalid_object_target(target, "write property", &name))
+void set_named(godot::Variant& target, const godot::StringName& name, const godot::Variant& value,
+               const ScriptSourceLocation location) {
+    if (reject_invalid_object_target(target, "write property", &name, location))
         return;
     if (target.get_type() == godot::Variant::DICTIONARY) {
         auto dictionary = static_cast<godot::Dictionary>(target);
@@ -994,28 +1112,30 @@ void set_named(godot::Variant& target, const godot::StringName& name, const godo
     bool valid = false;
     target.set_named(name, value, valid);
     if (!valid)
-        report_invalid_member("property write", name);
+        report_invalid_member("property write", name, location);
 }
 
-godot::Variant get_key(const godot::Variant& target, const godot::Variant& key) {
-    if (reject_invalid_object_target(target, "read key"))
+godot::Variant get_key(const godot::Variant& target, const godot::Variant& key,
+                       const ScriptSourceLocation location) {
+    if (reject_invalid_object_target(target, "read key", nullptr, location))
         return {};
     bool valid = false;
     auto result = target.get(key, &valid);
     if (!valid) {
-        report_invalid_key("read");
+        report_invalid_key("read", target, key, location);
         return {};
     }
     return result;
 }
 
-void set_key(godot::Variant& target, const godot::Variant& key, const godot::Variant& value) {
-    if (reject_invalid_object_target(target, "write key"))
+void set_key(godot::Variant& target, const godot::Variant& key, const godot::Variant& value,
+             const ScriptSourceLocation location) {
+    if (reject_invalid_object_target(target, "write key", nullptr, location))
         return;
     bool valid = false;
     target.set(key, value, &valid);
     if (!valid)
-        report_invalid_key("write");
+        report_invalid_key("write", target, key, location);
 }
 
 void report_index_out_of_bounds(const char* container, const char* operation,
@@ -1028,33 +1148,42 @@ void report_index_out_of_bounds(const char* container, const char* operation,
     report_script_failure(message, source_path, line, column);
 }
 
-bool iter_init(const godot::Variant& iterable, godot::Variant& iterator) {
-    if (reject_invalid_object_target(iterable, "start iteration"))
+bool iter_init(const godot::Variant& iterable, godot::Variant& iterator,
+               const ScriptSourceLocation location) {
+    if (reject_invalid_object_target(iterable, "start iteration", nullptr, location))
         return false;
     bool valid = false;
     const bool available = iterable.iter_init(iterator, valid);
     if (!valid)
-        report_script_failure("Value is not dynamically iterable.", nullptr, 0, 0);
+        report_script_failure(godot::String{"Value of type "} + describe_variant_type(iterable) +
+                                  " is not iterable.",
+                              location);
     return valid && available;
 }
 
-bool iter_next(const godot::Variant& iterable, godot::Variant& iterator) {
-    if (reject_invalid_object_target(iterable, "advance iteration"))
+bool iter_next(const godot::Variant& iterable, godot::Variant& iterator,
+               const ScriptSourceLocation location) {
+    if (reject_invalid_object_target(iterable, "advance iteration", nullptr, location))
         return false;
     bool valid = false;
     const bool available = iterable.iter_next(iterator, valid);
     if (!valid)
-        report_script_failure("Dynamic iterator advance failed.", nullptr, 0, 0);
+        report_script_failure(godot::String{"Iterator advance failed for "} +
+                                  describe_variant_type(iterable) + ".",
+                              location);
     return valid && available;
 }
 
-godot::Variant iter_get(const godot::Variant& iterable, const godot::Variant& iterator) {
-    if (reject_invalid_object_target(iterable, "read iterator value"))
+godot::Variant iter_get(const godot::Variant& iterable, const godot::Variant& iterator,
+                        const ScriptSourceLocation location) {
+    if (reject_invalid_object_target(iterable, "read iterator value", nullptr, location))
         return {};
     bool valid = false;
     auto value = iterable.iter_get(iterator, valid);
     if (!valid) {
-        report_script_failure("Dynamic iterator value read failed.", nullptr, 0, 0);
+        report_script_failure(godot::String{"Iterator value read failed for "} +
+                                  describe_variant_type(iterable) + ".",
+                              location);
         return {};
     }
     return value;
