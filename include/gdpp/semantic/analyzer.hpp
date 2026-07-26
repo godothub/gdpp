@@ -175,6 +175,7 @@ class SemanticModel final {
     [[nodiscard]] Type return_type_of(const ast::LambdaExpression& function) const;
     [[nodiscard]] bool is_coroutine(const ast::FunctionDeclaration& function) const noexcept;
     [[nodiscard]] bool is_coroutine(const ast::LambdaExpression& function) const noexcept;
+    [[nodiscard]] bool is_coroutine(const ast::PropertyAccessor& accessor) const noexcept;
     [[nodiscard]] bool is_coroutine_call(const ast::Expression& expression) const noexcept;
     [[nodiscard]] bool owner_bound(const ast::LambdaExpression& function) const noexcept;
     [[nodiscard]] const RpcConfiguration*
@@ -217,6 +218,7 @@ class SemanticModel final {
     std::unordered_set<const ast::LambdaExpression*> owner_bound_lambdas_;
     std::unordered_set<const ast::FunctionDeclaration*> coroutine_functions_;
     std::unordered_set<const ast::LambdaExpression*> coroutine_lambdas_;
+    std::unordered_set<const ast::PropertyAccessor*> coroutine_accessors_;
     std::unordered_set<const ast::Expression*> coroutine_calls_;
     std::unordered_map<const ast::FunctionDeclaration*, RpcConfiguration> rpc_configurations_;
     std::unordered_map<const ast::EnumEntry*, std::int64_t> enum_values_;
@@ -329,6 +331,7 @@ class SemanticAnalyzer final {
     [[nodiscard]] const ScriptMemberSymbol*
     find_inner_member(const ScriptInnerClassSymbol& owner, const std::string& name) const noexcept;
     [[nodiscard]] bool script_function_is_static(const std::string& name) const noexcept;
+    [[nodiscard]] bool accessor_is_coroutine(const ast::PropertyAccessor& accessor) const noexcept;
     void diagnose_static_instance_access(std::string_view kind, std::string_view name,
                                          SourceSpan span);
     void record_script_dependency(const ScriptClassSymbol* dependency);
@@ -344,6 +347,7 @@ class SemanticAnalyzer final {
     std::unordered_set<std::string> enum_types_;
     std::unordered_map<std::string, std::unordered_map<std::string, std::int64_t>> enum_members_;
     std::unordered_set<std::string> accessor_fields_;
+    std::unordered_set<std::string> coroutine_getter_fields_;
     std::unordered_set<std::string> static_fields_;
     std::unordered_set<std::string> current_accessor_fields_;
     std::unordered_set<std::string> active_warning_ignores_;

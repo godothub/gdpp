@@ -385,6 +385,10 @@ bool SemanticModel::is_coroutine(const ast::LambdaExpression& function) const no
     return coroutine_lambdas_.find(&function) != coroutine_lambdas_.end();
 }
 
+bool SemanticModel::is_coroutine(const ast::PropertyAccessor& accessor) const noexcept {
+    return coroutine_accessors_.find(&accessor) != coroutine_accessors_.end();
+}
+
 bool SemanticModel::is_coroutine_call(const ast::Expression& expression) const noexcept {
     return coroutine_calls_.find(&expression) != coroutine_calls_.end();
 }
@@ -851,6 +855,22 @@ bool SemanticAnalyzer::script_function_is_static(const std::string& name) const 
         return member && member->kind == ScriptMemberKind::function && member->is_static;
     }
     return false;
+}
+
+bool SemanticAnalyzer::accessor_is_coroutine(
+    const ast::PropertyAccessor& accessor) const noexcept {
+    if (accessor.method.empty())
+        return contains_await_syntax(accessor.body);
+    if (const auto found = functions_.find(accessor.method); found != functions_.end()) {
+        return found->second->name != "_init" && found->second->name != "_static_init" &&
+               contains_await_syntax(*found->second);
+    }
+    const ScriptMemberSymbol* member = nullptr;
+    if (current_inner_class_)
+        member = find_inner_member(*current_inner_class_, accessor.method);
+    else if (script_symbols_ && current_script_)
+        member = script_symbols_->find_member(*current_script_, accessor.method);
+    return member && member->kind == ScriptMemberKind::function && member->is_coroutine;
 }
 
 void SemanticAnalyzer::diagnose_static_instance_access(const std::string_view kind,
@@ -1706,22 +1726,30 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                 symbol->kind == SymbolKind::field &&
                 accessor_fields_.find(expression.value()) != accessor_fields_.end() &&
                 current_accessor_fields_.find(expression.value()) == current_accessor_fields_.end();
+            const auto property_assignment_type = result;
+            if (accessor_field &&
+                coroutine_getter_fields_.find(expression.value()) !=
+                    coroutine_getter_fields_.end()) {
+                result = variant_type;
+            }
             if (static_field && accessor_field) {
-                model_.api_resolutions_.emplace(&expression,
-                                                ApiResolution{ApiResolutionKind::script_property,
-                                                              "", "_gdpp_get_" + expression.value(),
-                                                              "_gdpp_set_" + expression.value(),
-                                                              result, 0, 0, false, true});
+                auto resolution =
+                    ApiResolution{ApiResolutionKind::script_property, "",
+                                  "_gdpp_get_" + expression.value(),
+                                  "_gdpp_set_" + expression.value(), result, 0, 0, false, true};
+                resolution.assignment_type = property_assignment_type;
+                model_.api_resolutions_.emplace(&expression, std::move(resolution));
             } else if (static_field) {
                 model_.api_resolutions_.emplace(
                     &expression, ApiResolution{ApiResolutionKind::script_static_field, "", "", "",
                                                result, 0, 0, false, true});
             } else if (accessor_field) {
-                model_.api_resolutions_.emplace(&expression,
-                                                ApiResolution{ApiResolutionKind::script_property,
-                                                              "", "_gdpp_get_" + expression.value(),
-                                                              "_gdpp_set_" + expression.value(),
-                                                              result, 0, 0, false, false});
+                auto resolution =
+                    ApiResolution{ApiResolutionKind::script_property, "",
+                                  "_gdpp_get_" + expression.value(),
+                                  "_gdpp_set_" + expression.value(), result, 0, 0, false, false};
+                resolution.assignment_type = property_assignment_type;
+                model_.api_resolutions_.emplace(&expression, std::move(resolution));
             }
             if (symbol->kind == SymbolKind::signal) {
                 result = {TypeKind::builtin, "Signal"};
@@ -3272,14 +3300,15 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
             if (member->kind == ScriptMemberKind::field && member->is_static) {
                 const bool runtime_static_field =
                     current_script_ && current_script_->is_tool && !target->is_tool;
-                result = runtime_static_field ? variant_type : member->type;
-                model_.api_resolutions_.emplace(
-                    &expression,
-                    ApiResolution{runtime_static_field
-                                      ? ApiResolutionKind::script_runtime_static_field
-                                      : ApiResolutionKind::script_property,
-                                  target->native_class_name, "_gdpp_get_" + expression.value(),
-                                  "_gdpp_set_" + expression.value(), result, 0, 0, false, true});
+                result = runtime_static_field || member->getter_is_coroutine ? variant_type
+                                                                            : member->type;
+                auto resolution = ApiResolution{
+                    runtime_static_field ? ApiResolutionKind::script_runtime_static_field
+                                         : ApiResolutionKind::script_property,
+                    target->native_class_name, "_gdpp_get_" + expression.value(),
+                    "_gdpp_set_" + expression.value(), result, 0, 0, false, true};
+                resolution.assignment_type = member->type;
+                model_.api_resolutions_.emplace(&expression, std::move(resolution));
                 break;
             }
             if (member->kind == ScriptMemberKind::function && member->is_static) {
@@ -3412,12 +3441,13 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                 result = unknown_type;
                 break;
             }
-            result = found->type;
-            model_.api_resolutions_.emplace(
-                &expression,
+            result = found->getter_is_coroutine ? variant_type : found->type;
+            auto resolution =
                 ApiResolution{ApiResolutionKind::script_property, inner->name,
                               "_gdpp_get_" + expression.value(), "_gdpp_set_" + expression.value(),
-                              result, 0, 0, false, false});
+                              result, 0, 0, false, false};
+            resolution.assignment_type = found->type;
+            model_.api_resolutions_.emplace(&expression, std::move(resolution));
             break;
         }
         const ScriptClassSymbol* script_owner = nullptr;
@@ -3581,14 +3611,16 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                                               member->is_static;
             const bool attached_instance_field =
                 script_owner->attached && !accessed_on_type && !member->is_static;
-            result = runtime_static_field ? variant_type : member->type;
-            model_.api_resolutions_.emplace(
-                &expression,
-                ApiResolution{runtime_static_field ? ApiResolutionKind::script_runtime_static_field
-                              : attached_instance_field ? ApiResolutionKind::dynamic_property
-                                                        : ApiResolutionKind::script_property,
-                              script_owner->native_class_name, "_gdpp_get_" + expression.value(),
-                              "_gdpp_set_" + expression.value(), result, 0, 0, false, false});
+            result = runtime_static_field || member->getter_is_coroutine ? variant_type
+                                                                         : member->type;
+            auto resolution = ApiResolution{
+                runtime_static_field ? ApiResolutionKind::script_runtime_static_field
+                : attached_instance_field ? ApiResolutionKind::dynamic_property
+                                          : ApiResolutionKind::script_property,
+                script_owner->native_class_name, "_gdpp_get_" + expression.value(),
+                "_gdpp_set_" + expression.value(), result, 0, 0, false, false};
+            resolution.assignment_type = member->type;
+            model_.api_resolutions_.emplace(&expression, std::move(resolution));
             break;
         }
         if (const auto* external_owner = object_type.kind == TypeKind::object && script_symbols_
@@ -4933,6 +4965,7 @@ void SemanticAnalyzer::analyze_class(const ast::ClassDeclaration& declaration) {
     auto saved_enum_types = std::move(enum_types_);
     auto saved_enum_members = std::move(enum_members_);
     auto saved_accessor_fields = std::move(accessor_fields_);
+    auto saved_coroutine_getter_fields = std::move(coroutine_getter_fields_);
     auto saved_static_fields = std::move(static_fields_);
     auto saved_current_accessor_fields = std::move(current_accessor_fields_);
     auto saved_bound_accessor_fields = std::move(bound_accessor_fields_);
@@ -4953,6 +4986,7 @@ void SemanticAnalyzer::analyze_class(const ast::ClassDeclaration& declaration) {
     enum_types_.clear();
     enum_members_.clear();
     accessor_fields_.clear();
+    coroutine_getter_fields_.clear();
     static_fields_.clear();
     current_accessor_fields_.clear();
     active_warning_ignores_.clear();
@@ -5007,6 +5041,8 @@ void SemanticAnalyzer::analyze_class(const ast::ClassDeclaration& declaration) {
                                                     member.kind == ScriptMemberKind::enum_value});
         if (member.kind == ScriptMemberKind::field && member.has_accessor)
             accessor_fields_.insert(member.name);
+        if (member.kind == ScriptMemberKind::field && member.getter_is_coroutine)
+            coroutine_getter_fields_.insert(member.name);
         if (member.kind == ScriptMemberKind::field && member.is_static)
             static_fields_.insert(member.name);
     };
@@ -5062,6 +5098,8 @@ void SemanticAnalyzer::analyze_class(const ast::ClassDeclaration& declaration) {
             static_fields_.insert(variable.name);
         if (variable.getter || variable.setter) {
             accessor_fields_.insert(variable.name);
+            if (variable.getter && accessor_is_coroutine(*variable.getter))
+                coroutine_getter_fields_.insert(variable.name);
             if (variable.getter && !variable.getter->method.empty())
                 bound_accessor_fields_[variable.getter->method].insert(variable.name);
             if (variable.setter && !variable.setter->method.empty())
@@ -5168,6 +5206,7 @@ void SemanticAnalyzer::analyze_class(const ast::ClassDeclaration& declaration) {
     enum_types_ = std::move(saved_enum_types);
     enum_members_ = std::move(saved_enum_members);
     accessor_fields_ = std::move(saved_accessor_fields);
+    coroutine_getter_fields_ = std::move(saved_coroutine_getter_fields);
     static_fields_ = std::move(saved_static_fields);
     current_accessor_fields_ = std::move(saved_current_accessor_fields);
     bound_accessor_fields_ = std::move(saved_bound_accessor_fields);
@@ -5322,16 +5361,26 @@ void SemanticAnalyzer::analyze_property_accessors(const ast::VariableDeclaration
     const auto saved_static = current_function_static_;
     const auto saved_instance_context = instance_context_available_;
     const auto saved_in_function = in_function_;
-    const auto prepare_accessor_body = [&](const std::vector<ast::Statement>&,
-                                           const Type& return_type) {
+    const auto saved_callable_suspends = current_callable_suspends_;
+    const auto saved_function_name = current_function_name_;
+    const auto saved_loop_depth = loop_depth_;
+    auto saved_flow_types = std::move(flow_types_);
+    const auto prepare_accessor_body = [&](const Type& return_type,
+                                           const std::string& function_name) {
         expected_return_ = return_type;
-        allow_dynamic_await_return_ = false;
+        allow_dynamic_await_return_ = true;
         current_function_static_ = variable.is_static;
         instance_context_available_ = !variable.is_static;
+        current_callable_suspends_ = false;
+        current_function_name_ = function_name;
+        loop_depth_ = 0;
+        flow_types_.clear();
         in_function_ = true;
     };
     if (variable.getter) {
         if (!variable.getter->method.empty()) {
+            if (accessor_is_coroutine(*variable.getter))
+                model_.coroutine_accessors_.insert(&*variable.getter);
             const auto found = functions_.find(variable.getter->method);
             if (found == functions_.end()) {
                 diagnostics_.error("GDS4082",
@@ -5356,10 +5405,12 @@ void SemanticAnalyzer::analyze_property_accessors(const ast::VariableDeclaration
                                    "property getter result");
             }
         } else {
-            prepare_accessor_body(variable.getter->body, type);
+            prepare_accessor_body(type, "@" + variable.name + "_getter");
             scopes_.emplace_back();
             const auto flow = analyze_statements(variable.getter->body);
             scopes_.pop_back();
+            if (current_callable_suspends_)
+                model_.coroutine_accessors_.insert(&*variable.getter);
             if (flow.falls_through) {
                 diagnostics_.error("GDS4050", "property getter must return a value on every path",
                                    variable.getter->span);
@@ -5368,6 +5419,8 @@ void SemanticAnalyzer::analyze_property_accessors(const ast::VariableDeclaration
     }
     if (variable.setter) {
         if (!variable.setter->method.empty()) {
+            if (accessor_is_coroutine(*variable.setter))
+                model_.coroutine_accessors_.insert(&*variable.setter);
             const auto found = functions_.find(variable.setter->method);
             if (found == functions_.end()) {
                 diagnostics_.error("GDS4085",
@@ -5400,7 +5453,7 @@ void SemanticAnalyzer::analyze_property_accessors(const ast::VariableDeclaration
                 }
             }
         } else {
-            prepare_accessor_body(variable.setter->body, void_type);
+            prepare_accessor_body(void_type, "@" + variable.name + "_setter");
             if (variable.setter->parameter.empty()) {
                 diagnostics_.error("GDS4051", "property setter requires a parameter",
                                    variable.setter->span);
@@ -5411,12 +5464,18 @@ void SemanticAnalyzer::analyze_property_accessors(const ast::VariableDeclaration
                      false});
             (void)analyze_statements(variable.setter->body);
             scopes_.pop_back();
+            if (current_callable_suspends_)
+                model_.coroutine_accessors_.insert(&*variable.setter);
         }
     }
     expected_return_ = saved_return;
     allow_dynamic_await_return_ = saved_dynamic_await;
     current_function_static_ = saved_static;
     instance_context_available_ = saved_instance_context;
+    current_callable_suspends_ = saved_callable_suspends;
+    current_function_name_ = saved_function_name;
+    loop_depth_ = saved_loop_depth;
+    flow_types_ = std::move(saved_flow_types);
     in_function_ = saved_in_function;
     current_accessor_fields_.clear();
 }
@@ -5766,6 +5825,7 @@ SemanticModel SemanticAnalyzer::analyze(const ast::Script& script) {
     enum_types_.clear();
     enum_members_.clear();
     accessor_fields_.clear();
+    coroutine_getter_fields_.clear();
     static_fields_.clear();
     current_accessor_fields_.clear();
     bound_accessor_fields_.clear();
@@ -5836,6 +5896,8 @@ SemanticModel SemanticAnalyzer::analyze(const ast::Script& script) {
                                                member->kind == ScriptMemberKind::enum_value});
             if (member->kind == ScriptMemberKind::field && member->has_accessor)
                 accessor_fields_.insert(member->name);
+            if (member->kind == ScriptMemberKind::field && member->getter_is_coroutine)
+                coroutine_getter_fields_.insert(member->name);
             if (member->kind == ScriptMemberKind::field && member->is_static)
                 static_fields_.insert(member->name);
         }
@@ -6005,6 +6067,37 @@ SemanticModel SemanticAnalyzer::analyze(const ast::Script& script) {
                     variable.type ? type_from_name(*variable.type, variable.span) : variant_type;
                 member.is_static = variable.is_constant || variable.is_static;
                 member.has_accessor = variable.getter.has_value() || variable.setter.has_value();
+                const auto accessor_suspends =
+                    [&](const std::optional<ast::PropertyAccessor>& accessor) {
+                        if (!accessor)
+                            return false;
+                        if (accessor->method.empty())
+                            return contains_await_syntax(accessor->body);
+                        const auto method = std::find_if(
+                            declaration.functions.begin(), declaration.functions.end(),
+                            [&](const auto& function) { return function.name == accessor->method; });
+                        return method != declaration.functions.end() &&
+                               method->name != "_init" && method->name != "_static_init" &&
+                               contains_await_syntax(*method);
+                    };
+                member.getter_is_coroutine = accessor_suspends(variable.getter);
+                member.setter_is_coroutine = accessor_suspends(variable.setter);
+                if (script_symbols_ && current_script_) {
+                    if (const auto* published =
+                            script_symbols_->find_inner(*current_script_, qualified)) {
+                        if (const auto* published_member =
+                                script_symbols_->find_inner_member(*published, variable.name);
+                            published_member &&
+                            published_member->kind == ScriptMemberKind::field) {
+                            member.getter_is_coroutine =
+                                member.getter_is_coroutine ||
+                                published_member->getter_is_coroutine;
+                            member.setter_is_coroutine =
+                                member.setter_is_coroutine ||
+                                published_member->setter_is_coroutine;
+                        }
+                    }
+                }
                 found->second.members.push_back(std::move(member));
             }
             for (const auto& function : declaration.functions) {
@@ -6074,6 +6167,8 @@ SemanticModel SemanticAnalyzer::analyze(const ast::Script& script) {
                                         member.kind == ScriptMemberKind::enum_value});
             if (member.kind == ScriptMemberKind::field && member.has_accessor)
                 accessor_fields_.insert(member.name);
+            if (member.kind == ScriptMemberKind::field && member.getter_is_coroutine)
+                coroutine_getter_fields_.insert(member.name);
             if (member.kind == ScriptMemberKind::field && member.is_static)
                 static_fields_.insert(member.name);
         }
@@ -6088,6 +6183,8 @@ SemanticModel SemanticAnalyzer::analyze(const ast::Script& script) {
             static_fields_.insert(variable.name);
         if (variable.getter || variable.setter) {
             accessor_fields_.insert(variable.name);
+            if (variable.getter && accessor_is_coroutine(*variable.getter))
+                coroutine_getter_fields_.insert(variable.name);
             if (variable.getter && !variable.getter->method.empty())
                 bound_accessor_fields_[variable.getter->method].insert(variable.name);
             if (variable.setter && !variable.setter->method.empty())
