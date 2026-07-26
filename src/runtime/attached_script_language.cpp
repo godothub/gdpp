@@ -82,6 +82,9 @@ godot::Dictionary debug_values(const char* names_key, const godot::PackedStringA
 
 ScriptDebugFrame::ScriptDebugFrame(const godot::String& source, const godot::StringName& function,
                                    const std::int32_t line, godot::Object* instance) {
+    auto* debugger = godot::EngineDebugger::get_singleton();
+    if (!debugger || !debugger->is_active() || !AttachedCompiledLanguage::get_singleton())
+        return;
     auto& state = thread_debug_state;
     token_ = state.next_token++;
     if (token_ == 0)
