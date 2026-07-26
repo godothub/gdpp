@@ -2580,7 +2580,7 @@ TEST_CASE("project compiler isolates coroutine overrides behind dynamic script d
     REQUIRE(source.find("gdpp::runtime::call_dynamic_at(") != std::string::npos);
 }
 
-TEST_CASE("project symbol refinement keeps immediate await functions on their typed ABI") {
+TEST_CASE("project symbol refinement keeps immediate await functions on the coroutine ABI") {
     const auto root = fixture_root("project-immediate-await-abi");
     std::error_code error;
     std::filesystem::remove_all(root, error);
@@ -2588,7 +2588,7 @@ TEST_CASE("project symbol refinement keeps immediate await functions on their ty
                                      "func answer() -> int:\n    return await 42\n");
     write_text(root / "consumer.gd", "extends RefCounted\nclass_name ImmediateAwaitConsumer\n"
                                      "var producer: ImmediateAwaitProducer\n"
-                                     "func answer() -> int:\n    return producer.answer()\n");
+                                     "func answer() -> int:\n    return await producer.answer()\n");
     const auto options = project_options(root);
 
     const auto result = gdpp::ProjectCompiler{}.compile(options);
@@ -2601,8 +2601,7 @@ TEST_CASE("project symbol refinement keeps immediate await functions on their ty
     REQUIRE(producer != result.scripts.end());
     const auto header =
         read_text(options.output_directory / "generated" / producer->header_file_name);
-    REQUIRE(header.find("virtual int64_t answer()") != std::string::npos);
-    REQUIRE(header.find("godot::Variant answer()") == std::string::npos);
+    REQUIRE(header.find("virtual godot::Variant answer()") != std::string::npos);
 }
 
 TEST_CASE("project compilation permits detached coroutine calls") {

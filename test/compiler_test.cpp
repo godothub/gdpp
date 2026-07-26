@@ -2322,6 +2322,51 @@ TEST_CASE("compiler supports structured awaits across instance and static corout
     REQUIRE(found_initializer_await);
 }
 
+TEST_CASE("compiler matches redundant await and internal class coroutine call contracts") {
+    const gdpp::Compiler compiler;
+    const auto direct =
+        compiler.compile("redundant_direct.gd", "func immediate() -> int:\n"
+                                                "    @warning_ignore(\"redundant_await\")\n"
+                                                "    return await 42\n"
+                                                "func consume() -> int:\n"
+                                                "    return immediate()\n");
+    const auto awaited =
+        compiler.compile("redundant_awaited.gd", "func immediate() -> int:\n"
+                                                 "    @warning_ignore(\"redundant_await\")\n"
+                                                 "    return await 42\n"
+                                                 "func consume() -> int:\n"
+                                                 "    return await immediate()\n");
+    const auto inner =
+        compiler.compile("inner_coroutine.gd", "extends Node\n"
+                                               "signal resumed\n"
+                                               "class Probe extends RefCounted:\n"
+                                               "    func forward(next_step: Signal) -> int:\n"
+                                               "        return await later(next_step)\n"
+                                               "    func later(next_step: Signal) -> int:\n"
+                                               "        await next_step\n"
+                                               "        return 42\n"
+                                               "func consume() -> int:\n"
+                                               "    return await Probe.new().forward(resumed)\n");
+    const auto constructor =
+        compiler.compile("immediate_init.gd", "extends RefCounted\n"
+                                              "func _init() -> void:\n"
+                                              "    @warning_ignore(\"redundant_await\")\n"
+                                              "    await 42\n");
+
+    REQUIRE(!direct.success);
+    REQUIRE(std::any_of(direct.diagnostics.begin(), direct.diagnostics.end(),
+                        [](const auto& diagnostic) { return diagnostic.code == "GDS4132"; }));
+    REQUIRE(awaited.success);
+    REQUIRE(awaited.unit.header.find("godot::Variant immediate()") != std::string::npos);
+    REQUIRE(inner.success);
+    REQUIRE(inner.unit.source.find("GDPPNative_InnerCoroutine__Probe::forward") !=
+            std::string::npos);
+    REQUIRE(inner.unit.source.find("gdpp::runtime::await_signal") != std::string::npos);
+    REQUIRE(std::none_of(inner.diagnostics.begin(), inner.diagnostics.end(),
+                         [](const auto& diagnostic) { return diagnostic.code == "GDS4093"; }));
+    REQUIRE(constructor.success);
+}
+
 TEST_CASE("compiler requires consumed coroutine results to be awaited and permits detachment") {
     const gdpp::Compiler compiler;
     const auto direct =

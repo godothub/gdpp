@@ -927,6 +927,23 @@ TEST_CASE("typed IR preserves coroutine ABI and call-site suspension metadata") 
     REQUIRE(verifier.verify(module));
 }
 
+TEST_CASE("typed IR keeps redundant await functions on the GDScript coroutine ABI") {
+    gdpp::DiagnosticBag diagnostics;
+    const auto module = lower_source("func immediate() -> int:\n"
+                                     "    @warning_ignore(\"redundant_await\")\n"
+                                     "    return await 42\n"
+                                     "func consume() -> int:\n"
+                                     "    return await immediate()\n",
+                                     diagnostics);
+
+    REQUIRE(!diagnostics.has_errors());
+    REQUIRE(module.functions.at(0).is_coroutine);
+    REQUIRE(module.functions.at(1).is_coroutine);
+    REQUIRE(module.functions.at(1).body.front().expression->coroutine_call);
+    gdpp::IrVerifier verifier{diagnostics};
+    REQUIRE(verifier.verify(module));
+}
+
 TEST_CASE("typed IR preserves a local initialized from an awaited signal") {
     gdpp::DiagnosticBag diagnostics;
     const auto module = lower_source("signal selected(value: String)\n"

@@ -1916,7 +1916,14 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
         if (can_suspend) {
             model_.suspension_variables_.insert_or_assign(&expression, suspension_variables);
         }
-        current_callable_suspends_ = current_callable_suspends_ || can_suspend;
+        // Godot classifies an ordinary function as a coroutine from the presence of `await`,
+        // even when the operand is immediately available (`await 42`). The immediate path still
+        // completes synchronously, but callers must consume it with `await` and the native ABI
+        // must remain Variant/FunctionState-compatible. Constructors are the sole exception:
+        // Godot permits a redundant immediate await in `_init` without making construction
+        // asynchronous, while a genuinely suspending constructor remains invalid below.
+        if (current_function_name_ != "_init" && current_function_name_ != "_static_init")
+            current_callable_suspends_ = true;
         if (!in_function_) {
             diagnostics_.error("GDS4090", "await expressions are only valid inside functions",
                                expression.span);
@@ -5958,6 +5965,8 @@ SemanticModel SemanticAnalyzer::analyze(const ast::Script& script) {
                 member.is_static = function.is_static;
                 member.is_vararg = function.rest_parameter.has_value();
                 member.is_abstract = function.is_abstract;
+                member.is_coroutine = function.name != "_init" && function.name != "_static_init" &&
+                                      contains_await_syntax(function.body);
                 member.has_explicit_type =
                     function.name == "_init" || function.return_type.has_value();
                 for (const auto& parameter : function.parameters) {
