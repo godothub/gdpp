@@ -5,6 +5,8 @@
 #include <godot_cpp/classes/class_db_singleton.hpp>
 #include <godot_cpp/classes/engine.hpp>
 #include <godot_cpp/classes/object.hpp>
+#include <godot_cpp/classes/ref.hpp>
+#include <godot_cpp/classes/ref_counted.hpp>
 #include <godot_cpp/classes/resource.hpp>
 #include <godot_cpp/classes/resource_loader.hpp>
 #include <godot_cpp/classes/scene_tree.hpp>
@@ -30,6 +32,7 @@ namespace gdpp::runtime {
 class CoroutineState final {
   public:
     godot::ObjectID owner;
+    godot::Ref<godot::RefCounted> owned_host;
     godot::StringName signal;
     godot::Variant result;
     std::mutex mutex;
@@ -658,11 +661,16 @@ godot::Variant await_result(const godot::Array& arguments) {
 }
 
 CoroutineStatePtr begin_coroutine(godot::Object* owner) {
-    if (!owner) {
-        godot::UtilityFunctions::push_error("GDPP: cannot start a coroutine without an owner");
-        return {};
-    }
     auto state = std::make_shared<CoroutineState>();
+    if (!owner) {
+        state->owned_host.instantiate();
+        if (state->owned_host.is_null()) {
+            godot::UtilityFunctions::push_error(
+                "GDPP: cannot allocate an owner for a static coroutine");
+            return {};
+        }
+        owner = state->owned_host.ptr();
+    }
     state->owner = owner->get_instance_id();
     do {
         const auto index = coroutine_counter().fetch_add(1, std::memory_order_relaxed);
@@ -679,6 +687,12 @@ CoroutineStatePtr begin_coroutine(godot::Object* owner) {
     return state;
 }
 
+godot::Object* coroutine_owner(const CoroutineStatePtr& state) {
+    if (!state)
+        return nullptr;
+    return godot::ObjectDB::get_instance(static_cast<std::uint64_t>(state->owner));
+}
+
 godot::Variant coroutine_result(const CoroutineStatePtr& state) {
     if (!state)
         return {};
@@ -692,7 +706,7 @@ godot::Variant coroutine_result(const CoroutineStatePtr& state) {
         else
             state->exposed = true;
     }
-    auto* owner = godot::ObjectDB::get_instance(static_cast<std::uint64_t>(state->owner));
+    auto* owner = coroutine_owner(state);
     if (!owner)
         return completed ? result : godot::Variant{};
     if (completed) {
@@ -717,7 +731,7 @@ void complete_coroutine(const CoroutineStatePtr& state, const godot::Variant& re
     }
     if (!exposed)
         return;
-    auto* owner = godot::ObjectDB::get_instance(static_cast<std::uint64_t>(state->owner));
+    auto* owner = coroutine_owner(state);
     if (!owner)
         return;
     owner->emit_signal(state->signal, result);

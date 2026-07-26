@@ -185,6 +185,7 @@ using AwaitContinuation = std::function<void(const godot::Array&)>;
 class CoroutineState;
 using CoroutineStatePtr = std::shared_ptr<CoroutineState>;
 [[nodiscard]] CoroutineStatePtr begin_coroutine(godot::Object* owner);
+[[nodiscard]] godot::Object* coroutine_owner(const CoroutineStatePtr& state);
 [[nodiscard]] godot::Variant coroutine_result(const CoroutineStatePtr& state);
 void complete_coroutine(const CoroutineStatePtr& state, const godot::Variant& result);
 
