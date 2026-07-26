@@ -29,6 +29,7 @@ const char* token_kind_name(TokenKind kind) noexcept {
         GDPP_TOKEN_NAME(kw_static);
         GDPP_TOKEN_NAME(kw_return);
         GDPP_TOKEN_NAME(kw_assert);
+        GDPP_TOKEN_NAME(kw_breakpoint);
         GDPP_TOKEN_NAME(kw_pass);
         GDPP_TOKEN_NAME(kw_if);
         GDPP_TOKEN_NAME(kw_match);

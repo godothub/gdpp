@@ -122,6 +122,20 @@ TEST_CASE("lexer recognizes assert as a statement keyword") {
     REQUIRE_EQ(tokens.front().kind, gdpp::TokenKind::kw_assert);
 }
 
+TEST_CASE("lexer recognizes breakpoint as a persistent debugger keyword") {
+    const gdpp::SourceFile source{"breakpoint.gd", "breakpoint\nstate.breakpoint = true\n"};
+    gdpp::DiagnosticBag diagnostics;
+    const auto tokens = gdpp::Lexer{source, diagnostics}.scan();
+
+    REQUIRE(!diagnostics.has_errors());
+    REQUIRE_EQ(tokens.front().kind, gdpp::TokenKind::kw_breakpoint);
+    REQUIRE_EQ(std::string{gdpp::token_kind_name(tokens.front().kind)},
+               std::string{"kw_breakpoint"});
+    REQUIRE(std::any_of(tokens.begin(), tokens.end(), [](const gdpp::Token& token) {
+        return token.kind == gdpp::TokenKind::dot;
+    }));
+}
+
 TEST_CASE("lexer recognizes modern literals node shorthand and symbolic operators") {
     const gdpp::SourceFile source{"modern.gd", "var mask := 0xff_00 | 0b1010\n"
                                                "var name := &\"player\"\n"
@@ -217,26 +231,27 @@ TEST_CASE("lexer accepts compact floats and compound unique-node paths") {
 
 TEST_CASE("lexer distinguishes member dots match rest and parameter ellipsis") {
     const gdpp::SourceFile source{"periods.gd", "var compact := .5\n"
-                                               "var member := owner.value\n"
-                                               "match values:\n"
-                                               "    [var first, ..]: pass\n"
-                                               "func collect(...args):\n"
-                                               "    pass\n"};
+                                                "var member := owner.value\n"
+                                                "match values:\n"
+                                                "    [var first, ..]: pass\n"
+                                                "func collect(...args):\n"
+                                                "    pass\n"};
     gdpp::DiagnosticBag diagnostics;
     const auto tokens = gdpp::Lexer{source, diagnostics}.scan();
 
     REQUIRE(!diagnostics.has_errors());
-    REQUIRE_EQ(std::count_if(tokens.begin(), tokens.end(), [](const gdpp::Token& token) {
-                   return token.kind == gdpp::TokenKind::dot;
-               }),
+    REQUIRE_EQ(
+        std::count_if(tokens.begin(), tokens.end(),
+                      [](const gdpp::Token& token) { return token.kind == gdpp::TokenKind::dot; }),
+        std::ptrdiff_t{1});
+    REQUIRE_EQ(std::count_if(
+                   tokens.begin(), tokens.end(),
+                   [](const gdpp::Token& token) { return token.kind == gdpp::TokenKind::dot_dot; }),
                std::ptrdiff_t{1});
-    REQUIRE_EQ(std::count_if(tokens.begin(), tokens.end(), [](const gdpp::Token& token) {
-                   return token.kind == gdpp::TokenKind::dot_dot;
-               }),
-               std::ptrdiff_t{1});
-    REQUIRE_EQ(std::count_if(tokens.begin(), tokens.end(), [](const gdpp::Token& token) {
-                   return token.kind == gdpp::TokenKind::ellipsis;
-               }),
+    REQUIRE_EQ(std::count_if(tokens.begin(), tokens.end(),
+                             [](const gdpp::Token& token) {
+                                 return token.kind == gdpp::TokenKind::ellipsis;
+                             }),
                std::ptrdiff_t{1});
     REQUIRE(std::find_if(tokens.begin(), tokens.end(), [](const gdpp::Token& token) {
                 return token.kind == gdpp::TokenKind::floating && token.lexeme == "0.5";

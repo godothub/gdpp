@@ -29,6 +29,7 @@ enum class TokenKind {
     kw_static,
     kw_return,
     kw_assert,
+    kw_breakpoint,
     kw_pass,
     kw_if,
     kw_match,
