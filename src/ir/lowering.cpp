@@ -737,6 +737,9 @@ ir::Module IrLowerer::lower(const ast::Script& script) const {
         script.annotations.begin(), script.annotations.end(),
         [](const ast::Annotation& annotation) { return annotation.name == "abstract"; });
     module.is_tool = script.tool;
+    module.static_unload = std::any_of(
+        script.annotations.begin(), script.annotations.end(),
+        [](const ast::Annotation& annotation) { return annotation.name == "static_unload"; });
     module.span = script.span;
     module.enums.reserve(script.enums.size());
     for (const auto& declaration : script.enums) {

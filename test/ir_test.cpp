@@ -262,6 +262,17 @@ TEST_CASE("typed IR preserves script tool execution mode") {
     REQUIRE(module.is_tool);
 }
 
+TEST_CASE("typed IR preserves the static unload lifecycle marker") {
+    gdpp::DiagnosticBag diagnostics;
+    const auto module = lower_source("@static_unload\n"
+                                     "extends Node\n"
+                                     "static var value := 42\n",
+                                     diagnostics);
+
+    REQUIRE(!diagnostics.has_errors());
+    REQUIRE(module.static_unload);
+}
+
 TEST_CASE("typed IR preserves script icon metadata") {
     gdpp::DiagnosticBag diagnostics;
     const auto module = lower_source("@icon(\"icons/custom.svg\")\n"

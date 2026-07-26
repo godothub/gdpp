@@ -265,6 +265,7 @@ struct Module {
     std::optional<std::string> icon_path;
     bool is_abstract{false};
     bool is_tool{false};
+    bool static_unload{false};
     std::vector<Enum> enums;
     std::vector<Field> fields;
     std::vector<Signal> signals;
