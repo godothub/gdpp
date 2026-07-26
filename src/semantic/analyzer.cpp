@@ -200,6 +200,18 @@ bool contains_await_syntax(const std::vector<ast::Statement>& statements) {
     return false;
 }
 
+bool contains_await_syntax(const ast::FunctionDeclaration& function) {
+    for (const auto& parameter : function.parameters) {
+        if (parameter.default_value && expression_contains_await(*parameter.default_value))
+            return true;
+    }
+    if (function.rest_parameter && function.rest_parameter->default_value &&
+        expression_contains_await(*function.rest_parameter->default_value)) {
+        return true;
+    }
+    return contains_await_syntax(function.body);
+}
+
 struct ProjectEnumLookup {
     const ScriptClassSymbol* owner{nullptr};
     const ScriptInnerClassSymbol* inner_owner{nullptr};
@@ -412,6 +424,11 @@ const Symbol* SemanticModel::symbol_of(const ast::Statement& statement) const no
 const Symbol* SemanticModel::symbol_of(const ast::MatchPattern& pattern) const noexcept {
     const auto found = match_pattern_symbols_.find(&pattern);
     return found == match_pattern_symbols_.end() ? nullptr : &found->second;
+}
+
+const Symbol* SemanticModel::symbol_of(const ast::Parameter& parameter) const noexcept {
+    const auto found = parameter_symbols_.find(&parameter);
+    return found == parameter_symbols_.end() ? nullptr : &found->second;
 }
 
 const ApiResolution*
@@ -637,6 +654,8 @@ void SemanticAnalyzer::analyze_rest_parameter(const ast::Parameter& parameter) {
     }
     model_.parameter_types_[&parameter] = type;
     declare({SymbolKind::parameter, parameter.name, type, parameter.span, false});
+    if (const auto* declared = resolve(parameter.name))
+        model_.parameter_symbols_.insert_or_assign(&parameter, *declared);
 }
 
 void SemanticAnalyzer::validate_container_method_call(const Type& container,
@@ -2415,7 +2434,7 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                             : nullptr;
                     mark_coroutine_call(member ? member->is_coroutine
                                                : local != functions_.end() &&
-                                                     contains_await_syntax(local->second->body));
+                                                     contains_await_syntax(*local->second));
                 }
                 if (symbol->kind == SymbolKind::function && script_symbols_ && current_script_) {
                     const auto* member =
@@ -4685,11 +4704,8 @@ void SemanticAnalyzer::analyze_function(const ast::FunctionDeclaration& function
                 ? &inherited_script_method->parameters[index]
                 : nullptr;
         std::optional<Type> analyzed_default;
-        const auto previous_await_context = await_expression_allowed_;
-        await_expression_allowed_ = false;
         if (parameter.default_value)
             analyzed_default = analyze_expression(*parameter.default_value);
-        await_expression_allowed_ = previous_await_context;
         if (parameter.infer_type && analyzed_default)
             require_inferable_type(*analyzed_default, parameter.span, "parameter");
         const auto type = parameter.type.has_value()
@@ -4706,6 +4722,8 @@ void SemanticAnalyzer::analyze_function(const ast::FunctionDeclaration& function
                                 : DefaultArgumentEvaluation::call_time);
         }
         declare({SymbolKind::parameter, parameter.name, type, parameter.span, false});
+        if (const auto* declared = resolve(parameter.name))
+            model_.parameter_symbols_.insert_or_assign(&parameter, *declared);
         if (analyzed_default)
             require_expression_assignable(type, *parameter.default_value, *analyzed_default,
                                           parameter.span, "invalid default value");
@@ -4849,11 +4867,8 @@ void SemanticAnalyzer::analyze_lambda(const ast::LambdaExpression& expression) {
     scopes_.emplace_back();
     for (const auto& parameter : expression.parameters) {
         std::optional<Type> analyzed_default;
-        const auto previous_await_context = await_expression_allowed_;
-        await_expression_allowed_ = false;
         if (parameter.default_value)
             analyzed_default = analyze_expression(*parameter.default_value);
-        await_expression_allowed_ = previous_await_context;
         if (parameter.infer_type && analyzed_default)
             require_inferable_type(*analyzed_default, parameter.span, "lambda parameter");
         const auto type = parameter.type ? type_from_name(*parameter.type, parameter.span)
@@ -4867,6 +4882,8 @@ void SemanticAnalyzer::analyze_lambda(const ast::LambdaExpression& expression) {
                                 : DefaultArgumentEvaluation::call_time);
         }
         declare({SymbolKind::parameter, parameter.name, type, parameter.span, false});
+        if (const auto* declared = resolve(parameter.name))
+            model_.parameter_symbols_.insert_or_assign(&parameter, *declared);
         if (analyzed_default)
             require_expression_assignable(type, *parameter.default_value, *analyzed_default,
                                           parameter.span, "invalid lambda default value");
@@ -6002,7 +6019,7 @@ SemanticModel SemanticAnalyzer::analyze(const ast::Script& script) {
                 member.is_vararg = function.rest_parameter.has_value();
                 member.is_abstract = function.is_abstract;
                 member.is_coroutine = function.name != "_init" && function.name != "_static_init" &&
-                                      contains_await_syntax(function.body);
+                                      contains_await_syntax(function);
                 member.has_explicit_type =
                     function.name == "_init" || function.return_type.has_value();
                 for (const auto& parameter : function.parameters) {

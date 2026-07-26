@@ -648,6 +648,18 @@ bool statements_contain_await(const std::vector<ast::Statement>& statements) {
     return false;
 }
 
+bool function_contains_await(const ast::FunctionDeclaration& function) {
+    for (const auto& parameter : function.parameters) {
+        if (parameter.default_value && expression_contains_await(*parameter.default_value))
+            return true;
+    }
+    if (function.rest_parameter && function.rest_parameter->default_value &&
+        expression_contains_await(*function.rest_parameter->default_value)) {
+        return true;
+    }
+    return statements_contain_await(function.body);
+}
+
 ScriptInnerClassSymbol inner_class_symbol(const ast::ClassDeclaration& declaration,
                                           const GodotApi& api) {
     ScriptInnerClassSymbol symbol;
@@ -677,7 +689,8 @@ ScriptInnerClassSymbol inner_class_symbol(const ast::ClassDeclaration& declarati
                                                : signature_type(function.return_type, nullptr, api);
         member.is_static = function.is_static;
         member.is_vararg = function.rest_parameter.has_value();
-        member.is_coroutine = statements_contain_await(function.body);
+        member.is_coroutine = function.name != "_init" && function.name != "_static_init" &&
+                              function_contains_await(function);
         member.is_abstract = function.is_abstract;
         member.has_explicit_type = function.name == "_init" || function.return_type.has_value();
         for (const auto& parameter : function.parameters) {
@@ -1388,7 +1401,8 @@ ProjectCompileResult ProjectCompiler::compile_impl(const ProjectCompileOptions& 
                               : signature_type(function.return_type, nullptr, target_api);
             member.is_static = function.is_static;
             member.is_vararg = function.rest_parameter.has_value();
-            member.is_coroutine = statements_contain_await(function.body);
+            member.is_coroutine = function.name != "_init" && function.name != "_static_init" &&
+                                  function_contains_await(function);
             member.is_abstract = function.is_abstract;
             member.has_explicit_type = function.name == "_init" || function.return_type.has_value();
             for (const auto& parameter : function.parameters) {
