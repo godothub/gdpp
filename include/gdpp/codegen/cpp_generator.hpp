@@ -159,6 +159,7 @@ class CodeGenerator final {
                                                      std::size_t indent) const;
     [[nodiscard]] std::string cpp_type(const Type& type) const;
     [[nodiscard]] std::string self_object_expression() const;
+    [[nodiscard]] std::string await_owner_expression() const;
     [[nodiscard]] std::string godot_owner_expression() const;
     [[nodiscard]] std::string api_native_type(std::string_view api_type,
                                               std::string_view native_meta) const;

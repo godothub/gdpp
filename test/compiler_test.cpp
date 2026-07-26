@@ -1998,7 +1998,7 @@ TEST_CASE("compiler preserves dynamic coroutine return values through the native
             std::string::npos);
 }
 
-TEST_CASE("compiler supports structured awaits and rejects unsafe coroutine contracts") {
+TEST_CASE("compiler supports structured awaits across instance and static coroutine contracts") {
     const gdpp::Compiler compiler;
     const auto nested = compiler.compile("nested_await.gd", "signal resumed\n"
                                                             "func run():\n"
@@ -2011,9 +2011,9 @@ TEST_CASE("compiler supports structured awaits and rejects unsafe coroutine cont
                                                              "func run() -> int:\n"
                                                              "    await resumed\n"
                                                              "    return 1\n");
-    const auto static_await = compiler.compile("static_await.gd", "signal resumed\n"
-                                                                  "static func run() -> void:\n"
-                                                                  "    await resumed\n");
+    const auto static_await =
+        compiler.compile("static_await.gd", "static func run(resumed: Signal) -> void:\n"
+                                            "    await resumed\n");
     const auto nonsignal = compiler.compile("bad_await.gd", "func run() -> void:\n"
                                                             "    await 42\n");
     const auto ignored =
@@ -2031,7 +2031,13 @@ TEST_CASE("compiler supports structured awaits and rejects unsafe coroutine cont
     REQUIRE(non_void.success);
     REQUIRE(non_void.unit.header.find("godot::Variant run()") != std::string::npos);
     REQUIRE(non_void.unit.source.find("gdpp::runtime::coroutine_result(") != std::string::npos);
-    REQUIRE(!static_await.success);
+    REQUIRE(static_await.success);
+    REQUIRE(static_await.unit.header.find("static godot::Variant run(godot::Signal resumed)") !=
+            std::string::npos);
+    REQUIRE(static_await.unit.source.find("gdpp::runtime::begin_coroutine(nullptr)") !=
+            std::string::npos);
+    REQUIRE(static_await.unit.source.find(
+                "gdpp::runtime::coroutine_owner(_gdpp_coroutine_state)") != std::string::npos);
     REQUIRE(nonsignal.success);
     REQUIRE(nonsignal.unit.source.find("static_cast<void>(static_cast<int64_t>(42))") !=
             std::string::npos);

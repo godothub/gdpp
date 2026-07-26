@@ -1196,6 +1196,12 @@ std::string CodeGenerator::self_object_expression() const {
     return attached_script_ ? "owner()" : "this";
 }
 
+std::string CodeGenerator::await_owner_expression() const {
+    return current_coroutine_abi_
+               ? "gdpp::runtime::coroutine_owner(" + current_coroutine_state_ + ")"
+               : self_object_expression();
+}
+
 std::string CodeGenerator::godot_owner_expression() const {
     if (!attached_script_)
         return "this";
@@ -4358,7 +4364,7 @@ std::string CodeGenerator::emit_flat_async(const mir::Function& function,
             result += indent(indentation + 4) + "continue;\n";
             result += indent(indentation + 3) + "}\n";
             result += indent(indentation + 3) + "if (!gdpp::runtime::await_signal(" + awaitable +
-                      ", " + self_object_expression() + ", [" + keep_alive +
+                      ", " + await_owner_expression() + ", [" + keep_alive +
                       "](const godot::Array &resume_values) { (*" + keep_alive + ")(" + target +
                       ", resume_values); })) {\n";
             result += current_coroutine_abi_
@@ -4564,7 +4570,7 @@ std::string CodeGenerator::emit_async_statements(
             result += async_return(indentation + 1, continuation_context);
             result += prefix + "}\n";
             result += prefix + "if (!gdpp::runtime::await_signal(" + awaitable_name + ", " +
-                      self_object_expression() + ", " + resume_name + ")) {\n";
+                      await_owner_expression() + ", " + resume_name + ")) {\n";
             result += current_coroutine_abi_ ? coroutine_return(indentation + 1, "godot::Variant{}",
                                                                 continuation_context)
                                              : async_return(indentation + 1, continuation_context);
@@ -5964,7 +5970,7 @@ void CodeGenerator::emit_inner_class_declaration(const ir::Class& declaration,
         return static_cast<const GodotMethodRecord*>(nullptr);
     };
     const auto coroutine_abi_for = [&](const ir::Function& function) {
-        return function.is_coroutine && !function.is_static && !engine_virtual_for(function);
+        return function.is_coroutine && !engine_virtual_for(function);
     };
     const auto function_return_type = [&](const ir::Function& function) {
         return coroutine_abi_for(function) ? std::string{"godot::Variant"}
@@ -6245,7 +6251,7 @@ void CodeGenerator::emit_inner_class_definition(const ir::Class& declaration,
         return static_cast<const GodotMethodRecord*>(nullptr);
     };
     const auto coroutine_abi_for = [&](const ir::Function& function) {
-        return function.is_coroutine && !function.is_static && !engine_virtual_for(function);
+        return function.is_coroutine && !engine_virtual_for(function);
     };
     const auto function_return_type = [&](const ir::Function& function) {
         return coroutine_abi_for(function) ? std::string{"godot::Variant"}
@@ -6716,7 +6722,8 @@ void CodeGenerator::emit_inner_class_definition(const ir::Class& declaration,
         source << emit_debug_frame(function.span.begin.line, 1);
         if (current_coroutine_abi_) {
             source << "    const auto " << current_coroutine_state_
-                   << " = gdpp::runtime::begin_coroutine(" << self_object_expression() << ");\n";
+                   << " = gdpp::runtime::begin_coroutine("
+                   << (function.is_static ? "nullptr" : self_object_expression()) << ");\n";
         }
         source << emit_statements(
             function.body, 1, 0,
@@ -7023,7 +7030,7 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
         return method && method->is_virtual ? method : nullptr;
     };
     const auto coroutine_abi_for = [&](const ir::Function& function) {
-        return function.is_coroutine && !function.is_static && !virtual_method_for(function);
+        return function.is_coroutine && !virtual_method_for(function);
     };
     const auto function_return_type = [&](const ir::Function& function) {
         return coroutine_abi_for(function) ? std::string{"godot::Variant"}
@@ -8150,7 +8157,8 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
         source << emit_debug_frame(function.span.begin.line, 1);
         if (current_coroutine_abi_) {
             source << "    const auto " << current_coroutine_state_
-                   << " = gdpp::runtime::begin_coroutine(" << self_object_expression() << ");\n";
+                   << " = gdpp::runtime::begin_coroutine("
+                   << (function.is_static ? "nullptr" : self_object_expression()) << ");\n";
         }
         if (function.name == "_ready" && !attached_script) {
             for (const auto& field : module.fields) {

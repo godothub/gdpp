@@ -1909,10 +1909,6 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
         if (can_suspend && current_function_name_ == "_init") {
             diagnostics_.error("GDS4097", "_init cannot suspend on a signal", expression.span);
         }
-        if (can_suspend && current_function_static_) {
-            diagnostics_.error("GDS4091", "static functions cannot suspend on a signal yet",
-                               expression.span);
-        }
         if (can_suspend && expected_return_.kind != TypeKind::void_type &&
             !allow_dynamic_await_return_) {
             diagnostics_.error("GDS4092",
