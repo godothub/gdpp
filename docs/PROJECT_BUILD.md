@@ -182,6 +182,10 @@ addons/gdpp/build/project/
 项目 manifest 区分源码实现哈希和公开 ABI 哈希，只让真实依赖方失效。对象缓存再包含 include/
 depfile、SDK/runtime、第三方 bridge、工具链绝对路径、profile 和可复现路径映射。
 
+从旧版原地升级时，成功的项目编译会精确删除输出根内已退役的 `gdpp_project.gdextension`、
+`CMakeLists.txt` 和两个历史 CMake 辅助脚本。当前导出只使用内存生成的 runtime 描述符和
+NativeBuilder 直接命令；这些旧文件既不会参与构建，也不会以旧入口 ABI 留在诊断现场。
+
 当前缓存事务在单进程内安全；多个编辑器或 CLI 同时写同一项目尚无跨进程锁，不属于支持用法。
 新进程仍需重新执行前端，持久化 AST/符号摘要尚未实现。
 
