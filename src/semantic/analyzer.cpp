@@ -324,6 +324,13 @@ IterationPlan SemanticModel::iteration_plan_of(const ast::Statement& statement) 
     return found == iteration_plans_.end() ? IterationPlan{} : found->second;
 }
 
+const std::vector<DebugVariable>&
+SemanticModel::debug_variables_at(const ast::Statement& statement) const noexcept {
+    static const std::vector<DebugVariable> empty;
+    const auto found = debug_variables_.find(&statement);
+    return found == debug_variables_.end() ? empty : found->second;
+}
+
 Type SemanticModel::type_of(const ast::MatchPattern& pattern) const {
     const auto found = match_pattern_types_.find(&pattern);
     return found == match_pattern_types_.end() ? unknown_type : found->second;
@@ -422,6 +429,27 @@ const Symbol* SemanticAnalyzer::resolve(const std::string& name) const noexcept 
             return &found->second;
     }
     return nullptr;
+}
+
+std::vector<DebugVariable> SemanticAnalyzer::visible_debug_variables() const {
+    std::vector<DebugVariable> result;
+    std::unordered_set<std::string> shadowed;
+    for (auto scope = scopes_.rbegin(); scope != scopes_.rend(); ++scope) {
+        for (const auto& [name, symbol] : *scope) {
+            const bool function_value =
+                symbol.storage == SymbolStorage::function_local &&
+                (symbol.kind == SymbolKind::parameter || symbol.kind == SymbolKind::local ||
+                 symbol.kind == SymbolKind::constant);
+            if (function_value && shadowed.insert(name).second)
+                result.push_back({name, symbol.type, symbol.declaration});
+        }
+    }
+    std::sort(result.begin(), result.end(), [](const auto& left, const auto& right) {
+        if (left.declaration.begin.offset != right.declaration.begin.offset)
+            return left.declaration.begin.offset < right.declaration.begin.offset;
+        return left.name < right.name;
+    });
+    return result;
 }
 
 void SemanticAnalyzer::require_assignable(const Type& target, const Type& source, SourceSpan span,
@@ -4342,7 +4370,9 @@ SemanticAnalyzer::FlowResult SemanticAnalyzer::analyze_statement(const ast::Stat
                    : FlowResult{false, false, false, true};
     }
     case ast::StatementKind::pass_statement:
+        return FlowResult{true, false, false, false};
     case ast::StatementKind::breakpoint_statement:
+        model_.debug_variables_.insert_or_assign(&statement, visible_debug_variables());
         return FlowResult{true, false, false, false};
     }
     return FlowResult{true, false, false, false};

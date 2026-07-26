@@ -112,9 +112,8 @@ struct ApiResolution {
     ApiResolution(ApiResolutionKind resolution_kind, std::string resolution_owner,
                   std::string resolution_getter, std::string resolution_setter,
                   Type resolution_type, std::uint16_t resolution_required_arguments = 0,
-                  std::uint16_t resolution_maximum_arguments = 0,
-                  bool resolution_is_vararg = false, bool resolution_direct = false,
-                  std::int64_t resolution_indexed_argument = -1,
+                  std::uint16_t resolution_maximum_arguments = 0, bool resolution_is_vararg = false,
+                  bool resolution_direct = false, std::int64_t resolution_indexed_argument = -1,
                   IntrinsicKind resolution_intrinsic = IntrinsicKind::none,
                   bool resolution_read_only = false, Type resolution_assignment_type = {})
         : kind(resolution_kind), owner(std::move(resolution_owner)),
@@ -148,6 +147,12 @@ struct ResolvedCallContract {
     bool is_vararg{false};
 };
 
+struct DebugVariable {
+    std::string name;
+    Type type;
+    SourceSpan declaration{};
+};
+
 class SemanticModel final {
   public:
     [[nodiscard]] Type type_of(const ast::Expression& expression) const;
@@ -157,6 +162,8 @@ class SemanticModel final {
     [[nodiscard]] Type property_type_of(const ast::VariableDeclaration& declaration) const;
     [[nodiscard]] Type type_of(const ast::Statement& statement) const;
     [[nodiscard]] IterationPlan iteration_plan_of(const ast::Statement& statement) const;
+    [[nodiscard]] const std::vector<DebugVariable>&
+    debug_variables_at(const ast::Statement& statement) const noexcept;
     [[nodiscard]] Type type_of(const ast::MatchPattern& pattern) const;
     [[nodiscard]] Type type_of(const ast::Parameter& parameter) const;
     [[nodiscard]] DefaultArgumentEvaluation
@@ -193,6 +200,7 @@ class SemanticModel final {
     std::unordered_map<const ast::VariableDeclaration*, Type> property_types_;
     std::unordered_map<const ast::Statement*, Type> local_types_;
     std::unordered_map<const ast::Statement*, IterationPlan> iteration_plans_;
+    std::unordered_map<const ast::Statement*, std::vector<DebugVariable>> debug_variables_;
     std::unordered_map<const ast::MatchPattern*, Type> match_pattern_types_;
     std::unordered_map<const ast::Parameter*, Type> parameter_types_;
     std::unordered_map<const ast::Parameter*, DefaultArgumentEvaluation>
@@ -248,6 +256,7 @@ class SemanticAnalyzer final {
     void validate_annotations(const ast::VariableDeclaration& variable, const Type& type);
     [[nodiscard]] FlowResult analyze_statements(const std::vector<ast::Statement>& statements);
     [[nodiscard]] FlowResult analyze_statement(const ast::Statement& statement);
+    [[nodiscard]] std::vector<DebugVariable> visible_debug_variables() const;
     [[nodiscard]] Type analyze_expression(const ast::Expression& expression);
     [[nodiscard]] Type analyze_binary_tree(const ast::Expression& expression);
     [[nodiscard]] ConditionalRefinements

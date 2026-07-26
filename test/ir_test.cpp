@@ -785,17 +785,27 @@ TEST_CASE("typed IR preserves assert condition and optional message") {
 
 TEST_CASE("typed IR preserves debugger breakpoints as observable statements") {
     gdpp::DiagnosticBag diagnostics;
-    const auto module = lower_source("func inspect(value: int) -> int:\n"
-                                     "    breakpoint\n"
+    const auto module = lower_source("func inspect(value: int, label := \"root\") -> int:\n"
+                                     "    var total := value\n"
+                                     "    if total > 0:\n"
+                                     "        var label := 42\n"
+                                     "        const fixed := 7\n"
+                                     "        breakpoint\n"
                                      "    return value\n",
                                      diagnostics);
 
     REQUIRE(!diagnostics.has_errors());
-    const auto& breakpoint = module.functions.front().body.front();
+    const auto& breakpoint = module.functions.front().body.at(1).body.at(2);
     REQUIRE_EQ(breakpoint.kind, gdpp::ir::StatementKind::breakpoint_statement);
-    REQUIRE_EQ(breakpoint.span.begin.line, std::size_t{2});
+    REQUIRE_EQ(breakpoint.span.begin.line, std::size_t{6});
     REQUIRE(!breakpoint.expression);
     REQUIRE(!breakpoint.condition);
+    REQUIRE_EQ(breakpoint.debug_variables.size(), std::size_t{4});
+    REQUIRE_EQ(breakpoint.debug_variables.at(0).name, std::string{"value"});
+    REQUIRE_EQ(breakpoint.debug_variables.at(1).name, std::string{"total"});
+    REQUIRE_EQ(breakpoint.debug_variables.at(2).name, std::string{"label"});
+    REQUIRE_EQ(breakpoint.debug_variables.at(2).type.kind, gdpp::TypeKind::integer);
+    REQUIRE_EQ(breakpoint.debug_variables.at(3).name, std::string{"fixed"});
     gdpp::IrVerifier verifier{diagnostics};
     REQUIRE(verifier.verify(module));
 }

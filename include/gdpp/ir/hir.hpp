@@ -138,6 +138,11 @@ struct MatchPattern {
     SourceSpan span{};
 };
 
+struct DebugVariable {
+    std::string name;
+    Type type;
+};
+
 struct Statement {
     StatementKind kind{StatementKind::expression};
     SourceSpan span{};
@@ -154,6 +159,7 @@ struct Statement {
     std::vector<Statement> assert_condition_prefix;
     std::vector<Statement> assert_message_prefix;
     std::vector<MatchPattern> patterns;
+    std::vector<DebugVariable> debug_variables;
 };
 
 struct PropertyAccessor {

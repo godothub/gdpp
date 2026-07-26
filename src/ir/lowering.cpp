@@ -606,6 +606,10 @@ ir::Statement IrLowerer::lower_statement(const ast::Statement& statement) const 
     lowered.is_constant = statement.is_constant();
     if (statement.kind() == ast::StatementKind::for_statement)
         lowered.iteration = semantic_.iteration_plan_of(statement);
+    if (statement.kind() == ast::StatementKind::breakpoint_statement) {
+        for (const auto& variable : semantic_.debug_variables_at(statement))
+            lowered.debug_variables.push_back({variable.name, variable.type});
+    }
     if (statement.expression())
         lowered.expression = lower_expression(*statement.expression());
     if (statement.condition())
