@@ -14,6 +14,24 @@
 本报告只描述可重复证据。内部商业语料和客户项目不按名称公开；它们只能补充发现问题，不能替代
 产品级 fixture 与 CI。
 
+## 1.8.0 候选本地验证
+
+| 门禁 | 结果 |
+|---|---|
+| Debug core CTest | 18 / 18 |
+| Debug plugin CTest | 21 / 21 |
+| Release plugin CTest | 21 / 21 |
+| 编译器单元 | 495 / 495 |
+| godot-cpp SDK | macOS 上完整重建 4.4、4.5、4.6、4.7 `template_release` |
+| 官方 Godot 4.6.2 Release | Universal 2 Attached provider 导出、独立运行成功 |
+| 官方 Godot 4.6.2 Debug | Universal 2 Attached provider 导出、独立运行成功 |
+| PCK 审计 | Debug/Release 均 19 个文件、2 个转换场景、1 个转换资源、0 违规 |
+| 源工程不变性 | compiler/provider 描述符及 extension registry SHA-256 导出前后相同 |
+
+两种 profile 的独立运行都输出 `GDPP_ATTACHED_EXPORT_RUNTIME_OK`。这组本地证据用于在正式矩阵
+前验证 runtime ABI 14、breakpoint 生成代码和 Release-only Universal provider 的 Debug 复用；
+它不替代下述跨 runner 发布门禁。
+
 ## 正式发布门禁
 
 ### 编译器与宿主
