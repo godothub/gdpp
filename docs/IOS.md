@@ -1,8 +1,11 @@
-# iOS 平台支持
+# iOS 平台支持与认证边界
 
 GDPP 的 iOS 后端面向 Godot 4.4～4.7，最低系统版本为 iOS 16.0。目标产物是动态
 XCFramework，而不是只包含真机 arm64 的单一 dylib：同一个项目库同时提供 iPhone arm64、
 Apple Silicon 模拟器 arm64 和 Intel 模拟器 x86_64 三种切片。
+
+当前状态是“构建链路与无签名模拟器集成通过”，不是“App Store 全流程已认证”。平台总体证据
+见 [平台测试报告](PLATFORM_TEST_REPORT.md)，未完成项见 [路线图](ROADMAP.md)。
 
 ## 用户依赖
 
@@ -11,18 +14,20 @@ Apple Silicon 模拟器 arm64 和 Intel 模拟器 x86_64 三种切片。
 - 能提供 iOS 16 SDK 的完整 Xcode、该 Xcode 要求的 macOS 宿主版本，以及通过 `xcode-select`
   选中的有效 Developer 目录；因此“插件可在 macOS 11.0 加载”不等于“macOS 11.0 可以安装
   当前 Xcode 并执行 iOS 导出”；
-- `gdpp-mac.zip`，其中同时包含 Godot 4.4～4.7 的 macOS Universal 2 SDK 与 iOS target pack；
+- `gdpp-mac.zip`，其中同时包含 Godot 4.4～4.7 的 macOS Universal 2、iOS、Android 与 Web
+  release SDK；
 - 已安装对应 Godot iOS 导出模板；
 - 真机或 App Store 导出所需的 Apple Developer Team、Bundle ID、证书和描述文件。
 
-用户不需要 CMake、Ninja、Python、SCons，也不需要自行编译 godot-cpp。iOS target pack 的
-device 与 Universal Simulator 目录各包含一份优化后的 `template_release` godot-cpp 静态
-依赖；Debug 与 Release 导出复用它们，这些静态依赖只参与本机链接，不会整包进入游戏。
+用户不需要 CMake、Ninja、Python、SCons，也不需要自行编译 godot-cpp。每套 SDK 的共享
+`lib/` 中包含 device 和 Universal Simulator 两份优化后的 `template_release` 静态依赖；
+`sdk/manifests/ios.arm64.sdk.manifest` 描述其身份。Debug 与 Release 导出复用这些 release
+binding，它们只参与链接，不会整包进入游戏。
 
 ## 导出流程
 
-1. 将 `gdpp-mac.zip` 解压到项目根目录；iOS target pack 会随插件合并到
-   `addons/gdpp/sdk/<Godot版本>/` 的共享 SDK 中，不需要再下载第二个 GDPP 包。
+1. 将 `gdpp-mac.zip` 解压到项目根目录，得到 `addons/gdpp/`；iOS 依赖已经合并到
+   `addons/gdpp/sdk/<Godot版本>/`，不需要再下载或拼接 target pack。
 2. 使用 macOS 上对应版本的 Godot 打开项目并启用 GDPP。
 3. 安装 Godot iOS 导出模板，在 iOS 预设中设置 Team ID、Bundle ID 和应用信息。
 4. 保持 `gdpp/strip_gdscript_sources=true`、`gdpp/allow_source_fallback=false`。
@@ -53,7 +58,7 @@ addons/gdpp/binary/libgdpp.<debug|release>.ios.arm64.xcframework/
 
 ## 签名与 CI 边界
 
-仓库的 iOS 流水线分为两层：Godot 4.4～4.7 target pack 矩阵检查三种切片、最低版本、路径
+仓库的 iOS 流水线分为两层：Godot 4.4～4.7 SDK 矩阵检查三种切片、最低版本、路径
 可复现性和 SDK 契约；Godot 4.6.2 集成门禁再生成无源码 Xcode 工程，并以关闭签名的方式完成
 iOS Simulator Release 构建。集成门禁从官方 Godot 模板的实际静态库读取可用架构，并只选择
 该架构与 GDPP Universal Simulator target pack 的交集；target pack 矩阵仍独立强制检查 arm64
@@ -69,3 +74,14 @@ iOS Simulator Release 构建。集成门禁从官方 Godot 模板的实际静态
 
 这些发布凭据不应存入 GDPP 仓库或公共 CI。GDPP 负责生成可被标准 Godot iOS 导出器处理的
 项目原生库，不接管 Apple 账号与商店发布流程。
+
+## 当前未覆盖
+
+- iPhone/iPad 真机的启动、网络、图形、音频、暂停恢复和内存压力；
+- 签名 Archive、TestFlight、App Store Connect 与商店审核；
+- Swift/Objective-C 原生插件与 GDPP 项目库的组合矩阵；
+- 后台下载、推送、Game Center、StoreKit 等平台服务；
+- 大型项目的设备内存、热量、启动和帧时间门禁。
+
+这些是明确的认证缺口，不应被无签名模拟器构建结果掩盖。若客户交付包含上述能力，应在其
+签名环境中增加对应 fixture、设备运行 oracle 和失败日志归档后再宣称支持。
