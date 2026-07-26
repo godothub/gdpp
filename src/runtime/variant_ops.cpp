@@ -45,6 +45,37 @@ namespace {
 
 thread_local ScriptFaultState* active_script_fault = nullptr;
 
+struct ActiveInitialization final {
+    const ScriptInitializationState* state{nullptr};
+    ActiveInitialization* previous{nullptr};
+};
+
+thread_local ActiveInitialization* active_initialization = nullptr;
+
+bool initialization_is_active(const ScriptInitializationState* state) noexcept {
+    for (auto* active = active_initialization; active; active = active->previous) {
+        if (active->state == state)
+            return true;
+    }
+    return false;
+}
+
+class ActiveInitializationScope final {
+  public:
+    explicit ActiveInitializationScope(const ScriptInitializationState* state) noexcept
+        : node_{state, active_initialization} {
+        active_initialization = &node_;
+    }
+
+    ~ActiveInitializationScope() { active_initialization = node_.previous; }
+
+    ActiveInitializationScope(const ActiveInitializationScope&) = delete;
+    ActiveInitializationScope& operator=(const ActiveInitializationScope&) = delete;
+
+  private:
+    ActiveInitialization node_;
+};
+
 ScriptFaultState* coroutine_script_fault(const CoroutineStatePtr& coroutine) noexcept {
     return coroutine ? &coroutine->script_fault : nullptr;
 }
@@ -53,6 +84,14 @@ ScriptFaultState* coroutine_script_fault(const CoroutineStatePtr& coroutine) noe
 
 ScriptFunctionScope::ScriptFunctionScope() noexcept
     : state_{&local_}, previous_{active_script_fault} {
+    active_script_fault = state_;
+}
+
+ScriptFunctionScope::ScriptFunctionScope(const ScriptFaultPolicy policy) noexcept
+    : state_{policy == ScriptFaultPolicy::inherit_existing && active_script_fault
+                 ? active_script_fault
+                 : &local_},
+      previous_{active_script_fault} {
     active_script_fault = state_;
 }
 
@@ -76,6 +115,65 @@ void mark_script_failure() noexcept {
 
 bool script_function_failed() noexcept {
     return active_script_fault && active_script_fault->failed.load(std::memory_order_relaxed);
+}
+
+bool ScriptInitializationState::run(const char* failure_message,
+                                    const std::function<void()>& initialize,
+                                    const std::function<void()>& rollback) {
+    ScriptFunctionScope fault_scope{ScriptFaultPolicy::inherit_existing};
+    if (script_function_failed())
+        return false;
+
+    auto phase = phase_.load(std::memory_order_acquire);
+    if (phase == Phase::ready)
+        return true;
+    if (phase == Phase::failed) {
+        report_script_failure(failure_message ? failure_message
+                                              : "Script initialization previously failed.");
+        return false;
+    }
+    if (initialization_is_active(this))
+        return true;
+
+    std::lock_guard<std::mutex> lock{mutex_};
+    phase = phase_.load(std::memory_order_relaxed);
+    if (phase == Phase::ready)
+        return true;
+    if (phase == Phase::failed) {
+        report_script_failure(failure_message ? failure_message
+                                              : "Script initialization previously failed.");
+        return false;
+    }
+
+    ActiveInitializationScope initialization_scope{this};
+    if (initialize)
+        initialize();
+    if (script_function_failed()) {
+        if (rollback)
+            rollback();
+        phase_.store(Phase::failed, std::memory_order_release);
+        return false;
+    }
+    phase_.store(Phase::ready, std::memory_order_release);
+    return true;
+}
+
+void ScriptInitializationState::reset(const std::function<void()>& cleanup) {
+    if (initialization_is_active(this))
+        return;
+    std::lock_guard<std::mutex> lock{mutex_};
+    ActiveInitializationScope initialization_scope{this};
+    if (cleanup)
+        cleanup();
+    phase_.store(Phase::uninitialized, std::memory_order_release);
+}
+
+bool ScriptInitializationState::ready() const noexcept {
+    return phase_.load(std::memory_order_acquire) == Phase::ready;
+}
+
+bool ScriptInitializationState::failed() const noexcept {
+    return phase_.load(std::memory_order_acquire) == Phase::failed;
 }
 
 godot::String describe_variant_type(const godot::Variant& value) {

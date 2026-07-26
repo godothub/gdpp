@@ -20,6 +20,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <type_traits>
 #include <utility>
 
@@ -42,6 +43,11 @@ struct ScriptSourceLocation final {
     std::int64_t column{0};
 };
 
+enum class ScriptFaultPolicy : std::uint8_t {
+    isolated,
+    inherit_existing,
+};
+
 // GDScript runtime failures terminate only the currently executing script function. A nested
 // generated call therefore installs an independent frame, while every continuation of one
 // coroutine re-enters the state owned by that coroutine. This explicit model avoids C++ exceptions
@@ -49,6 +55,7 @@ struct ScriptSourceLocation final {
 class ScriptFunctionScope final {
   public:
     ScriptFunctionScope() noexcept;
+    explicit ScriptFunctionScope(ScriptFaultPolicy policy) noexcept;
     explicit ScriptFunctionScope(const CoroutineStatePtr& coroutine) noexcept;
     ~ScriptFunctionScope();
 
@@ -61,6 +68,35 @@ class ScriptFunctionScope final {
     ScriptFaultState local_;
     ScriptFaultState* state_{nullptr};
     ScriptFaultState* previous_{nullptr};
+};
+
+// Static fields, managed constants, and cached preloads form one-time script initialization
+// transactions. The state below provides a thread-safe fast path after success, permits
+// same-thread recursive reads during an active transaction, preserves a terminal failure instead
+// of publishing partially initialized storage, and makes static unload explicitly resettable.
+class ScriptInitializationState final {
+  public:
+    ScriptInitializationState() = default;
+
+    ScriptInitializationState(const ScriptInitializationState&) = delete;
+    ScriptInitializationState& operator=(const ScriptInitializationState&) = delete;
+
+    [[nodiscard]] bool run(const char* failure_message, const std::function<void()>& initialize,
+                           const std::function<void()>& rollback = {});
+    void reset(const std::function<void()>& cleanup = {});
+
+    [[nodiscard]] bool ready() const noexcept;
+    [[nodiscard]] bool failed() const noexcept;
+
+  private:
+    enum class Phase : std::uint8_t {
+        uninitialized,
+        ready,
+        failed,
+    };
+
+    std::atomic<Phase> phase_{Phase::uninitialized};
+    std::mutex mutex_;
 };
 
 void mark_script_failure() noexcept;
