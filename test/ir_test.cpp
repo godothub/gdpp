@@ -140,6 +140,28 @@ TEST_CASE("typed IR isolates awaited defaults into ordered callable prologues") 
     REQUIRE(verifier.verify(module));
 }
 
+TEST_CASE("typed IR records coroutine property accessors") {
+    gdpp::DiagnosticBag diagnostics;
+    const auto module = lower_source("signal resumed(value)\n"
+                                     "var inline_value: int:\n"
+                                     "    get:\n"
+                                     "        return await resumed\n"
+                                     "    set(next):\n"
+                                     "        await resumed\n"
+                                     "var bound_value: int: get = read_bound\n"
+                                     "func read_bound() -> int:\n"
+                                     "    return await resumed\n",
+                                     diagnostics);
+
+    REQUIRE(!diagnostics.has_errors());
+    REQUIRE(module.fields.at(0).getter->is_coroutine);
+    REQUIRE(module.fields.at(0).setter->is_coroutine);
+    REQUIRE(module.fields.at(1).getter->is_coroutine);
+    REQUIRE(!module.fields.at(1).setter);
+    gdpp::IrVerifier verifier{diagnostics};
+    REQUIRE(verifier.verify(module));
+}
+
 TEST_CASE("typed IR owns function and lambda rest parameters") {
     gdpp::DiagnosticBag diagnostics;
     auto module =
