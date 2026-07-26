@@ -7045,7 +7045,7 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
         return method && method->is_virtual ? method : nullptr;
     };
     const auto coroutine_abi_for = [&](const ir::Function& function) {
-        return function.is_coroutine && !virtual_method_for(function);
+        return function.is_coroutine;
     };
     const auto function_return_type = [&](const ir::Function& function) {
         return coroutine_abi_for(function) ? std::string{"godot::Variant"}
@@ -8098,13 +8098,7 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
             source << ')';
             if (engine_virtual->is_const)
                 source << " const";
-            source << " {\n    ";
-            if (std::string_view{engine_virtual->return_type}.empty() ||
-                std::string_view{engine_virtual->return_type} == "void") {
-                source << "";
-            } else {
-                source << "return ";
-            }
+            source << " {\n";
             std::string call = engine_virtual->is_const
                                    ? "const_cast<" + unit.class_name + "*>(this)->"
                                    : "this->";
@@ -8133,9 +8127,28 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
             call += ")";
             if (std::string_view{engine_virtual->return_type}.empty() ||
                 std::string_view{engine_virtual->return_type} == "void") {
-                source << call;
+                source << "    static_cast<void>(" << call << ')';
+            } else if (function.is_coroutine) {
+                const auto api_return = type_from_godot_api(engine_virtual->return_type);
+                source << "    const godot::Variant _gdpp_virtual_result = " << call << ";\n";
+                if (!api_return.is_dynamic()) {
+                    source << "    if (!gdpp::runtime::validate_virtual_return("
+                              "_gdpp_virtual_result, "
+                           << variant_type(api_return) << ", " << godot_string_name(function.name)
+                           << ", " << godot_string_name(api_return.display_name()) << ", "
+                           << (api_return.kind == TypeKind::object
+                                   ? godot_string_name(api_return.name)
+                                   : "godot::StringName{}")
+                           << ", _gdpp_source_path, " << function.span.begin.line << ", "
+                           << function.span.begin.column << ")) return {};\n";
+                }
+                source << "    return "
+                       << emit_api_argument(engine_virtual->return_type,
+                                            engine_virtual->return_meta,
+                                            {TypeKind::variant, "Variant"}, "_gdpp_virtual_result");
             } else {
-                source << emit_api_argument(engine_virtual->return_type,
+                source << "    return "
+                       << emit_api_argument(engine_virtual->return_type,
                                             engine_virtual->return_meta, function.return_type,
                                             std::move(call));
             }
