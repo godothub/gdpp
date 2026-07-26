@@ -457,7 +457,9 @@ func validate_inheritance() -> bool:
     if not child:
         return false
     var answer: Variant = child.call("child_answer")
-    return answer == 42
+    var factory_answer: Variant = child.call("resource_factory_answer")
+    var initializer_answer: Variant = child.call("required_init_answer")
+    return answer == 42 and factory_answer == 45 and initializer_answer == 7
 
 
 func assertion_evaluation_count() -> int:
