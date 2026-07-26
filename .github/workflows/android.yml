@@ -140,7 +140,7 @@ jobs:
           llvm_bin="$ANDROID_SDK_ROOT/ndk/$GDPP_ANDROID_NDK_VERSION/toolchains/llvm/prebuilt/linux-x86_64/bin"
           test "$("$llvm_bin/llvm-nm" -D --defined-only "$project_so" | awk 'NF {print $NF}' | wc -l)" -eq 1
           "$llvm_bin/llvm-nm" -D --defined-only "$project_so" | awk 'NF {print $NF}' | \
-            grep -qx gdpp_project_library_init
+            grep -qx gdpp_library_init
           if "$llvm_bin/llvm-readelf" -S "$project_so" | grep '\.symtab' >/dev/null; then
             echo 'Android Release project library contains a normal symbol table.'
             exit 1

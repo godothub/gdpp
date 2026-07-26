@@ -193,7 +193,7 @@ jobs:
           test -f "$project"
           test "$(nm -D --defined-only "$project" | awk 'NF {print $NF}' | wc -l)" -eq 1
           nm -D --defined-only "$project" | awk 'NF {print $NF}' | \
-            grep -qx gdpp_project_library_init
+            grep -qx gdpp_library_init
           if readelf -S "$project" | grep '\.symtab' >/dev/null; then
             echo 'Linux Release project library contains a normal symbol table.'
             exit 1
@@ -247,7 +247,7 @@ jobs:
           test -f "$project"
           test "$(nm -D --defined-only "$project" | awk 'NF {print $NF}' | wc -l)" -eq 1
           nm -D --defined-only "$project" | awk 'NF {print $NF}' | \
-            grep -qx gdpp_project_library_init
+            grep -qx gdpp_library_init
           if readelf -S "$project" | grep '\.symtab' >/dev/null; then
             echo 'Linux Debug project library was not Release-stripped.'
             exit 1
