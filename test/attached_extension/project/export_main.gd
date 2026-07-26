@@ -32,12 +32,23 @@ class ContainerItem extends RefCounted:
         value = initial
 
 
+static func _await_static_result(signal_value: Signal) -> int:
+    await signal_value
+    return 42
+
+
 func _ready() -> void:
     super._ready()
     call_deferred(&"_verify_export_runtime")
 
 
 func _verify_export_runtime() -> void:
+    var static_result: int = await _await_static_result(
+        get_tree().create_timer(0.001).timeout,
+    )
+    if static_result != 42:
+        _fail("static coroutine lost its completion owner or typed return value")
+        return
     if not is_class(&"VendorBase"):
         _fail("export changed the provider-owned Node type")
         return
