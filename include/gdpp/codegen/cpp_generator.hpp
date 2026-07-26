@@ -132,11 +132,7 @@ class CodeGenerator final {
                                                     std::size_t indent) const;
     [[nodiscard]] std::string
     emit_statements(const std::vector<ir::Statement>& statements, std::size_t indent,
-                    std::size_t begin = 0,
-                    const std::vector<std::pair<std::string, Type>>& entry_locals = {}) const;
-    [[nodiscard]] static std::vector<std::pair<std::string, Type>>
-    parameter_locals(const std::vector<ir::Parameter>& parameters,
-                     const ir::Parameter* rest_parameter = nullptr);
+                    std::size_t begin = 0) const;
     [[nodiscard]] std::string
     emit_async_statements(const std::vector<ir::Statement>& statements, std::size_t indent,
                           std::size_t begin, std::vector<StatementSlice> tails,
@@ -166,6 +162,7 @@ class CodeGenerator final {
     [[nodiscard]] std::string lift_async_loop_locals(const ir::Statement& statement,
                                                      std::size_t indent) const;
     [[nodiscard]] std::string cpp_type(const Type& type) const;
+    [[nodiscard]] std::string native_default_value(const Type& type) const;
     [[nodiscard]] std::string self_object_expression() const;
     [[nodiscard]] std::string await_owner_expression() const;
     [[nodiscard]] std::string godot_owner_expression() const;
@@ -267,9 +264,7 @@ class CodeGenerator final {
     mutable std::unordered_map<std::string, std::vector<Type>> local_function_parameters_;
     mutable std::unordered_map<std::string, const ir::Function*> local_functions_;
     mutable std::unordered_map<std::string, const ir::Function*> constructor_functions_;
-    mutable std::unordered_map<std::string, Type> current_local_types_;
-    mutable std::unordered_set<std::string> ambiguous_local_names_;
-    mutable std::unordered_map<std::string, std::string> local_expression_overrides_;
+    mutable std::unordered_map<FlowSymbolId, std::string> local_expression_overrides_;
     mutable std::unordered_map<const ir::Expression*, std::string> exact_expression_overrides_;
     mutable bool lowering_assignment_{false};
     mutable std::string current_debug_source_;

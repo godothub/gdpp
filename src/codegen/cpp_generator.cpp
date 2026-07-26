@@ -6,6 +6,7 @@
 #include <cctype>
 #include <cstddef>
 #include <filesystem>
+#include <map>
 #include <optional>
 #include <set>
 #include <sstream>
@@ -174,58 +175,59 @@ bool contains_current_loop_control(const ir::Statement& statement) {
                        statement.assert_message_prefix.end(), contains_current_loop_control);
 }
 
-void collect_local_declarations(const std::vector<ir::Statement>& statements,
-                                std::unordered_map<std::string, Type>& types,
-                                std::unordered_set<std::string>& ambiguous) {
+struct AsyncLocalSymbol final {
+    std::string name;
+    Type type;
+};
+
+void collect_match_declarations(const ir::MatchPattern& pattern,
+                                std::unordered_set<FlowSymbolId>& symbols) {
+    if (pattern.kind == ir::MatchPatternKind::binding && pattern.symbol_identity != 0)
+        symbols.insert(pattern.symbol_identity);
+    for (const auto& child : pattern.elements)
+        collect_match_declarations(child, symbols);
+}
+
+void collect_declared_symbols(const std::vector<ir::Statement>& statements,
+                              std::unordered_set<FlowSymbolId>& symbols) {
     for (const auto& statement : statements) {
         if (statement.kind == ir::StatementKind::variable ||
             statement.kind == ir::StatementKind::await_variable ||
             statement.kind == ir::StatementKind::for_statement) {
-            if (const auto [found, inserted] =
-                    types.emplace(statement.name, statement.declared_type);
-                !inserted && found->second != statement.declared_type) {
-                ambiguous.insert(statement.name);
-            } else if (!inserted) {
-                ambiguous.insert(statement.name);
-            }
+            if (statement.symbol_identity != 0)
+                symbols.insert(statement.symbol_identity);
         }
-        collect_local_declarations(statement.body, types, ambiguous);
-        collect_local_declarations(statement.else_body, types, ambiguous);
-        collect_local_declarations(statement.guard_prefix, types, ambiguous);
-        collect_local_declarations(statement.assert_condition_prefix, types, ambiguous);
-        collect_local_declarations(statement.assert_message_prefix, types, ambiguous);
+        for (const auto& pattern : statement.patterns)
+            collect_match_declarations(pattern, symbols);
+        collect_declared_symbols(statement.body, symbols);
+        collect_declared_symbols(statement.else_body, symbols);
+        collect_declared_symbols(statement.guard_prefix, symbols);
+        collect_declared_symbols(statement.assert_condition_prefix, symbols);
+        collect_declared_symbols(statement.assert_message_prefix, symbols);
     }
 }
 
-void collect_declared_names(const std::vector<ir::Statement>& statements,
-                            std::unordered_set<std::string>& names) {
-    for (const auto& statement : statements) {
-        if (statement.kind == ir::StatementKind::variable ||
-            statement.kind == ir::StatementKind::await_variable ||
-            statement.kind == ir::StatementKind::for_statement) {
-            names.insert(statement.name);
-        }
-        collect_declared_names(statement.body, names);
-        collect_declared_names(statement.else_body, names);
-        collect_declared_names(statement.guard_prefix, names);
-        collect_declared_names(statement.assert_condition_prefix, names);
-        collect_declared_names(statement.assert_message_prefix, names);
-    }
-}
-
-void collect_assigned_names(const std::vector<ir::Statement>& statements,
-                            std::unordered_set<std::string>& names) {
+void collect_assigned_symbols(const std::vector<ir::Statement>& statements,
+                              std::unordered_map<FlowSymbolId, AsyncLocalSymbol>& symbols) {
     for (const auto& statement : statements) {
         if (statement.kind == ir::StatementKind::assignment && statement.condition &&
             statement.condition->kind == ir::ExpressionKind::identifier &&
-            statement.condition->resolution == ir::ResolutionKind::none) {
-            names.insert(statement.condition->value);
+            statement.condition->resolution == ir::ResolutionKind::none &&
+            statement.condition->symbol_identity != 0) {
+            const auto& target = *statement.condition;
+            symbols.try_emplace(target.symbol_identity, AsyncLocalSymbol{
+                                                            target.value,
+                                                            target.storage_type.kind ==
+                                                                    TypeKind::unknown
+                                                                ? target.type
+                                                                : target.storage_type,
+                                                        });
         }
-        collect_assigned_names(statement.body, names);
-        collect_assigned_names(statement.else_body, names);
-        collect_assigned_names(statement.guard_prefix, names);
-        collect_assigned_names(statement.assert_condition_prefix, names);
-        collect_assigned_names(statement.assert_message_prefix, names);
+        collect_assigned_symbols(statement.body, symbols);
+        collect_assigned_symbols(statement.else_body, symbols);
+        collect_assigned_symbols(statement.guard_prefix, symbols);
+        collect_assigned_symbols(statement.assert_condition_prefix, symbols);
+        collect_assigned_symbols(statement.assert_message_prefix, symbols);
     }
 }
 
@@ -1192,6 +1194,15 @@ std::string CodeGenerator::cpp_type(const Type& type) const {
     default:
         return "godot::Variant";
     }
+}
+
+std::string CodeGenerator::native_default_value(const Type& type) const {
+    if (type.kind == TypeKind::void_type || type.is_dynamic() || type.kind == TypeKind::nil)
+        return "godot::Variant{}";
+    const auto native_type = cpp_type(type);
+    if (!native_type.empty() && native_type.back() == '*')
+        return "static_cast<" + native_type + ">(nullptr)";
+    return native_type + "{}";
 }
 
 std::string CodeGenerator::self_object_expression() const {
@@ -2740,8 +2751,10 @@ std::string CodeGenerator::emit_expression(const ir::Expression& expression) con
                "get_node<godot::Node>(" + godot_node_path(path) + "))";
     }
     case ir::ExpressionKind::identifier:
-        if (expression.resolution == ir::ResolutionKind::none) {
-            if (const auto override = local_expression_overrides_.find(expression.value);
+        if (expression.resolution == ir::ResolutionKind::none &&
+            expression.symbol_identity != 0) {
+            if (const auto override =
+                    local_expression_overrides_.find(expression.symbol_identity);
                 override != local_expression_overrides_.end()) {
                 return override->second;
             }
@@ -4291,12 +4304,33 @@ std::string CodeGenerator::emit_expression(const ir::Expression& expression) con
                           [](const auto& parameter) { return !parameter.default_value; });
         const auto identity = temporary_counter_++;
         const auto arguments = "_gdpp_lambda_arguments_" + std::to_string(identity);
-        std::string result = "gdpp::runtime::make_local_callable(";
+        const auto saved_local_overrides = local_expression_overrides_;
+        std::map<FlowSymbolId, std::string> ordered_overrides(local_expression_overrides_.begin(),
+                                                              local_expression_overrides_.end());
+        std::string result;
+        if (!ordered_overrides.empty()) {
+            result += "([&]() {\n";
+            for (const auto& [symbol, source] : ordered_overrides) {
+                const auto capture = "_gdpp_lambda_capture_" + std::to_string(identity) + "_" +
+                                     std::to_string(symbol);
+                result += "    [[maybe_unused]] auto " + capture + " = " + source + ";\n";
+                local_expression_overrides_[symbol] = capture;
+            }
+            result += "    return ";
+        }
+        result += "gdpp::runtime::make_local_callable(";
         result += lambda.owner_bound ? self_object_expression() : "nullptr";
         result += ", " + std::to_string(required) + ", " + std::to_string(lambda.parameters.size());
         if (lambda.rest_parameter)
             result += ", true";
-        result += ", [=](const auto &" + arguments + ") mutable -> godot::Variant {\n";
+        // GDScript captures the value visible when the Callable is created, then copies that
+        // snapshot into a fresh invocation frame for every call. Scalar writes inside one call
+        // therefore do not persist into the next call, while Array/Dictionary/Object copies keep
+        // their normal shared identity. The outer immutable closure owns the creation snapshot;
+        // the inner mutable closure is the per-call frame and also becomes the root captured by
+        // asynchronous continuations and nested lambdas.
+        result += ", [=](const auto &" + arguments + ") -> godot::Variant {\n";
+        result += "    return [=]() mutable -> godot::Variant {\n";
 
         const auto saved_return = current_return_type_;
         const auto saved_callable = in_callable_lambda_;
@@ -4354,10 +4388,7 @@ std::string CodeGenerator::emit_expression(const ir::Expression& expression) con
                       "[_gdpp_rest_index - " + std::to_string(lambda.parameters.size()) +
                       "] = " + arguments + "[static_cast<std::size_t>(_gdpp_rest_index)];\n";
         }
-        result += emit_statements(lambda.body, 1, 0,
-                                  parameter_locals(lambda.parameters, lambda.rest_parameter
-                                                                          ? &*lambda.rest_parameter
-                                                                          : nullptr));
+        result += emit_statements(lambda.body, 1);
         current_return_type_ = saved_return;
         in_callable_lambda_ = saved_callable;
         in_function_body_ = saved_function;
@@ -4374,70 +4405,42 @@ std::string CodeGenerator::emit_expression(const ir::Expression& expression) con
              requires_native_fallback(lambda.body) ||
              (lambda.return_type.is_dynamic() && native_statements_fall_through(lambda.body))))
             result += "    return godot::Variant();\n";
-        result += "})";
+        result += "    }();\n})";
+        if (!ordered_overrides.empty())
+            result += ";\n}())";
+        local_expression_overrides_ = saved_local_overrides;
         return result;
     }
     }
     return "godot::Variant()";
 }
 
-std::string CodeGenerator::emit_statements(
-    const std::vector<ir::Statement>& statements, const std::size_t indentation,
-    const std::size_t begin, const std::vector<std::pair<std::string, Type>>& entry_locals) const {
-    const auto saved_types = current_local_types_;
-    const auto saved_ambiguous = ambiguous_local_names_;
+std::string CodeGenerator::emit_statements(const std::vector<ir::Statement>& statements,
+                                           const std::size_t indentation,
+                                           const std::size_t begin) const {
     const auto saved_overrides = local_expression_overrides_;
-    for (const auto& [name, type] : entry_locals) {
-        if (const auto [_, inserted] = current_local_types_.emplace(name, type); !inserted)
-            ambiguous_local_names_.insert(name);
-    }
-    collect_local_declarations(statements, current_local_types_, ambiguous_local_names_);
     auto result = emit_async_statements(statements, indentation, begin, {}, {}, false);
-    current_local_types_ = saved_types;
-    ambiguous_local_names_ = saved_ambiguous;
     local_expression_overrides_ = saved_overrides;
-    return result;
-}
-
-std::vector<std::pair<std::string, Type>>
-CodeGenerator::parameter_locals(const std::vector<ir::Parameter>& parameters,
-                                const ir::Parameter* rest_parameter) {
-    std::vector<std::pair<std::string, Type>> result;
-    result.reserve(parameters.size() + (rest_parameter ? 1 : 0));
-    for (const auto& parameter : parameters)
-        result.emplace_back(parameter.name, parameter.type);
-    if (rest_parameter)
-        result.emplace_back(rest_parameter->name, rest_parameter->type);
     return result;
 }
 
 std::string CodeGenerator::lift_async_loop_locals(const ir::Statement& statement,
                                                   const std::size_t indentation) const {
-    std::unordered_set<std::string> assigned;
-    std::unordered_set<std::string> declared;
-    collect_assigned_names(statement.body, assigned);
-    collect_declared_names(statement.body, declared);
-    std::set<std::string> ordered(assigned.begin(), assigned.end());
+    std::unordered_map<FlowSymbolId, AsyncLocalSymbol> assigned;
+    std::unordered_set<FlowSymbolId> declared;
+    collect_assigned_symbols(statement.body, assigned);
+    collect_declared_symbols(statement.body, declared);
+    std::map<FlowSymbolId, AsyncLocalSymbol> ordered(assigned.begin(), assigned.end());
     std::string result;
-    for (const auto& name : ordered) {
-        if (declared.find(name) != declared.end() ||
-            local_expression_overrides_.find(name) != local_expression_overrides_.end()) {
-            continue;
-        }
-        const auto type = current_local_types_.find(name);
-        if (type == current_local_types_.end())
-            continue;
-        if (ambiguous_local_names_.find(name) != ambiguous_local_names_.end()) {
-            diagnostics_.error("GDS3006",
-                               "async loop-carried local '" + name +
-                                   "' is shadowed and requires symbol-identity frame lowering",
-                               statement.span);
+    for (const auto& [symbol, local] : ordered) {
+        if (declared.find(symbol) != declared.end() ||
+            local_expression_overrides_.find(symbol) != local_expression_overrides_.end()) {
             continue;
         }
         const auto cell = "_gdpp_async_cell_" + std::to_string(temporary_counter_++);
         result += indent(indentation) + "const auto " + cell + " = std::make_shared<" +
-                  cpp_type(type->second) + ">(" + sanitize_identifier(name) + ");\n";
-        local_expression_overrides_[name] = "(*" + cell + ")";
+                  cpp_type(local.type) + ">(" + sanitize_identifier(local.name) + ");\n";
+        local_expression_overrides_[symbol] = "(*" + cell + ")";
     }
     return result;
 }
@@ -4504,7 +4507,14 @@ std::string CodeGenerator::emit_script_failure_return(const std::size_t indentat
     if (current_coroutine_abi_) {
         result += coroutine_return(indentation + 1, "godot::Variant{}", continuation_context);
     } else if (in_callable_lambda_) {
-        result += indent(indentation + 1) + "return godot::Variant{};\n";
+        result += indent(indentation + 1);
+        if (current_return_type_.kind == TypeKind::void_type || current_return_type_.is_dynamic() ||
+            current_return_type_.kind == TypeKind::nil) {
+            result += "return godot::Variant{};\n";
+        } else {
+            result += "return gdpp::runtime::to_variant(" +
+                      native_default_value(current_return_type_) + ");\n";
+        }
     } else if (continuation_context || current_return_type_.kind == TypeKind::void_type) {
         result += indent(indentation + 1) + "return;\n";
     } else {
@@ -5162,7 +5172,7 @@ std::string CodeGenerator::emit_debug_breakpoint(const ir::Statement& statement,
                          "godot::PackedStringArray " + local_names + ";\n" + body +
                          "godot::Array " + local_values + ";\n";
     for (const auto& variable : statement.debug_variables) {
-        const auto override = local_expression_overrides_.find(variable.name);
+        const auto override = local_expression_overrides_.find(variable.symbol_identity);
         const auto expression = override == local_expression_overrides_.end()
                                     ? sanitize_identifier(variable.name)
                                     : override->second;
@@ -7164,8 +7174,7 @@ void CodeGenerator::emit_inner_class_definition(const ir::Class& declaration,
             current_debug_instance_ = field.is_static ? "nullptr" : "owner()";
             source << emit_script_function_scope(1);
             source << emit_debug_frame(field.setter->span.begin.line, 1);
-            source << emit_statements(field.setter->body, 1, 0,
-                                      {{field.setter->parameter, field.type}});
+            source << emit_statements(field.setter->body, 1);
         } else {
             source << "    "
                    << emit_storage_assignment(
@@ -7268,10 +7277,7 @@ void CodeGenerator::emit_inner_class_definition(const ir::Class& declaration,
         }
         source << emit_parameter_default_initializers(function.parameters, 1);
         source << emit_debug_frame(function.span.begin.line, 1);
-        source << emit_statements(
-            function.body, 1, 0,
-            parameter_locals(function.parameters,
-                             function.rest_parameter ? &*function.rest_parameter : nullptr));
+        source << emit_statements(function.body, 1);
         if (!current_coroutine_abi_ && function.return_type.kind != TypeKind::void_type &&
             (requires_native_fallback(function.body) ||
              (function.return_type.is_dynamic() && native_statements_fall_through(function.body))))
@@ -8703,8 +8709,7 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
                     variable.is_static ? "nullptr" : (attached_script ? "owner()" : "this");
                 source << emit_script_function_scope(1);
                 source << emit_debug_frame(variable.setter->span.begin.line, 1);
-                source << emit_statements(variable.setter->body, 1, 0,
-                                          {{variable.setter->parameter, variable.type}});
+                source << emit_statements(variable.setter->body, 1);
                 in_function_body_ = false;
             }
         } else {
@@ -8856,10 +8861,7 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
             can_emit_flat_async(function, *mir_function)) {
             source << emit_flat_async(*mir_function, 1);
         } else {
-            source << emit_statements(
-                function.body, 1, 0,
-                parameter_locals(function.parameters,
-                                 function.rest_parameter ? &*function.rest_parameter : nullptr));
+            source << emit_statements(function.body, 1);
         }
         if (!current_coroutine_abi_ && function.return_type.kind != TypeKind::void_type &&
             (requires_native_fallback(function.body) ||
