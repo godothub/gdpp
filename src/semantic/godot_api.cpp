@@ -231,6 +231,16 @@ bool GodotApi::validate_metadata() const noexcept {
     const auto arguments_valid = [&](const std::size_t first, const std::size_t count) {
         return first <= argument_count_ && count <= argument_count_ - first;
     };
+    const auto type_valid = [](const char* value) {
+        return value && value[0] != '\0' &&
+               type_from_godot_api(value).kind != TypeKind::unknown;
+    };
+    const auto owned_records_sorted = [](const auto* records, const std::size_t count) {
+        return std::is_sorted(records, records + count, [](const auto& left, const auto& right) {
+            return std::pair{std::string_view{left.owner}, std::string_view{left.name}} <
+                   std::pair{std::string_view{right.owner}, std::string_view{right.name}};
+        });
+    };
     if (!std::is_sorted(classes_, classes_ + class_count_, [](const auto& left, const auto& right) {
             return std::string_view{left.name} < std::string_view{right.name};
         })) {
@@ -245,9 +255,24 @@ bool GodotApi::validate_metadata() const noexcept {
             return false;
         }
     }
+    const auto class_constants_sorted = std::is_sorted(
+        class_constants_, class_constants_ + class_constant_count_,
+        [](const auto& left, const auto& right) {
+            return std::tuple{std::string_view{left.owner}, std::string_view{left.enum_name},
+                              std::string_view{left.name}} <
+                   std::tuple{std::string_view{right.owner}, std::string_view{right.enum_name},
+                              std::string_view{right.name}};
+        });
+    if (!class_constants_sorted || !owned_records_sorted(methods_, method_count_) ||
+        !owned_records_sorted(properties_, property_count_) ||
+        !owned_records_sorted(signals_, signal_count_) ||
+        !owned_records_sorted(builtin_constants_, builtin_constant_count_)) {
+        return false;
+    }
     for (std::size_t index = 0; index < method_count_; ++index) {
         const auto& method = methods_[index];
         if (!find_class(method.owner) || method.name[0] == '\0' ||
+            !type_valid(method.return_type) ||
             method.required_arguments > method.maximum_arguments ||
             !arguments_valid(method.first_argument, method.maximum_arguments)) {
             return false;
@@ -255,7 +280,7 @@ bool GodotApi::validate_metadata() const noexcept {
         for (std::size_t argument_index = 0; argument_index < method.maximum_arguments;
              ++argument_index) {
             const auto* value = argument(method, argument_index);
-            if (!value || value->type[0] == '\0' ||
+            if (!value || !type_valid(value->type) ||
                 (argument_index < method.required_arguments && value->has_default) ||
                 (argument_index >= method.required_arguments && !value->has_default)) {
                 return false;
@@ -269,6 +294,12 @@ bool GodotApi::validate_metadata() const noexcept {
             !arguments_valid(constructor.first_argument, constructor.argument_count)) {
             return false;
         }
+        for (std::size_t argument_index = 0; argument_index < constructor.argument_count;
+             ++argument_index) {
+            const auto* value = argument(constructor, argument_index);
+            if (!value || !type_valid(value->type) || value->has_default)
+                return false;
+        }
     }
     for (std::size_t index = 0; index < signal_count_; ++index) {
         const auto& signal = signals_[index];
@@ -279,21 +310,28 @@ bool GodotApi::validate_metadata() const noexcept {
         for (std::size_t argument_index = 0; argument_index < signal.argument_count;
              ++argument_index) {
             const auto* value = argument(signal, argument_index);
-            if (!value || value->type[0] == '\0' || value->has_default)
+            if (!value || !type_valid(value->type) || value->has_default)
                 return false;
         }
     }
     for (std::size_t index = 0; index < utility_function_count_; ++index) {
         const auto& function = utility_functions_[index];
         if (function.name[0] == '\0' ||
+            !type_valid(function.return_type) ||
             function.required_arguments > function.maximum_arguments ||
             !arguments_valid(function.first_argument, function.maximum_arguments)) {
             return false;
         }
+        for (std::size_t argument_index = 0; argument_index < function.maximum_arguments;
+             ++argument_index) {
+            const auto* value = argument(function, argument_index);
+            if (!value || !type_valid(value->type))
+                return false;
+        }
     }
     for (std::size_t index = 0; index < property_count_; ++index) {
         if (!find_class(properties_[index].owner) || properties_[index].name[0] == '\0' ||
-            properties_[index].type[0] == '\0') {
+            !type_valid(properties_[index].type)) {
             return false;
         }
     }
