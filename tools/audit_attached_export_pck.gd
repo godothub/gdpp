@@ -3,6 +3,7 @@ extends SceneTree
 const EXTENSION_REGISTRY := "res://.godot/extension_list.cfg"
 const VENDOR_DESCRIPTOR := "res://addons/vendor/vendor.gdextension"
 const PROJECT_DESCRIPTOR := "res://addons/gdpp/gdpp.gdextension"
+const PROJECT_LIBRARY_ENTRY := 'entry_symbol = "gdpp_library_init"'
 const HARNESS_FILES := {
     "res://audit_attached_export_pck.gd": true,
     "res://audit_attached_export_pck.gd.uid": true,
@@ -81,8 +82,8 @@ func _audit_extension_registry(violations: PackedStringArray) -> String:
         violations.append("runtime registry contains the GDPP project extension more than once")
     if FileAccess.file_exists(PROJECT_DESCRIPTOR):
         var descriptor := FileAccess.get_file_as_string(PROJECT_DESCRIPTOR)
-        if not descriptor.contains("entry_symbol = \"gdpp_project_library_init\""):
-            violations.append("runtime descriptor still points to the compiler entry")
+        if not descriptor.contains(PROJECT_LIBRARY_ENTRY):
+            violations.append("runtime descriptor does not use the GDPP project entry ABI")
         if descriptor.contains("gdpp_compiler"):
             violations.append("runtime descriptor still references a compiler library")
     if vendor_index < 0 or project_index < 0:

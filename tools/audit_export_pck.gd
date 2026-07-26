@@ -9,6 +9,7 @@ const HARNESS_FILES := {
 const EXTENSION_REGISTRY := "res://.godot/extension_list.cfg"
 const RUNTIME_DESCRIPTOR := "res://addons/gdpp/gdpp.gdextension"
 const AUDIT_DESCRIPTOR := "res://gdpp_pck_audit.gdextension"
+const PROJECT_LIBRARY_ENTRY_SYMBOL := "gdpp_library_init"
 
 
 func _init() -> void:
@@ -179,7 +180,9 @@ func _validate_and_load_runtime_extension(
         violations.append("缺少 GDPP 项目运行时描述符")
         return
     var runtime_descriptor := FileAccess.get_file_as_string(RUNTIME_DESCRIPTOR)
-    if not runtime_descriptor.contains("entry_symbol = \"gdpp_project_library_init\""):
+    if not runtime_descriptor.contains(
+        'entry_symbol = "%s"' % PROJECT_LIBRARY_ENTRY_SYMBOL
+    ):
         violations.append("GDPP 项目描述符未指向项目原生库入口")
     if runtime_descriptor.contains("gdpp_export_fallback_library_init"):
         violations.append("GDPP 项目描述符仍指向 fallback")
@@ -231,7 +234,7 @@ func _validate_and_load_runtime_extension(
         return
     var audit_descriptor := (
         "[configuration]\n\n"
-        + "entry_symbol = \"gdpp_project_library_init\"\n"
+        + 'entry_symbol = "%s"\n' % PROJECT_LIBRARY_ENTRY_SYMBOL
         + "compatibility_minimum = \"4.4\"\n"
         + "reloadable = false\n\n"
         + "[libraries]\n\n"
