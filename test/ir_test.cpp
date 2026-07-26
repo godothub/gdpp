@@ -998,6 +998,32 @@ TEST_CASE("typed IR A-normalizes await expressions without changing evaluation o
     REQUIRE(verifier.verify(module));
 }
 
+TEST_CASE("typed IR normalizes awaited assignment targets before their values") {
+    gdpp::DiagnosticBag diagnostics;
+    const auto module = lower_source("signal selected(value)\n"
+                                     "signal replacement(value)\n"
+                                     "func run() -> void:\n"
+                                     "    (await selected).value = await replacement\n"
+                                     "    (await selected)[await replacement] = 42\n",
+                                     diagnostics);
+
+    REQUIRE(!diagnostics.has_errors());
+    const auto& body = module.functions.front().body;
+    REQUIRE_EQ(body.at(0).kind, gdpp::ir::StatementKind::await_variable);
+    REQUIRE_EQ(body.at(1).kind, gdpp::ir::StatementKind::variable);
+    REQUIRE_EQ(body.at(2).kind, gdpp::ir::StatementKind::await_variable);
+    REQUIRE_EQ(body.at(3).kind, gdpp::ir::StatementKind::assignment);
+    REQUIRE_EQ(body.at(4).kind, gdpp::ir::StatementKind::await_variable);
+    REQUIRE_EQ(body.at(5).kind, gdpp::ir::StatementKind::variable);
+    REQUIRE_EQ(body.at(6).kind, gdpp::ir::StatementKind::await_variable);
+    REQUIRE_EQ(body.at(7).kind, gdpp::ir::StatementKind::assignment);
+    REQUIRE(std::none_of(body.begin(), body.end(), [](const auto& statement) {
+        return contains_await_expression(statement);
+    }));
+    gdpp::IrVerifier verifier{diagnostics};
+    REQUIRE(verifier.verify(module));
+}
+
 TEST_CASE("typed IR preserves lazy await branches and reevaluated loop conditions") {
     gdpp::DiagnosticBag diagnostics;
     const auto module = lower_source("signal selected(value)\n"

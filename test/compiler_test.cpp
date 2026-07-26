@@ -1878,6 +1878,24 @@ TEST_CASE("compiler lowers await expressions through ordered continuation tempor
     REQUIRE(result.unit.source.find("unlowered await expression") == std::string::npos);
 }
 
+TEST_CASE("compiler preserves awaited assignment target ordering and writeback") {
+    const gdpp::Compiler compiler;
+    const auto result = compiler.compile("await_assignment_target.gd",
+                                         "extends Node\n"
+                                         "signal selected(value)\n"
+                                         "signal replacement(value)\n"
+                                         "func run() -> void:\n"
+                                         "    (await selected).value = await replacement\n"
+                                         "    (await selected)[await replacement] = 42\n");
+
+    REQUIRE(result.success);
+    REQUIRE(result.unit.source.find("gdpp::runtime::await_signal") != std::string::npos);
+    REQUIRE(result.unit.source.find("gdpp::runtime::set_named") != std::string::npos);
+    REQUIRE(result.unit.source.find("gdpp::runtime::set_key") != std::string::npos);
+    REQUIRE(result.unit.source.find("unlowered await expression") == std::string::npos);
+    REQUIRE(result.unit.source.find("unsupported structured await") == std::string::npos);
+}
+
 TEST_CASE("compiler lowers short-circuit conditional and loop-condition awaits through CFG") {
     const gdpp::Compiler compiler;
     const auto short_circuit =
