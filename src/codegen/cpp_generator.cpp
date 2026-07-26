@@ -1255,7 +1255,8 @@ std::string CodeGenerator::self_object_expression() const {
 std::string CodeGenerator::await_owner_expression() const {
     return current_coroutine_abi_
                ? "gdpp::runtime::coroutine_owner(" + current_coroutine_state_ + ")"
-               : self_object_expression();
+           : current_static_context_ ? "nullptr"
+                                     : self_object_expression();
 }
 
 std::string CodeGenerator::godot_owner_expression() const {
@@ -4361,8 +4362,10 @@ std::string CodeGenerator::emit_expression(const typed::Expression& expression) 
                 !expression.resolved_owner.empty()) {
                 return expression.resolved_owner + "::" + expression.getter + "()";
             }
-            if (expression.operands.at(0)->resolution == typed::ResolutionKind::script_type ||
-                expression.operands.at(0)->resolution == typed::ResolutionKind::inner_type) {
+            if (expression.operands.at(0)->resolution == typed::ResolutionKind::script_type) {
+                return expression.resolved_owner + "::" + expression.getter + "()";
+            }
+            if (expression.operands.at(0)->resolution == typed::ResolutionKind::inner_type) {
                 return emit_expression(*expression.operands.at(0)) + "::" + expression.getter +
                        "()";
             }
@@ -4540,9 +4543,13 @@ std::string CodeGenerator::emit_expression(const typed::Expression& expression) 
         const auto saved_coroutine_state = current_coroutine_state_;
         const auto saved_debug_function = current_debug_function_;
         const auto saved_debug_instance = current_debug_instance_;
+        const auto saved_async_continuation = in_async_continuation_;
+        const auto saved_static_context = current_static_context_;
         current_return_type_ = lambda.return_type;
         in_callable_lambda_ = true;
         in_function_body_ = true;
+        in_async_continuation_ = false;
+        current_static_context_ = !lambda.owner_bound;
         current_coroutine_abi_ = lambda.is_coroutine;
         current_coroutine_state_ = lambda.is_coroutine
                                        ? "_gdpp_lambda_coroutine_state_" + std::to_string(identity)
@@ -4590,6 +4597,8 @@ std::string CodeGenerator::emit_expression(const typed::Expression& expression) 
         current_coroutine_state_ = saved_coroutine_state;
         current_debug_function_ = saved_debug_function;
         current_debug_instance_ = saved_debug_instance;
+        in_async_continuation_ = saved_async_continuation;
+        current_static_context_ = saved_static_context;
         // Typed non-void lambdas have already passed semantic all-path return
         // analysis. Adding a defensive return here creates unreachable C++ and
         // fails warning-clean MSVC builds. A void GDScript lambda still needs a
@@ -5924,7 +5933,9 @@ std::string CodeGenerator::emit_statement_body(const typed::Statement& statement
                 }
                 if (owner.resolution == typed::ResolutionKind::script_type ||
                     owner.resolution == typed::ResolutionKind::inner_type) {
-                    const auto owner_type = emit_expression(owner);
+                    const auto owner_type = owner.resolution == typed::ResolutionKind::script_type
+                                                ? target.resolved_owner
+                                                : emit_expression(owner);
                     const auto current = statement.operation == "="
                                              ? std::string{}
                                              : owner_type + "::" + target.getter + "()";
@@ -6829,11 +6840,11 @@ void CodeGenerator::emit_inner_class_declaration(const typed::Class& declaration
         const auto setter_parameter = field.setter && field.setter->method.empty()
                                           ? sanitize_identifier(field.setter->parameter)
                                           : "value";
-        const auto getter_type =
-            field.getter && field.getter->is_coroutine ? std::string{"godot::Variant"}
-                                                       : cpp_type(field.type);
-        header << "    " << (field.is_static ? "static " : "") << getter_type
-               << " _gdpp_get_" << name << "();\n"
+        const auto getter_type = field.getter && field.getter->is_coroutine
+                                     ? std::string{"godot::Variant"}
+                                     : cpp_type(field.type);
+        header << "    " << (field.is_static ? "static " : "") << getter_type << " _gdpp_get_"
+               << name << "();\n"
                << "    " << (field.is_static ? "static " : "") << "void _gdpp_set_" << name << '('
                << cpp_type(field.type) << ' ' << setter_parameter << ");\n";
     }
@@ -7414,8 +7425,8 @@ void CodeGenerator::emit_inner_class_definition(const typed::Class& declaration,
             field.getter && field.getter->method.empty() && field.getter->is_coroutine;
         current_return_type_ = field.type;
         current_coroutine_abi_ = inline_getter_coroutine;
-        current_coroutine_state_ =
-            inline_getter_coroutine ? "_gdpp_property_coroutine_state" : "";
+        current_static_context_ = field.is_static;
+        current_coroutine_state_ = inline_getter_coroutine ? "_gdpp_property_coroutine_state" : "";
         source << (field.getter && field.getter->is_coroutine ? "godot::Variant"
                                                               : cpp_type(field.type))
                << ' ' << native_name << "::_gdpp_get_" << name << "() {\n";
@@ -7449,9 +7460,10 @@ void CodeGenerator::emit_inner_class_definition(const typed::Class& declaration,
         source << "}\n\n";
         current_coroutine_abi_ = false;
         current_coroutine_state_.clear();
+        current_static_context_ = field.is_static;
         current_return_type_ = {TypeKind::void_type, "void"};
-        source << "void " << native_name << "::_gdpp_set_" << name << '('
-               << "[[maybe_unused]] " << cpp_type(field.type) << ' '
+        source << "void " << native_name << "::_gdpp_set_" << name << '(' << "[[maybe_unused]] "
+               << cpp_type(field.type) << ' '
                << (field.setter && field.setter->method.empty()
                        ? sanitize_identifier(field.setter->parameter)
                        : "value")
@@ -7483,10 +7495,12 @@ void CodeGenerator::emit_inner_class_definition(const typed::Class& declaration,
         in_function_body_ = false;
         current_coroutine_abi_ = false;
         current_coroutine_state_.clear();
+        current_static_context_ = false;
     }
     for (const auto& function : declaration.functions) {
         current_return_type_ = function.return_type;
         current_coroutine_abi_ = coroutine_abi_for(function);
+        current_static_context_ = function.is_static;
         current_coroutine_state_ = current_coroutine_abi_ ? "_gdpp_coroutine_state" : "";
         in_function_body_ = true;
         current_debug_function_ = function.name;
@@ -7549,6 +7563,7 @@ void CodeGenerator::emit_inner_class_definition(const typed::Class& declaration,
             in_function_body_ = false;
             current_coroutine_abi_ = false;
             current_coroutine_state_.clear();
+            current_static_context_ = false;
             continue;
         }
         record_generated_symbol(GeneratedSymbolKind::method, source_symbol,
@@ -7599,6 +7614,7 @@ void CodeGenerator::emit_inner_class_definition(const typed::Class& declaration,
         in_function_body_ = false;
         current_coroutine_abi_ = false;
         current_coroutine_state_.clear();
+        current_static_context_ = false;
     }
     for (const auto& function : declaration.functions) {
         if (function.name == "_static_init" || engine_virtual_for(function)) {
@@ -7640,6 +7656,8 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
     const auto base_name = path.stem().string();
     GeneratedUnit unit;
     generated_symbols_.clear();
+    current_static_context_ = false;
+    in_async_continuation_ = false;
     unit.icon_path = module.icon_path;
     unit.is_abstract = module.is_abstract;
     unit.is_tool = module.is_tool;
@@ -8311,11 +8329,11 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
         const auto setter_parameter = variable.setter && variable.setter->method.empty()
                                           ? sanitize_identifier(variable.setter->parameter)
                                           : "value";
-        const auto getter_type =
-            variable.getter && variable.getter->is_coroutine ? std::string{"godot::Variant"}
-                                                             : cpp_type(variable.type);
-        header << "    " << (variable.is_static ? "static " : "") << getter_type
-               << " _gdpp_get_" << name << "();\n"
+        const auto getter_type = variable.getter && variable.getter->is_coroutine
+                                     ? std::string{"godot::Variant"}
+                                     : cpp_type(variable.type);
+        header << "    " << (variable.is_static ? "static " : "") << getter_type << " _gdpp_get_"
+               << name << "();\n"
                << "    " << (variable.is_static ? "static " : "") << "void _gdpp_set_" << name
                << "(" << cpp_type(variable.type) << ' ' << setter_parameter << ");\n";
     }
@@ -8996,12 +9014,11 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
                                 unit.class_name + "::_gdpp_set_" + name,
                                 variable.setter ? variable.setter->span : variable.span);
         const bool inline_getter_coroutine =
-            variable.getter && variable.getter->method.empty() &&
-            variable.getter->is_coroutine;
+            variable.getter && variable.getter->method.empty() && variable.getter->is_coroutine;
         current_return_type_ = variable.type;
         current_coroutine_abi_ = inline_getter_coroutine;
-        current_coroutine_state_ =
-            inline_getter_coroutine ? "_gdpp_property_coroutine_state" : "";
+        current_static_context_ = variable.is_static;
+        current_coroutine_state_ = inline_getter_coroutine ? "_gdpp_property_coroutine_state" : "";
         source << (variable.getter && variable.getter->is_coroutine ? "godot::Variant"
                                                                     : cpp_type(variable.type))
                << ' ' << unit.class_name << "::_gdpp_get_" << name << "() {\n";
@@ -9042,10 +9059,10 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
         source << "}\n\n";
         current_coroutine_abi_ = false;
         current_coroutine_state_.clear();
+        current_static_context_ = variable.is_static;
         current_return_type_ = {TypeKind::void_type, "void"};
-        source << "void " << unit.class_name << "::_gdpp_set_" << name << '('
-               << "[[maybe_unused]] " << cpp_type(variable.type) << ' ' << setter_parameter
-               << ") {\n";
+        source << "void " << unit.class_name << "::_gdpp_set_" << name << '(' << "[[maybe_unused]] "
+               << cpp_type(variable.type) << ' ' << setter_parameter << ") {\n";
         if (variable.is_static && has_static_initialization) {
             source << "    gdpp::runtime::ScriptFunctionScope _gdpp_script_initialization_scope("
                       "gdpp::runtime::ScriptFaultPolicy::inherit_existing);\n"
@@ -9078,11 +9095,13 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
         source << "}\n\n";
         current_coroutine_abi_ = false;
         current_coroutine_state_.clear();
+        current_static_context_ = false;
     }
     const auto mir_owner = module.class_name.value_or("<script>");
     for (const auto& function : module.functions) {
         current_return_type_ = function.return_type;
         current_coroutine_abi_ = coroutine_abi_for(function);
+        current_static_context_ = function.is_static;
         current_coroutine_state_ = current_coroutine_abi_ ? "_gdpp_coroutine_state" : "";
         in_function_body_ = true;
         current_debug_function_ = function.name;
@@ -9165,6 +9184,7 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
             in_function_body_ = false;
             current_coroutine_abi_ = false;
             current_coroutine_state_.clear();
+            current_static_context_ = false;
             continue;
         }
         record_generated_symbol(GeneratedSymbolKind::method, function.name,
@@ -9246,6 +9266,7 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
         in_function_body_ = false;
         current_coroutine_abi_ = false;
         current_coroutine_state_.clear();
+        current_static_context_ = false;
     }
     for (const auto& function : module.functions) {
         if (function.name == "_static_init" || (!attached_script && function.name == "_init") ||
@@ -9278,6 +9299,7 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
         }
         source << "}\n\n";
         in_function_body_ = false;
+        current_static_context_ = false;
     }
     source << "#if defined(__clang__)\n"
            << "#pragma clang diagnostic pop\n"
