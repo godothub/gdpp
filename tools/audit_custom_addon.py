@@ -72,7 +72,7 @@ def main() -> None:
     require_field(manifest, "api_sha256", api_digest, "SDK")
     require_field(manifest, "precision", arguments.precision, "SDK")
     require_field(manifest, "gdpp_version", arguments.version, "SDK")
-    require_field(manifest, "runtime_abi", "17", "SDK")
+    require_field(manifest, "runtime_abi", "18", "SDK")
     require_field(manifest, "distribution_binding", "template_release", "SDK")
     require_field(manifest, "distribution_optimization", "Release", "SDK")
 
