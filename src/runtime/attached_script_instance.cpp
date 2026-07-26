@@ -1,4 +1,5 @@
 #include "gdpp/runtime/attached_script.hpp"
+#include "gdpp/runtime/variant_ops.hpp"
 
 #include <godot_cpp/classes/class_db_singleton.hpp>
 #include <godot_cpp/classes/engine.hpp>
@@ -405,8 +406,13 @@ void instance_call(AttachedScriptInstance* instance, const godot::StringName* me
     // GDScript runs every @implicit_ready() initializer from the base script to the most-derived
     // script before dispatching _ready(). Keep that lifecycle independent of whether the customer
     // declared _ready() and repeat it when request_ready() causes another ready notification.
-    if (*method == godot::StringName{"_ready"} && instance->behavior.is_valid())
+    if (*method == godot::StringName{"_ready"} && instance->behavior.is_valid()) {
+        // @implicit_ready is one script function in GDScript. A failed initializer stops the
+        // remaining base-to-derived initializer chain, but it must neither suppress _ready nor
+        // contaminate whichever generated function caused the node to enter the tree.
+        ScriptFunctionScope onready_initialization_scope;
         instance->behavior->_gdpp_initialize_onready();
+    }
     const auto* dispatch = find_method_dispatch(instance, *method);
     if (!dispatch) {
         error->error = GDEXTENSION_CALL_ERROR_INVALID_METHOD;
@@ -530,7 +536,13 @@ void* AttachedCompiledScript::_instance_create(godot::Object* object) const {
         return instance->godot_instance_handle;
     }
 
-    behavior->_gdpp_initialize_instance();
+    {
+        // The complete base-to-derived @implicit_new chain shares one fault state. Its failure
+        // preserves fields assigned before the failing expression, stops later field
+        // initializers, and remains isolated from both the constructor caller and _init.
+        ScriptFunctionScope instance_initialization_scope;
+        behavior->_gdpp_initialize_instance();
+    }
 
     if (find_method(instance, "_init")) {
         const godot::Array empty_arguments;
