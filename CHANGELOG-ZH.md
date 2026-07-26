@@ -1,6 +1,15 @@
 ## 1.8.0
 
 - 生成的客户 GDExtension C 入口 ABI 统一缩短为 `gdpp_library_init`，生成注册代码、运行时描述符、Apple 静态入口登记、ELF/Mach-O 导出表、Wasm 检查、PCK 审计及各平台发布门禁均强制校验这一唯一符号。
+- 每次项目编译成功时自动清理已退役的 `gdpp_project.gdextension` 和 CMake 项目脚手架，原地升级不会在当前直接构建 manifest 旁残留旧入口符号或失效构建脚本。
+- 支持真正挂起的静态函数，通过无实例完成宿主保留类型化结果和 Signal 恢复；类型化 lambda 协程也拥有逐次调用独立的挂起状态和可逆序完成的并发恢复。
+- 以稳定局部符号身份匹配 GDScript lambda 捕获：Callable 创建时取得值快照，Array/Dictionary/Object 保持共享身份，每次调用建立独立可写标量帧，并在词法遮蔽下完整保留嵌套、返回、共享容器递归、异步循环和调试器可见捕获。
+- 真实 Godot 运行矩阵新增 Callable 相等性/有效性、bind/unbind 参数数量、一次性/延迟/引用计数 Signal 连接、发射期连接变更、宿主销毁、共享容器递归，以及两个原生 Thread 并发调用同一生成 Callable。
+- 引入脚本 fault frame：致命 GDScript 操作只终止当前生成函数，调用方可继续执行；同时保留源码求值顺序、惰性分支、专用调用参数顺序、Callable 默认返回，以及 Variant、容器、对象和第三方扩展边界的精确 `.gd` 路径、行列诊断。
+- 动态标量、Object/Ref、Array/Dictionary、PackedArray 和 Attached 属性写入统一执行 Godot 严格运行时存储转换，不再接受 godot-cpp 更宽松的 cast，也不会把非法值静默变成默认值。
+- 静态/preload 初始化以及 Attached 字段、`_init`、`@onready` 阶段分别采用事务和故障隔离；失败的部分状态不会发布，后续对象构造与调用方仍能按 GDScript 默认值语义继续。
+- 挂起的引擎虚函数 continuation 进入统一协程 runtime，所有立即返回的非 Variant 原生值在跨越引擎 ABI 前受检，并纳入官方 Godot 导出运行门禁；非立即类型化虚函数返回值的等待协议仍作为发布前 P0 显式审计项。
+- `@static_unload` 意图从 AST 贯通 HIR、生成 metadata、项目 manifest、缓存身份和编辑器 Script 描述；每个脚本可观察的独立卸载/重置生命周期仍作为发布前 P0 显式审计项。
 - 完整实现 GDScript `breakpoint` 语句，从词法、语法、语义模型、HIR、类型化 MIR、verifier、C++17 生成一直贯通到 Godot 原生调试器桥接，合法的生产脚本不再因该语句而在 AOT 前端失败关闭。
 - 通过 `ScriptLanguageExtension` 向调试器报告生成代码的原始 `.gd` 路径、函数、当前源码行、精确处理遮蔽关系的词法局部变量，以及当前脚本与继承脚本成员；调试表达式使用 Attached 脚本相同的帧宿主求值。
 - 普通方法、访问器、静态函数、lambda、附着到第三方 GDExtension 基类的脚本和协程恢复点统一保留调试行为；Release 产物完全移除断点插桩，没有连接 Godot 调试器时也不创建无效调试帧。
