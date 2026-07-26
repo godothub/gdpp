@@ -9,6 +9,7 @@ const RPC_RUNTIME_HARNESS := preload("res://rpc_runtime_harness.gd")
 const RUNTIME_FAULT_MATRIX := preload("res://runtime_fault_matrix.gd")
 const RUNTIME_VALUE_MATRIX := preload("res://runtime_value_matrix.gd")
 const AWAIT_DEFAULT_PROBE := preload("res://await_default_probe.gd")
+const COROUTINE_ACCESSOR_PROBE := preload("res://coroutine_accessor_probe.gd")
 const RUNTIME_SHADER := preload("res://runtime_shader.gdshader")
 const ATTACHED_SCENE := preload("res://attached_scene.tscn")
 
@@ -79,6 +80,12 @@ func _verify_fault_matrix() -> void:
         _fail(await_default_failure)
         return
     print("GDPP_AWAIT_DEFAULT_MATRIX=ok")
+    var coroutine_accessor_probe: Variant = COROUTINE_ACCESSOR_PROBE.new()
+    var coroutine_accessor_failure: String = await coroutine_accessor_probe.verify(get_tree())
+    if not coroutine_accessor_failure.is_empty():
+        _fail(coroutine_accessor_failure)
+        return
+    print("GDPP_COROUTINE_ACCESSOR_MATRIX=ok")
     get_tree().quit(0)
 
 
@@ -216,6 +223,10 @@ func _verify_export_runtime() -> void:
         return
     if compute(3) != 62 or invoke_hook(4) != 54:
         _fail("export changed attached inheritance or native dispatch")
+        return
+    native_bias = 9
+    if native_bias != 9:
+        _fail("inherited GDExtension property dispatch changed after AOT")
         return
     if get_ready_notifications() != 1:
         _fail("export did not preserve the provider lifecycle callback")
