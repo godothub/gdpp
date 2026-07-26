@@ -11,6 +11,7 @@ struct MirSize {
     std::size_t functions{0};
     std::size_t blocks{0};
     std::size_t operations{0};
+    std::size_t values{0};
 };
 
 MirSize measure(const std::vector<mir::ControlFlowFunction>& functions) {
@@ -18,6 +19,7 @@ MirSize measure(const std::vector<mir::ControlFlowFunction>& functions) {
     result.functions = functions.size();
     for (const auto& function : functions) {
         result.blocks += function.blocks.size();
+        result.values += function.values.size();
         for (const auto& block : function.blocks)
             result.operations += block.instructions.size() + 1U;
     }
@@ -78,6 +80,57 @@ void rebuild_operation_ids(mir::ControlFlowFunction& function) {
     }
 }
 
+void prune_dead_values(mir::ControlFlowFunction& function, MirOptimizationStats& stats) {
+    std::vector<bool> live(function.values.size(), false);
+    std::vector<mir::ValueId> worklist;
+    const auto mark = [&](const mir::ValueId value) {
+        if (value < function.values.size())
+            worklist.push_back(value);
+    };
+    for (const auto& block : function.blocks) {
+        for (const auto& instruction : block.instructions) {
+            for (const auto input : instruction.inputs)
+                mark(input);
+        }
+        mark(block.terminator.condition_value);
+    }
+    while (!worklist.empty()) {
+        const auto value = worklist.back();
+        worklist.pop_back();
+        if (live[value])
+            continue;
+        live[value] = true;
+        for (const auto operand : function.values[value].operands)
+            mark(operand);
+    }
+
+    std::vector<mir::ValueId> remap(function.values.size(), mir::invalid_value);
+    std::vector<mir::Value> retained;
+    retained.reserve(function.values.size());
+    for (std::size_t index = 0; index < function.values.size(); ++index) {
+        if (!live[index]) {
+            ++stats.values_removed;
+            continue;
+        }
+        remap[index] = static_cast<mir::ValueId>(retained.size());
+        retained.push_back(std::move(function.values[index]));
+    }
+    for (auto& value : retained) {
+        value.id = remap[value.id];
+        for (auto& operand : value.operands)
+            operand = remap[operand];
+    }
+    for (auto& block : function.blocks) {
+        for (auto& instruction : block.instructions) {
+            for (auto& input : instruction.inputs)
+                input = remap[input];
+        }
+        if (block.terminator.condition_value != mir::invalid_value)
+            block.terminator.condition_value = remap[block.terminator.condition_value];
+    }
+    function.values = std::move(retained);
+}
+
 void prune_unreachable(mir::ControlFlowFunction& function, MirOptimizationStats& stats) {
     std::vector<bool> reachable(function.blocks.size(), false);
     std::vector<mir::BlockId> worklist{function.entry};
@@ -116,6 +169,7 @@ void prune_unreachable(mir::ControlFlowFunction& function, MirOptimizationStats&
         });
     rebuild_predecessors(function);
     rebuild_operation_ids(function);
+    prune_dead_values(function, stats);
 }
 
 } // namespace
@@ -135,10 +189,12 @@ MirOptimizationStats MirOptimizer::optimize(mir::Module& module, DiagnosticBag& 
     const auto before = measure(module.functions);
     stats.blocks_before = before.blocks;
     stats.operations_before = before.operations;
+    stats.values_before = before.values;
     if (!within_budget(before, budget)) {
         stats.budget_exhausted = true;
         stats.blocks_after = before.blocks;
         stats.operations_after = before.operations;
+        stats.values_after = before.values;
         stats.postcondition_verified = true;
         return stats;
     }
@@ -163,14 +219,17 @@ MirOptimizationStats MirOptimizer::optimize(mir::Module& module, DiagnosticBag& 
     const auto after = measure(module.functions);
     stats.blocks_after = after.blocks;
     stats.operations_after = after.operations;
+    stats.values_after = after.values;
     stats.postcondition_verified = MirVerifier{diagnostics}.verify(module);
     if (!stats.postcondition_verified) {
         module.functions = std::move(original);
         stats.blocks_after = before.blocks;
         stats.operations_after = before.operations;
+        stats.values_after = before.values;
         stats.branches_simplified = 0;
         stats.blocks_removed = 0;
         stats.instructions_removed = 0;
+        stats.values_removed = 0;
     }
     return stats;
 }

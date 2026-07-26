@@ -17,11 +17,14 @@ struct MirOptimizationStats {
     std::size_t branches_simplified{0};
     std::size_t blocks_removed{0};
     std::size_t instructions_removed{0};
+    std::size_t values_removed{0};
     std::size_t functions_visited{0};
     std::size_t blocks_before{0};
     std::size_t blocks_after{0};
     std::size_t operations_before{0};
     std::size_t operations_after{0};
+    std::size_t values_before{0};
+    std::size_t values_after{0};
     bool precondition_verified{false};
     bool postcondition_verified{false};
     bool budget_exhausted{false};

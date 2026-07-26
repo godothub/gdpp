@@ -143,6 +143,9 @@ TEST_CASE("MIR optimizer simplifies typed boolean branches and rebuilds dense CF
     REQUIRE_EQ(stats.functions_visited, std::size_t{1});
     REQUIRE_EQ(stats.blocks_before, original_blocks);
     REQUIRE_EQ(stats.blocks_after, original_blocks - 1U);
+    REQUIRE_EQ(stats.values_before, std::size_t{1});
+    REQUIRE_EQ(stats.values_after, std::size_t{0});
+    REQUIRE_EQ(stats.values_removed, std::size_t{1});
     REQUIRE_EQ(mir.functions.front().blocks.size(), original_blocks - 1U);
     REQUIRE(std::none_of(mir.functions.front().blocks.begin(), mir.functions.front().blocks.end(),
                          [](const auto& block) {
@@ -153,6 +156,43 @@ TEST_CASE("MIR optimizer simplifies typed boolean branches and rebuilds dense CF
     REQUIRE_EQ(second.branches_simplified, std::size_t{0});
     REQUIRE_EQ(second.blocks_removed, std::size_t{0});
     REQUIRE(gdpp::MirVerifier{diagnostics}.verify(mir));
+}
+
+TEST_CASE("MIR optimizer removes dead values and densely remaps live operand graphs") {
+    gdpp::typed::Module program;
+    gdpp::typed::Function function;
+    function.name = "value_liveness";
+    gdpp::typed::Statement conditional;
+    conditional.kind = gdpp::typed::StatementKind::if_statement;
+    conditional.condition = literal("true");
+    gdpp::typed::Statement live;
+    live.kind = gdpp::typed::StatementKind::expression;
+    live.expression = nested_binary(2);
+    conditional.body.push_back(std::move(live));
+    gdpp::typed::Statement dead;
+    dead.kind = gdpp::typed::StatementKind::expression;
+    dead.expression = nested_binary(8);
+    conditional.else_body.push_back(std::move(dead));
+    function.body.push_back(std::move(conditional));
+    program.functions.push_back(std::move(function));
+
+    auto mir = gdpp::MirLowerer{}.lower(std::move(program));
+    const auto values_before = mir.functions.front().values.size();
+    gdpp::DiagnosticBag diagnostics;
+    const auto stats = gdpp::MirOptimizer{}.optimize(mir, diagnostics);
+
+    REQUIRE(stats.precondition_verified);
+    REQUIRE(stats.postcondition_verified);
+    REQUIRE_EQ(stats.values_before, values_before);
+    REQUIRE(stats.values_removed > std::size_t{10});
+    REQUIRE_EQ(stats.values_after, std::size_t{5});
+    REQUIRE_EQ(mir.functions.front().values.size(), std::size_t{5});
+    for (std::size_t index = 0; index < mir.functions.front().values.size(); ++index)
+        REQUIRE_EQ(mir.functions.front().values[index].id, static_cast<gdpp::mir::ValueId>(index));
+    const auto& instruction = mir.functions.front().blocks[1].instructions.front();
+    REQUIRE_EQ(instruction.inputs, std::vector<gdpp::mir::ValueId>{0});
+    REQUIRE(gdpp::MirVerifier{diagnostics}.verify(mir));
+    REQUIRE(!diagnostics.has_errors());
 }
 
 TEST_CASE("MIR optimizer never treats match selectors as truthy branch conditions") {
@@ -388,6 +428,7 @@ TEST_CASE("MIR optimization budgets preserve verified unoptimized input") {
     REQUIRE(stats.postcondition_verified);
     REQUIRE(stats.budget_exhausted);
     REQUIRE_EQ(stats.functions_visited, std::size_t{0});
+    REQUIRE_EQ(stats.values_after, stats.values_before);
     REQUIRE_EQ(gdpp::MirSerializer{}.serialize(mir), before);
     REQUIRE(!diagnostics.has_errors());
 }
