@@ -1267,14 +1267,9 @@ std::string CodeGenerator::api_native_type(std::string_view api_type,
         const auto native = "godot::" + qualified;
         return bitfield ? "godot::BitField<" + native + ">" : native;
     }
-    if (native_meta == "real_t")
-        return "godot::real_t";
-    if (native_meta == "float" || native_meta == "double")
-        return std::string{native_meta};
-    if (native_meta == "int8" || native_meta == "int16" || native_meta == "int32" ||
-        native_meta == "int64" || native_meta == "uint8" || native_meta == "uint16" ||
-        native_meta == "uint32" || native_meta == "uint64") {
-        return std::string{native_meta} + "_t";
+    if (const auto scalar = godot_native_scalar_cpp_type(godot_native_meta(native_meta));
+        !scalar.empty()) {
+        return std::string{scalar};
     }
     const auto type = type_from_godot_api(api_type);
     if (type.is_packed_array())
@@ -2295,17 +2290,9 @@ std::string CodeGenerator::emit_api_argument(std::string_view api_type,
     auto converted = emit_conversion(target, source, std::move(value));
     if (target.is_packed_array())
         converted = "gdpp::runtime::packed_native_argument(" + converted + ")";
-    std::string native_type;
-    if (native_meta == "real_t")
-        native_type = "godot::real_t";
-    else if (native_meta == "float" || native_meta == "double")
-        native_type = std::string{native_meta};
-    else if (native_meta == "int8" || native_meta == "int16" || native_meta == "int32" ||
-             native_meta == "int64" || native_meta == "uint8" || native_meta == "uint16" ||
-             native_meta == "uint32" || native_meta == "uint64")
-        native_type = std::string{native_meta} + "_t";
+    const auto native_type = godot_native_scalar_cpp_type(godot_native_meta(native_meta));
     if (!native_type.empty())
-        return "static_cast<" + native_type + ">(" + converted + ")";
+        return "static_cast<" + std::string{native_type} + ">(" + converted + ")";
     return converted;
 }
 

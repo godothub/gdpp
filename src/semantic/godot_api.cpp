@@ -232,14 +232,25 @@ bool GodotApi::validate_metadata() const noexcept {
         return first <= argument_count_ && count <= argument_count_ - first;
     };
     const auto type_valid = [](const char* value) {
-        return value && value[0] != '\0' &&
-               type_from_godot_api(value).kind != TypeKind::unknown;
+        return value && value[0] != '\0' && type_from_godot_api(value).kind != TypeKind::unknown;
+    };
+    const auto type_and_meta_valid = [&](const char* value, const char* meta) {
+        return type_valid(value) && meta && godot_api_meta_matches(value, meta);
     };
     const auto owned_records_sorted = [](const auto* records, const std::size_t count) {
         return std::is_sorted(records, records + count, [](const auto& left, const auto& right) {
             return std::pair{std::string_view{left.owner}, std::string_view{left.name}} <
                    std::pair{std::string_view{right.owner}, std::string_view{right.name}};
         });
+    };
+    const auto owned_records_unique = [](const auto* records, const std::size_t count) {
+        return std::adjacent_find(records, records + count,
+                                  [](const auto& left, const auto& right) {
+                                      return std::pair{std::string_view{left.owner},
+                                                       std::string_view{left.name}} ==
+                                             std::pair{std::string_view{right.owner},
+                                                       std::string_view{right.name}};
+                                  }) == records + count;
     };
     if (!std::is_sorted(classes_, classes_ + class_count_, [](const auto& left, const auto& right) {
             return std::string_view{left.name} < std::string_view{right.name};
@@ -264,15 +275,31 @@ bool GodotApi::validate_metadata() const noexcept {
                               std::string_view{right.name}};
         });
     if (!class_constants_sorted || !owned_records_sorted(methods_, method_count_) ||
+        !owned_records_unique(methods_, method_count_) ||
         !owned_records_sorted(properties_, property_count_) ||
+        !owned_records_unique(properties_, property_count_) ||
         !owned_records_sorted(signals_, signal_count_) ||
-        !owned_records_sorted(builtin_constants_, builtin_constant_count_)) {
+        !owned_records_unique(signals_, signal_count_) ||
+        !owned_records_sorted(builtin_constants_, builtin_constant_count_) ||
+        !owned_records_unique(builtin_constants_, builtin_constant_count_)) {
         return false;
+    }
+    for (std::size_t index = 0; index < class_constant_count_; ++index) {
+        const auto& constant = class_constants_[index];
+        if (!find_class(constant.owner) || constant.name[0] == '\0' ||
+            (index != 0 &&
+             std::tuple{std::string_view{class_constants_[index - 1].owner},
+                        std::string_view{class_constants_[index - 1].enum_name},
+                        std::string_view{class_constants_[index - 1].name}} ==
+                 std::tuple{std::string_view{constant.owner}, std::string_view{constant.enum_name},
+                            std::string_view{constant.name}})) {
+            return false;
+        }
     }
     for (std::size_t index = 0; index < method_count_; ++index) {
         const auto& method = methods_[index];
         if (!find_class(method.owner) || method.name[0] == '\0' ||
-            !type_valid(method.return_type) ||
+            !type_and_meta_valid(method.return_type, method.return_meta) ||
             method.required_arguments > method.maximum_arguments ||
             !arguments_valid(method.first_argument, method.maximum_arguments)) {
             return false;
@@ -280,7 +307,7 @@ bool GodotApi::validate_metadata() const noexcept {
         for (std::size_t argument_index = 0; argument_index < method.maximum_arguments;
              ++argument_index) {
             const auto* value = argument(method, argument_index);
-            if (!value || !type_valid(value->type) ||
+            if (!value || !type_and_meta_valid(value->type, value->meta) ||
                 (argument_index < method.required_arguments && value->has_default) ||
                 (argument_index >= method.required_arguments && !value->has_default)) {
                 return false;
@@ -297,7 +324,7 @@ bool GodotApi::validate_metadata() const noexcept {
         for (std::size_t argument_index = 0; argument_index < constructor.argument_count;
              ++argument_index) {
             const auto* value = argument(constructor, argument_index);
-            if (!value || !type_valid(value->type) || value->has_default)
+            if (!value || !type_and_meta_valid(value->type, value->meta) || value->has_default)
                 return false;
         }
     }
@@ -310,14 +337,13 @@ bool GodotApi::validate_metadata() const noexcept {
         for (std::size_t argument_index = 0; argument_index < signal.argument_count;
              ++argument_index) {
             const auto* value = argument(signal, argument_index);
-            if (!value || !type_valid(value->type) || value->has_default)
+            if (!value || !type_and_meta_valid(value->type, value->meta) || value->has_default)
                 return false;
         }
     }
     for (std::size_t index = 0; index < utility_function_count_; ++index) {
         const auto& function = utility_functions_[index];
-        if (function.name[0] == '\0' ||
-            !type_valid(function.return_type) ||
+        if (function.name[0] == '\0' || !type_valid(function.return_type) ||
             function.required_arguments > function.maximum_arguments ||
             !arguments_valid(function.first_argument, function.maximum_arguments)) {
             return false;
@@ -325,8 +351,12 @@ bool GodotApi::validate_metadata() const noexcept {
         for (std::size_t argument_index = 0; argument_index < function.maximum_arguments;
              ++argument_index) {
             const auto* value = argument(function, argument_index);
-            if (!value || !type_valid(value->type))
+            if (!value || !type_and_meta_valid(value->type, value->meta) ||
+                (!function.is_vararg &&
+                 ((argument_index < function.required_arguments && value->has_default) ||
+                  (argument_index >= function.required_arguments && !value->has_default)))) {
                 return false;
+            }
         }
     }
     for (std::size_t index = 0; index < property_count_; ++index) {
@@ -338,6 +368,52 @@ bool GodotApi::validate_metadata() const noexcept {
     for (std::size_t index = 0; index < singleton_count_; ++index) {
         if (singletons_[index].name[0] == '\0' || !find_class(singletons_[index].type))
             return false;
+    }
+    const auto names_sorted_unique = [](const auto* records, const std::size_t count) {
+        for (std::size_t index = 0; index < count; ++index) {
+            if (records[index].name[0] == '\0' ||
+                (index != 0 && std::string_view{records[index - 1].name} >=
+                                   std::string_view{records[index].name})) {
+                return false;
+            }
+        }
+        return true;
+    };
+    if (!names_sorted_unique(singletons_, singleton_count_) ||
+        !names_sorted_unique(utility_functions_, utility_function_count_) ||
+        !names_sorted_unique(global_constants_, global_constant_count_)) {
+        return false;
+    }
+    for (std::size_t index = 0; index < global_enum_value_count_; ++index) {
+        const auto& value = global_enum_values_[index];
+        if (value.owner[0] == '\0' || value.name[0] == '\0' ||
+            (index != 0 &&
+             std::pair{std::string_view{global_enum_values_[index - 1].owner},
+                       std::string_view{global_enum_values_[index - 1].name}} >=
+                 std::pair{std::string_view{value.owner}, std::string_view{value.name}})) {
+            return false;
+        }
+    }
+    for (std::size_t index = 0; index < builtin_operator_count_; ++index) {
+        const auto& operation = builtin_operators_[index];
+        if (!type_valid(operation.left_type) || operation.name[0] == '\0' ||
+            (operation.right_type[0] != '\0' && !type_valid(operation.right_type)) ||
+            !type_valid(operation.return_type) ||
+            (index != 0 &&
+             std::tuple{std::string_view{builtin_operators_[index - 1].left_type},
+                        std::string_view{builtin_operators_[index - 1].name},
+                        std::string_view{builtin_operators_[index - 1].right_type}} >=
+                 std::tuple{std::string_view{operation.left_type}, std::string_view{operation.name},
+                            std::string_view{operation.right_type}})) {
+            return false;
+        }
+    }
+    for (std::size_t index = 0; index < builtin_constant_count_; ++index) {
+        const auto& constant = builtin_constants_[index];
+        const auto* owner = find_class(constant.owner);
+        if (!owner || !owner->builtin || !type_valid(constant.type) || constant.value[0] == '\0') {
+            return false;
+        }
     }
     return true;
 }
@@ -694,6 +770,114 @@ Type type_from_godot_api(std::string_view raw_type) {
     if (type.back() == '*')
         return {TypeKind::variant, "Variant"};
     return type_from_annotation(std::string{type});
+}
+
+GodotNativeMeta godot_native_meta(const std::string_view meta) noexcept {
+    if (meta.empty())
+        return GodotNativeMeta::none;
+    if (meta == "real_t")
+        return GodotNativeMeta::real;
+    if (meta == "float")
+        return GodotNativeMeta::float32;
+    if (meta == "double")
+        return GodotNativeMeta::float64;
+    if (meta == "int8")
+        return GodotNativeMeta::int8;
+    if (meta == "int16")
+        return GodotNativeMeta::int16;
+    if (meta == "int32")
+        return GodotNativeMeta::int32;
+    if (meta == "int64")
+        return GodotNativeMeta::int64;
+    if (meta == "uint8")
+        return GodotNativeMeta::uint8;
+    if (meta == "uint16")
+        return GodotNativeMeta::uint16;
+    if (meta == "uint32")
+        return GodotNativeMeta::uint32;
+    if (meta == "uint64")
+        return GodotNativeMeta::uint64;
+    if (meta == "char16")
+        return GodotNativeMeta::char16;
+    if (meta == "char32")
+        return GodotNativeMeta::char32;
+    if (meta == "required")
+        return GodotNativeMeta::required_object;
+    return GodotNativeMeta::unknown;
+}
+
+std::string_view godot_native_scalar_cpp_type(const GodotNativeMeta meta) noexcept {
+    switch (meta) {
+    case GodotNativeMeta::real:
+        return "godot::real_t";
+    case GodotNativeMeta::float32:
+        return "float";
+    case GodotNativeMeta::float64:
+        return "double";
+    case GodotNativeMeta::int8:
+        return "int8_t";
+    case GodotNativeMeta::int16:
+        return "int16_t";
+    case GodotNativeMeta::int32:
+        return "int32_t";
+    case GodotNativeMeta::int64:
+        return "int64_t";
+    case GodotNativeMeta::uint8:
+        return "uint8_t";
+    case GodotNativeMeta::uint16:
+        return "uint16_t";
+    case GodotNativeMeta::uint32:
+        return "uint32_t";
+    case GodotNativeMeta::uint64:
+        return "uint64_t";
+    case GodotNativeMeta::char16:
+        return "char16_t";
+    case GodotNativeMeta::char32:
+        return "char32_t";
+    case GodotNativeMeta::none:
+    case GodotNativeMeta::required_object:
+    case GodotNativeMeta::unknown:
+        return {};
+    }
+    return {};
+}
+
+bool godot_api_meta_matches(const std::string_view type, const std::string_view meta) noexcept {
+    const auto native_meta = godot_native_meta(meta);
+    if (native_meta == GodotNativeMeta::unknown)
+        return false;
+    if (godot_api_type_is_native_pointer(type))
+        return native_meta == GodotNativeMeta::none;
+    const auto semantic_type = type_from_godot_api(type);
+    switch (native_meta) {
+    case GodotNativeMeta::none:
+        return true;
+    case GodotNativeMeta::real:
+    case GodotNativeMeta::float32:
+    case GodotNativeMeta::float64:
+        return semantic_type.kind == TypeKind::floating;
+    case GodotNativeMeta::int8:
+    case GodotNativeMeta::int16:
+    case GodotNativeMeta::int32:
+    case GodotNativeMeta::int64:
+    case GodotNativeMeta::uint8:
+    case GodotNativeMeta::uint16:
+    case GodotNativeMeta::uint32:
+    case GodotNativeMeta::uint64:
+    case GodotNativeMeta::char16:
+    case GodotNativeMeta::char32:
+        return semantic_type.kind == TypeKind::integer;
+    case GodotNativeMeta::required_object:
+        return semantic_type.kind == TypeKind::object;
+    case GodotNativeMeta::unknown:
+        return false;
+    }
+    return false;
+}
+
+bool godot_api_type_is_native_pointer(std::string_view type) noexcept {
+    type = first_allowed_type(type);
+    return type.find('*') != std::string_view::npos;
 }
 
 } // namespace gdpp

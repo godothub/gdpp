@@ -26,6 +26,30 @@ VARARG_MINIMUM_ARGUMENTS = {
     "push_warning": 0,
 }
 
+SUPPORTED_NATIVE_META = {
+    "",
+    "real_t",
+    "float",
+    "double",
+    "int8",
+    "int16",
+    "int32",
+    "int64",
+    "uint8",
+    "uint16",
+    "uint32",
+    "uint64",
+    "char16",
+    "char32",
+    "required",
+}
+
+
+def checked_meta(value: str, context: str) -> str:
+    if value not in SUPPORTED_NATIVE_META:
+        raise ValueError(f"unreviewed Godot native meta {value!r} in {context}")
+    return value
+
 
 def cpp_string(value: str | None) -> str:
     return json.dumps(value or "", ensure_ascii=True)
@@ -45,9 +69,10 @@ def method_record(owner: str, method: dict, builtin: bool) -> tuple:
         if builtin
         else method.get("return_value", {}).get("type", "void")
     )
-    return_meta = (
+    return_meta = checked_meta(
         "real_t" if builtin and return_type == "float"
-        else method.get("return_value", {}).get("meta", "")
+        else method.get("return_value", {}).get("meta", ""),
+        f"{owner}.{method['name']} return",
     )
     return (
         owner,
@@ -64,7 +89,12 @@ def method_record(owner: str, method: dict, builtin: bool) -> tuple:
             (
                 argument.get("name", ""),
                 argument.get("type", "Variant"),
-                argument.get("meta", "real_t" if builtin and argument.get("type") == "float" else ""),
+                checked_meta(
+                    argument.get(
+                        "meta", "real_t" if builtin and argument.get("type") == "float" else ""
+                    ),
+                    f"{owner}.{method['name']} argument {argument.get('name', '')}",
+                ),
                 "default_value" in argument,
             )
             for argument in arguments
@@ -124,7 +154,10 @@ def main() -> None:
                     (
                         argument.get("name", ""),
                         argument.get("type", "Variant"),
-                        argument.get("meta", ""),
+                        checked_meta(
+                            argument.get("meta", ""),
+                            f"{owner}.{signal['name']} argument {argument.get('name', '')}",
+                        ),
                         False,
                     )
                     for argument in signal.get("arguments", [])
@@ -165,8 +198,12 @@ def main() -> None:
                         (
                             argument.get("name", ""),
                             argument.get("type", "Variant"),
-                            argument.get(
-                                "meta", "real_t" if argument.get("type") == "float" else ""
+                            checked_meta(
+                                argument.get(
+                                    "meta",
+                                    "real_t" if argument.get("type") == "float" else "",
+                                ),
+                                f"{owner} constructor argument {argument.get('name', '')}",
                             ),
                             False,
                         )
@@ -215,7 +252,10 @@ def main() -> None:
                     (
                         argument.get("name", ""),
                         argument.get("type", "Variant"),
-                        argument.get("meta", ""),
+                        checked_meta(
+                            argument.get("meta", ""),
+                            f"{function['name']} argument {argument.get('name', '')}",
+                        ),
                         "default_value" in argument,
                     )
                     for argument in arguments_list

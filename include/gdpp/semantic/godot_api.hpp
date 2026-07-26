@@ -109,6 +109,28 @@ struct GodotBuiltinConstantRecord {
     const char* value;
 };
 
+// extension_api.json carries a second, native representation axis for scalar values and
+// non-null object references. Keep that vocabulary explicit and fail-closed so a new Godot meta
+// value cannot silently fall back to GDScript's wider int/float ABI.
+enum class GodotNativeMeta {
+    none,
+    real,
+    float32,
+    float64,
+    int8,
+    int16,
+    int32,
+    int64,
+    uint8,
+    uint16,
+    uint32,
+    uint64,
+    char16,
+    char32,
+    required_object,
+    unknown,
+};
+
 class GodotApi final {
   public:
     [[nodiscard]] static const GodotApi& instance() noexcept;
@@ -152,10 +174,8 @@ class GodotApi final {
     // getter/setter ABI uses their common Material base. Reads and writes are
     // resolved independently so code generation never assumes that both accessors
     // have the same contract merely because current engine metadata usually does.
-    [[nodiscard]] Type
-    property_getter_type(const GodotPropertyRecord& property) const noexcept;
-    [[nodiscard]] Type
-    property_setter_type(const GodotPropertyRecord& property) const noexcept;
+    [[nodiscard]] Type property_getter_type(const GodotPropertyRecord& property) const noexcept;
+    [[nodiscard]] Type property_setter_type(const GodotPropertyRecord& property) const noexcept;
     [[nodiscard]] const GodotSignalRecord*
     find_signal(std::string_view owner, std::string_view name,
                 bool include_inherited = true) const noexcept;
@@ -235,5 +255,9 @@ class GodotApi final {
 };
 
 [[nodiscard]] Type type_from_godot_api(std::string_view type);
+[[nodiscard]] GodotNativeMeta godot_native_meta(std::string_view meta) noexcept;
+[[nodiscard]] std::string_view godot_native_scalar_cpp_type(GodotNativeMeta meta) noexcept;
+[[nodiscard]] bool godot_api_meta_matches(std::string_view type, std::string_view meta) noexcept;
+[[nodiscard]] bool godot_api_type_is_native_pointer(std::string_view type) noexcept;
 
 } // namespace gdpp
