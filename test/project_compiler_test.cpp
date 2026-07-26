@@ -2571,6 +2571,48 @@ TEST_CASE("project symbols classify awaited defaults as coroutine ABI") {
     REQUIRE(generated.find("gdpp::runtime::await_result(") != std::string::npos);
 }
 
+TEST_CASE("project symbols propagate coroutine property accessors across scripts") {
+    const auto root = fixture_root("project-coroutine-property");
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
+    write_text(root / "base.gd", "extends RefCounted\n"
+                                 "class_name CoroutinePropertyBase\n"
+                                 "signal resumed(value)\n"
+                                 "func read_value() -> int:\n"
+                                 "    return await resumed\n");
+    write_text(root / "producer.gd", "extends CoroutinePropertyBase\n"
+                                     "class_name CoroutinePropertyProducer\n"
+                                     "var value: int: get = read_value\n"
+                                     "func read_value() -> int:\n"
+                                     "    return await resumed\n");
+    write_text(root / "consumer.gd", "extends RefCounted\n"
+                                     "class_name CoroutinePropertyConsumer\n"
+                                     "var producer: CoroutinePropertyProducer\n"
+                                     "func consume() -> int:\n"
+                                     "    return await producer.value\n");
+
+    const auto options = project_options(root);
+    const auto result = gdpp::ProjectCompiler{}.compile(options);
+    REQUIRE(result.success);
+    const auto producer =
+        std::find_if(result.scripts.begin(), result.scripts.end(), [](const auto& script) {
+            return script.relative_path.filename() == "producer.gd";
+        });
+    const auto consumer =
+        std::find_if(result.scripts.begin(), result.scripts.end(), [](const auto& script) {
+            return script.relative_path.filename() == "consumer.gd";
+        });
+    REQUIRE(producer != result.scripts.end());
+    REQUIRE(consumer != result.scripts.end());
+    const auto producer_header =
+        read_text(options.output_directory / "generated" / producer->header_file_name);
+    const auto consumer_source =
+        read_text(options.output_directory / "generated" / consumer->source_file_name);
+    REQUIRE(producer_header.find("godot::Variant _gdpp_get_value()") != std::string::npos);
+    REQUIRE(consumer_source.find("gdpp::runtime::is_awaitable(") != std::string::npos);
+    REQUIRE(consumer_source.find("gdpp::runtime::await_result(") != std::string::npos);
+}
+
 TEST_CASE("preload alias casts preserve void coroutine ABI at call sites") {
     const auto root = fixture_root("project-preload-alias-void-coroutine");
     std::error_code error;
