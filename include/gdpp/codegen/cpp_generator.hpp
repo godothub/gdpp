@@ -130,9 +130,8 @@ class CodeGenerator final {
     [[nodiscard]] std::string emit_debug_line(std::size_t line, std::size_t indent) const;
     [[nodiscard]] std::string emit_debug_breakpoint(const ir::Statement& statement,
                                                     std::size_t indent) const;
-    [[nodiscard]] std::string
-    emit_statements(const std::vector<ir::Statement>& statements, std::size_t indent,
-                    std::size_t begin = 0) const;
+    [[nodiscard]] std::string emit_statements(const std::vector<ir::Statement>& statements,
+                                              std::size_t indent, std::size_t begin = 0) const;
     [[nodiscard]] std::string
     emit_async_statements(const std::vector<ir::Statement>& statements, std::size_t indent,
                           std::size_t begin, std::vector<StatementSlice> tails,
@@ -155,9 +154,12 @@ class CodeGenerator final {
                                                          bool inherit_existing = false) const;
     [[nodiscard]] std::string emit_script_failure_return(std::size_t indent,
                                                          bool continuation_context) const;
+    [[nodiscard]] std::string emit_suspension_lifetime(const ir::Statement& statement,
+                                                       std::size_t indent) const;
     [[nodiscard]] bool can_emit_flat_async(const ir::Function& function,
                                            const mir::Function& mir_function) const noexcept;
-    [[nodiscard]] std::string emit_flat_async(const mir::Function& function,
+    [[nodiscard]] std::string emit_flat_async(const ir::Function& source,
+                                              const mir::Function& function,
                                               std::size_t indent) const;
     [[nodiscard]] std::string lift_async_loop_locals(const ir::Statement& statement,
                                                      std::size_t indent) const;

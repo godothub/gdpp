@@ -84,6 +84,12 @@ enum class ResolutionKind {
     intrinsic,
 };
 
+struct DebugVariable {
+    std::string name;
+    Type type;
+    FlowSymbolId symbol_identity{0};
+};
+
 struct Expression {
     ExpressionKind kind{ExpressionKind::literal};
     Type type;
@@ -103,6 +109,7 @@ struct Expression {
     FlowSymbolId symbol_identity{0};
     IntrinsicKind intrinsic{IntrinsicKind::none};
     std::optional<CallContract> call_contract;
+    std::vector<DebugVariable> suspension_variables;
     std::vector<std::unique_ptr<Expression>> operands;
     std::unique_ptr<LambdaExpression> lambda;
 };
@@ -141,12 +148,6 @@ struct MatchPattern {
     SourceSpan span{};
 };
 
-struct DebugVariable {
-    std::string name;
-    Type type;
-    FlowSymbolId symbol_identity{0};
-};
-
 struct Statement {
     StatementKind kind{StatementKind::expression};
     SourceSpan span{};
@@ -165,6 +166,7 @@ struct Statement {
     std::vector<Statement> assert_message_prefix;
     std::vector<MatchPattern> patterns;
     std::vector<DebugVariable> debug_variables;
+    std::vector<DebugVariable> suspension_variables;
 };
 
 struct PropertyAccessor {

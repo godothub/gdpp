@@ -202,6 +202,26 @@ ir::ExpressionPtr normalize_await_expression(ir::ExpressionPtr expression,
     if (expression->kind == ir::ExpressionKind::await_expression) {
         auto awaited = normalize_await_expression(std::move(expression->operands.at(0)), prefix,
                                                   temporary_counter);
+        auto suspension_variables = std::move(expression->suspension_variables);
+        ir::ExpressionPtr* receiver = nullptr;
+        if (awaited && awaited->kind == ir::ExpressionKind::call && !awaited->operands.empty()) {
+            auto& callee = awaited->operands.front();
+            if (callee && callee->kind == ir::ExpressionKind::member && !callee->operands.empty() &&
+                !is_type_reference(*callee->operands.front())) {
+                receiver = &callee->operands.front();
+            }
+        } else if (awaited && awaited->kind == ir::ExpressionKind::member &&
+                   !awaited->operands.empty() && !is_type_reference(*awaited->operands.front())) {
+            receiver = &awaited->operands.front();
+        }
+        if (receiver && *receiver) {
+            const auto receiver_type = (*receiver)->type;
+            *receiver = materialize_before_suspend(std::move(*receiver), prefix, temporary_counter);
+            if (*receiver && (*receiver)->kind == ir::ExpressionKind::identifier) {
+                suspension_variables.push_back(
+                    {(*receiver)->value, receiver_type, (*receiver)->symbol_identity});
+            }
+        }
         const auto type = expression->type;
         const auto span = expression->span;
         const auto name = "@gdpp-await-result-" + std::to_string(temporary_counter++);
@@ -211,6 +231,7 @@ ir::ExpressionPtr normalize_await_expression(ir::ExpressionPtr expression,
         suspension.name = name;
         suspension.declared_type = type;
         suspension.expression = std::move(awaited);
+        suspension.suspension_variables = std::move(suspension_variables);
         prefix.push_back(std::move(suspension));
         return make_temporary_reference(name, type, span);
     }
@@ -427,6 +448,12 @@ ir::ExpressionPtr IrLowerer::lower_expression(const ast::Expression& expression)
     lowered->span = expression.span;
     lowered->value = expression.value();
     lowered->coroutine_call = semantic_.is_coroutine_call(expression);
+    if (expression.kind() == ast::ExpressionKind::await_expression) {
+        for (const auto& variable : semantic_.suspension_variables_at(expression)) {
+            lowered->suspension_variables.push_back(
+                {variable.name, variable.type, variable.identity});
+        }
+    }
     if (const auto* symbol = semantic_.symbol_of(expression))
         lowered->symbol_identity = symbol->identity;
     if (const auto* contract = semantic_.call_contract_of(expression)) {

@@ -4520,6 +4520,19 @@ std::string CodeGenerator::emit_script_failure_return(const std::size_t indentat
     return result + prefix + "}\n";
 }
 
+std::string CodeGenerator::emit_suspension_lifetime(const ir::Statement& statement,
+                                                    const std::size_t indentation) const {
+    std::string result;
+    for (const auto& variable : statement.suspension_variables) {
+        const auto override = local_expression_overrides_.find(variable.symbol_identity);
+        const auto expression = override == local_expression_overrides_.end()
+                                    ? sanitize_identifier(variable.name)
+                                    : override->second;
+        result += indent(indentation) + "static_cast<void>(" + expression + ");\n";
+    }
+    return result;
+}
+
 bool CodeGenerator::can_emit_flat_async(const ir::Function& function,
                                         const mir::Function& mir_function) const noexcept {
     // A long source-level callback chain produces recursively nested lambda types. MSVC can use
@@ -4530,11 +4543,14 @@ bool CodeGenerator::can_emit_flat_async(const ir::Function& function,
     const auto suspensions = std::count_if(
         mir_function.blocks.begin(), mir_function.blocks.end(),
         [](const auto& block) { return block.terminator.kind == mir::TerminatorKind::suspend; });
-    return mir_function.suspends && suspensions >= 8 &&
+    std::unordered_set<FlowSymbolId> declared;
+    collect_declared_symbols(function.body, declared);
+    return mir_function.suspends && suspensions >= 8 && declared.empty() &&
            std::all_of(function.body.begin(), function.body.end(), flat_async_statement_supported);
 }
 
-std::string CodeGenerator::emit_flat_async(const mir::Function& function,
+std::string CodeGenerator::emit_flat_async(const ir::Function& source,
+                                           const mir::Function& function,
                                            const std::size_t indentation) const {
     const auto prefix = indent(indentation);
     const auto identity = std::to_string(temporary_counter_++);
@@ -4552,6 +4568,14 @@ std::string CodeGenerator::emit_flat_async(const mir::Function& function,
     result += prefix + "const std::weak_ptr<" + step_type + "> " + weak_step + " = " + step + ";\n";
     result += prefix + "*" + step + " = [=](std::size_t " + pc + ", const godot::Array &" + values +
               ") mutable {\n";
+    for (const auto& parameter : source.parameters) {
+        result += indent(indentation + 1) + "static_cast<void>(" +
+                  parameter_native_name(parameter) + ");\n";
+    }
+    if (source.rest_parameter) {
+        result += indent(indentation + 1) + "static_cast<void>(" +
+                  sanitize_identifier(source.rest_parameter->name) + ");\n";
+    }
     result += emit_script_function_scope(indentation + 1);
     result += indent(indentation + 1) + "static_cast<void>(" + values + ");\n";
     result +=
@@ -4793,6 +4817,7 @@ std::string CodeGenerator::emit_async_statements(
                       ") mutable {\n";
             result += emit_script_function_scope(indentation + 1);
             result += indent(indentation + 1) + "static_cast<void>(" + result_name + ");\n";
+            result += emit_suspension_lifetime(statement, indentation + 1);
             if (statement.kind == ir::StatementKind::await_variable) {
                 result += indent(indentation + 1) + "[[maybe_unused]] " +
                           cpp_type(statement.declared_type) + " " +
@@ -8863,7 +8888,7 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
             });
         if (mir_function != mir_module.functions.end() &&
             can_emit_flat_async(function, *mir_function)) {
-            source << emit_flat_async(*mir_function, 1);
+            source << emit_flat_async(function, *mir_function, 1);
         } else {
             source << emit_statements(function.body, 1);
         }

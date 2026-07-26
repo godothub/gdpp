@@ -165,6 +165,8 @@ class SemanticModel final {
     [[nodiscard]] IterationPlan iteration_plan_of(const ast::Statement& statement) const;
     [[nodiscard]] const std::vector<DebugVariable>&
     debug_variables_at(const ast::Statement& statement) const noexcept;
+    [[nodiscard]] const std::vector<DebugVariable>&
+    suspension_variables_at(const ast::Expression& expression) const noexcept;
     [[nodiscard]] Type type_of(const ast::MatchPattern& pattern) const;
     [[nodiscard]] Type type_of(const ast::Parameter& parameter) const;
     [[nodiscard]] DefaultArgumentEvaluation
@@ -204,6 +206,7 @@ class SemanticModel final {
     std::unordered_map<const ast::Statement*, Type> local_types_;
     std::unordered_map<const ast::Statement*, IterationPlan> iteration_plans_;
     std::unordered_map<const ast::Statement*, std::vector<DebugVariable>> debug_variables_;
+    std::unordered_map<const ast::Expression*, std::vector<DebugVariable>> suspension_variables_;
     std::unordered_map<const ast::MatchPattern*, Type> match_pattern_types_;
     std::unordered_map<const ast::Parameter*, Type> parameter_types_;
     std::unordered_map<const ast::Parameter*, DefaultArgumentEvaluation>

@@ -1739,6 +1739,28 @@ TEST_CASE("compiler lowers top-level signal awaits to lifetime-aware continuatio
     REQUIRE(result.unit.source.find("= captured;") != std::string::npos);
 }
 
+TEST_CASE("compiler retains every lexical local and awaited temporary receiver while suspended") {
+    const gdpp::Compiler compiler;
+    const auto result =
+        compiler.compile("await_lifetime.gd", "extends Node\n"
+                                              "signal resumed\n"
+                                              "func callback() -> Callable:\n"
+                                              "    return func() -> int:\n"
+                                              "        await resumed\n"
+                                              "        return 42\n"
+                                              "func run(parameter: RefCounted) -> int:\n"
+                                              "    var unrelated := RefCounted.new()\n"
+                                              "    await resumed\n"
+                                              "    return await callback().call()\n");
+
+    REQUIRE(result.success);
+    REQUIRE(result.unit.source.find("static_cast<void>(parameter);") != std::string::npos);
+    REQUIRE(result.unit.source.find("static_cast<void>(unrelated);") != std::string::npos);
+    REQUIRE(result.unit.source.find(
+                "static_cast<void>(_gdpp_id_40676470702d61776169742d76616c75652d") !=
+            std::string::npos);
+}
+
 TEST_CASE("compiler flattens long await chains into bounded MIR dispatch") {
     const gdpp::Compiler compiler;
     const auto result = compiler.compile("long_await_chain.gd", "extends Node\n"
@@ -1761,6 +1783,7 @@ TEST_CASE("compiler flattens long await chains into bounded MIR dispatch") {
     REQUIRE(result.unit.source.find("using _gdpp_async_step_type_") != std::string::npos);
     REQUIRE(result.unit.source.find("switch (_gdpp_async_pc_") != std::string::npos);
     REQUIRE(result.unit.source.find("std::weak_ptr<_gdpp_async_step_type_") != std::string::npos);
+    REQUIRE(result.unit.source.find("static_cast<void>(enabled);") != std::string::npos);
     REQUIRE(result.unit.source.find("[=](const godot::Array &) mutable") == std::string::npos);
     std::size_t await_count = 0;
     for (std::size_t offset = 0; (offset = result.unit.source.find("gdpp::runtime::await_signal",
@@ -1769,6 +1792,28 @@ TEST_CASE("compiler flattens long await chains into bounded MIR dispatch") {
         ++await_count;
     }
     REQUIRE_EQ(await_count, std::size_t{10});
+}
+
+TEST_CASE("compiler keeps local-bearing long coroutines on a lifetime-preserving state machine") {
+    const gdpp::Compiler compiler;
+    const auto result =
+        compiler.compile("long_local_await_chain.gd", "extends Node\n"
+                                                      "signal resumed\n"
+                                                      "func run() -> void:\n"
+                                                      "    var retained := RefCounted.new()\n"
+                                                      "    await resumed\n"
+                                                      "    await resumed\n"
+                                                      "    await resumed\n"
+                                                      "    await resumed\n"
+                                                      "    await resumed\n"
+                                                      "    await resumed\n"
+                                                      "    await resumed\n"
+                                                      "    await resumed\n"
+                                                      "    print(retained)\n");
+
+    REQUIRE(result.success);
+    REQUIRE(result.unit.source.find("using _gdpp_async_step_type_") == std::string::npos);
+    REQUIRE(result.unit.source.find("static_cast<void>(retained);") != std::string::npos);
 }
 
 TEST_CASE("compiler restores signal arguments for await-initialized locals") {

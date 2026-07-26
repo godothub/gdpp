@@ -331,6 +331,13 @@ SemanticModel::debug_variables_at(const ast::Statement& statement) const noexcep
     return found == debug_variables_.end() ? empty : found->second;
 }
 
+const std::vector<DebugVariable>&
+SemanticModel::suspension_variables_at(const ast::Expression& expression) const noexcept {
+    static const std::vector<DebugVariable> empty;
+    const auto found = suspension_variables_.find(&expression);
+    return found == suspension_variables_.end() ? empty : found->second;
+}
+
 Type SemanticModel::type_of(const ast::MatchPattern& pattern) const {
     const auto found = match_pattern_types_.find(&pattern);
     return found == match_pattern_types_.end() ? unknown_type : found->second;
@@ -1899,12 +1906,16 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
         break;
     }
     case ast::ExpressionKind::await_expression: {
+        const auto suspension_variables = visible_debug_variables();
         ++await_operand_depth_;
         const auto awaited = analyze_expression(*expression.operand(0));
         --await_operand_depth_;
         const bool coroutine_call = model_.is_coroutine_call(*expression.operand(0));
         const bool can_suspend = coroutine_call || awaited.is_dynamic() ||
                                  (awaited.kind == TypeKind::builtin && awaited.name == "Signal");
+        if (can_suspend) {
+            model_.suspension_variables_.insert_or_assign(&expression, suspension_variables);
+        }
         current_callable_suspends_ = current_callable_suspends_ || can_suspend;
         if (!in_function_) {
             diagnostics_.error("GDS4090", "await expressions are only valid inside functions",

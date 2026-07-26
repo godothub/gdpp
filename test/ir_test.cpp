@@ -868,6 +868,42 @@ TEST_CASE("typed IR preserves signal await suspension points") {
     REQUIRE(verifier.verify(module));
 }
 
+TEST_CASE("typed IR records lexical and temporary receiver lifetimes at suspension points") {
+    gdpp::DiagnosticBag diagnostics;
+    const auto module = lower_source("extends Node\n"
+                                     "signal resumed\n"
+                                     "func callback() -> Callable:\n"
+                                     "    return func() -> int:\n"
+                                     "        await resumed\n"
+                                     "        return 42\n"
+                                     "func run(parameter: RefCounted) -> int:\n"
+                                     "    var local := RefCounted.new()\n"
+                                     "    await resumed\n"
+                                     "    return await callback().call()\n",
+                                     diagnostics);
+
+    REQUIRE(!diagnostics.has_errors());
+    const auto& run = module.functions.at(1);
+    const auto first = std::find_if(run.body.begin(), run.body.end(), [](const auto& statement) {
+        return statement.kind == gdpp::ir::StatementKind::await_statement;
+    });
+    REQUIRE(first != run.body.end());
+    REQUIRE_EQ(first->suspension_variables.size(), std::size_t{2});
+    REQUIRE_EQ(first->suspension_variables.at(0).name, std::string{"parameter"});
+    REQUIRE_EQ(first->suspension_variables.at(1).name, std::string{"local"});
+
+    const auto second = std::find_if(run.body.begin(), run.body.end(), [](const auto& statement) {
+        return statement.kind == gdpp::ir::StatementKind::await_variable;
+    });
+    REQUIRE(second != run.body.end());
+    REQUIRE_EQ(second->suspension_variables.size(), std::size_t{3});
+    REQUIRE_EQ(second->suspension_variables.at(0).name, std::string{"parameter"});
+    REQUIRE_EQ(second->suspension_variables.at(1).name, std::string{"local"});
+    REQUIRE(second->suspension_variables.at(2).name.rfind("@gdpp-await-value-", 0) == 0);
+    gdpp::IrVerifier verifier{diagnostics};
+    REQUIRE(verifier.verify(module));
+}
+
 TEST_CASE("typed IR preserves coroutine ABI and call-site suspension metadata") {
     gdpp::DiagnosticBag diagnostics;
     const auto module = lower_source("signal resumed\n"
