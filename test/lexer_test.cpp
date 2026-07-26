@@ -3,6 +3,7 @@
 #include "gdpp/core/diagnostic.hpp"
 #include "gdpp/core/source.hpp"
 #include "gdpp/frontend/lexer.hpp"
+#include "gdpp/frontend/literal.hpp"
 #include "gdpp/frontend/token.hpp"
 #include "gdpp/frontend/unicode.hpp"
 
@@ -424,6 +425,7 @@ TEST_CASE("lexer rejects malformed literals before parsing") {
         "var value := \"\\U110000\"\n",
         R"gd(var value := r"ends\"
 )gd",
+        ".0StrinNalu\n",
     };
 
     for (const auto& text : invalid_sources) {
@@ -432,6 +434,20 @@ TEST_CASE("lexer rejects malformed literals before parsing") {
         (void)gdpp::Lexer{source, diagnostics}.scan();
         REQUIRE(diagnostics.has_errors());
     }
+}
+
+TEST_CASE("floating literal normalization rejects malformed input without arithmetic overflow") {
+    const auto suffix = gdpp::analyze_floating_literal(".0StrinNalu");
+    REQUIRE_EQ(suffix.range, gdpp::FloatingLiteralRange::invalid);
+    REQUIRE_EQ(suffix.canonical, std::string{"0.0StrinNalu"});
+
+    const auto repeated_exponent = gdpp::analyze_floating_literal("1e2e999999999999999999999");
+    REQUIRE_EQ(repeated_exponent.range, gdpp::FloatingLiteralRange::invalid);
+
+    const auto saturated_exponent =
+        gdpp::analyze_floating_literal("1e999999999999999999999999999999999");
+    REQUIRE_EQ(saturated_exponent.range, gdpp::FloatingLiteralRange::overflow);
+    REQUIRE(saturated_exponent.exponent_clamped);
 }
 
 TEST_CASE("lexer preserves lambda blocks inside continued call arguments") {

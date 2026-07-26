@@ -16,6 +16,7 @@ struct ParsedGodotFloat {
     double value{0.0};
     bool exponent_clamped{false};
     bool nonzero_mantissa{false};
+    bool valid{true};
 };
 
 // GDScript literal values are produced by Godot's deterministic built_in_strtod algorithm, not by
@@ -27,29 +28,42 @@ ParsedGodotFloat parse_like_godot(std::string_view normalized) {
                                      1.0e32, 1.0e64, 1.0e128, 1.0e256};
 
     const auto exponent_marker = normalized.find_first_of("eE");
+    if (normalized.empty() ||
+        (exponent_marker != std::string_view::npos &&
+         normalized.find_first_of("eE", exponent_marker + 1U) != std::string_view::npos)) {
+        return {0.0, false, false, false};
+    }
     const auto mantissa = normalized.substr(0, exponent_marker);
     const auto decimal_point = mantissa.find('.');
+    if (mantissa.empty() || (decimal_point != std::string_view::npos &&
+                             mantissa.find('.', decimal_point + 1U) != std::string_view::npos)) {
+        return {0.0, false, false, false};
+    }
     const auto digits_before_point =
         decimal_point == std::string_view::npos ? mantissa.size() : decimal_point;
     const auto digit_count = mantissa.size() - (decimal_point == std::string_view::npos ? 0U : 1U);
     const auto retained_digits = std::min<std::size_t>(digit_count, 18U);
     const auto first_count = retained_digits > 9U ? retained_digits - 9U : 0U;
 
-    int first = 0;
-    int second = 0;
+    std::uint32_t first = 0;
+    std::uint32_t second = 0;
     std::size_t consumed = 0;
     bool nonzero_mantissa = false;
     for (const char character : mantissa) {
         if (character == '.')
             continue;
+        if (character < '0' || character > '9')
+            return {0.0, false, false, false};
         nonzero_mantissa = nonzero_mantissa || character != '0';
         if (consumed < first_count) {
-            first = 10 * first + (character - '0');
+            first = 10U * first + static_cast<std::uint32_t>(character - '0');
         } else if (consumed < retained_digits) {
-            second = 10 * second + (character - '0');
+            second = 10U * second + static_cast<std::uint32_t>(character - '0');
         }
         ++consumed;
     }
+    if (consumed == 0)
+        return {0.0, false, false, false};
     double fraction = (1.0e9 * static_cast<double>(first)) + static_cast<double>(second);
 
     long long fractional_exponent = 0;
@@ -70,10 +84,17 @@ ParsedGodotFloat parse_like_godot(std::string_view normalized) {
             negative_exponent = normalized[cursor] == '-';
             ++cursor;
         }
+        if (cursor == normalized.size())
+            return {0.0, false, false, false};
         for (; cursor < normalized.size(); ++cursor) {
-            explicit_exponent =
-                std::min(1000000000LL, explicit_exponent * 10LL +
-                                           static_cast<long long>(normalized[cursor] - '0'));
+            const auto character = normalized[cursor];
+            if (character < '0' || character > '9')
+                return {0.0, false, false, false};
+            const auto digit = static_cast<long long>(character - '0');
+            constexpr auto exponent_limit = 1000000000LL;
+            explicit_exponent = explicit_exponent > (exponent_limit - digit) / 10LL
+                                    ? exponent_limit
+                                    : explicit_exponent * 10LL + digit;
         }
     }
 
@@ -94,7 +115,7 @@ ParsedGodotFloat parse_like_godot(std::string_view normalized) {
         ++power;
     }
     fraction = exponent_negative ? fraction / scale : fraction * scale;
-    return {fraction, exponent_clamped, nonzero_mantissa};
+    return {fraction, exponent_clamped, nonzero_mantissa, true};
 }
 
 std::string canonical_float(double value, std::string normalized) {
@@ -166,6 +187,8 @@ FloatingLiteralValue analyze_floating_literal(std::string_view text) {
     }
 
     const auto parsed = parse_like_godot(normalized);
+    if (!parsed.valid)
+        return {std::move(normalized), FloatingLiteralRange::invalid, false};
     auto range = FloatingLiteralRange::finite;
     if (std::isnan(parsed.value))
         range = FloatingLiteralRange::not_a_number;

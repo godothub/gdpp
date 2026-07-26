@@ -410,7 +410,16 @@ void Lexer::scan_number(SourceLocation begin) {
         const auto raw =
             std::string_view{source_.text()}.substr(begin.offset, offset_ - begin.offset);
         if (kind == TokenKind::floating) {
+            if (!valid) {
+                emit(kind, begin, std::string{raw});
+                return;
+            }
             auto parsed = analyze_floating_literal(raw);
+            if (parsed.range == FloatingLiteralRange::invalid) {
+                report("invalid floating-point literal");
+                emit(kind, begin, std::string{raw});
+                return;
+            }
             if (parsed.exponent_clamped)
                 diagnostics_.warning("GDS1007", "floating exponent exceeds Godot's range",
                                      {begin, location()});

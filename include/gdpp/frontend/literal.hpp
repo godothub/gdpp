@@ -15,7 +15,7 @@ struct IntegerLiteralValue {
     unsigned base{10};
 };
 
-enum class FloatingLiteralRange { finite, overflow, underflow, not_a_number };
+enum class FloatingLiteralRange { finite, overflow, underflow, not_a_number, invalid };
 
 struct FloatingLiteralValue {
     std::string canonical;
