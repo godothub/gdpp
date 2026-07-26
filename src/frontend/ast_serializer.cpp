@@ -9,7 +9,7 @@
 namespace gdpp {
 namespace {
 
-template <typename> inline constexpr bool unhandled_ast_node = false;
+template <typename> struct UnhandledAstNode : std::false_type {};
 
 void indent(std::ostream& output, const std::size_t depth) {
     for (std::size_t index = 0; index < depth; ++index)
@@ -208,7 +208,7 @@ void expression(std::ostream& output, const ast::Expression* value, const std::s
                 output << "none\n";
             }
         } else {
-            static_assert(unhandled_ast_node<Node>, "unhandled AST expression node");
+            static_assert(UnhandledAstNode<Node>::value, "unhandled AST expression node");
         }
     });
 }
@@ -231,7 +231,7 @@ void match_pattern(std::ostream& output, const ast::MatchPattern& value, const s
             } else if constexpr (std::is_same_v<Node, ast::DictionaryPattern>) {
                 output << "dictionary_pattern ";
             } else {
-                static_assert(unhandled_ast_node<Node>, "unhandled AST match pattern node");
+                static_assert(UnhandledAstNode<Node>::value, "unhandled AST match pattern node");
             }
             span(output, value.span);
             output << '\n';
@@ -310,7 +310,7 @@ void statement(std::ostream& output, const ast::Statement& value, const std::siz
         } else if constexpr (std::is_same_v<Node, ast::BreakpointStatement>) {
             output << "breakpoint_statement ";
         } else {
-            static_assert(unhandled_ast_node<Node>, "unhandled AST statement node");
+            static_assert(UnhandledAstNode<Node>::value, "unhandled AST statement node");
         }
         span(output, value.span);
         output << '\n';
