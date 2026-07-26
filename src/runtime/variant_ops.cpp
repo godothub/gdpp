@@ -150,10 +150,11 @@ std::optional<integer::Result> evaluate_integer_operator(const godot::Variant::O
 }
 
 void report_integer_error(const integer::ArithmeticError error) {
+    mark_script_failure();
     if (error == integer::ArithmeticError::division_by_zero)
-        godot::UtilityFunctions::push_error("GDPP: division by zero error in operator '/'");
+        godot::UtilityFunctions::push_error("Division by zero error in operator '/'.");
     else if (error == integer::ArithmeticError::modulo_by_zero)
-        godot::UtilityFunctions::push_error("GDPP: modulo by zero error in operator '%'");
+        godot::UtilityFunctions::push_error("Modulo by zero error in operator '%'.");
 }
 
 std::int64_t integer_result_or_zero(const integer::Result result) {
@@ -316,13 +317,13 @@ class LambdaCallable final : public godot::CallableCustom {
 };
 
 void report_invalid_member(const char* operation, const godot::StringName& name) {
-    godot::UtilityFunctions::push_error(godot::String("GDPP: dynamic ") + operation + " '" +
-                                        godot::String(name) + "' failed");
+    report_script_failure(godot::String("Dynamic ") + operation + " '" + godot::String(name) +
+                              "' failed.",
+                          nullptr, 0, 0);
 }
 
 void report_invalid_key(const char* operation) {
-    godot::UtilityFunctions::push_error(godot::String("GDPP: dynamic keyed ") + operation +
-                                        " failed");
+    report_script_failure(godot::String("Dynamic keyed ") + operation + " failed.", nullptr, 0, 0);
 }
 
 bool reject_invalid_object_target(const godot::Variant& target, const char* operation,
@@ -332,7 +333,7 @@ bool reject_invalid_object_target(const godot::Variant& target, const char* oper
     auto message = godot::String{"GDPP: cannot "} + operation;
     if (member)
         message += godot::String{" '"} + godot::String{*member} + "'";
-    godot::UtilityFunctions::push_error(message + " on a null or freed dynamic object");
+    report_script_failure(message + " on a null or freed dynamic object.", nullptr, 0, 0);
     return true;
 }
 
@@ -369,7 +370,7 @@ godot::Variant binary(godot::Variant::Operator operation, const godot::Variant& 
             return false;
         if (operation == godot::Variant::OP_NOT_EQUAL)
             return true;
-        godot::UtilityFunctions::push_error("GDPP: invalid dynamic binary operation");
+        report_script_failure("Invalid operands in dynamic binary operation.", nullptr, 0, 0);
         return {};
     }
     return result;
@@ -435,7 +436,7 @@ godot::Variant unary(godot::Variant::Operator operation, const godot::Variant& o
     bool valid = false;
     godot::Variant::evaluate(operation, operand, godot::Variant{}, result, valid);
     if (!valid) {
-        godot::UtilityFunctions::push_error("GDPP: invalid dynamic unary operation");
+        report_script_failure("Invalid operand in dynamic unary operation.", nullptr, 0, 0);
         return {};
     }
     return result;
@@ -462,7 +463,9 @@ godot::Array make_range(std::int64_t start, std::int64_t stop) {
 godot::Array make_range(std::int64_t start, std::int64_t stop, std::int64_t step) {
     godot::Array result;
     if (step == 0) {
-        godot::UtilityFunctions::push_error("GDPP: range step cannot be zero");
+        report_script_failure("Error calling GDScript utility function \"range()\": Step argument "
+                              "is zero!",
+                              nullptr, 0, 0);
         return result;
     }
     for (auto value = start; step > 0 ? value < stop : value > stop;) {
@@ -938,10 +941,11 @@ godot::Variant call_dynamic_impl(godot::Variant& target, const godot::StringName
             return {};
         }
         if (requested_class.begins_with("GDPPNative_")) {
-            godot::UtilityFunctions::push_error(
+            report_script_failure(
                 godot::String("GDPP: cannot attach native script class '") +
-                godot::String(requested_class) +
-                "' to an object that was not converted to that class during export");
+                    godot::String(requested_class) +
+                    "' to an object that was not converted to that class during export",
+                nullptr, 0, 0);
             return {};
         }
     }
@@ -1014,11 +1018,10 @@ void report_index_out_of_bounds(const char* container, const char* operation,
                                 const std::int64_t index, const std::int64_t size,
                                 const char* source_path, const std::int64_t line,
                                 const std::int64_t column) {
-    godot::UtilityFunctions::push_error(
-        godot::String{"GDPP: "} + container + " " + operation + " index " +
-        godot::String::num_int64(index) + " is out of bounds for size " +
-        godot::String::num_int64(size) + " at " + source_path + ":" +
-        godot::String::num_int64(line) + ":" + godot::String::num_int64(column));
+    const auto message = godot::String{"Out of bounds "} + operation + " index '" +
+                         godot::String::num_int64(index) + "' (on base: '" + container +
+                         "', size " + godot::String::num_int64(size) + ")";
+    report_script_failure(message, source_path, line, column);
 }
 
 bool iter_init(const godot::Variant& iterable, godot::Variant& iterator) {
@@ -1027,7 +1030,7 @@ bool iter_init(const godot::Variant& iterable, godot::Variant& iterator) {
     bool valid = false;
     const bool available = iterable.iter_init(iterator, valid);
     if (!valid)
-        godot::UtilityFunctions::push_error("GDPP: value is not dynamically iterable");
+        report_script_failure("Value is not dynamically iterable.", nullptr, 0, 0);
     return valid && available;
 }
 
@@ -1037,7 +1040,7 @@ bool iter_next(const godot::Variant& iterable, godot::Variant& iterator) {
     bool valid = false;
     const bool available = iterable.iter_next(iterator, valid);
     if (!valid)
-        godot::UtilityFunctions::push_error("GDPP: dynamic iterator advance failed");
+        report_script_failure("Dynamic iterator advance failed.", nullptr, 0, 0);
     return valid && available;
 }
 
@@ -1047,7 +1050,7 @@ godot::Variant iter_get(const godot::Variant& iterable, const godot::Variant& it
     bool valid = false;
     auto value = iterable.iter_get(iterator, valid);
     if (!valid) {
-        godot::UtilityFunctions::push_error("GDPP: dynamic iterator value read failed");
+        report_script_failure("Dynamic iterator value read failed.", nullptr, 0, 0);
         return {};
     }
     return value;
