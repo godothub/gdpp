@@ -93,6 +93,8 @@ Shader/UI 更新。结果表明这一端到端场景未发生性能回归，AOT 
 - 本地/`self` Signal 直接进入 `emit_signal`，外部接收者保留通用错误语义。
 - PackedArray 参数通过专用 native argument 适配，不做多余 Variant round-trip。
 - Release/Debug 项目库都启用编译优化、函数/数据 section 和链接器 dead stripping。
+- Release 不生成 breakpoint/调试帧代码；Debug 只有在 `EngineDebugger` 已连接时才把帧压入线程
+  局部调试栈，没有调试器时跳过变量快照。
 - 简单长 await 链按 MIR 状态机生成，避免递归 lambda 导致 MSVC 模板内存爆炸。
 - 异步循环共享帧只提升跨挂起且会写入的局部状态。
 
@@ -138,7 +140,7 @@ N 个生成/运行时翻译单元
 - 静态调用与动态桥接数量；
 - 平台动态库格式和压缩方式。
 
-1.7.10 插件发布资产大小：
+1.8.0 插件发布资产大小门禁当前使用最近的 1.7.10 正式资产作为比较基线：
 
 | 资产 | 字节 |
 |---|---:|
