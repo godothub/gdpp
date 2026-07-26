@@ -10,7 +10,7 @@ parser 直接构造有名节点：
 - 表达式：literal、identifier、unary、await、binary、call、member、subscript、conditional、
   node reference、Array/Dictionary、lambda；
 - 语句：expression、return、variable/const、assert、assignment、if、match、while、for、
-  pass、break、continue；
+  pass、break、continue、breakpoint；
 - match pattern：value、wildcard、binding、rest、Array、Dictionary；
 - 声明：字段、函数、Signal、enum、内部类、脚本注解。
 
@@ -42,6 +42,7 @@ parser 直接构造有名节点：
 - `@rpc` 已规范化为 `RpcConfiguration`，后端不再解释字符串参数。
 - 常量必须有初始化器，赋值必须分别保存 target/value。
 - 已知协程调用携带 coroutine ABI，消费结果时必须位于 await。
+- breakpoint 保存语义阶段确定的精确可见绑定，遮蔽后的外层同名局部不能泄漏到调试器。
 - 所有原始 await 在进入 C++ emitter 前转换为独立挂起/恢复语句。
 
 违反不变量产生 `GDS5xxx` 编译诊断，不依赖断言或无效 C++。
@@ -77,8 +78,9 @@ Function
     predecessors[]
 ```
 
-指令记录 evaluate、declare、assign、assert、loop test、match test 和 suspend value；副作用标记
-区分读状态、写状态、可能失败、可能分配和挂起。
+指令记录 evaluate、declare、assign、assert、debug breakpoint、loop test、match test 和
+suspend value；副作用标记区分读状态、写状态、可能失败、可能分配、挂起和观察调试器。
+`observes_debugger` 使 breakpoint 即使不改变程序数据也不能被死代码删除或跨越重排。
 
 终止指令包括 jump、branch、return、stop 和 suspend。branch 的 `BranchRole` 区分：
 
