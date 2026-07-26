@@ -1,3 +1,14 @@
+## 1.8.0
+
+- 完整实现 GDScript `breakpoint` 语句，从词法、语法、语义模型、HIR、类型化 MIR、verifier、C++17 生成一直贯通到 Godot 原生调试器桥接，合法的生产脚本不再因该语句而在 AOT 前端失败关闭。
+- 通过 `ScriptLanguageExtension` 向调试器报告生成代码的原始 `.gd` 路径、函数、当前源码行、精确处理遮蔽关系的词法局部变量，以及当前脚本与继承脚本成员；调试表达式使用 Attached 脚本相同的帧宿主求值。
+- 普通方法、访问器、静态函数、lambda、附着到第三方 GDExtension 基类的脚本和协程恢复点统一保留调试行为；Release 产物完全移除断点插桩，没有连接 Godot 调试器时也不创建无效调试帧。
+- Attached 原生实例返回 Godot 公开的规范 `ScriptInstance` 句柄，使调试器、引擎回调、属性访问和生命周期追踪始终指向同一个引擎对象，不再泄漏内部实现指针。
+- 在 Clang、GCC 和 MSVC 严格 warning-as-error 构建下保留 GDScript 合法的词法遮蔽，同时不关闭其他原生编译诊断。
+- macOS Universal Debug 导出可以复用经过验证、仅提供 Release 的第三方 provider fat binary；GDPP 只在导出包内的描述符字节中增加 Debug 别名，不修改客户源码目录中的描述符或动态库。
+- 生成的 breakpoint fixture 会与真实 godot-cpp 一同编译，并使用官方 Godot 4.6.2 对附着第三方 GDExtension 的 Debug、Release 项目执行导出和运行验证。
+- 发行 runtime ABI 升级到 14；缺少调试帧或规范 ScriptInstance 契约的旧 SDK 会在预检阶段失败关闭，不会生成 ABI 不兼容的客户库。
+
 ## 1.7.10
 
 - 附着式脚本现严格匹配 GDScript 独立的 implicit-ready 生命周期：在正常 `_ready` 分派前按基类到派生类顺序初始化 `@onready` 字段，覆盖未声明 `_ready`、继承回调、内部类以及 `request_ready()` 再次触发的场景。
