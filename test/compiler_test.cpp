@@ -4207,6 +4207,48 @@ TEST_CASE("compiler generates validated method-bound property accessors") {
     REQUIRE(result.unit.source.find(" = _gdpp_get_active();") != std::string::npos);
 }
 
+TEST_CASE("compiler preserves coroutine property accessor ABI") {
+    const gdpp::Compiler compiler;
+    const auto inline_accessors =
+        compiler.compile("coroutine_property.gd", "extends Node\n"
+                                                  "signal resumed(value)\n"
+                                                  "var observed := -1\n"
+                                                  "var value: int:\n"
+                                                  "    get:\n"
+                                                  "        return await resumed\n"
+                                                  "    set(next):\n"
+                                                  "        await resumed\n"
+                                                  "        observed = next\n"
+                                                  "func read() -> int:\n"
+                                                  "    return await value\n");
+    const auto bound_accessors =
+        compiler.compile("bound_coroutine_property.gd", "extends Node\n"
+                                                        "signal resumed(value)\n"
+                                                        "var value: int: get = read_value\n"
+                                                        "func read_value() -> int:\n"
+                                                        "    return await resumed\n"
+                                                        "func consume() -> int:\n"
+                                                        "    return await value\n");
+
+    REQUIRE(inline_accessors.success);
+    REQUIRE(inline_accessors.unit.header.find("godot::Variant _gdpp_get_value()") !=
+            std::string::npos);
+    REQUIRE(inline_accessors.unit.source.find(
+                "godot::Variant GDPPNative_CoroutineProperty::_gdpp_get_value()") !=
+            std::string::npos);
+    REQUIRE(inline_accessors.unit.source.find(
+                "gdpp::runtime::begin_coroutine(this)") != std::string::npos);
+    REQUIRE(inline_accessors.unit.source.find(
+                "gdpp::runtime::complete_coroutine(_gdpp_property_coroutine_state") !=
+            std::string::npos);
+    REQUIRE(inline_accessors.unit.source.find("void GDPPNative_CoroutineProperty::_gdpp_set_value") !=
+            std::string::npos);
+    REQUIRE(bound_accessors.success);
+    REQUIRE(bound_accessors.unit.header.find("godot::Variant _gdpp_get_value()") !=
+            std::string::npos);
+    REQUIRE(bound_accessors.unit.source.find("return read_value();") != std::string::npos);
+}
+
 TEST_CASE("compiler rejects invalid bound property accessor signatures") {
     const gdpp::Compiler compiler;
     const auto missing = compiler.compile("missing.gd", "var value: int: get = missing_getter\n");
