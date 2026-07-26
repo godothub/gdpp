@@ -47,6 +47,13 @@ namespace {
 
 thread_local ScriptFaultState* active_script_fault = nullptr;
 
+godot::ObjectID variant_object_id(const godot::Variant& value) {
+    // Calling the conversion operator explicitly is intentional. MSVC otherwise considers the
+    // ObjectID signed and unsigned integer constructors alongside Variant's integer conversions
+    // and rejects an otherwise direct static_cast as ambiguous.
+    return value.operator godot::ObjectID();
+}
+
 const godot::StringName& coroutine_completed_signal() {
     static const godot::StringName name{"completed"};
     return name;
@@ -323,7 +330,7 @@ godot::String describe_variant_type(const godot::Variant& value) {
     if (value.get_type() == godot::Variant::OBJECT) {
         if (auto* object = value.get_validated_object())
             return object->get_class();
-        const auto id = static_cast<godot::ObjectID>(value);
+        const auto id = variant_object_id(value);
         return id.is_valid() ? godot::String{"freed Object"} : godot::String{"null Object"};
     }
     return godot::Variant::get_type_name(value.get_type());
@@ -361,7 +368,7 @@ godot::Object* strict_native_object_storage(const godot::Variant& value,
     }
     auto* object = value.get_validated_object();
     if (!object) {
-        const auto id = static_cast<godot::ObjectID>(value);
+        const auto id = variant_object_id(value);
         if (id.is_valid())
             report_script_failure("Cannot assign a previously freed object instance.", location);
         return nullptr;
@@ -668,7 +675,7 @@ bool reject_invalid_object_target(const godot::Variant& target, const char* oper
     auto message = godot::String{"Cannot "} + operation;
     if (member)
         message += godot::String{" '"} + godot::String{*member} + "'";
-    const auto id = static_cast<godot::ObjectID>(target);
+    const auto id = variant_object_id(target);
     report_script_failure(
         message + (id.is_valid() ? " on a previously freed instance." : " on a null instance."),
         location);
@@ -813,7 +820,7 @@ void free_object_at(const godot::Variant& value, const ScriptSourceLocation loca
     }
     auto* object = value.get_validated_object();
     if (!object) {
-        const auto identity = static_cast<godot::ObjectID>(value);
+        const auto identity = variant_object_id(value);
         report_script_failure(identity.is_valid() ? "Attempted to free a previously freed Object."
                                                   : "Attempted to free a null Object.",
                               location);
