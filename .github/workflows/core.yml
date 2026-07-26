@@ -92,6 +92,41 @@ jobs:
           ASAN_OPTIONS: halt_on_error=1:detect_leaks=1
         run: ctest --test-dir build/ci-asan --output-on-failure
 
+  frontend-fuzz:
+    name: Core / Ubuntu / frontend fuzz
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          submodules: recursive
+      - name: Configure coverage-guided frontend fuzzing
+        run: |
+          cmake -S . -B build/ci-frontend-fuzz -G Ninja \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCMAKE_CXX_COMPILER=clang++ \
+            -DGDPP_BUILD_CLI=OFF \
+            -DGDPP_BUILD_TESTS=OFF \
+            -DGDPP_BUILD_EXTENSION=OFF \
+            -DGDPP_BUILD_FUZZERS=ON \
+            -DGDPP_WARNINGS_AS_ERRORS=ON
+      - name: Build the instrumented frontend
+        run: cmake --build build/ci-frontend-fuzz --target gdpp_frontend_fuzzer --parallel
+      - name: Fuzz lexer and recoverable parser
+        env:
+          ASAN_OPTIONS: halt_on_error=1:detect_leaks=1
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+        run: |
+          mkdir -p build/ci-frontend-fuzz/fuzz-artifacts
+          build/ci-frontend-fuzz/bin/gdpp_frontend_fuzzer \
+            build/ci-frontend-fuzz/fuzz-corpus/frontend \
+            -dict=test/fuzz/gdscript.dict \
+            -max_len=65536 \
+            -timeout=5 \
+            -rss_limit_mb=0 \
+            -max_total_time=90 \
+            -artifact_prefix=build/ci-frontend-fuzz/fuzz-artifacts/
+
   tsan:
     name: Core / Ubuntu / thread safety
     runs-on: ubuntu-22.04

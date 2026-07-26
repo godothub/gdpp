@@ -68,6 +68,7 @@ set_property(GLOBAL PROPERTY RULE_LAUNCH_CUSTOM
 
 option(GDPP_BUILD_CLI "Build the gdpp command-line compiler" ON)
 option(GDPP_BUILD_TESTS "Build compiler tests" ON)
+option(GDPP_BUILD_FUZZERS "Build coverage-guided compiler fuzz targets" OFF)
 option(GDPP_BUILD_EXTENSION "Build the Godot GDExtension" OFF)
 option(GDPP_WARNINGS_AS_ERRORS "Treat project warnings as errors" ON)
 option(GDPP_ENABLE_OFFICIAL_CORPUS_TESTS "Download and test pinned official Godot projects" OFF)
@@ -606,6 +607,48 @@ target_include_directories(
 target_compile_features(gdpp_core PUBLIC cxx_std_17)
 set_target_properties(gdpp_core PROPERTIES POSITION_INDEPENDENT_CODE ON)
 gdpp_set_project_warnings(gdpp_core)
+
+if(GDPP_BUILD_FUZZERS)
+    if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang" OR MSVC)
+        message(FATAL_ERROR "GDPP_BUILD_FUZZERS requires Clang with libFuzzer support")
+    endif()
+    add_library(
+        gdpp_frontend_fuzz_core
+        STATIC
+        ${GDPP_CORE_SOURCES}
+        ${GDPP_FRONTEND_SOURCES}
+    )
+    target_include_directories(
+        gdpp_frontend_fuzz_core
+        PUBLIC "$<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/include>"
+    )
+    target_compile_features(gdpp_frontend_fuzz_core PUBLIC cxx_std_17)
+    target_compile_options(
+        gdpp_frontend_fuzz_core
+        PRIVATE
+            -fsanitize=fuzzer-no-link,address,undefined
+            -fno-sanitize-recover=undefined
+            -fno-omit-frame-pointer
+    )
+    gdpp_set_project_warnings(gdpp_frontend_fuzz_core)
+
+    add_executable(gdpp_frontend_fuzzer test/fuzz/frontend_fuzzer.cpp)
+    target_link_libraries(gdpp_frontend_fuzzer PRIVATE gdpp_frontend_fuzz_core)
+    target_compile_options(
+        gdpp_frontend_fuzzer
+        PRIVATE
+            -fsanitize=fuzzer,address,undefined
+            -fno-sanitize-recover=undefined
+            -fno-omit-frame-pointer
+    )
+    target_link_options(
+        gdpp_frontend_fuzzer
+        PRIVATE -fsanitize=fuzzer,address,undefined -fno-sanitize-recover=undefined
+    )
+    gdpp_set_project_warnings(gdpp_frontend_fuzzer)
+    file(COPY "${CMAKE_SOURCE_DIR}/test/fuzz/corpus/frontend"
+         DESTINATION "${CMAKE_BINARY_DIR}/fuzz-corpus")
+endif()
 
 if(GDPP_BUILD_CLI)
     add_executable(gdpp src/cli/main.cpp)
