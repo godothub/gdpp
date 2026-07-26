@@ -1,6 +1,16 @@
+class_name CoroutineAccessorProbe
 extends RefCounted
 
 signal resumed(value)
+
+static var static_observed := -1
+static var delayed_static: int:
+    get:
+        await (Engine.get_main_loop() as SceneTree).process_frame
+        return 44
+    set(next):
+        await (Engine.get_main_loop() as SceneTree).process_frame
+        static_observed = next
 
 var setter_value := -1
 var setter_values: Array[int] = []
@@ -22,6 +32,14 @@ func _read_bound() -> int:
     return await resumed
 
 
+class InnerProbe:
+    signal resumed(value)
+
+    var value: int:
+        get:
+            return await resumed
+
+
 func _capture_inline() -> void:
     _captured.push_back(await get("inline_value"))
 
@@ -31,6 +49,23 @@ func _capture_bound() -> void:
 
 
 func verify(tree: SceneTree) -> String:
+    static_observed = -1
+    CoroutineAccessorProbe.delayed_static = 43
+    var static_value: int = await CoroutineAccessorProbe.delayed_static
+    await tree.process_frame
+    if static_value != 44 or static_observed != 43:
+        return "static coroutine accessor lost owner-free suspension state"
+
+    var inner_probe := InnerProbe.new()
+    var inner_values: Array[int] = []
+    var capture_inner := func() -> void:
+        inner_values.push_back(await inner_probe.get("value"))
+    capture_inner.call()
+    inner_probe.resumed.emit(45)
+    await tree.process_frame
+    if inner_values != [45]:
+        return "internal class coroutine getter lost its resumed value"
+
     _captured.clear()
     _capture_inline()
     _capture_inline()
