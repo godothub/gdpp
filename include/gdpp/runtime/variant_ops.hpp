@@ -4,6 +4,7 @@
 
 #include <godot_cpp/classes/class_db_singleton.hpp>
 #include <godot_cpp/classes/ref.hpp>
+#include <godot_cpp/classes/ref_counted.hpp>
 #include <godot_cpp/core/object.hpp>
 #include <godot_cpp/variant/array.hpp>
 #include <godot_cpp/variant/callable.hpp>
@@ -33,6 +34,40 @@ namespace gdpp::runtime {
 
 class CoroutineState;
 using CoroutineStatePtr = std::shared_ptr<CoroutineState>;
+using AwaitContinuation = std::function<void(const godot::Array&)>;
+
+// GDScript exposes a pending coroutine as a RefCounted function-state object whose `completed`
+// signal is consumed by `await`. Returning a raw Signal is sufficient for a direct known await,
+// but changes dynamic calls and engine virtual returns. Keep the public Variant shape equivalent
+// while retaining the generated coroutine implementation behind an opaque shared state.
+class CoroutineFunctionState final : public godot::RefCounted {
+    GDCLASS(CoroutineFunctionState, godot::RefCounted)
+
+  public:
+    [[nodiscard]] bool is_valid(bool extended_check = false) const;
+    godot::Variant resume(const godot::Variant& argument = {});
+    [[nodiscard]] godot::String _to_string() const;
+
+  protected:
+    static void _bind_methods();
+
+  private:
+    friend bool await_signal(const godot::Variant&, godot::Object*, const CoroutineStatePtr&,
+                             AwaitContinuation);
+    friend void complete_coroutine(const CoroutineStatePtr&, const godot::Variant&);
+
+    godot::Variant signal_callback(const godot::Variant** arguments, GDExtensionInt argument_count,
+                                   GDExtensionCallError& error);
+    void install(godot::Object* owner, const CoroutineStatePtr& coroutine,
+                 AwaitContinuation continuation);
+    void finish();
+    void clear_incoming_connections();
+
+    mutable std::mutex mutex_;
+    godot::ObjectID owner_;
+    std::weak_ptr<CoroutineState> coroutine_;
+    AwaitContinuation continuation_;
+};
 
 struct ScriptFaultState final {
     std::atomic_bool failed{false};
@@ -384,9 +419,9 @@ call_external_static_at(const ScriptSourceLocation location, const godot::String
                                                const godot::StringName& signal,
                                                ScriptSourceLocation location = {});
 
-using AwaitContinuation = std::function<void(const godot::Array&)>;
 [[nodiscard]] bool await_signal(const godot::Variant& signal, godot::Object* owner,
-                                AwaitContinuation continuation);
+                                const CoroutineStatePtr& coroutine, AwaitContinuation continuation);
+[[nodiscard]] bool is_awaitable(const godot::Variant& value);
 [[nodiscard]] godot::Variant await_result(const godot::Array& arguments);
 
 [[nodiscard]] CoroutineStatePtr begin_coroutine(godot::Object* owner);

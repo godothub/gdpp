@@ -12,6 +12,7 @@
 #include <godot_cpp/classes/scene_tree.hpp>
 #include <godot_cpp/classes/script.hpp>
 #include <godot_cpp/classes/window.hpp>
+#include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/core/object.hpp>
 #include <godot_cpp/variant/callable.hpp>
 #include <godot_cpp/variant/callable_custom.hpp>
@@ -32,8 +33,8 @@ namespace gdpp::runtime {
 class CoroutineState final {
   public:
     godot::ObjectID owner;
-    godot::Ref<godot::RefCounted> owned_host;
-    godot::StringName signal;
+    godot::ObjectID function_state;
+    godot::Ref<CoroutineFunctionState> initial_function_state;
     godot::Variant result;
     std::mutex mutex;
     ScriptFaultState script_fault;
@@ -44,6 +45,11 @@ class CoroutineState final {
 namespace {
 
 thread_local ScriptFaultState* active_script_fault = nullptr;
+
+const godot::StringName& coroutine_completed_signal() {
+    static const godot::StringName name{"completed"};
+    return name;
+}
 
 struct ActiveInitialization final {
     const ScriptInitializationState* state{nullptr};
@@ -81,6 +87,116 @@ ScriptFaultState* coroutine_script_fault(const CoroutineStatePtr& coroutine) noe
 }
 
 } // namespace
+
+void CoroutineFunctionState::_bind_methods() {
+    godot::ClassDB::bind_method(godot::D_METHOD("resume", "arg"), &CoroutineFunctionState::resume,
+                                DEFVAL(godot::Variant{}));
+    godot::ClassDB::bind_method(godot::D_METHOD("is_valid", "extended_check"),
+                                &CoroutineFunctionState::is_valid, DEFVAL(false));
+
+    godot::MethodInfo callback{"_signal_callback"};
+    godot::ClassDB::bind_vararg_method(godot::METHOD_FLAGS_DEFAULT, callback.name,
+                                       &CoroutineFunctionState::signal_callback, callback);
+
+    godot::MethodInfo completed{coroutine_completed_signal()};
+    completed.arguments.push_back(godot::PropertyInfo{godot::Variant::NIL,
+                                                      "result",
+                                                      godot::PROPERTY_HINT_NONE,
+                                                      {},
+                                                      godot::PROPERTY_USAGE_NIL_IS_VARIANT});
+    godot::ClassDB::add_signal(get_class_static(), completed);
+}
+
+bool CoroutineFunctionState::is_valid(const bool extended_check) const {
+    std::lock_guard lock{mutex_};
+    if (!continuation_)
+        return false;
+    return !extended_check || owner_.is_null() ||
+           godot::ObjectDB::get_instance(static_cast<std::uint64_t>(owner_));
+}
+
+void CoroutineFunctionState::clear_incoming_connections() {
+    const godot::TypedArray<godot::Dictionary> connections = get_incoming_connections();
+    for (std::int64_t index = 0; index < connections.size(); ++index) {
+        const godot::Dictionary connection = connections[index];
+        godot::Signal signal = connection.get("signal", godot::Signal{});
+        const godot::Callable callable = connection.get("callable", godot::Callable{});
+        if (!signal.is_null() && signal.is_connected(callable))
+            signal.disconnect(callable);
+    }
+}
+
+godot::Variant CoroutineFunctionState::resume(const godot::Variant& argument) {
+    AwaitContinuation continuation;
+    CoroutineStatePtr coroutine;
+    {
+        std::lock_guard lock{mutex_};
+        if (!continuation_) {
+            godot::UtilityFunctions::push_error(
+                "GDPP: cannot resume a completed or invalid coroutine function state");
+            return {};
+        }
+        if (!owner_.is_null() &&
+            !godot::ObjectDB::get_instance(static_cast<std::uint64_t>(owner_))) {
+            continuation_ = {};
+            godot::UtilityFunctions::push_error(
+                "GDPP: cannot resume a coroutine after its instance was freed");
+            return {};
+        }
+        coroutine = coroutine_.lock();
+        continuation = std::move(continuation_);
+    }
+    clear_incoming_connections();
+    godot::Array values;
+    values.push_back(argument);
+    continuation(values);
+    return coroutine ? coroutine_result(coroutine) : godot::Variant{};
+}
+
+godot::Variant CoroutineFunctionState::signal_callback(const godot::Variant** arguments,
+                                                       const GDExtensionInt argument_count,
+                                                       GDExtensionCallError& error) {
+    error.error = GDEXTENSION_CALL_OK;
+    if (argument_count < 1) {
+        error.error = GDEXTENSION_CALL_ERROR_TOO_FEW_ARGUMENTS;
+        error.expected = 1;
+        return {};
+    }
+
+    godot::Variant result;
+    const auto signal_argument_count = argument_count - 1;
+    if (signal_argument_count == 1) {
+        result = *arguments[0];
+    } else if (signal_argument_count > 1) {
+        godot::Array values;
+        values.resize(signal_argument_count);
+        for (GDExtensionInt index = 0; index < signal_argument_count; ++index)
+            values[index] = *arguments[index];
+        result = values;
+    }
+    return resume(result);
+}
+
+void CoroutineFunctionState::install(godot::Object* owner, const CoroutineStatePtr& coroutine,
+                                     AwaitContinuation continuation) {
+    std::lock_guard lock{mutex_};
+    owner_ = owner ? owner->get_instance_id() : godot::ObjectID{};
+    coroutine_ = coroutine;
+    continuation_ = std::move(continuation);
+}
+
+void CoroutineFunctionState::finish() {
+    {
+        std::lock_guard lock{mutex_};
+        continuation_ = {};
+    }
+    clear_incoming_connections();
+}
+
+godot::String CoroutineFunctionState::_to_string() const {
+    return godot::String{"<GDScriptFunctionState#"} +
+           godot::String::num_int64(static_cast<std::int64_t>(get_instance_id())) + ">";
+}
 
 ScriptFunctionScope::ScriptFunctionScope() noexcept
     : state_{&local_}, previous_{active_script_fault} {
@@ -294,11 +410,6 @@ void emit_local_signal_variants(godot::Object* owner, const godot::Variant** arg
 
 namespace {
 
-std::atomic<std::uint64_t>& coroutine_counter() {
-    static std::atomic<std::uint64_t> value{0};
-    return value;
-}
-
 const godot::StringName& default_argument_marker() {
     static const godot::StringName marker{
         "__gdpp_internal_omitted_argument_7f7b20d940d64b33aebdbdc51ca21ab3__"};
@@ -450,58 +561,6 @@ godot::String call_error_message(const godot::String& subject, const GDExtension
     return subject + godot::String{" failed with call error "} +
            godot::String::num_int64(static_cast<std::int64_t>(error.error)) + godot::String{"."};
 }
-
-class AwaitCallable final : public godot::CallableCustom {
-  public:
-    AwaitCallable(godot::Object* owner, AwaitContinuation continuation)
-        : owner_(owner ? owner->get_instance_id() : godot::ObjectID{}),
-          continuation_(std::move(continuation)) {}
-
-    [[nodiscard]] std::uint32_t hash() const override {
-        return static_cast<std::uint32_t>(static_cast<std::uint64_t>(owner_));
-    }
-
-    [[nodiscard]] godot::String get_as_text() const override { return "GDPP await continuation"; }
-
-    static bool compare_equal(const godot::CallableCustom* left,
-                              const godot::CallableCustom* right) {
-        return left == right;
-    }
-
-    [[nodiscard]] CompareEqualFunc get_compare_equal_func() const override {
-        return &AwaitCallable::compare_equal;
-    }
-
-    static bool compare_less(const godot::CallableCustom* left,
-                             const godot::CallableCustom* right) {
-        return left < right;
-    }
-
-    [[nodiscard]] CompareLessFunc get_compare_less_func() const override {
-        return &AwaitCallable::compare_less;
-    }
-
-    [[nodiscard]] godot::ObjectID get_object() const override { return owner_; }
-
-    void call(const godot::Variant** arguments, int argument_count, godot::Variant& return_value,
-              GDExtensionCallError& error) const override {
-        if (!godot::ObjectDB::get_instance(static_cast<std::uint64_t>(owner_))) {
-            return_value = {};
-            error.error = GDEXTENSION_CALL_OK;
-            return;
-        }
-        godot::Array values;
-        for (int index = 0; index < argument_count; ++index)
-            values.push_back(*arguments[index]);
-        continuation_(values);
-        return_value = {};
-        error.error = GDEXTENSION_CALL_OK;
-    }
-
-  private:
-    godot::ObjectID owner_;
-    AwaitContinuation continuation_;
-};
 
 class LambdaCallable final : public godot::CallableCustom {
   public:
@@ -1056,23 +1115,65 @@ godot::Signal external_signal_at(const godot::Variant& value, const godot::Strin
 }
 
 bool await_signal(const godot::Variant& signal_value, godot::Object* owner,
-                  AwaitContinuation continuation) {
-    if (!owner || !continuation || signal_value.get_type() != godot::Variant::SIGNAL) {
-        godot::UtilityFunctions::push_error("GDPP: await requires a live owner and Signal");
+                  const CoroutineStatePtr& coroutine, AwaitContinuation continuation) {
+    if (!continuation) {
+        godot::UtilityFunctions::push_error("GDPP: await requires a live continuation");
         return false;
     }
-    auto signal = static_cast<godot::Signal>(signal_value);
+    const auto active_coroutine = coroutine ? coroutine : begin_coroutine(owner);
+    if (!active_coroutine)
+        return false;
+    godot::Signal signal;
+    if (signal_value.get_type() == godot::Variant::SIGNAL) {
+        signal = static_cast<godot::Signal>(signal_value);
+    } else if (signal_value.get_type() == godot::Variant::OBJECT) {
+        auto* state = signal_value.get_validated_object();
+        if (state && state->has_signal(coroutine_completed_signal()) &&
+            (state->is_class(CoroutineFunctionState::get_class_static()) ||
+             state->is_class(godot::StringName{"GDScriptFunctionState"}))) {
+            signal = godot::Signal(state, coroutine_completed_signal());
+        }
+    }
     if (signal.is_null()) {
-        godot::UtilityFunctions::push_error("GDPP: cannot await a null Signal");
+        godot::UtilityFunctions::push_error(
+            "GDPP: await requires a Signal or coroutine function state");
         return false;
     }
-    const godot::Callable callable{memnew(AwaitCallable(owner, std::move(continuation)))};
+    auto* function_state_object =
+        godot::ObjectDB::get_instance(static_cast<std::uint64_t>(active_coroutine->function_state));
+    godot::Ref<CoroutineFunctionState> function_state{
+        godot::Object::cast_to<CoroutineFunctionState>(function_state_object)};
+    if (function_state.is_null()) {
+        godot::UtilityFunctions::push_error(
+            "GDPP: await cannot continue because its coroutine function state was freed");
+        return false;
+    }
+
+    function_state->install(owner, active_coroutine, std::move(continuation));
+    godot::Callable callable{function_state.ptr(), "_signal_callback"};
+    callable = callable.bind(godot::Variant{function_state});
     const auto error = signal.connect(callable, godot::Object::CONNECT_ONE_SHOT);
     if (error != 0) {
+        function_state->finish();
         godot::UtilityFunctions::push_error("GDPP: failed to connect await continuation");
         return false;
     }
+    if (!coroutine) {
+        const std::lock_guard<std::mutex> lock{active_coroutine->mutex};
+        active_coroutine->initial_function_state.unref();
+    }
     return true;
+}
+
+bool is_awaitable(const godot::Variant& value) {
+    if (value.get_type() == godot::Variant::SIGNAL)
+        return true;
+    if (value.get_type() != godot::Variant::OBJECT)
+        return false;
+    auto* state = value.get_validated_object();
+    return state && state->has_signal(coroutine_completed_signal()) &&
+           (state->is_class(CoroutineFunctionState::get_class_static()) ||
+            state->is_class(godot::StringName{"GDScriptFunctionState"}));
 }
 
 godot::Variant await_result(const godot::Array& arguments) {
@@ -1085,34 +1186,21 @@ godot::Variant await_result(const godot::Array& arguments) {
 
 CoroutineStatePtr begin_coroutine(godot::Object* owner) {
     auto state = std::make_shared<CoroutineState>();
-    if (!owner) {
-        state->owned_host.instantiate();
-        if (state->owned_host.is_null()) {
-            godot::UtilityFunctions::push_error(
-                "GDPP: cannot allocate an owner for a static coroutine");
-            return {};
-        }
-        owner = state->owned_host.ptr();
+    state->initial_function_state.instantiate();
+    if (state->initial_function_state.is_null()) {
+        godot::UtilityFunctions::push_error("GDPP: cannot allocate a coroutine function state");
+        return {};
     }
-    state->owner = owner->get_instance_id();
-    do {
-        const auto index = coroutine_counter().fetch_add(1, std::memory_order_relaxed);
-        const auto name = std::string{"__gdpp_coroutine_completed_"} + std::to_string(index);
-        state->signal = godot::StringName(name.c_str());
-    } while (owner->has_user_signal(state->signal));
-
-    godot::Dictionary argument;
-    argument["name"] = "result";
-    argument["type"] = static_cast<std::int64_t>(godot::Variant::NIL);
-    godot::Array arguments;
-    arguments.push_back(argument);
-    owner->add_user_signal(godot::String(state->signal), arguments);
+    state->owner = owner ? owner->get_instance_id() : godot::ObjectID{};
+    state->function_state = state->initial_function_state->get_instance_id();
     return state;
 }
 
 godot::Object* coroutine_owner(const CoroutineStatePtr& state) {
     if (!state)
         return nullptr;
+    if (state->owner.is_null())
+        return godot::ObjectDB::get_instance(static_cast<std::uint64_t>(state->function_state));
     return godot::ObjectDB::get_instance(static_cast<std::uint64_t>(state->owner));
 }
 
@@ -1120,24 +1208,28 @@ godot::Variant coroutine_result(const CoroutineStatePtr& state) {
     if (!state)
         return {};
     godot::Variant result;
+    godot::Ref<CoroutineFunctionState> function_state;
     bool completed = false;
     {
         const std::lock_guard<std::mutex> lock{state->mutex};
         completed = state->completed;
         if (completed)
             result = state->result;
-        else
+        else {
             state->exposed = true;
+            function_state = state->initial_function_state;
+            if (function_state.is_null()) {
+                auto* object = godot::ObjectDB::get_instance(
+                    static_cast<std::uint64_t>(state->function_state));
+                function_state.reference_ptr(
+                    godot::Object::cast_to<CoroutineFunctionState>(object));
+            }
+        }
+        state->initial_function_state.unref();
     }
-    auto* owner = coroutine_owner(state);
-    if (!owner)
-        return completed ? result : godot::Variant{};
-    if (completed) {
-        if (owner->has_user_signal(state->signal))
-            owner->remove_user_signal(state->signal);
+    if (completed)
         return result;
-    }
-    return godot::Signal(owner, state->signal);
+    return godot::Variant{function_state};
 }
 
 void complete_coroutine(const CoroutineStatePtr& state, const godot::Variant& result) {
@@ -1154,12 +1246,14 @@ void complete_coroutine(const CoroutineStatePtr& state, const godot::Variant& re
     }
     if (!exposed)
         return;
-    auto* owner = coroutine_owner(state);
-    if (!owner)
+    auto* function_state_object =
+        godot::ObjectDB::get_instance(static_cast<std::uint64_t>(state->function_state));
+    godot::Ref<CoroutineFunctionState> function_state{
+        godot::Object::cast_to<CoroutineFunctionState>(function_state_object)};
+    if (function_state.is_null())
         return;
-    owner->emit_signal(state->signal, result);
-    if (owner->has_user_signal(state->signal))
-        owner->remove_user_signal(state->signal);
+    function_state->finish();
+    function_state->emit_signal(coroutine_completed_signal(), result);
 }
 
 bool validate_virtual_return(const godot::Variant& value, const godot::Variant::Type expected_type,
@@ -1167,6 +1261,13 @@ bool validate_virtual_return(const godot::Variant& value, const godot::Variant::
                              const godot::StringName& expected_name,
                              const godot::StringName& expected_class, const char* source_path,
                              const std::int64_t line, const std::int64_t column) {
+    // Godot invokes script virtuals through Variant and casts the returned value only after the
+    // language call. A pending GDScript coroutine is therefore allowed to cross every virtual
+    // return ABI as its FunctionState object, even when the declared result is String or another
+    // concrete type. Preserve that observable behavior; validating the eventual typed result is
+    // only meaningful when the coroutine completed synchronously.
+    if (is_awaitable(value))
+        return true;
     bool compatible = false;
     if (expected_type == godot::Variant::OBJECT) {
         compatible =

@@ -167,6 +167,8 @@ TEST_CASE("project compiler incrementally generates a unified native extension")
     REQUIRE(registration.find("gdpp_library_init(GDExtensionInterfaceGetProcAddress") !=
             std::string::npos);
     REQUIRE(registration.find("gdpp_project_library_init") == std::string::npos);
+    REQUIRE(registration.find("GDREGISTER_CLASS(gdpp::runtime::CoroutineFunctionState)") !=
+            std::string::npos);
 
     std::filesystem::remove(root / "player.gd", error);
     const auto fourth = compiler.compile(options);
@@ -1609,6 +1611,8 @@ TEST_CASE("project compiler attaches scripts to third-party GDExtension instance
             std::string::npos);
     REQUIRE(registration.find("GDREGISTER_CLASS(gdpp::runtime::AttachedCompiledScript)") !=
             std::string::npos);
+    REQUIRE(registration.find("GDREGISTER_CLASS(gdpp::runtime::CoroutineFunctionState)") !=
+            std::string::npos);
     REQUIRE(registration.find("GDREGISTER_CLASS(" + result.scripts.front().class_name + ")") !=
             std::string::npos);
     REQUIRE(registration.find("GDREGISTER_CLASS(" +
@@ -2491,7 +2495,7 @@ TEST_CASE("project coroutine ABI changes invalidate callers and require cross-sc
     REQUIRE_EQ(consumer->dependencies, std::vector<std::string>{"producer.gd"});
     const auto generated =
         read_text(options.output_directory / "generated" / consumer->source_file_name);
-    REQUIRE(generated.find(".get_type() != godot::Variant::SIGNAL") != std::string::npos);
+    REQUIRE(generated.find("gdpp::runtime::is_awaitable(") != std::string::npos);
     REQUIRE(generated.find("gdpp::runtime::await_result(") != std::string::npos);
 
     write_text(root / "producer.gd", "extends RefCounted\nclass_name CoroutineProducer\n"

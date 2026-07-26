@@ -395,6 +395,7 @@ TEST_CASE("compiler applies warning directives and structured await to property 
 
     REQUIRE(result.success);
     REQUIRE(result.unit.source.find("await_signal") != std::string::npos);
+    REQUIRE(result.unit.source.find("gdpp::runtime::CoroutineStatePtr{}") != std::string::npos);
 }
 
 TEST_CASE("compiler defers packed array typed storage failures to the runtime boundary") {
@@ -2291,7 +2292,7 @@ TEST_CASE("compiler requires consumed coroutine results to be awaited and permit
         [](const gdpp::Diagnostic& diagnostic) { return diagnostic.code == "GDS4132"; }));
     REQUIRE(awaited.success);
     REQUIRE(awaited.unit.source.find("produce(_gdpp_call_argument_") != std::string::npos);
-    REQUIRE(awaited.unit.source.find(".get_type() != godot::Variant::SIGNAL") != std::string::npos);
+    REQUIRE(awaited.unit.source.find("gdpp::runtime::is_awaitable(") != std::string::npos);
     REQUIRE(awaited.unit.source.find("gdpp::runtime::await_result(") != std::string::npos);
     REQUIRE(detached.success);
     REQUIRE(detached.unit.source.find("produce()") != std::string::npos);
@@ -3307,7 +3308,7 @@ TEST_CASE("compiler preserves coroutine state behind every engine virtual return
                 "validate_virtual_return(_gdpp_virtual_result, godot::Variant::STRING") !=
             std::string::npos);
     REQUIRE(result.unit.source.find("gdpp::runtime::begin_coroutine(this)") != std::string::npos);
-    REQUIRE(result.unit.source.find("gdpp::runtime::await_signal") != std::string::npos);
+    REQUIRE(result.unit.source.find("_gdpp_coroutine_state, _gdpp_resume_") != std::string::npos);
 }
 
 TEST_CASE("compiler emits injective ASCII names for Unicode and C++ identifiers") {

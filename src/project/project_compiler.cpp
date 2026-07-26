@@ -891,10 +891,12 @@ std::string generated_registration(const std::vector<CompiledProjectScript>& scr
            << "#include <godot_cpp/core/defs.hpp>\n"
            << "#include <godot_cpp/core/error_macros.hpp>\n"
            << "#include <godot_cpp/godot.hpp>\n\n"
-           << (has_attached_scripts ? "#include <gdpp/runtime/attached_script.hpp>\n\n" : "")
+           << "#include <gdpp/runtime/variant_ops.hpp>\n"
+           << (has_attached_scripts ? "#include <gdpp/runtime/attached_script.hpp>\n" : "") << "\n"
            << "namespace {\n"
            << "void initialize_gdpp_project(godot::ModuleInitializationLevel level) {\n"
-           << "    if (level != godot::MODULE_INITIALIZATION_LEVEL_SCENE) return;\n";
+           << "    if (level != godot::MODULE_INITIALIZATION_LEVEL_SCENE) return;\n"
+           << "    GDREGISTER_CLASS(gdpp::runtime::CoroutineFunctionState);\n";
     if (has_editor_only_classes) {
         output << "    auto* gdpp_engine = godot::Engine::get_singleton();\n"
                << "    ERR_FAIL_NULL_MSG(gdpp_engine, "

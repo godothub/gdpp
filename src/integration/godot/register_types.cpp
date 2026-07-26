@@ -1,5 +1,6 @@
 #include "compiler_service.hpp"
 #include "gdpp/runtime/attached_script.hpp"
+#include "gdpp/runtime/variant_ops.hpp"
 
 #include <gdextension_interface.h>
 
@@ -13,6 +14,7 @@ namespace {
 void initialize_gdpp(godot::ModuleInitializationLevel level) {
     if (level != godot::MODULE_INITIALIZATION_LEVEL_SCENE)
         return;
+    GDREGISTER_CLASS(gdpp::runtime::CoroutineFunctionState);
     GDREGISTER_CLASS(gdpp::runtime::AttachedScriptBehavior);
     GDREGISTER_CLASS(gdpp::runtime::AttachedCompiledLanguage);
     GDREGISTER_CLASS(gdpp::runtime::AttachedCompiledScript);

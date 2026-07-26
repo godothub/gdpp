@@ -4596,15 +4596,17 @@ std::string CodeGenerator::emit_flat_async(const mir::Function& function,
                       " = gdpp::runtime::to_variant(" + emit_expression(*terminator.condition) +
                       ");\n";
             result += emit_script_failure_return(indentation + 3, true);
-            result += indent(indentation + 3) + "if (" + awaitable +
-                      ".get_type() != godot::Variant::SIGNAL) {\n";
+            result += indent(indentation + 3) + "if (!gdpp::runtime::is_awaitable(" + awaitable +
+                      ")) {\n";
             result += indent(indentation + 4) + pc + " = " + target + ";\n";
             result += indent(indentation + 4) + "continue;\n";
             result += indent(indentation + 3) + "}\n";
             result += indent(indentation + 3) + "if (!gdpp::runtime::await_signal(" + awaitable +
-                      ", " + await_owner_expression() + ", [" + keep_alive +
-                      "](const godot::Array &resume_values) { (*" + keep_alive + ")(" + target +
-                      ", resume_values); })) {\n";
+                      ", " + await_owner_expression() + ", " +
+                      (current_coroutine_state_.empty() ? "gdpp::runtime::CoroutineStatePtr{}"
+                                                        : current_coroutine_state_) +
+                      ", [" + keep_alive + "](const godot::Array &resume_values) { (*" +
+                      keep_alive + ")(" + target + ", resume_values); })) {\n";
             result += current_coroutine_abi_
                           ? coroutine_return(indentation + 4, "godot::Variant{}", true)
                           : indent(indentation + 4) + "return;\n";
@@ -4806,8 +4808,7 @@ std::string CodeGenerator::emit_async_statements(
             result += emit_async_statements(statements, indentation + 1, index + 1, tails, terminal,
                                             true, loop_control);
             result += prefix + "};\n";
-            result +=
-                prefix + "if (" + awaitable_name + ".get_type() != godot::Variant::SIGNAL) {\n";
+            result += prefix + "if (!gdpp::runtime::is_awaitable(" + awaitable_name + ")) {\n";
             result += indent(indentation + 1) + "godot::Array " + immediate_name + ";\n";
             result +=
                 indent(indentation + 1) + immediate_name + ".push_back(" + awaitable_name + ");\n";
@@ -4815,7 +4816,10 @@ std::string CodeGenerator::emit_async_statements(
             result += async_return(indentation + 1, continuation_context);
             result += prefix + "}\n";
             result += prefix + "if (!gdpp::runtime::await_signal(" + awaitable_name + ", " +
-                      await_owner_expression() + ", " + resume_name + ")) {\n";
+                      await_owner_expression() + ", " +
+                      (current_coroutine_state_.empty() ? "gdpp::runtime::CoroutineStatePtr{}"
+                                                        : current_coroutine_state_) +
+                      ", " + resume_name + ")) {\n";
             result += current_coroutine_abi_ ? coroutine_return(indentation + 1, "godot::Variant{}",
                                                                 continuation_context)
                                              : async_return(indentation + 1, continuation_context);
