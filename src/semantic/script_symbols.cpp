@@ -63,6 +63,35 @@ bool ScriptSymbolTable::set_coroutine(const std::string& path, const std::string
     return true;
 }
 
+bool ScriptSymbolTable::set_accessor_coroutines(const std::string& path,
+                                                const std::string& inner_class,
+                                                const std::string& field,
+                                                const bool getter_coroutine,
+                                                const bool setter_coroutine) {
+    const auto found = paths_.find(path);
+    if (found == paths_.end())
+        return false;
+    auto& owner = classes_[found->second];
+    auto* members = &owner.members;
+    if (!inner_class.empty()) {
+        const auto inner = std::find_if(owner.inner_classes.begin(), owner.inner_classes.end(),
+                                        [&](const auto& item) { return item.name == inner_class; });
+        if (inner == owner.inner_classes.end())
+            return false;
+        members = &inner->members;
+    }
+    const auto member = std::find_if(members->begin(), members->end(), [&](const auto& item) {
+        return item.kind == ScriptMemberKind::field && item.name == field;
+    });
+    if (member == members->end())
+        return false;
+    const bool changed = member->getter_is_coroutine != getter_coroutine ||
+                         member->setter_is_coroutine != setter_coroutine;
+    member->getter_is_coroutine = getter_coroutine;
+    member->setter_is_coroutine = setter_coroutine;
+    return changed;
+}
+
 void ScriptSymbolTable::update_class_identity(const std::string& path,
                                               std::string native_class_name,
                                               std::string header_file_name) {

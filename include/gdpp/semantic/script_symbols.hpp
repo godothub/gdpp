@@ -22,6 +22,8 @@ struct ScriptMemberSymbol {
     std::size_t required_arguments{0};
     bool is_static{false};
     bool has_accessor{false};
+    bool getter_is_coroutine{false};
+    bool setter_is_coroutine{false};
     // Source-level annotation metadata is kept separate from the resolved native ABI.
     // Project inheritance can therefore inherit omitted types without losing the fact that
     // the author did (or did not) explicitly constrain an override.
@@ -110,6 +112,9 @@ class ScriptSymbolTable final {
     void add_resource_alias(std::string reference, std::string project_path);
     bool set_coroutine(const std::string& path, const std::string& inner_class,
                        const std::string& method, bool coroutine);
+    bool set_accessor_coroutines(const std::string& path, const std::string& inner_class,
+                                 const std::string& field, bool getter_coroutine,
+                                 bool setter_coroutine);
     void update_class_identity(const std::string& path, std::string native_class_name,
                                std::string header_file_name);
 
