@@ -600,6 +600,8 @@ add_custom_command(
         "${GDPP_SMOKE_DIR}/breakpoint.gd.cpp"
         "${GDPP_SMOKE_DIR}/transactional_initialization.gd.hpp"
         "${GDPP_SMOKE_DIR}/transactional_initialization.gd.cpp"
+        "${GDPP_SMOKE_DIR}/static_context_case.gd.hpp"
+        "${GDPP_SMOKE_DIR}/static_context_case.gd.cpp"
     COMMAND "${CMAKE_COMMAND}" -E make_directory "${GDPP_SMOKE_DIR}"
     COMMAND $<TARGET_FILE:gdpp> compile "${CMAKE_SOURCE_DIR}/example/hello.gd"
             --output "${GDPP_SMOKE_DIR}"
@@ -608,11 +610,14 @@ add_custom_command(
     COMMAND $<TARGET_FILE:gdpp> compile
             "${CMAKE_SOURCE_DIR}/test/fixtures/transactional_initialization.gd"
             --output "${GDPP_SMOKE_DIR}"
+    COMMAND $<TARGET_FILE:gdpp> compile "${CMAKE_SOURCE_DIR}/example/static_context_case.gd"
+            --output "${GDPP_SMOKE_DIR}"
     DEPENDS
         gdpp
         "${CMAKE_SOURCE_DIR}/example/hello.gd"
         "${CMAKE_SOURCE_DIR}/test/fixtures/breakpoint.gd"
         "${CMAKE_SOURCE_DIR}/test/fixtures/transactional_initialization.gd"
+        "${CMAKE_SOURCE_DIR}/example/static_context_case.gd"
     VERBATIM
 )
 add_library(
@@ -621,6 +626,7 @@ add_library(
     "${GDPP_SMOKE_DIR}/hello_aot.gd.cpp"
     "${GDPP_SMOKE_DIR}/breakpoint.gd.cpp"
     "${GDPP_SMOKE_DIR}/transactional_initialization.gd.cpp"
+    "${GDPP_SMOKE_DIR}/static_context_case.gd.cpp"
 )
 target_include_directories(gdpp_generated_smoke PRIVATE "${GDPP_SMOKE_DIR}")
 target_link_libraries(gdpp_generated_smoke PRIVATE gdpp::runtime godot::cpp)
