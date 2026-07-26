@@ -370,7 +370,8 @@ func _export_file(path: String, _type: String, _features: PackedStringArray) -> 
         return
 
     # Selected Universal 2 providers are registered by GDPP without changing customer files.
-    # Their byte-for-byte original runtime descriptor is still shipped in the package.
+    # Debug packages may receive an in-package debug alias to the verified Release Mach-O when
+    # the provider does not ship a separate debug binary.
     if _provider_descriptor_overrides.has(path):
         add_file(path, str(_provider_descriptor_overrides[path]).to_utf8_buffer(), false)
         skip()
@@ -2004,7 +2005,15 @@ func _prepare_provider_export_overrides(descriptors: PackedStringArray) -> bool:
             config.erase_section_key("libraries", str(pair.x86))
             config.set_value("libraries", universal_key, str(pair.library))
 
-        var selection := _select_extension_library(config, path, normalized_features)
+        var selection_features := normalized_features
+        var selection := _select_extension_library(config, path, selection_features)
+        var release_fallback := false
+        if selection.is_empty() and _build_profile == "debug":
+            selection_features = normalized_features.duplicate()
+            selection_features.erase("debug")
+            selection_features["release"] = true
+            selection = _select_extension_library(config, path, selection_features)
+            release_fallback = not selection.is_empty()
         if selection.is_empty():
             _fail_export(
                 "provider extension '%s' has no Universal 2 library for this export" % path
@@ -2017,16 +2026,32 @@ func _prepare_provider_export_overrides(descriptors: PackedStringArray) -> bool:
                 % [path, selected_path]
             )
             return false
-        var selected_tags: PackedStringArray = selection.get("tags", PackedStringArray())
-        if not _register_shared_object_once(selected_path, selected_tags):
+        if not _register_shared_object_once(selected_path, _shared_object_tags()):
             return false
         if not _register_extension_dependencies(
             config,
             path,
-            normalized_features
+            selection_features
         ):
             return false
-        _provider_descriptor_overrides[path] = original
+        if release_fallback:
+            var runtime_config := ConfigFile.new()
+            if runtime_config.load(path) != OK:
+                _fail_export("cannot rebuild provider extension descriptor: %s" % path)
+                return false
+            runtime_config.set_value(
+                "libraries",
+                "macos.debug.arm64",
+                selected_path
+            )
+            runtime_config.set_value(
+                "libraries",
+                "macos.debug.x86_64",
+                selected_path
+            )
+            _provider_descriptor_overrides[path] = runtime_config.encode_to_text()
+        else:
+            _provider_descriptor_overrides[path] = original
     return true
 
 
