@@ -9,6 +9,7 @@
 #include "gdpp/semantic/godot_api.hpp"
 #include "gdpp/support/path_utf8.hpp"
 #include "gdpp/support/sha256.hpp"
+#include "gdpp/version.hpp"
 
 #include <godot_cpp/classes/class_db_singleton.hpp>
 #include <godot_cpp/classes/engine.hpp>
@@ -1444,9 +1445,10 @@ void GDPPCompiler::_bind_methods() {
     godot::ClassDB::bind_method(
         godot::D_METHOD("compile_project", "project_root", "output_directory", "sdk_root",
                         "compiler_executable", "target_version", "build_profile", "target_platform",
-                        "target_architecture", "target_variant", "progress_callback"),
+                        "target_architecture", "target_variant", "target_precision",
+                        "progress_callback"),
         &GDPPCompiler::compile_project, DEFVAL("4.4"), DEFVAL("release"), DEFVAL(""),
-        DEFVAL(""), DEFVAL(""), DEFVAL(godot::Callable{}));
+        DEFVAL(""), DEFVAL(""), DEFVAL(GDPP_GODOT_PRECISION), DEFVAL(godot::Callable{}));
     godot::ClassDB::bind_method(godot::D_METHOD("get_default_sdk_root"),
                                 &GDPPCompiler::get_default_sdk_root);
     godot::ClassDB::bind_method(godot::D_METHOD("get_default_compiler_executable"),
@@ -1732,7 +1734,8 @@ godot::Dictionary GDPPCompiler::compile_project(
     const godot::String& sdk_root, const godot::String& compiler_executable,
     const godot::String& target_version, const godot::String& build_profile,
     const godot::String& target_platform, const godot::String& target_architecture,
-    const godot::String& target_variant, const godot::Callable& progress_callback) const {
+    const godot::String& target_variant, const godot::String& target_precision,
+    const godot::Callable& progress_callback) const {
     const auto version = parse_godot_version(native_string(target_version));
     if (!version)
         return invalid_version_result(target_version);
@@ -1791,6 +1794,27 @@ godot::Dictionary GDPPCompiler::compile_project(
         output["success"] = false;
         godot::PackedStringArray diagnostics;
         diagnostics.push_back("target variant is only valid for the Web platform");
+        output["diagnostics"] = diagnostics;
+        return output;
+    }
+    const auto precision_value = native_string(target_precision);
+    const auto precision = parse_native_precision(precision_value);
+    if (!precision) {
+        godot::Dictionary output;
+        output["success"] = false;
+        godot::PackedStringArray diagnostics;
+        diagnostics.push_back("target precision must be exactly 'single' or 'double'");
+        output["diagnostics"] = diagnostics;
+        return output;
+    }
+    if (precision_value != GDPP_GODOT_PRECISION) {
+        godot::Dictionary output;
+        output["success"] = false;
+        godot::PackedStringArray diagnostics;
+        diagnostics.push_back(
+            "target Godot precision is '" + target_precision +
+            "', but this GDPP compiler was built for '" GDPP_GODOT_PRECISION
+            "'; use the package rebuilt from the target engine extension_api.json");
         output["diagnostics"] = diagnostics;
         return output;
     }
@@ -1913,6 +1937,7 @@ godot::Dictionary GDPPCompiler::compile_project(
         build_options.architecture = architecture;
         build_options.profile = *profile;
         build_options.web_thread_mode = web_thread_mode;
+        build_options.precision = *precision;
         build_options.target_version = *version;
         const NativeBuilder builder;
         const auto plan = builder.plan(build_options);
@@ -1945,6 +1970,7 @@ godot::Dictionary GDPPCompiler::compile_project(
         output["build_profile"] = build_profile;
         output["target_platform"] = godot::String{platform_value.c_str()};
         output["target_architecture"] = godot::String{architecture.c_str()};
+        output["target_precision"] = target_precision;
     }
     return output;
 }

@@ -62,6 +62,7 @@ func _worker_entry(compiler: Object, request: Dictionary) -> Dictionary:
         str(request.get("target_platform", "")),
         str(request.get("target_architecture", "")),
         str(request.get("target_variant", "")),
+        str(request.get("target_precision", "single")),
         progress_callback
     )
     if not plan.get("success", false):

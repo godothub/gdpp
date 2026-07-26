@@ -31,7 +31,7 @@ class GDPPCompiler final : public godot::RefCounted {
                     const godot::String& sdk_root, const godot::String& compiler_executable,
                     const godot::String& target_version, const godot::String& build_profile,
                     const godot::String& target_platform, const godot::String& target_architecture,
-                    const godot::String& target_variant,
+                    const godot::String& target_variant, const godot::String& target_precision,
                     const godot::Callable& progress_callback = {}) const;
     [[nodiscard]] godot::Dictionary
     execute_project_build(const godot::Dictionary& build_plan,

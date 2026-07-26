@@ -54,6 +54,7 @@ var _build_id := ""
 var _target_platform := ""
 var _target_architecture := ""
 var _target_variant := ""
+var _target_precision := ""
 var _build_profile := ""
 var _export_extension_registry := ""
 var _export_script_class_cache := ""
@@ -143,6 +144,7 @@ func _export_begin(
     _target_platform = _platform_from_features(features)
     _target_architecture = _architecture_from_features(features)
     _target_variant = _web_variant_from_features(features)
+    _target_precision = _precision_from_features(features)
     _build_profile = "debug" if is_debug else "release"
     for feature: String in features:
         _export_features[feature] = true
@@ -248,6 +250,7 @@ func _get_customization_configuration_hash() -> int:
         _target_platform,
         _target_architecture,
         _target_variant,
+        _target_precision,
         _build_profile,
     ])
 
@@ -525,10 +528,17 @@ func _prepare_export_impl(features: PackedStringArray, is_debug: bool) -> bool:
     _target_platform = _platform_from_features(features)
     _target_architecture = _architecture_from_features(features)
     _target_variant = _web_variant_from_features(features)
+    _target_precision = _precision_from_features(features)
     if _target_platform.is_empty() or _target_architecture.is_empty():
         _fail_export(
             "unsupported or ambiguous export target features: %s; keeping GDScript sources"
             % [", ".join(features)]
+        )
+        return false
+    if _target_precision.is_empty():
+        _fail_export(
+            "export target must expose exactly one Godot real_t precision feature "
+            + "('single' or 'double'); keeping GDScript sources"
         )
         return false
     if not _compiler.is_target_supported(_target_platform, _target_architecture):
@@ -585,6 +595,7 @@ func _prepare_export_impl(features: PackedStringArray, is_debug: bool) -> bool:
         "target_platform": _target_platform,
         "target_architecture": _target_architecture,
         "target_variant": _target_variant,
+        "target_precision": _target_precision,
     }, distribution_progress)
     if not _accept_build_outcome(distribution_outcome, _build_profile):
         return false
@@ -842,6 +853,14 @@ func _web_variant_from_features(features: PackedStringArray) -> String:
     return matches[0] if matches.size() == 1 else ""
 
 
+func _precision_from_features(features: PackedStringArray) -> String:
+    var matches: Array[String] = []
+    for value in ["single", "double"]:
+        if features.has(value):
+            matches.append(value)
+    return matches[0] if matches.size() == 1 else ""
+
+
 func _android_compiler() -> String:
     var ndk_root := str(ProjectSettings.get_setting(ANDROID_NDK_SETTING, ""))
     if ndk_root.is_empty():
@@ -908,6 +927,8 @@ func _runtime_library_entries(library_path: String, feature := "") -> String:
     var prefix := _target_platform
     if not feature.is_empty():
         prefix += "." + feature
+    if not _target_precision.is_empty():
+        prefix += "." + _target_precision
     # Universal 2 is a Mach-O payload property, not a Godot runtime feature.
     # Each process reports its active CPU architecture, and both entries load
     # the same fat dylib.
@@ -930,6 +951,8 @@ func _shared_object_tags() -> PackedStringArray:
         tags.append(_target_architecture)
     if _target_platform == "web" and _target_variant == "threads":
         tags.append("threads")
+    if not _target_precision.is_empty():
+        tags.append(_target_precision)
     return tags
 
 
@@ -2314,6 +2337,7 @@ func _reset_export_state() -> void:
     _target_platform = ""
     _target_architecture = ""
     _target_variant = ""
+    _target_precision = ""
     _build_profile = ""
     _export_extension_registry = ""
     _export_script_class_cache = ""

@@ -16,7 +16,9 @@ func _run() -> void:
         target_version,
         "release",
         compiler.get_host_platform(),
-        compiler.get_host_architecture()
+        compiler.get_host_architecture(),
+        "",
+        "double" if OS.has_feature("double") else "single"
     )
     if not result.get("success", false):
         push_error("GDPP release planning failed: %s" % result.get("diagnostics", []))
