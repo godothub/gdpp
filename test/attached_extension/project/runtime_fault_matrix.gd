@@ -8,8 +8,26 @@ func run() -> String:
     var cases: Array[Callable] = [
         array_oob_read,
         array_oob_write,
-        packed_oob_read,
-        packed_oob_write,
+        packed_byte_oob_read,
+        packed_byte_oob_write,
+        packed_int32_oob_read,
+        packed_int32_oob_write,
+        packed_int64_oob_read,
+        packed_int64_oob_write,
+        packed_float32_oob_read,
+        packed_float32_oob_write,
+        packed_float64_oob_read,
+        packed_float64_oob_write,
+        packed_string_oob_read,
+        packed_string_oob_write,
+        packed_vector2_oob_read,
+        packed_vector2_oob_write,
+        packed_vector3_oob_read,
+        packed_vector3_oob_write,
+        packed_vector4_oob_read,
+        packed_vector4_oob_write,
+        packed_color_oob_read,
+        packed_color_oob_write,
         wrong_array_key,
         missing_dictionary_key,
         missing_method,
@@ -29,7 +47,21 @@ func run() -> String:
         required_object_argument,
         invalid_explicit_conversion,
         invalid_typed_array_append,
+        invalid_typed_array_write,
+        valid_typed_array_dynamic_write,
+        invalid_typed_object_array_write,
+        invalid_typed_array_compound_write,
+        invalid_typed_array_assignment,
+        invalid_typed_object_array_append,
+        invalid_typed_dictionary_key,
+        invalid_typed_dictionary_read_key,
+        missing_typed_dictionary_key,
+        valid_typed_dictionary_dynamic_write,
+        invalid_typed_dictionary_compound_key,
+        invalid_typed_dictionary_compound_value,
         invalid_typed_dictionary_set,
+        invalid_typed_dictionary_assignment,
+        invalid_packed_array_assignment,
         integer_iteration,
     ]
     for index in cases.size():
@@ -59,17 +91,134 @@ func array_oob_write() -> void:
     after("array_oob_write")
 
 
-func packed_oob_read() -> void:
-    before("packed_oob_read")
+func packed_byte_oob_read() -> void:
+    before("packed_byte_oob_read")
     var value: Variant = PackedByteArray([1])[4]
-    after("packed_oob_read:" + str(value))
+    after("packed_byte_oob_read:" + str(value))
 
 
-func packed_oob_write() -> void:
-    before("packed_oob_write")
+func packed_byte_oob_write() -> void:
+    before("packed_byte_oob_write")
     var values := PackedByteArray([1])
     values[4] = 2
-    after("packed_oob_write")
+    after("packed_byte_oob_write")
+
+
+func packed_int32_oob_read() -> void:
+    before("packed_int32_oob_read")
+    var value: Variant = PackedInt32Array([1])[4]
+    after("packed_int32_oob_read:" + str(value))
+
+
+func packed_int32_oob_write() -> void:
+    before("packed_int32_oob_write")
+    var values := PackedInt32Array([1])
+    values[4] = 2
+    after("packed_int32_oob_write")
+
+
+func packed_int64_oob_read() -> void:
+    before("packed_int64_oob_read")
+    var value: Variant = PackedInt64Array([1])[4]
+    after("packed_int64_oob_read:" + str(value))
+
+
+func packed_int64_oob_write() -> void:
+    before("packed_int64_oob_write")
+    var values := PackedInt64Array([1])
+    values[4] = 2
+    after("packed_int64_oob_write")
+
+
+func packed_float32_oob_read() -> void:
+    before("packed_float32_oob_read")
+    var value: Variant = PackedFloat32Array([1.0])[4]
+    after("packed_float32_oob_read:" + str(value))
+
+
+func packed_float32_oob_write() -> void:
+    before("packed_float32_oob_write")
+    var values := PackedFloat32Array([1.0])
+    values[4] = 2.0
+    after("packed_float32_oob_write")
+
+
+func packed_float64_oob_read() -> void:
+    before("packed_float64_oob_read")
+    var value: Variant = PackedFloat64Array([1.0])[4]
+    after("packed_float64_oob_read:" + str(value))
+
+
+func packed_float64_oob_write() -> void:
+    before("packed_float64_oob_write")
+    var values := PackedFloat64Array([1.0])
+    values[4] = 2.0
+    after("packed_float64_oob_write")
+
+
+func packed_string_oob_read() -> void:
+    before("packed_string_oob_read")
+    var value: Variant = PackedStringArray(["one"])[4]
+    after("packed_string_oob_read:" + str(value))
+
+
+func packed_string_oob_write() -> void:
+    before("packed_string_oob_write")
+    var values := PackedStringArray(["one"])
+    values[4] = "two"
+    after("packed_string_oob_write")
+
+
+func packed_vector2_oob_read() -> void:
+    before("packed_vector2_oob_read")
+    var value: Variant = PackedVector2Array([Vector2.ZERO])[4]
+    after("packed_vector2_oob_read:" + str(value))
+
+
+func packed_vector2_oob_write() -> void:
+    before("packed_vector2_oob_write")
+    var values := PackedVector2Array([Vector2.ZERO])
+    values[4] = Vector2.ONE
+    after("packed_vector2_oob_write")
+
+
+func packed_vector3_oob_read() -> void:
+    before("packed_vector3_oob_read")
+    var value: Variant = PackedVector3Array([Vector3.ZERO])[4]
+    after("packed_vector3_oob_read:" + str(value))
+
+
+func packed_vector3_oob_write() -> void:
+    before("packed_vector3_oob_write")
+    var values := PackedVector3Array([Vector3.ZERO])
+    values[4] = Vector3.ONE
+    after("packed_vector3_oob_write")
+
+
+func packed_vector4_oob_read() -> void:
+    before("packed_vector4_oob_read")
+    var value: Variant = PackedVector4Array([Vector4.ZERO])[4]
+    after("packed_vector4_oob_read:" + str(value))
+
+
+func packed_vector4_oob_write() -> void:
+    before("packed_vector4_oob_write")
+    var values := PackedVector4Array([Vector4.ZERO])
+    values[4] = Vector4.ONE
+    after("packed_vector4_oob_write")
+
+
+func packed_color_oob_read() -> void:
+    before("packed_color_oob_read")
+    var value: Variant = PackedColorArray([Color.BLACK])[4]
+    after("packed_color_oob_read:" + str(value))
+
+
+func packed_color_oob_write() -> void:
+    before("packed_color_oob_write")
+    var values := PackedColorArray([Color.BLACK])
+    values[4] = Color.WHITE
+    after("packed_color_oob_write")
 
 
 func wrong_array_key() -> void:
@@ -218,12 +367,122 @@ func invalid_typed_array_append() -> void:
     after("invalid_typed_array_append")
 
 
+func invalid_typed_array_write() -> void:
+    before("invalid_typed_array_write")
+    var values: Array[int] = [1]
+    var source: Variant = "bad"
+    values[0] = source
+    after("invalid_typed_array_write")
+
+
+func valid_typed_array_dynamic_write() -> void:
+    before("valid_typed_array_dynamic_write")
+    var values: Array[int] = [1]
+    var source: Variant = 4
+    values[0] = source
+    after("valid_typed_array_dynamic_write:" + str(values[0]))
+
+
+func invalid_typed_object_array_write() -> void:
+    before("invalid_typed_object_array_write")
+    var values: Array[Node] = [Node.new()]
+    var source: Variant = RefCounted.new()
+    values[0] = source
+    after("invalid_typed_object_array_write")
+
+
+func invalid_typed_array_compound_write() -> void:
+    before("invalid_typed_array_compound_write")
+    var values: Array[int] = [1]
+    var source: Variant = 0.5
+    values[0] += source
+    after("invalid_typed_array_compound_write:" + str(values[0]))
+
+
+func invalid_typed_array_assignment() -> void:
+    before("invalid_typed_array_assignment")
+    var source: Variant = ["bad"]
+    var values: Array[int] = source
+    after("invalid_typed_array_assignment:" + str(values))
+
+
+func invalid_typed_object_array_append() -> void:
+    before("invalid_typed_object_array_append")
+    var values: Array[Node] = []
+    var source: Variant = RefCounted.new()
+    values.append(source)
+    after("invalid_typed_object_array_append")
+
+
+func invalid_typed_dictionary_key() -> void:
+    before("invalid_typed_dictionary_key")
+    var values: Dictionary[String, int] = {}
+    var source: Variant = 4
+    values[source] = 1
+    after("invalid_typed_dictionary_key")
+
+
+func invalid_typed_dictionary_read_key() -> void:
+    before("invalid_typed_dictionary_read_key")
+    var values: Dictionary[String, Variant] = {"value": 1}
+    var source: Variant = 4
+    var value: Variant = values[source]
+    after("invalid_typed_dictionary_read_key:" + str(value))
+
+
+func missing_typed_dictionary_key() -> void:
+    before("missing_typed_dictionary_key")
+    var values: Dictionary[String, Variant] = {"value": 1}
+    var source: Variant = "missing"
+    var value: Variant = values[source]
+    after("missing_typed_dictionary_key:" + str(value))
+
+
+func valid_typed_dictionary_dynamic_write() -> void:
+    before("valid_typed_dictionary_dynamic_write")
+    var values: Dictionary[String, int] = {}
+    var key: Variant = "value"
+    var value: Variant = 4
+    values[key] = value
+    after("valid_typed_dictionary_dynamic_write:" + str(values["value"]))
+
+
+func invalid_typed_dictionary_compound_key() -> void:
+    before("invalid_typed_dictionary_compound_key")
+    var values: Dictionary[String, int] = {"value": 1}
+    var source: Variant = 4
+    values[source] += 1
+    after("invalid_typed_dictionary_compound_key")
+
+
+func invalid_typed_dictionary_compound_value() -> void:
+    before("invalid_typed_dictionary_compound_value")
+    var values: Dictionary[String, int] = {"value": 1}
+    var source: Variant = 0.5
+    values["value"] += source
+    after("invalid_typed_dictionary_compound_value:" + str(values["value"]))
+
+
 func invalid_typed_dictionary_set() -> void:
     before("invalid_typed_dictionary_set")
     var values: Dictionary[String, int] = {}
     var source: Variant = "bad"
     values["value"] = source
     after("invalid_typed_dictionary_set")
+
+
+func invalid_typed_dictionary_assignment() -> void:
+    before("invalid_typed_dictionary_assignment")
+    var source: Variant = {4: "bad"}
+    var values: Dictionary[String, int] = source
+    after("invalid_typed_dictionary_assignment:" + str(values))
+
+
+func invalid_packed_array_assignment() -> void:
+    before("invalid_packed_array_assignment")
+    var source: Variant = PackedStringArray(["bad"])
+    var values: PackedInt32Array = source
+    after("invalid_packed_array_assignment:" + str(values))
 
 
 func integer_iteration() -> void:
