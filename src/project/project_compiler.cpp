@@ -16,6 +16,7 @@
 #include "project_file_selector.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <fstream>
 #include <iomanip>
@@ -2723,6 +2724,27 @@ ProjectCompileResult ProjectCompiler::compile_impl(const ProjectCompileOptions& 
         result.diagnostics.push_back(
             {generated, project_error("PRJ0019", "cannot reconcile generated translation units")});
         return result;
+    }
+
+    // These files belonged to the retired CMake-driven project build. The direct native builder
+    // no longer reads or generates them, but an in-place plug-in upgrade can leave them beside the
+    // current manifest. Reconcile the compiler-owned output directory so an old descriptor cannot
+    // advertise a retired entry symbol and old CMake scripts cannot be mistaken for active build
+    // inputs by tooling or support diagnostics.
+    constexpr std::array<std::string_view, 4> retired_scaffold{
+        "CMakeLists.txt",
+        "gdpp_project.gdextension",
+        "patch_godot_cpp_class_db.cmake",
+        "prune_stale_development.cmake",
+    };
+    for (const auto name : retired_scaffold) {
+        std::filesystem::remove(output / name, error);
+        if (error) {
+            result.diagnostics.push_back(
+                {output / name,
+                 project_error("PRJ0022", "cannot remove retired project build scaffold")});
+            return result;
+        }
     }
 
     const auto relative_output = output.lexically_relative(root);
