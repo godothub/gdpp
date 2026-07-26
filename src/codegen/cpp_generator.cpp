@@ -215,13 +215,13 @@ void collect_assigned_symbols(const std::vector<ir::Statement>& statements,
             statement.condition->resolution == ir::ResolutionKind::none &&
             statement.condition->symbol_identity != 0) {
             const auto& target = *statement.condition;
-            symbols.try_emplace(target.symbol_identity, AsyncLocalSymbol{
-                                                            target.value,
-                                                            target.storage_type.kind ==
-                                                                    TypeKind::unknown
-                                                                ? target.type
-                                                                : target.storage_type,
-                                                        });
+            symbols.try_emplace(target.symbol_identity,
+                                AsyncLocalSymbol{
+                                    target.value,
+                                    target.storage_type.kind == TypeKind::unknown
+                                        ? target.type
+                                        : target.storage_type,
+                                });
         }
         collect_assigned_symbols(statement.body, symbols);
         collect_assigned_symbols(statement.else_body, symbols);
@@ -398,25 +398,29 @@ void emit_rpc_configurations(std::ostringstream& source, const std::vector<ir::F
                << prefix << "    gdpp_rpc_config[\"rpc_mode\"] = godot::MultiplayerAPI::"
                << (rpc.permission == RpcPermission::any_peer ? "RPC_MODE_ANY_PEER"
                                                              : "RPC_MODE_AUTHORITY")
-               << ";\n"
-               << prefix << "    gdpp_rpc_config[\"transfer_mode\"] = godot::MultiplayerPeer::";
-        switch (rpc.transfer_mode) {
-        case RpcTransferMode::unreliable:
-            source << "TRANSFER_MODE_UNRELIABLE";
-            break;
-        case RpcTransferMode::unreliable_ordered:
-            source << "TRANSFER_MODE_UNRELIABLE_ORDERED";
-            break;
-        case RpcTransferMode::reliable:
-            source << "TRANSFER_MODE_RELIABLE";
-            break;
+               << ";\n";
+        if (rpc.transfer_mode_explicit) {
+            source << prefix << "    gdpp_rpc_config[\"transfer_mode\"] = godot::MultiplayerPeer::";
+            switch (rpc.transfer_mode) {
+            case RpcTransferMode::unreliable:
+                source << "TRANSFER_MODE_UNRELIABLE";
+                break;
+            case RpcTransferMode::unreliable_ordered:
+                source << "TRANSFER_MODE_UNRELIABLE_ORDERED";
+                break;
+            case RpcTransferMode::reliable:
+                source << "TRANSFER_MODE_RELIABLE";
+                break;
+            }
+            source << ";\n";
         }
-        source << ";\n"
-               << prefix
-               << "    gdpp_rpc_config[\"call_local\"] = " << (rpc.call_local ? "true" : "false")
-               << ";\n"
-               << prefix << "    gdpp_rpc_config[\"channel\"] = int64_t{" << rpc.channel << "};\n"
-               << prefix << "    rpc_config(" << godot_string_name(function.name)
+        if (rpc.call_local_explicit)
+            source << prefix << "    gdpp_rpc_config[\"call_local\"] = "
+                   << (rpc.call_local ? "true" : "false") << ";\n";
+        if (rpc.channel_explicit)
+            source << prefix << "    gdpp_rpc_config[\"channel\"] = int64_t{" << rpc.channel
+                   << "};\n";
+        source << prefix << "    rpc_config(" << godot_string_name(function.name)
                << ", gdpp_rpc_config);\n"
                << prefix << "}\n";
     }
@@ -1570,9 +1574,8 @@ std::string CodeGenerator::emit_attached_script_cast(const Type& target, std::st
     if (source_path.empty())
         return value;
     const auto* location_span = source_span ? source_span : current_expression_span_;
-    const auto location = location_span
-                              ? ", " + script_location(*location_span)
-                              : ", gdpp::runtime::ScriptSourceLocation{}";
+    const auto location = location_span ? ", " + script_location(*location_span)
+                                        : ", gdpp::runtime::ScriptSourceLocation{}";
     auto object = "gdpp::runtime::strict_attached_script_storage("
                   "gdpp::runtime::to_variant(" +
                   std::move(value) + "), " + godot_string(source_path) + location + ")";
@@ -1897,12 +1900,9 @@ bool CodeGenerator::managed_constant_reference(const ir::Expression& expression)
 }
 
 std::string CodeGenerator::emit_conversion(const Type& target, const Type& source,
-                                           std::string value,
-                                           const SourceSpan* source_span) const {
+                                           std::string value, const SourceSpan* source_span) const {
     const auto* location_span = source_span ? source_span : current_expression_span_;
-    const auto location = location_span
-                              ? ", " + script_location(*location_span)
-                              : std::string{};
+    const auto location = location_span ? ", " + script_location(*location_span) : std::string{};
     if (target.kind == TypeKind::void_type)
         return "(static_cast<void>(" + value + "))";
     if (target.is_dynamic())
@@ -1980,21 +1980,21 @@ std::string CodeGenerator::emit_conversion(const Type& target, const Type& sourc
             const auto object_cpp =
                 target_cpp.substr(ref_prefix.size(), target_cpp.size() - ref_prefix.size() - 1);
             return "gdpp::runtime::strict_native_ref_storage<" + object_cpp +
-                   ">(gdpp::runtime::to_variant(" + value + "), " +
-                   godot_string_name(target.name) + location + ")";
+                   ">(gdpp::runtime::to_variant(" + value + "), " + godot_string_name(target.name) +
+                   location + ")";
         }
         auto object_cpp = target_cpp;
         if (!object_cpp.empty() && object_cpp.back() == '*')
             object_cpp.pop_back();
         return "gdpp::runtime::strict_native_pointer_storage<" + object_cpp +
-               ">(gdpp::runtime::to_variant(" + value + "), " +
-               godot_string_name(target.name) + location + ")";
+               ">(gdpp::runtime::to_variant(" + value + "), " + godot_string_name(target.name) +
+               location + ")";
     }
     const auto conversion = classify_conversion(target, source);
     if (conversion == ConversionKind::dynamic) {
         return "gdpp::runtime::strict_builtin_storage<" + cpp_type(target) +
-               ">(gdpp::runtime::to_variant(" + value + "), " + variant_type(target) +
-               location + ")";
+               ">(gdpp::runtime::to_variant(" + value + "), " + variant_type(target) + location +
+               ")";
     }
     if (conversion == ConversionKind::implicit) {
         return "static_cast<" + cpp_type(target) + ">(gdpp::runtime::to_variant(" + value + "))";
@@ -2066,9 +2066,8 @@ CodeGenerator::emit_parameter_default_initializers(const std::vector<ir::Paramet
         }
         if (parameter.type.is_dynamic())
             fallback = "gdpp::runtime::to_variant(" + fallback + ")";
-        const auto supplied =
-            emit_conversion(parameter.type, {TypeKind::variant, "Variant"}, native_name,
-                            &parameter.span);
+        const auto supplied = emit_conversion(parameter.type, {TypeKind::variant, "Variant"},
+                                              native_name, &parameter.span);
         result += prefix + cpp_type(parameter.type) + " " + source_name + " = " +
                   "gdpp::runtime::is_default_argument(" + native_name + ") ? " + fallback + " : " +
                   supplied + ";\n";
@@ -2751,10 +2750,8 @@ std::string CodeGenerator::emit_expression(const ir::Expression& expression) con
                "get_node<godot::Node>(" + godot_node_path(path) + "))";
     }
     case ir::ExpressionKind::identifier:
-        if (expression.resolution == ir::ResolutionKind::none &&
-            expression.symbol_identity != 0) {
-            if (const auto override =
-                    local_expression_overrides_.find(expression.symbol_identity);
+        if (expression.resolution == ir::ResolutionKind::none && expression.symbol_identity != 0) {
+            if (const auto override = local_expression_overrides_.find(expression.symbol_identity);
                 override != local_expression_overrides_.end()) {
                 return override->second;
             }
@@ -4364,9 +4361,9 @@ std::string CodeGenerator::emit_expression(const ir::Expression& expression) con
             const auto& parameter = lambda.parameters[index];
             result += "    [[maybe_unused]] " + cpp_type(parameter.type) + " " +
                       sanitize_identifier(parameter.name) + " = ";
-            const auto converted = emit_conversion(parameter.type, {TypeKind::variant, "Variant"},
-                                                   arguments + "[" + std::to_string(index) + "]",
-                                                   &parameter.span);
+            const auto converted =
+                emit_conversion(parameter.type, {TypeKind::variant, "Variant"},
+                                arguments + "[" + std::to_string(index) + "]", &parameter.span);
             if (parameter.default_value) {
                 result += arguments + ".size() > " + std::to_string(index) + " ? " + converted +
                           " : " + emit_expression(*parameter.default_value);
@@ -5914,12 +5911,11 @@ std::string CodeGenerator::emit_statement_body(const ir::Statement& statement,
             result += ") {\n";
             const auto content_indent = indentation + 2;
             for (const auto& binding : bindings) {
-                result +=
-                    indent(content_indent) + "[[maybe_unused]] " + cpp_type(binding.type) + " " +
-                    sanitize_identifier(binding.name) + " = " +
-                    emit_conversion(binding.type, {TypeKind::variant, "Variant"}, binding.slot,
-                                    &branch.span) +
-                    ";\n";
+                result += indent(content_indent) + "[[maybe_unused]] " + cpp_type(binding.type) +
+                          " " + sanitize_identifier(binding.name) + " = " +
+                          emit_conversion(binding.type, {TypeKind::variant, "Variant"},
+                                          binding.slot, &branch.span) +
+                          ";\n";
             }
             for (const auto& guard_statement : branch.guard_prefix)
                 result += emit_statement(guard_statement, content_indent);
@@ -6126,8 +6122,7 @@ std::string CodeGenerator::emit_statement_body(const ir::Statement& statement,
                                                       : cpp_type(statement.declared_type)) +
                 " " + sanitize_identifier(statement.name) + " = " +
                 emit_conversion(statement.declared_type, statement.iteration.element_type,
-                                iterable_name + ".native()[" + index_name + "]",
-                                &statement.span) +
+                                iterable_name + ".native()[" + index_name + "]", &statement.span) +
                 ";\n";
             for (const auto& child : statement.body)
                 result += emit_statement(child, indentation + 2);
@@ -6152,8 +6147,7 @@ std::string CodeGenerator::emit_statement_body(const ir::Statement& statement,
                                                       : cpp_type(statement.declared_type)) +
                 " " + sanitize_identifier(statement.name) + " = " +
                 emit_conversion(statement.declared_type, statement.iteration.element_type,
-                                iterable_name + ".substr(" + index_name + ", 1)",
-                                &statement.span) +
+                                iterable_name + ".substr(" + index_name + ", 1)", &statement.span) +
                 ";\n";
             for (const auto& child : statement.body)
                 result += emit_statement(child, indentation + 2);
@@ -6363,23 +6357,29 @@ void CodeGenerator::emit_attached_descriptor_definition(
                    << "            config[\"rpc_mode\"] = godot::MultiplayerAPI::"
                    << (rpc.permission == RpcPermission::any_peer ? "RPC_MODE_ANY_PEER"
                                                                  : "RPC_MODE_AUTHORITY")
-                   << ";\n"
-                   << "            config[\"transfer_mode\"] = godot::MultiplayerPeer::";
-            switch (rpc.transfer_mode) {
-            case RpcTransferMode::unreliable:
-                source << "TRANSFER_MODE_UNRELIABLE";
-                break;
-            case RpcTransferMode::unreliable_ordered:
-                source << "TRANSFER_MODE_UNRELIABLE_ORDERED";
-                break;
-            case RpcTransferMode::reliable:
-                source << "TRANSFER_MODE_RELIABLE";
-                break;
+                   << ";\n";
+            if (rpc.transfer_mode_explicit) {
+                source << "            config[\"transfer_mode\"] = "
+                          "godot::MultiplayerPeer::";
+                switch (rpc.transfer_mode) {
+                case RpcTransferMode::unreliable:
+                    source << "TRANSFER_MODE_UNRELIABLE";
+                    break;
+                case RpcTransferMode::unreliable_ordered:
+                    source << "TRANSFER_MODE_UNRELIABLE_ORDERED";
+                    break;
+                case RpcTransferMode::reliable:
+                    source << "TRANSFER_MODE_RELIABLE";
+                    break;
+                }
+                source << ";\n";
             }
-            source << ";\n            config[\"call_local\"] = "
-                   << (rpc.call_local ? "true" : "false") << ";\n"
-                   << "            config[\"channel\"] = int64_t{" << rpc.channel
-                   << "};\n            rpc[" << godot_string_name(function.name)
+            if (rpc.call_local_explicit)
+                source << "            config[\"call_local\"] = "
+                       << (rpc.call_local ? "true" : "false") << ";\n";
+            if (rpc.channel_explicit)
+                source << "            config[\"channel\"] = int64_t{" << rpc.channel << "};\n";
+            source << "            rpc[" << godot_string_name(function.name)
                    << "] = config;\n        }\n";
         }
         source << "        descriptor.rpc_config = rpc;\n    }\n";

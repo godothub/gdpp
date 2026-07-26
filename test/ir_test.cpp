@@ -483,8 +483,11 @@ TEST_CASE("typed IR normalizes RPC annotations before code generation") {
     REQUIRE(module.functions.front().rpc.has_value());
     REQUIRE_EQ(module.functions.front().rpc->permission, gdpp::RpcPermission::any_peer);
     REQUIRE_EQ(module.functions.front().rpc->transfer_mode, gdpp::RpcTransferMode::reliable);
+    REQUIRE(module.functions.front().rpc->transfer_mode_explicit);
     REQUIRE(module.functions.front().rpc->call_local);
+    REQUIRE(module.functions.front().rpc->call_local_explicit);
     REQUIRE_EQ(module.functions.front().rpc->channel, std::int64_t{7});
+    REQUIRE(module.functions.front().rpc->channel_explicit);
     gdpp::IrVerifier verifier{diagnostics};
     REQUIRE(verifier.verify(module));
 }

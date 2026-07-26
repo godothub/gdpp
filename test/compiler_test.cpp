@@ -518,17 +518,14 @@ TEST_CASE("compiler applies internal call contracts to every native storage fami
     REQUIRE(result.unit.source.find(
                 "gdpp::runtime::strict_typed_storage<godot::TypedDictionary<godot::String, "
                 "int64_t>>(gdpp::runtime::to_variant(_gdpp_call_argument_") != std::string::npos);
-    REQUIRE(result.unit.source.find(
-                "gdpp::runtime::strict_native_pointer_storage<godot::Node>("
-                "gdpp::runtime::to_variant(_gdpp_call_argument_") !=
+    REQUIRE(result.unit.source.find("gdpp::runtime::strict_native_pointer_storage<godot::Node>("
+                                    "gdpp::runtime::to_variant(_gdpp_call_argument_") !=
             std::string::npos);
-    REQUIRE(result.unit.source.find(
-                "gdpp::runtime::strict_builtin_storage<godot::String>("
-                "gdpp::runtime::to_variant(_gdpp_call_argument_") !=
+    REQUIRE(result.unit.source.find("gdpp::runtime::strict_builtin_storage<godot::String>("
+                                    "gdpp::runtime::to_variant(_gdpp_call_argument_") !=
             std::string::npos);
-    REQUIRE(result.unit.source.find(
-                "gdpp::runtime::strict_builtin_storage<godot::Vector3>("
-                "gdpp::runtime::to_variant(_gdpp_call_argument_") !=
+    REQUIRE(result.unit.source.find("gdpp::runtime::strict_builtin_storage<godot::Vector3>("
+                                    "gdpp::runtime::to_variant(_gdpp_call_argument_") !=
             std::string::npos);
 }
 
@@ -891,18 +888,15 @@ TEST_CASE("compiler generates registered internal classes and native lambda Call
 
 TEST_CASE("lambda call frames copy creation snapshots per invocation") {
     const gdpp::Compiler compiler;
-    const auto result = compiler.compile(
-        "lambda_snapshots.gd",
-        "func make() -> Callable:\n"
-        "    var captured := 1\n"
-        "    return func() -> int:\n"
-        "        captured += 1\n"
-        "        return captured\n");
+    const auto result = compiler.compile("lambda_snapshots.gd", "func make() -> Callable:\n"
+                                                                "    var captured := 1\n"
+                                                                "    return func() -> int:\n"
+                                                                "        captured += 1\n"
+                                                                "        return captured\n");
 
     REQUIRE(result.success);
     const auto callable = result.unit.source.find("gdpp::runtime::make_local_callable(");
-    const auto creation_snapshot =
-        result.unit.source.find(") -> godot::Variant {", callable);
+    const auto creation_snapshot = result.unit.source.find(") -> godot::Variant {", callable);
     const auto invocation_snapshot =
         result.unit.source.find("return [=]() mutable -> godot::Variant {", creation_snapshot);
     const auto invocation = result.unit.source.find("captured", invocation_snapshot);
@@ -916,21 +910,21 @@ TEST_CASE("lambda call frames copy creation snapshots per invocation") {
 
 TEST_CASE("async loop lambdas snapshot symbol-identified cells at creation") {
     const gdpp::Compiler compiler;
-    const auto result = compiler.compile(
-        "async_lambda_snapshots.gd",
-        "extends Node\n"
-        "signal resume\n"
-        "func run() -> void:\n"
-        "    var captured := 1\n"
-        "    var iteration := 0\n"
-        "    while iteration < 1:\n"
-        "        await resume\n"
-        "        var callback := func() -> int:\n"
-        "            captured += 1\n"
-        "            return captured\n"
-        "        captured = 10\n"
-        "        print(callback.call(), captured, callback.call(), captured)\n"
-        "        iteration += 1\n");
+    const auto result =
+        compiler.compile("async_lambda_snapshots.gd",
+                         "extends Node\n"
+                         "signal resume\n"
+                         "func run() -> void:\n"
+                         "    var captured := 1\n"
+                         "    var iteration := 0\n"
+                         "    while iteration < 1:\n"
+                         "        await resume\n"
+                         "        var callback := func() -> int:\n"
+                         "            captured += 1\n"
+                         "            return captured\n"
+                         "        captured = 10\n"
+                         "        print(callback.call(), captured, callback.call(), captured)\n"
+                         "        iteration += 1\n");
 
     REQUIRE(result.success);
     const auto& source = result.unit.source;
@@ -1046,11 +1040,10 @@ TEST_CASE("void lambdas return a Variant when argument conversion fails") {
 
 TEST_CASE("typed lambdas return their declared default value after runtime failure") {
     const gdpp::Compiler compiler;
-    const auto result = compiler.compile(
-        "typed_lambda_failure.gd",
-        "func make() -> Callable:\n"
-        "    return func(values: Array) -> int:\n"
-        "        return values[9]\n");
+    const auto result =
+        compiler.compile("typed_lambda_failure.gd", "func make() -> Callable:\n"
+                                                    "    return func(values: Array) -> int:\n"
+                                                    "        return values[9]\n");
 
     REQUIRE(result.success);
     const auto callable = result.unit.source.find("mutable -> godot::Variant {");
@@ -1316,6 +1309,30 @@ TEST_CASE("compiler emits complete native RPC configuration for Node classes") {
     REQUIRE(result.unit.source.find("descriptor.rpc_config = rpc") != std::string::npos);
 }
 
+TEST_CASE("compiler preserves official RPC configuration field presence") {
+    const gdpp::Compiler compiler;
+    const auto defaults = compiler.compile("rpc_defaults.gd", "extends Node\n"
+                                                              "@rpc\n"
+                                                              "func ping() -> void:\n"
+                                                              "    pass\n");
+    const auto explicit_defaults = compiler.compile(
+        "rpc_explicit_defaults.gd", "extends Node\n"
+                                    "@rpc(\"authority\", \"call_remote\", \"unreliable\", 0)\n"
+                                    "func ping() -> void:\n"
+                                    "    pass\n");
+
+    REQUIRE(defaults.success);
+    REQUIRE(defaults.unit.source.find("RPC_MODE_AUTHORITY") != std::string::npos);
+    REQUIRE(defaults.unit.source.find("[\"transfer_mode\"]") == std::string::npos);
+    REQUIRE(defaults.unit.source.find("[\"call_local\"]") == std::string::npos);
+    REQUIRE(defaults.unit.source.find("[\"channel\"]") == std::string::npos);
+
+    REQUIRE(explicit_defaults.success);
+    REQUIRE(explicit_defaults.unit.source.find("TRANSFER_MODE_UNRELIABLE") != std::string::npos);
+    REQUIRE(explicit_defaults.unit.source.find("[\"call_local\"] = false") != std::string::npos);
+    REQUIRE(explicit_defaults.unit.source.find("[\"channel\"] = int64_t{0}") != std::string::npos);
+}
+
 TEST_CASE("compiler accepts inert RPC metadata on non-Node classes") {
     const gdpp::Compiler compiler;
     const auto result = compiler.compile("rpc_ref.gd", "extends RefCounted\n"
@@ -1392,10 +1409,10 @@ TEST_CASE("compiler preloads member resources before instances are constructed")
     REQUIRE(result.unit.header.find("static godot::Variant& _gdpp_preloaded_scene()") !=
             std::string::npos);
     REQUIRE(result.unit.source.find("scene = _gdpp_preloaded_scene();") != std::string::npos);
-    REQUIRE(result.unit.source.find(
-                "_gdpp_preloaded_scene() = gdpp::runtime::to_variant("
-                "gdpp::runtime::strict_native_ref_storage<godot::PackedScene>(") !=
-            std::string::npos);
+    REQUIRE(
+        result.unit.source.find("_gdpp_preloaded_scene() = gdpp::runtime::to_variant("
+                                "gdpp::runtime::strict_native_ref_storage<godot::PackedScene>(") !=
+        std::string::npos);
     REQUIRE(result.unit.source.find("gdpp::runtime::load_resource(") != std::string::npos);
     REQUIRE(result.unit.header.find("static void _gdpp_release_preloaded_resources()") !=
             std::string::npos);
@@ -2344,9 +2361,9 @@ TEST_CASE("compiler preserves explicit typed iterator variables") {
 
     REQUIRE(result.success);
     REQUIRE(result.unit.source.find("_gdpp_array_iterable_") != std::string::npos);
-    REQUIRE(result.unit.source.find("int64_t value = gdpp::runtime::strict_builtin_storage<int64_t>("
-                                    "gdpp::runtime::to_variant(_gdpp_array_iterable_") !=
-            std::string::npos);
+    REQUIRE(result.unit.source.find(
+                "int64_t value = gdpp::runtime::strict_builtin_storage<int64_t>("
+                "gdpp::runtime::to_variant(_gdpp_array_iterable_") != std::string::npos);
     REQUIRE(result.unit.source.find("gdpp::runtime::iter_init") == std::string::npos);
 }
 
@@ -2439,9 +2456,8 @@ TEST_CASE("compiler lowers static object iterators through Godot's Variant proto
     REQUIRE(result.unit.source.find("gdpp::runtime::iter_init") != std::string::npos);
     REQUIRE(result.unit.source.find("gdpp::runtime::iter_next") != std::string::npos);
     REQUIRE(result.unit.source.find("gdpp::runtime::iter_get") != std::string::npos);
-    REQUIRE(result.unit.source.find(
-                "godot::StringName value = "
-                "gdpp::runtime::strict_builtin_storage<godot::StringName>(") !=
+    REQUIRE(result.unit.source.find("godot::StringName value = "
+                                    "gdpp::runtime::strict_builtin_storage<godot::StringName>(") !=
             std::string::npos);
 }
 
@@ -4023,9 +4039,9 @@ TEST_CASE("semantic flow narrows type-tested values in if and while bodies") {
     REQUIRE(result.success);
     REQUIRE(result.unit.source.find("godot::Object::cast_to<godot::Node>") != std::string::npos);
     REQUIRE(result.unit.source.find("->get_name()") != std::string::npos);
-    REQUIRE(result.unit.source.find(
-                "gdpp::runtime::strict_builtin_storage<godot::Array>("
-                "gdpp::runtime::to_variant(value), godot::Variant::ARRAY") != std::string::npos);
+    REQUIRE(result.unit.source.find("gdpp::runtime::strict_builtin_storage<godot::Array>("
+                                    "gdpp::runtime::to_variant(value), godot::Variant::ARRAY") !=
+            std::string::npos);
     REQUIRE(result.unit.source.find(".size()") != std::string::npos);
     REQUIRE(result.unit.source.find("gdpp::runtime::get_named") == std::string::npos);
 }
@@ -4272,13 +4288,13 @@ TEST_CASE("semantic flow narrows structural match subjects and guarded bindings"
                                           "        _: return \"\"\n");
 
     REQUIRE(result.success);
-    REQUIRE(result.unit.source.find(
-                "gdpp::runtime::strict_builtin_storage<godot::Array>("
-                "gdpp::runtime::to_variant(value), godot::Variant::ARRAY") != std::string::npos);
-    REQUIRE(result.unit.source.find(
-                "gdpp::runtime::strict_builtin_storage<godot::Dictionary>("
-                "gdpp::runtime::to_variant(value), godot::Variant::DICTIONARY") !=
+    REQUIRE(result.unit.source.find("gdpp::runtime::strict_builtin_storage<godot::Array>("
+                                    "gdpp::runtime::to_variant(value), godot::Variant::ARRAY") !=
             std::string::npos);
+    REQUIRE(
+        result.unit.source.find("gdpp::runtime::strict_builtin_storage<godot::Dictionary>("
+                                "gdpp::runtime::to_variant(value), godot::Variant::DICTIONARY") !=
+        std::string::npos);
     REQUIRE(result.unit.source.find("godot::Object::cast_to<godot::Node>") != std::string::npos);
     REQUIRE(result.unit.source.find("gdpp::runtime::call_dynamic") == std::string::npos);
     REQUIRE(result.unit.source.find("gdpp::runtime::get_named") == std::string::npos);

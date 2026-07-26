@@ -4456,18 +4456,23 @@ void SemanticAnalyzer::analyze_rpc_annotations(const ast::FunctionDeclaration& f
         } else if (*value == "call_remote") {
             ++locality_arguments;
             configuration.call_local = false;
+            configuration.call_local_explicit = true;
         } else if (*value == "call_local") {
             ++locality_arguments;
             configuration.call_local = true;
+            configuration.call_local_explicit = true;
         } else if (*value == "unreliable") {
             ++transfer_arguments;
             configuration.transfer_mode = RpcTransferMode::unreliable;
+            configuration.transfer_mode_explicit = true;
         } else if (*value == "unreliable_ordered") {
             ++transfer_arguments;
             configuration.transfer_mode = RpcTransferMode::unreliable_ordered;
+            configuration.transfer_mode_explicit = true;
         } else if (*value == "reliable") {
             ++transfer_arguments;
             configuration.transfer_mode = RpcTransferMode::reliable;
+            configuration.transfer_mode_explicit = true;
         } else {
             diagnostics_.error("GDS4135",
                                "invalid RPC argument '" + *value +
@@ -4503,6 +4508,7 @@ void SemanticAnalyzer::analyze_rpc_annotations(const ast::FunctionDeclaration& f
             valid = false;
         } else {
             configuration.channel = *channel;
+            configuration.channel_explicit = true;
         }
     }
     if (valid)

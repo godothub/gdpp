@@ -15,6 +15,9 @@ struct RpcConfiguration {
     RpcTransferMode transfer_mode{RpcTransferMode::unreliable};
     bool call_local{false};
     std::int64_t channel{0};
+    bool transfer_mode_explicit{false};
+    bool call_local_explicit{false};
+    bool channel_explicit{false};
 };
 
 } // namespace gdpp
