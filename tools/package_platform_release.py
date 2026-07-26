@@ -25,6 +25,7 @@ RUNTIME_FILES = {
     "integer_semantics_header_sha256": "include/gdpp/numeric/integer_semantics.hpp",
 }
 RUNTIME_FIELDS = ("runtime_abi", *RUNTIME_FILES)
+API_FIELDS = ("api_kind", "api_sha256", "precision")
 
 
 @dataclass(frozen=True)
@@ -99,6 +100,26 @@ def require_runtime_contract(
     return contract
 
 
+def require_api_contract(
+    sdk: Path,
+    fields: dict[str, str],
+    expected: dict[str, str] | None,
+) -> dict[str, str]:
+    contract = {field: fields.get(field, "") for field in API_FIELDS}
+    if contract["api_kind"] != "official":
+        fail(f"commercial release SDK must use a pinned official Godot API: {sdk}")
+    if contract["precision"] != "single":
+        fail(f"commercial release SDK must use the single-precision Godot ABI: {sdk}")
+    if (
+        len(contract["api_sha256"]) != 64
+        or any(character not in "0123456789abcdef" for character in contract["api_sha256"])
+    ):
+        fail(f"SDK Godot API SHA-256 is missing or malformed: {sdk / 'sdk.manifest'}")
+    if expected is not None and contract != expected:
+        fail(f"SDK Godot API contract conflicts with another package component: {sdk}")
+    return contract
+
+
 def validate_static_addon(addon: Path, package: PlatformPackage) -> str:
     if addon.name != "gdpp" or addon.parent.name != "addons":
         fail(f"host component path must end in addons/gdpp: {addon}")
@@ -137,7 +158,7 @@ def validate_host_sdk(
     godot_version: str,
     gdpp_version: str,
     runtime_contract: dict[str, str] | None,
-) -> dict[str, str]:
+) -> tuple[dict[str, str], dict[str, str]]:
     require_no_symlinks(sdk)
     for relative in package_release.HOST_SDK_PATHS:
         if not (sdk / relative).exists():
@@ -168,7 +189,10 @@ def validate_host_sdk(
         ):
             fail(f"Windows SDK must use an MSVC 19.x toolset: {manifest}")
     package_release.require_profile_libraries(sdk / "lib", ("template_release",))
-    return require_runtime_contract(sdk, fields, runtime_contract)
+    return (
+        require_runtime_contract(sdk, fields, runtime_contract),
+        require_api_contract(sdk, fields, None),
+    )
 
 
 def validate_android_sdk(
@@ -176,6 +200,7 @@ def validate_android_sdk(
     godot_version: str,
     gdpp_version: str,
     runtime_contract: dict[str, str],
+    api_contract: dict[str, str],
 ) -> None:
     require_no_symlinks(sdk)
     manifest = sdk / "sdk.manifest"
@@ -202,6 +227,7 @@ def validate_android_sdk(
     )
     package_release.require_profile_libraries(sdk / "lib", ("template_release",))
     require_runtime_contract(sdk, fields, runtime_contract)
+    require_api_contract(sdk, fields, api_contract)
 
 
 def validate_ios_sdk(
@@ -209,6 +235,7 @@ def validate_ios_sdk(
     godot_version: str,
     gdpp_version: str,
     runtime_contract: dict[str, str],
+    api_contract: dict[str, str],
 ) -> None:
     require_no_symlinks(sdk)
     manifest = sdk / "sdk.manifest"
@@ -237,6 +264,7 @@ def validate_ios_sdk(
     package_release.require_profile_libraries(sdk / "lib/device", ("template_release",))
     package_release.require_profile_libraries(sdk / "lib/simulator", ("template_release",))
     require_runtime_contract(sdk, fields, runtime_contract)
+    require_api_contract(sdk, fields, api_contract)
 
 
 def validate_web_sdk(
@@ -245,6 +273,7 @@ def validate_web_sdk(
     variant: str,
     gdpp_version: str,
     runtime_contract: dict[str, str],
+    api_contract: dict[str, str],
 ) -> None:
     require_no_symlinks(sdk)
     manifest = sdk / "sdk.manifest"
@@ -277,6 +306,7 @@ def validate_web_sdk(
     if variant == "threads" and any(".nothreads." in name for name in archives):
         fail(f"multi-threaded Web SDK contains a nothreads archive: {sdk}")
     require_runtime_contract(sdk, fields, runtime_contract)
+    require_api_contract(sdk, fields, api_contract)
 
 
 def host_component(components: Path, package: PlatformPackage) -> Path:
@@ -331,7 +361,7 @@ def stage_platform_package(
     runtime_contract: dict[str, str] | None = None
 
     for godot_version in package_release.SUPPORTED_GODOT_VERSIONS:
-        runtime_contract = validate_host_sdk(
+        runtime_contract, api_contract = validate_host_sdk(
             addon / "sdk" / godot_version,
             host,
             godot_version,
@@ -343,6 +373,7 @@ def stage_platform_package(
             godot_version,
             gdpp_version,
             runtime_contract,
+            api_contract,
         )
         for variant in WEB_VARIANTS:
             validate_web_sdk(
@@ -351,6 +382,7 @@ def stage_platform_package(
                 variant,
                 gdpp_version,
                 runtime_contract,
+                api_contract,
             )
         if package.include_ios:
             validate_ios_sdk(
@@ -358,6 +390,7 @@ def stage_platform_package(
                 godot_version,
                 gdpp_version,
                 runtime_contract,
+                api_contract,
             )
 
     if runtime_contract is None:
@@ -407,6 +440,8 @@ def stage_platform_package(
         f"version {gdpp_version}\n"
         "compiler_godot_api 4.4\n"
         "target_godot_apis 4.4,4.5,4.6,4.7\n"
+        "godot_precision single\n"
+        "api_fingerprints sha256-verified\n"
         f"host {package_name}\n"
         f"editor_host {host.platform}-{host.architecture}\n"
         f"host_platform_minimum {host.platform_minimum}\n"
@@ -456,6 +491,7 @@ def validate_shared_target_manifest(
     manifest: Path,
     expected: dict[str, str],
     runtime_contract: dict[str, str],
+    api_contract: dict[str, str],
 ) -> None:
     schema, fields = package_release.read_sdk_manifest(manifest)
     package_release.require_fields(
@@ -472,6 +508,9 @@ def validate_shared_target_manifest(
     contract = {field: fields.get(field, "") for field in RUNTIME_FIELDS}
     if contract != runtime_contract:
         fail(f"shared target manifest runtime contract conflicts with the host SDK: {manifest}")
+    target_api_contract = {field: fields.get(field, "") for field in API_FIELDS}
+    if target_api_contract != api_contract:
+        fail(f"shared target manifest Godot API contract conflicts with the host SDK: {manifest}")
 
 
 def validate_platform_stage(addon: Path, package_name: str, gdpp_version: str) -> None:
@@ -523,6 +562,7 @@ def validate_platform_stage(addon: Path, package_name: str, gdpp_version: str) -
             host_fields,
             None,
         )
+        api_contract = require_api_contract(version_root, host_fields, None)
         manifests = version_root / "manifests"
         validate_shared_target_manifest(
             manifests / "android.arm64.sdk.manifest",
@@ -533,6 +573,7 @@ def validate_platform_stage(addon: Path, package_name: str, gdpp_version: str) -
                 "gdpp_version": gdpp_version,
             },
             runtime_contract,
+            api_contract,
         )
         for variant in WEB_VARIANTS:
             validate_shared_target_manifest(
@@ -545,6 +586,7 @@ def validate_platform_stage(addon: Path, package_name: str, gdpp_version: str) -
                     "gdpp_version": gdpp_version,
                 },
                 runtime_contract,
+                api_contract,
             )
         ios_manifest = manifests / "ios.arm64.sdk.manifest"
         if package.include_ios:
@@ -557,6 +599,7 @@ def validate_platform_stage(addon: Path, package_name: str, gdpp_version: str) -
                     "gdpp_version": gdpp_version,
                 },
                 runtime_contract,
+                api_contract,
             )
         elif ios_manifest.exists():
             fail(f"{package_name} package cannot contain an iOS SDK manifest")

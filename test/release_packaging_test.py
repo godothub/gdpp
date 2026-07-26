@@ -61,6 +61,9 @@ RUNTIME_FIELDS = {
     },
 }
 COMMON_FIELDS = {
+    "api_kind": "official",
+    "api_sha256": "a" * 64,
+    "precision": "single",
     "distribution_binding": "template_release",
     "distribution_optimization": "Release",
     "gdpp_version": "1.7.10",

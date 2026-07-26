@@ -13,7 +13,7 @@ from pathlib import Path
 
 
 SUPPORTED_GODOT_VERSIONS = ("4.4", "4.5", "4.6", "4.7")
-SDK_SCHEMA = 11
+SDK_SCHEMA = 12
 STATIC_ADDON_FILES = (
     "build_progress.gd",
     "native_build_job.gd",
