@@ -12,7 +12,7 @@ func _side_effect(marker: String) -> int:
 func _direct_bounds_failure() -> void:
     markers.push_back("direct-before")
     var values := [1]
-    var result := _side_effect("left") + values[9] + _side_effect("right")
+    var result: Variant = _side_effect("left") + values[9] + _side_effect("right")
     markers.push_back("direct-after:%d" % result)
 
 
@@ -66,6 +66,48 @@ func _typed_array_engine_error_continues() -> bool:
     return values == [1]
 
 
+func _callable_target(value: int) -> int:
+    markers.push_back("callable-target:%d" % value)
+    return value + 1
+
+
+func _null_callable_failure() -> void:
+    markers.push_back("null-call-before")
+    var callback := Callable()
+    var result: Variant = callback.call(_side_effect("null-call-argument"))
+    markers.push_back("null-call-after:%s" % result)
+
+
+func _callable_arity_failure() -> void:
+    markers.push_back("arity-call-before")
+    var callback: Callable = Callable(self, &"_callable_target")
+    var result: Variant = callback.call()
+    markers.push_back("arity-call-after:%s" % result)
+
+
+func _freed_callable_failure() -> void:
+    var target := Node.new()
+    var callback := Callable(target, &"get_name")
+    target.free()
+    markers.push_back("freed-call-before")
+    var result: Variant = callback.call(_side_effect("freed-call-argument"))
+    markers.push_back("freed-call-after:%s" % result)
+
+
+func _unbound_callable_failure() -> void:
+    markers.push_back("unbound-call-before")
+    var callback: Callable = Callable(self, &"_callable_target").unbind(2)
+    var result: Variant = callback.call()
+    markers.push_back("unbound-call-after:%s" % result)
+
+
+func _null_signal_emit_continues() -> void:
+    markers.push_back("null-emit-before")
+    var empty := Signal()
+    empty.emit(_side_effect("null-emit-argument"))
+    markers.push_back("null-emit-after")
+
+
 func run_contract() -> bool:
     markers.clear()
     _direct_bounds_failure()
@@ -86,4 +128,32 @@ func run_contract() -> bool:
         return false
     if not _typed_array_engine_error_continues():
         return false
-    return markers == ["division-before", "binary-before", "typed-array-after"]
+    if markers != ["division-before", "binary-before", "typed-array-after"]:
+        return false
+    markers.clear()
+    _null_callable_failure()
+    markers.push_back("caller-after-null-call")
+    if markers != ["null-call-before", "null-call-argument", "caller-after-null-call"]:
+        return false
+    markers.clear()
+    _callable_arity_failure()
+    markers.push_back("caller-after-arity-call")
+    if markers != ["arity-call-before", "caller-after-arity-call"]:
+        return false
+    markers.clear()
+    _freed_callable_failure()
+    markers.push_back("caller-after-freed-call")
+    if markers != [
+        "freed-call-before",
+        "freed-call-argument",
+        "caller-after-freed-call",
+    ]:
+        return false
+    markers.clear()
+    _unbound_callable_failure()
+    markers.push_back("caller-after-unbound-call")
+    if markers != ["unbound-call-before", "caller-after-unbound-call"]:
+        return false
+    markers.clear()
+    _null_signal_emit_continues()
+    return markers == ["null-emit-before", "null-emit-argument", "null-emit-after"]
