@@ -2719,6 +2719,62 @@ TEST_CASE("compiler contains invalid native sequence indexes instead of derefere
     REQUIRE(result.unit.source.find("_gdpp_source_path, 4, 32") != std::string::npos);
 }
 
+TEST_CASE("typed container subscripts preserve Godot runtime failure boundaries") {
+    const gdpp::Compiler compiler;
+    const auto result = compiler.compile(
+        "typed_container_boundaries.gd",
+        "func write_array(values: Array[int], source: Variant) -> void:\n"
+        "    values[0] = source\n"
+        "func compound_array(values: Array[int], source: Variant) -> void:\n"
+        "    values[0] += source\n"
+        "func write_dictionary(values: Dictionary[String, int], key: Variant, source: Variant) "
+        "-> void:\n"
+        "    values[key] = source\n"
+        "func compound_dictionary(values: Dictionary[String, int], key: Variant, source: "
+        "Variant) -> void:\n"
+        "    values[key] += source\n"
+        "func read_dictionary(values: Dictionary[String, Variant], key: Variant) -> Variant:\n"
+        "    return values[key]\n");
+
+    REQUIRE(result.success);
+    const auto& source = result.unit.source;
+    const auto section = [&](const std::string& function, const std::string& next) {
+        const auto begin = source.find("::" + function + "(");
+        const auto end = source.find("::" + next + "(", begin + 1);
+        REQUIRE(begin != std::string::npos);
+        REQUIRE(end != std::string::npos);
+        return source.substr(begin, end - begin);
+    };
+
+    const auto array_write = section("write_array", "compound_array");
+    REQUIRE(array_write.find("gdpp::runtime::checked_array_set(") != std::string::npos);
+    REQUIRE(array_write.find("gdpp::runtime::strict_builtin_storage<int64_t>(") ==
+            std::string::npos);
+
+    const auto array_compound = section("compound_array", "write_dictionary");
+    REQUIRE(array_compound.find("gdpp::runtime::checked_array_set(") != std::string::npos);
+    REQUIRE(array_compound.find("gdpp::runtime::strict_builtin_storage<int64_t>(") ==
+            std::string::npos);
+
+    const auto dictionary_write = section("write_dictionary", "compound_dictionary");
+    REQUIRE(dictionary_write.find("gdpp::runtime::checked_dictionary_set(") != std::string::npos);
+    REQUIRE(dictionary_write.find("gdpp::runtime::strict_builtin_storage<int64_t>(") ==
+            std::string::npos);
+
+    const auto dictionary_compound = section("compound_dictionary", "read_dictionary");
+    REQUIRE(dictionary_compound.find("gdpp::runtime::checked_dictionary_get(") !=
+            std::string::npos);
+    REQUIRE(dictionary_compound.find("gdpp::runtime::unchecked_dictionary_set(") !=
+            std::string::npos);
+    const auto dictionary_binary = dictionary_compound.find("gdpp::runtime::binary(");
+    REQUIRE(dictionary_binary != std::string::npos);
+    REQUIRE(dictionary_compound.find("gdpp::runtime::strict_builtin_storage<int64_t>(",
+                                     dictionary_binary) == std::string::npos);
+
+    const auto dictionary_read = source.substr(source.find("::read_dictionary("));
+    REQUIRE(dictionary_read.find("gdpp::runtime::checked_dictionary_get(") != std::string::npos);
+}
+
 TEST_CASE("compiler compares every static Godot object representation by Variant identity") {
     const gdpp::Compiler compiler;
     const auto result = compiler.compile(

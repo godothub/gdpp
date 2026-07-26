@@ -2343,7 +2343,8 @@ std::string CodeGenerator::emit_subscript_read(const Type& container, const Type
                 source_location + ")";
         return emit_conversion(result, result, std::move(value));
     } else if (container.kind == TypeKind::dictionary) {
-        value = target + "[" + index + "]";
+        value = "gdpp::runtime::checked_dictionary_get(" + target + ", gdpp::runtime::to_variant(" +
+                index + "), " + script_location(span) + ")";
     } else {
         value = "gdpp::runtime::get_key(gdpp::runtime::to_variant(" + target +
                 "), gdpp::runtime::to_variant(" + index + "), " + script_location(span) + ")";
@@ -5523,8 +5524,18 @@ std::string CodeGenerator::emit_statement_body(const typed::Statement& statement
                 : target.type.is_dynamic() || statement.expression->type.is_dynamic()
                     ? Type{TypeKind::variant, "Variant"}
                     : target.type;
-            assigned = emit_conversion(target.type, assigned_source_type, std::move(assigned),
-                                       &statement.expression->span);
+            const auto& container_type = target.operands.at(0)->type;
+            // Godot's typed Array/Dictionary subscript operators validate a dynamic Variant at
+            // the container boundary. A failed Array set and a failed compound Dictionary set
+            // leave the container unchanged and continue the script, while a failed direct
+            // Dictionary set becomes a script error. Converting into native element storage
+            // first would incorrectly turn all three cases into the same fatal failure.
+            if (!assigned_source_type.is_dynamic() ||
+                (container_type.kind != TypeKind::array &&
+                 container_type.kind != TypeKind::dictionary)) {
+                assigned = emit_conversion(target.type, assigned_source_type, std::move(assigned),
+                                           &statement.expression->span);
+            }
             assigned = emit_subscript_store(target.operands.at(0)->type, std::move(assigned));
             const auto final_name = "_gdpp_subscript_assigned_" + suffix;
             result += nested_prefix + "const auto " + final_name + " = " + assigned + ";\n";
@@ -5540,9 +5551,15 @@ std::string CodeGenerator::emit_statement_body(const typed::Statement& statement
                           container_name + ", " + index_name + ", " + assigned +
                           ", _gdpp_source_path, " + std::to_string(target.span.begin.line) + ", " +
                           std::to_string(target.span.begin.column) + ");\n";
+            } else if (statement.operation == "=") {
+                result += nested_prefix + "gdpp::runtime::checked_dictionary_set(" +
+                          container_name + ", gdpp::runtime::to_variant(" + index_name +
+                          "), gdpp::runtime::to_variant(" + assigned + "), " +
+                          script_location(target.span) + ");\n";
             } else {
-                result +=
-                    nested_prefix + container_name + "[" + index_name + "] = " + assigned + ";\n";
+                result += nested_prefix + "gdpp::runtime::unchecked_dictionary_set(" +
+                          container_name + ", gdpp::runtime::to_variant(" + index_name +
+                          "), gdpp::runtime::to_variant(" + assigned + "));\n";
             }
             result += prefix + "}\n";
             return result;

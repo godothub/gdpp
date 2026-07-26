@@ -162,15 +162,14 @@ template <typename Target>
     return static_cast<Target>(value);
 }
 
-[[nodiscard]] godot::Object*
-strict_native_object_storage(const godot::Variant& value, const godot::StringName& expected_class,
-                             ScriptSourceLocation location = {});
+[[nodiscard]] godot::Object* strict_native_object_storage(const godot::Variant& value,
+                                                          const godot::StringName& expected_class,
+                                                          ScriptSourceLocation location = {});
 
 template <typename ObjectType>
-[[nodiscard]] ObjectType*
-strict_native_pointer_storage(const godot::Variant& value,
-                              const godot::StringName& expected_class,
-                              const ScriptSourceLocation location = {}) {
+[[nodiscard]] ObjectType* strict_native_pointer_storage(const godot::Variant& value,
+                                                        const godot::StringName& expected_class,
+                                                        const ScriptSourceLocation location = {}) {
     return godot::Object::cast_to<ObjectType>(
         strict_native_object_storage(value, expected_class, location));
 }
@@ -193,19 +192,17 @@ strict_native_ref_storage(const godot::Variant& value, const godot::StringName& 
         strict_native_object_storage(value, expected_class, location)));
 }
 
-[[nodiscard]] godot::Variant
-strict_external_object_storage(const godot::Variant& value,
-                               const godot::StringName& expected_class,
-                               ScriptSourceLocation location = {});
+[[nodiscard]] godot::Variant strict_external_object_storage(const godot::Variant& value,
+                                                            const godot::StringName& expected_class,
+                                                            ScriptSourceLocation location = {});
 
 template <typename PackedArray>
 [[nodiscard]] SharedPackedArray<PackedArray>
-strict_packed_array_storage(const godot::Variant& value,
-                            const ScriptSourceLocation location = {}) {
+strict_packed_array_storage(const godot::Variant& value, const ScriptSourceLocation location = {}) {
     if (script_function_failed())
         return {};
-    const auto expected = static_cast<godot::Variant::Type>(
-        godot::internal::VariantInternalType<PackedArray>::type);
+    const auto expected =
+        static_cast<godot::Variant::Type>(godot::internal::VariantInternalType<PackedArray>::type);
     if (value.get_type() != expected &&
         !godot::Variant::can_convert_strict(value.get_type(), expected)) {
         report_script_failure(godot::String{"Cannot assign "} + describe_variant_type(value) +
@@ -717,6 +714,40 @@ inline void checked_array_set(godot::Array& target, std::int64_t index, const go
         return;
     }
     target[normalized] = value;
+}
+
+[[nodiscard]] inline godot::Variant
+checked_dictionary_get(const godot::Dictionary& target, const godot::Variant& key,
+                       const ScriptSourceLocation location = {}) {
+    if (script_function_failed())
+        return {};
+    if (!target.has(key)) {
+        report_script_failure(godot::String{"Invalid access to property or key "} +
+                                  key.stringify() + " on " +
+                                  describe_variant_type(godot::Variant(target)) + ".",
+                              location);
+        return {};
+    }
+    return target[key];
+}
+
+inline void checked_dictionary_set(godot::Dictionary& target, const godot::Variant& key,
+                                   const godot::Variant& value,
+                                   const ScriptSourceLocation location = {}) {
+    if (script_function_failed())
+        return;
+    if (!target.set(key, value)) {
+        report_script_failure(godot::String{"Invalid assignment of property or key "} +
+                                  key.stringify() + " with " + describe_variant_type(value) +
+                                  " on " + describe_variant_type(godot::Variant(target)) + ".",
+                              location);
+    }
+}
+
+inline void unchecked_dictionary_set(godot::Dictionary& target, const godot::Variant& key,
+                                     const godot::Variant& value) {
+    if (!script_function_failed())
+        (void)target.set(key, value);
 }
 
 template <typename PackedArray>
