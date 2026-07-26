@@ -2,9 +2,11 @@ extends Node
 class_name RuntimeFailureCase
 
 signal resume_lambda_loop
+signal lifecycle(value: int)
 
 var markers: Array[String] = []
 var async_lambda_values: Array[int] = []
+var lifecycle_markers: Array[String] = []
 
 
 class BrokenFieldInitialization extends RefCounted:
@@ -58,6 +60,16 @@ class OnreadyOnly extends Node:
     func record(value: String) -> int:
         markers.push_back(value)
         return markers.size()
+
+
+class LifecycleTarget extends Node:
+    var output: Array[String]
+
+    func _init(target_output: Array[String]) -> void:
+        output = target_output
+
+    func record(value: int, label: String) -> void:
+        output.push_back("%s:%d" % [label, value])
 
 
 func _side_effect(marker: String) -> int:
@@ -255,6 +267,125 @@ func _async_lambda_capture_semantics_match() -> bool:
     return async_lambda_values == [2, 10, 2, 10]
 
 
+static func _make_owner_free_callback(output: Array[String], label: String) -> Callable:
+    return func(value: int) -> void:
+        output.push_back("%s:%d" % [label, value])
+
+
+func _lifecycle_first(value: int) -> void:
+    lifecycle_markers.push_back("first:%d" % value)
+    if lifecycle.is_connected(_lifecycle_second):
+        lifecycle.disconnect(_lifecycle_second)
+    if not lifecycle.is_connected(_lifecycle_late):
+        lifecycle.connect(_lifecycle_late)
+
+
+func _lifecycle_second(value: int) -> void:
+    lifecycle_markers.push_back("second:%d" % value)
+
+
+func _lifecycle_late(value: int) -> void:
+    lifecycle_markers.push_back("late:%d" % value)
+
+
+func _lifecycle_bound(first: int, second: String, suffix: String) -> String:
+    return "%d:%s:%s" % [first, second, suffix]
+
+
+func _signal_callable_lifecycle_matches() -> bool:
+    lifecycle_markers.clear()
+    var one_shot := _make_owner_free_callback(lifecycle_markers, "once")
+    var retained := _make_owner_free_callback(lifecycle_markers, "retained")
+    if one_shot != one_shot or one_shot == _make_owner_free_callback(lifecycle_markers, "once"):
+        return false
+    if lifecycle.connect(one_shot, CONNECT_ONE_SHOT) != OK:
+        return false
+    if lifecycle.connect(retained) != OK:
+        return false
+    lifecycle.emit(1)
+    lifecycle.emit(2)
+    if lifecycle_markers != ["once:1", "retained:1", "retained:2"]:
+        return false
+    lifecycle.disconnect(retained)
+
+    lifecycle_markers.clear()
+    lifecycle.connect(_lifecycle_first)
+    lifecycle.connect(_lifecycle_second)
+    lifecycle.emit(3)
+    lifecycle.emit(4)
+    if lifecycle_markers != ["first:3", "second:3", "first:4", "late:4"]:
+        return false
+    lifecycle.disconnect(_lifecycle_first)
+    lifecycle.disconnect(_lifecycle_late)
+
+    lifecycle_markers.clear()
+    var reference_counted := _make_owner_free_callback(lifecycle_markers, "reference")
+    if lifecycle.connect(reference_counted, CONNECT_REFERENCE_COUNTED) != OK:
+        return false
+    if lifecycle.connect(reference_counted, CONNECT_REFERENCE_COUNTED) != OK:
+        return false
+    lifecycle.emit(5)
+    lifecycle.disconnect(reference_counted)
+    if not lifecycle.is_connected(reference_counted):
+        return false
+    lifecycle.emit(6)
+    lifecycle.disconnect(reference_counted)
+    if lifecycle.is_connected(reference_counted):
+        return false
+    if lifecycle_markers != ["reference:5", "reference:6"]:
+        return false
+
+    lifecycle_markers.clear()
+    var target := LifecycleTarget.new(lifecycle_markers)
+    var target_callback := Callable(target, &"record").bind("target")
+    lifecycle.connect(target_callback)
+    target.free()
+    if target_callback.is_valid() or lifecycle.is_connected(target_callback):
+        return false
+    lifecycle.emit(7)
+
+    var deferred := _make_owner_free_callback(lifecycle_markers, "deferred")
+    if lifecycle.connect(deferred, CONNECT_DEFERRED | CONNECT_ONE_SHOT) != OK:
+        return false
+    lifecycle.emit(8)
+    if not lifecycle_markers.is_empty():
+        return false
+
+    var bound := Callable(self, &"_lifecycle_bound").bind("tail")
+    var rebound := bound.unbind(1)
+    if (
+        bound.get_argument_count() != 2
+        or bound.call(9, "head") != "9:head:tail"
+        or rebound.get_argument_count() != 3
+        or rebound.call(9, "ignored", "head") != "9:ignored:tail"
+    ):
+        return false
+
+    var mutex := Mutex.new()
+    var threaded_values: Array[int] = []
+    var worker := func(base: int) -> void:
+        for offset in 64:
+            mutex.lock()
+            threaded_values.push_back(base + offset)
+            mutex.unlock()
+    var first_thread := Thread.new()
+    var second_thread := Thread.new()
+    first_thread.start(worker.bind(0))
+    second_thread.start(worker.bind(64))
+    first_thread.wait_to_finish()
+    second_thread.wait_to_finish()
+    threaded_values.sort()
+    return (
+        threaded_values.size() == 128
+        and threaded_values.front() == 0
+        and threaded_values.back() == 127
+    )
+
+
+func deferred_signal_lifecycle_matches() -> bool:
+    return lifecycle_markers == ["deferred:8"]
+
+
 func run_contract() -> bool:
     markers.clear()
     _direct_bounds_failure()
@@ -310,4 +441,5 @@ func run_contract() -> bool:
         and _onready_initialization_failure_continues()
         and _lambda_capture_semantics_match()
         and _async_lambda_capture_semantics_match()
+        and _signal_callable_lifecycle_matches()
     )
