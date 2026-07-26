@@ -63,7 +63,7 @@ compiler 动态库，不携带 editor 静态库。
 
 ## SDK 契约
 
-SDK schema 11、runtime ABI 14 由源码、打包器和发布门禁共同校验。manifest 包含：
+SDK schema 11、runtime ABI 15 由源码、打包器和发布门禁共同校验。manifest 包含：
 
 - GDPP/Godot 版本、平台、架构、最低系统；
 - C++17、异常关闭、工具链族/版本和 MSVC CRT；

@@ -113,7 +113,7 @@ GDExtension 创建，生成行为通过下列层附着：
 - 脚本 override 从供应商回调进入 Attached dispatch；
 - 外部 `super` 通过 ClassDB 的精确 MethodBind compatibility hash；
 - provider 类型在实例化时解析，不依赖扩展注册表的偶然加载顺序；
-- 动态 Signal/Callable、await 和跨脚本调用经统一 runtime ABI。
+- 动态 Signal/Callable、FunctionState await 和跨脚本调用经统一 runtime ABI。
 
 该设计避免 Godot 尚不支持的跨 GDExtension C++ 继承，也不需要供应商头文件或链接库。
 
@@ -165,7 +165,7 @@ ProjectCompiler 后台只消费快照，不访问实时 ClassDB。离线 CLI 可
 ## NativeBuilder
 
 客户导出不调用 CMake、Ninja、Python 或 SCons。NativeBuilder 验证 SDK schema 11/runtime
-ABI 14 后，直接生成系统工具链命令：
+ABI 15 后，直接生成系统工具链命令：
 
 - Windows：MSVC/Windows SDK、x86_64、静态 CRT；
 - macOS：AppleClang、arm64/x86_64/Universal 2；

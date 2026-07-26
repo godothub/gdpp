@@ -5,7 +5,7 @@
 | 项目 | 值 |
 |---|---|
 | GDPP | 1.8.0 |
-| 功能审计提交 | `ce55d986583ee749534983d67a82637c6513aa3e` |
+| 功能审计提交 | `2c81784fcbe9456a4ce24f047df14d3e4491bcc3` |
 | 最近正式发布运行 | 1.7.10 / `https://github.com/abandoft/gdpp/actions/runs/30170732292` |
 | 1.8.0 发布状态 | 候选；正式发布矩阵尚待执行 |
 | 目标发行资产 | `gdpp-mac.zip`、`gdpp-linux.zip`、`gdpp-win.zip`、`SHA256SUMS` |
@@ -23,15 +23,16 @@
 | 编译器单元 | 507 / 507 |
 | godot-cpp SDK | macOS 上完整重建 4.4、4.5、4.6、4.7 `template_release` |
 | 官方 Godot 4.7.1 直接构建 | 当前 compiler 生成、顺序编译并链接真实客户项目库成功 |
-| 官方 Godot 4.7.1 AOT runtime | 静态/lambda 协程、捕获快照、Callable/Signal 生命周期和故障边界成功 |
+| 官方 Godot 4.7.1 AOT runtime | FunctionState/异步虚函数、静态/lambda 协程、Callable/Signal 生命周期和故障边界成功 |
 | 官方 Godot 4.6.2 Release | Universal 2 Attached provider 导出、独立运行成功 |
 | 官方 Godot 4.6.2 Debug | Universal 2 Attached provider 导出、独立运行成功 |
 | PCK 审计 | Debug/Release 均 19 个文件、2 个转换场景、1 个转换资源、0 违规 |
 | 源工程不变性 | compiler/provider 描述符及 extension registry SHA-256 导出前后相同 |
 
 4.6.2 两种 profile 的独立运行都输出 `GDPP_ATTACHED_EXPORT_RUNTIME_OK`；当前 4.7.1 AOT
-故障/Callable/Signal oracle 输出 `GDPP_CALLABLE_SIGNAL_RUNTIME_OK`。这组本地证据用于在正式矩阵
-前验证 runtime ABI 14、breakpoint、静态与 lambda 协程、严格存储、故障隔离和生命周期语义；
+故障/Callable/Signal oracle 输出 `GDPP_CALLABLE_SIGNAL_RUNTIME_OK`，FunctionState 差分输出
+`GDPP_FUNCTION_STATE_RUNTIME_OK`。这组本地证据用于在正式矩阵前验证 runtime ABI 15、
+breakpoint、静态与 lambda 协程、异步虚函数、严格存储、故障隔离和生命周期语义；
 它不替代下述跨 runner 发布门禁。
 
 ## 正式发布门禁
@@ -145,8 +146,9 @@ Godot 4.4.1～4.7.1 均执行 Linux 导出/运行；Godot 4.6.2 另执行 macOS 
 godot-cpp 一同编译。本地使用官方 Godot 4.6.2 完成 Attached provider 的 macOS Universal 2
 Debug/Release 无源码导出和独立运行；Release-only provider 由 Debug 导出复用时，源描述符保持
 不变。官方 Godot 4.7.1 还实际运行了真正挂起的静态函数、类型化/并发 lambda 协程、创建时捕获
-快照、Signal 发射期连接变更、one-shot/deferred/reference-counted 连接、宿主销毁和多线程 Callable
-调用。编辑器 gutter 断点和完整单步调试尚未列为已认证能力。
+快照、Signal 发射期连接变更、one-shot/deferred/reference-counted 连接、宿主销毁和多线程
+Callable 调用；挂起的异步虚函数还覆盖 FunctionState 对象、`completed`、手动恢复、旧连接清理、
+有效性和即时 native 返回转换。编辑器 gutter 断点和完整单步调试尚未列为已认证能力。
 
 ## Windows 补充端到端审计
 
