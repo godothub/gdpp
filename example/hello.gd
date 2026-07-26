@@ -97,6 +97,8 @@ func _on_ready() -> void:
     if matrix_args.has("--gdpp-runtime-failure"):
         var failure_case: Variant = get_node(NodePath("RuntimeFailureCase"))
         if failure_case.run_contract():
+            await get_tree().process_frame
+        if failure_case.deferred_signal_lifecycle_matches():
             print("GDPP_RUNTIME_FAILURE_OK")
             get_tree().quit(0)
         else:
