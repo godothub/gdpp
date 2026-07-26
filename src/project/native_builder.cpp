@@ -1,5 +1,6 @@
 #include "gdpp/project/native_builder.hpp"
 
+#include "gdpp/project/native_contract.hpp"
 #include "gdpp/support/path_utf8.hpp"
 #include "gdpp/support/sha256.hpp"
 #include "gdpp/version.hpp"
@@ -1319,14 +1320,16 @@ NativeBuildPlan NativeBuilder::plan(const NativeBuildOptions& options) const {
         return result;
     }
     if (options.platform == NativePlatform::linux || options.platform == NativePlatform::android) {
-        if (!write_file_if_changed(export_map,
-                                   "{ global: gdpp_project_library_init; local: *; };\n")) {
+        const auto contents =
+            "{ global: " + std::string{project_library_entry_symbol} + "; local: *; };\n";
+        if (!write_file_if_changed(export_map, contents)) {
             result.diagnostics.emplace_back("cannot write ELF project export map");
             return result;
         }
     } else if (options.platform == NativePlatform::macos ||
                options.platform == NativePlatform::ios) {
-        if (!write_file_if_changed(export_map, "_gdpp_project_library_init\n")) {
+        const auto contents = "_" + std::string{project_library_entry_symbol} + "\n";
+        if (!write_file_if_changed(export_map, contents)) {
             result.diagnostics.emplace_back("cannot write Mach-O project export list");
             return result;
         }

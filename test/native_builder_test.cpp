@@ -752,6 +752,8 @@ TEST_CASE("native builder creates a stable release library with release bindings
                         plan.commands.back().arguments.end(), [](const std::string& argument) {
                             return argument.find("-Wl,-exported_symbols_list,") == 0;
                         }));
+    REQUIRE_EQ(read_input(root / "project/native-direct/4.4/macos/arm64/release/gdpp.exports.map"),
+               std::string{"_gdpp_library_init\n"});
     REQUIRE(contains_path(plan.commands.back().arguments,
                           root / "sdk/lib/libgodot-cpp.macos.template_release.arm64.a"));
 }
@@ -1207,6 +1209,8 @@ TEST_CASE("native builder hides static archive symbols in every Linux project ex
     REQUIRE(std::any_of(
         plan.commands.back().arguments.begin(), plan.commands.back().arguments.end(),
         [](const std::string& argument) { return argument.find("-Wl,--version-script=") == 0; }));
+    REQUIRE_EQ(read_input(root / "project/native-direct/4.4/linux/x86_64/release/gdpp.exports.map"),
+               std::string{"{ global: gdpp_library_init; local: *; };\n"});
 }
 
 TEST_CASE("native builder emits a macOS universal compile and link plan") {
