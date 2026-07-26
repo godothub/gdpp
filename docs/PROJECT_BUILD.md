@@ -115,7 +115,8 @@ STL 或 Web threads 模式，不能用另一个模式的静态库勉强链接。
 
 一次 Debug 导出只构建 Debug，一次 Release 只构建 Release。不会先构建 editor/development 项目
 库，也不会同时编译两种 profile。Debug/Release 均链接唯一的 Release 优化
-`template_release`，Debug 区别只在脚本 `assert` 等语义。
+`template_release`；Debug 保留脚本 `assert`、`breakpoint` 和源码调试帧，Release 在生成阶段移除
+这些调试语义。
 
 每个翻译单元和链接命令严格串行。构建运行在后台线程，主线程继续渲染、处理窗口和驱动导出。
 一个连续进度条覆盖全部大阶段；逐文件步骤显示 `(当前/总数)`，结束后让出 Godot 自己的打包进度。
@@ -144,7 +145,7 @@ SDK schema 11 固定以下契约：
 - C++17、异常关闭、工具链族和 MSVC 静态 CRT；
 - `debug,release` 项目 profile；
 - 唯一 `distribution_binding template_release`；
-- runtime ABI 13 和所有 runtime 文件 SHA-256；
+- runtime ABI 14 和所有 runtime 文件 SHA-256；
 - Android API/STL、iOS slices、Web threads 等目标字段。
 
 NativeBuilder 在创建第一条编译命令前验证完整 manifest。旧 schema、错误 API/架构、损坏
@@ -210,8 +211,9 @@ gdpp/strip_gdscript_sources=true
 gdpp/allow_source_fallback=false
 ```
 
-任一步失败都会注入不可满足的目标库并阻断 Godot 打包，同时恢复 compiler 描述符、extension
-registry、供应商扫描描述和 Autoload。插件下次启动也会检查中断事务备份。
+任一步失败都会注入不可满足的目标库并阻断 Godot 打包，同时恢复临时 Autoload 和必要的
+source-fallback extension registry 状态。标准 AOT 导出不改写 compiler/provider 物理描述符；
+插件启动时仍会恢复 1.7.8 及更旧版本可能遗留的中断事务备份。
 
 已知尚未闭合的构建可靠性边界：
 
