@@ -116,7 +116,7 @@ TEST_CASE("compiler centralizes packed values at every generated Variant boundar
             std::string::npos);
     REQUIRE(result.unit.source.find(" = gdpp::runtime::to_variant(bytes);") != std::string::npos);
     REQUIRE(result.unit.source.find("_gdpp_dynamic_result_") != std::string::npos);
-    REQUIRE(result.unit.source.find(" = gdpp::runtime::call_dynamic(") != std::string::npos);
+    REQUIRE(result.unit.source.find(" = gdpp::runtime::call_dynamic_at(") != std::string::npos);
     REQUIRE(result.unit.source.find(" = godot::Variant(_gdpp_dynamic_argument_") ==
             std::string::npos);
     REQUIRE(result.unit.source.find(" = gdpp::runtime::to_variant(_gdpp_call_argument_") !=
@@ -963,16 +963,16 @@ TEST_CASE("static lambdas support defaults without binding an instance owner") {
 
 TEST_CASE("void lambdas return a Variant when argument conversion fails") {
     const gdpp::Compiler compiler;
-    const auto result = compiler.compile(
-        "void_lambda.gd", "func make() -> Callable:\n"
-                          "    return func(value: Variant) -> void:\n"
-                          "        var values: Array[int] = value\n"
-                          "        print(values.size())\n");
+    const auto result =
+        compiler.compile("void_lambda.gd", "func make() -> Callable:\n"
+                                           "    return func(value: Variant) -> void:\n"
+                                           "        var values: Array[int] = value\n"
+                                           "        print(values.size())\n");
 
     REQUIRE(result.success);
     const auto callable = result.unit.source.find("mutable -> godot::Variant {");
-    const auto failure = result.unit.source.find("if (gdpp::runtime::script_function_failed())",
-                                                 callable);
+    const auto failure =
+        result.unit.source.find("if (gdpp::runtime::script_function_failed())", callable);
     REQUIRE(callable != std::string::npos);
     REQUIRE(failure != std::string::npos);
     REQUIRE(result.unit.source.find("return godot::Variant{};", failure) != std::string::npos);
@@ -1079,8 +1079,7 @@ TEST_CASE("compiler completes coroutine state inside structured await continuati
             std::string::npos);
     REQUIRE(result.unit.source.find("return;", cancelled_branch) != std::string::npos);
     const auto lambda = result.unit.source.find("mutable -> godot::Variant {");
-    const auto lambda_scope =
-        result.unit.source.find("gdpp::runtime::ScriptFunctionScope", lambda);
+    const auto lambda_scope = result.unit.source.find("gdpp::runtime::ScriptFunctionScope", lambda);
     const auto lambda_parameter =
         result.unit.source.find("[[maybe_unused]] godot::Variant value =", lambda_scope);
     REQUIRE(lambda < lambda_scope);
@@ -2855,8 +2854,7 @@ TEST_CASE("compiler assigns shader resources through the property accessor base 
     REQUIRE(result.unit.source.find("godot::Ref<godot::Material>(godot::Object::cast_to<"
                                     "godot::Material>((_gdpp_assignment_value_") !=
             std::string::npos);
-    REQUIRE(result.unit.source.find("set_material(_gdpp_assignment_result_") !=
-            std::string::npos);
+    REQUIRE(result.unit.source.find("set_material(_gdpp_assignment_result_") != std::string::npos);
     REQUIRE(result.unit.source.find("cast_to<godot::CanvasItemMaterial>") == std::string::npos);
     REQUIRE(result.unit.source.find("godot::Ref<godot::Material>") != std::string::npos);
 }
@@ -2896,8 +2894,7 @@ TEST_CASE("compiler applies Material ABI across every shader-capable property fa
     REQUIRE(result.unit.source.find("cast_to<godot::PanoramaSkyMaterial>") == std::string::npos);
     REQUIRE(result.unit.source.find("set_process_material(_gdpp_property_assigned_") !=
             std::string::npos);
-    REQUIRE(result.unit.source.find("set_material(_gdpp_property_assigned_") !=
-            std::string::npos);
+    REQUIRE(result.unit.source.find("set_material(_gdpp_property_assigned_") != std::string::npos);
     REQUIRE(result.unit.source.find("set_material_override(_gdpp_property_assigned_") !=
             std::string::npos);
     REQUIRE(result.unit.source.find("set_material_overlay(_gdpp_property_assigned_") !=
@@ -2917,8 +2914,7 @@ TEST_CASE("compiler applies Godot-compatible numeric and builtin conversions") {
 
     REQUIRE(result.success);
     REQUIRE(result.unit.source.find("static_cast<godot::Color>(gdpp::runtime::to_variant("
-                                    "_gdpp_assignment_value_") !=
-            std::string::npos);
+                                    "_gdpp_assignment_value_") != std::string::npos);
     REQUIRE(result.unit.source.find("godot::String(\"bcbcbc\")") != std::string::npos);
     REQUIRE(result.unit.source.find("static_cast<int64_t>") != std::string::npos);
 }
@@ -2956,7 +2952,8 @@ TEST_CASE("compiler covers strict and explicit Godot conversion families end to 
             std::string::npos);
     REQUIRE(valid.unit.source.find("gdpp::runtime::explicit_variant_cast<int64_t>("
                                    "gdpp::runtime::to_variant(parse_source), "
-                                   "godot::Variant::INT)") != std::string::npos);
+                                   "godot::Variant::INT, "
+                                   "gdpp::runtime::ScriptSourceLocation{") != std::string::npos);
     REQUIRE(valid.unit.source.find("gdpp::runtime::packed_array_storage<godot::PackedInt64Array>"
                                    "(gdpp::runtime::to_variant(values))") != std::string::npos);
     REQUIRE(!invalid.success);
@@ -3061,10 +3058,12 @@ TEST_CASE("compiler guards dynamic explicit casts with the runtime source type")
     REQUIRE(result.success);
     REQUIRE(result.unit.source.find("gdpp::runtime::explicit_variant_cast<int64_t>("
                                     "gdpp::runtime::to_variant(value), "
-                                    "godot::Variant::INT)") != std::string::npos);
+                                    "godot::Variant::INT, "
+                                    "gdpp::runtime::ScriptSourceLocation{") != std::string::npos);
     REQUIRE(result.unit.source.find("gdpp::runtime::explicit_variant_cast<godot::String>("
                                     "gdpp::runtime::to_variant(value), "
-                                    "godot::Variant::STRING)") != std::string::npos);
+                                    "godot::Variant::STRING, "
+                                    "gdpp::runtime::ScriptSourceLocation{") != std::string::npos);
 }
 
 TEST_CASE("compiler infers native Godot virtual signatures and escapes C++ keywords") {
@@ -3560,8 +3559,7 @@ TEST_CASE("dynamic nested value assignments write every changed value back to it
     REQUIRE(source.find("godot::StringName(\"position\"), _gdpp_dynamic_child_") !=
             std::string::npos);
     REQUIRE(source.find("_gdpp_dynamic_root_") != std::string::npos);
-    REQUIRE(source.find("_gdpp_assignment_receiver_0 = _gdpp_dynamic_root_") !=
-            std::string::npos);
+    REQUIRE(source.find("_gdpp_assignment_receiver_0 = _gdpp_dynamic_root_") != std::string::npos);
 
     // Deeper Transform3D.origin.x-style chains must reverse through every value layer.
     REQUIRE(source.find("godot::StringName(\"origin\"), _gdpp_dynamic_child_") !=
@@ -3570,8 +3568,7 @@ TEST_CASE("dynamic nested value assignments write every changed value back to it
             std::string::npos);
 
     // Variant-held value roots and Array[index] records exercise the two distinct final stores.
-    REQUIRE(source.find("_gdpp_assignment_receiver_2 = _gdpp_dynamic_root_") !=
-            std::string::npos);
+    REQUIRE(source.find("_gdpp_assignment_receiver_2 = _gdpp_dynamic_root_") != std::string::npos);
     REQUIRE(source.find("gdpp::runtime::set_key(_gdpp_dynamic_root_") != std::string::npos);
     REQUIRE(source.find("godot::StringName(\"tint\"), _gdpp_dynamic_child_") != std::string::npos);
 }
@@ -3909,9 +3906,9 @@ TEST_CASE("generated object method calls reject null and freed receivers") {
 
     REQUIRE(result.success);
     REQUIRE(result.unit.source.find("gdpp::runtime::is_instance_valid") != std::string::npos);
-    REQUIRE(result.unit.source.find(
-                "Cannot call method 'get_child_count' on a null or freed value.") !=
-            std::string::npos);
+    REQUIRE(
+        result.unit.source.find("Cannot call method 'get_child_count' on a null or freed value.") !=
+        std::string::npos);
     REQUIRE(result.unit.source.find("_gdpp_source_path, 3, 12") != std::string::npos);
     REQUIRE(result.unit.source.find("_gdpp_source_path, 6, 16") != std::string::npos);
 }
@@ -3929,8 +3926,7 @@ TEST_CASE("generated object property reads reject null and freed receivers") {
 
     REQUIRE(result.success);
     REQUIRE(result.unit.source.find("_gdpp_property_receiver_") != std::string::npos);
-    REQUIRE(result.unit.source.find(
-                "Cannot access member 'name' on a null or freed value.") !=
+    REQUIRE(result.unit.source.find("Cannot access member 'name' on a null or freed value.") !=
             std::string::npos);
     REQUIRE(result.unit.source.find("_gdpp_source_path, 3, 12") != std::string::npos);
     REQUIRE(result.unit.source.find("_gdpp_source_path, 6, 16") != std::string::npos);
@@ -4496,8 +4492,7 @@ TEST_CASE("Godot API inheritance resolves native methods properties and builtin 
     REQUIRE(result.unit.header.find("#include <godot_cpp/variant/vector2.hpp>") !=
             std::string::npos);
     REQUIRE(result.unit.header.find("godot::Vector2 delta") != std::string::npos);
-    REQUIRE(result.unit.source.find("set_position(_gdpp_assignment_result_") !=
-            std::string::npos);
+    REQUIRE(result.unit.source.find("set_position(_gdpp_assignment_result_") != std::string::npos);
     REQUIRE(result.unit.source.find("= get_position(); const auto _gdpp_property_right_") !=
             std::string::npos);
     REQUIRE(result.unit.source.find("queue_redraw()") != std::string::npos);
@@ -4899,33 +4894,33 @@ TEST_CASE("compiler sequences every eager binary operand before evaluation") {
 
 TEST_CASE("compiler contains fatal expression faults and preserves Godot assignment order") {
     const gdpp::Compiler compiler;
-    const auto result = compiler.compile(
-        "failure_order.gd",
-        "extends RefCounted\n"
-        "func marker(name: String) -> int:\n"
-        "    return 1\n"
-        "func target(values: Array[int]) -> Array[int]:\n"
-        "    marker(\"target\")\n"
-        "    return values\n"
-        "func index() -> int:\n"
-        "    marker(\"index\")\n"
-        "    return 0\n"
-        "func direct() -> void:\n"
-        "    var values := [1]\n"
-        "    var result = marker(\"left\") + values[4] + marker(\"right\")\n"
-        "    marker(str(result))\n"
-        "func callee() -> int:\n"
-        "    var values := [1]\n"
-        "    return values[4]\n"
-        "func caller() -> int:\n"
-        "    return marker(\"before\") + callee() + marker(\"after\")\n"
-        "func logical(values: Array) -> bool:\n"
-        "    return values[4] or marker(\"logical-right\")\n"
-        "func conditional(values: Array) -> int:\n"
-        "    return marker(\"selected\") if values[4] else marker(\"fallback\")\n"
-        "func assign() -> void:\n"
-        "    var values: Array[int] = [0]\n"
-        "    target(values)[index()] = marker(\"rhs\")\n");
+    const auto result =
+        compiler.compile("failure_order.gd",
+                         "extends RefCounted\n"
+                         "func marker(name: String) -> int:\n"
+                         "    return 1\n"
+                         "func target(values: Array[int]) -> Array[int]:\n"
+                         "    marker(\"target\")\n"
+                         "    return values\n"
+                         "func index() -> int:\n"
+                         "    marker(\"index\")\n"
+                         "    return 0\n"
+                         "func direct() -> void:\n"
+                         "    var values := [1]\n"
+                         "    var result = marker(\"left\") + values[4] + marker(\"right\")\n"
+                         "    marker(str(result))\n"
+                         "func callee() -> int:\n"
+                         "    var values := [1]\n"
+                         "    return values[4]\n"
+                         "func caller() -> int:\n"
+                         "    return marker(\"before\") + callee() + marker(\"after\")\n"
+                         "func logical(values: Array) -> bool:\n"
+                         "    return values[4] or marker(\"logical-right\")\n"
+                         "func conditional(values: Array) -> int:\n"
+                         "    return marker(\"selected\") if values[4] else marker(\"fallback\")\n"
+                         "func assign() -> void:\n"
+                         "    var values: Array[int] = [0]\n"
+                         "    target(values)[index()] = marker(\"rhs\")\n");
 
     REQUIRE(result.success);
     const auto& source = result.unit.source;
@@ -5009,9 +5004,47 @@ TEST_CASE("specialized calls stop argument evaluation at the first fatal fault")
     };
     require_stopped_call("utility", "utility-last", "godot::UtilityFunctions::print(");
     require_stopped_call("invoke_callable", "callable-last", ".call(");
-    require_stopped_call("invoke_dynamic", "dynamic-last", "gdpp::runtime::call_dynamic(");
+    require_stopped_call("invoke_dynamic", "dynamic-last", "gdpp::runtime::call_dynamic_at(");
     require_stopped_call("emit_signal_arguments", "signal-last",
                          "gdpp::runtime::emit_local_signal(");
+}
+
+TEST_CASE("runtime failure boundaries retain precise script source locations") {
+    const gdpp::Compiler compiler;
+    const auto result =
+        compiler.compile("runtime_locations.gd", "extends RefCounted\n"
+                                                 "func inspect(target: Variant) -> void:\n"
+                                                 "    var property: Variant = target.value\n"
+                                                 "    var keyed: Variant = target[\"key\"]\n"
+                                                 "    target.value = keyed\n"
+                                                 "    target[\"key\"] = property\n"
+                                                 "    target.accept(property)\n"
+                                                 "    var converted: int = int(target)\n"
+                                                 "    var typed: Array[int] = target\n"
+                                                 "    for entry in target:\n"
+                                                 "        property = entry\n"
+                                                 "    var divided := converted / 0\n");
+
+    REQUIRE(result.success);
+    const auto& source = result.unit.source;
+    const std::string location{"gdpp::runtime::ScriptSourceLocation{_gdpp_source_path, "};
+    REQUIRE(source.find("gdpp::runtime::get_named(") != std::string::npos);
+    REQUIRE(source.find("gdpp::runtime::get_key(") != std::string::npos);
+    REQUIRE(source.find("gdpp::runtime::set_named(") != std::string::npos);
+    REQUIRE(source.find("gdpp::runtime::set_key(") != std::string::npos);
+    REQUIRE(source.find("gdpp::runtime::call_dynamic_at(") != std::string::npos);
+    REQUIRE(source.find("gdpp::runtime::explicit_variant_cast<int64_t>(") != std::string::npos);
+    REQUIRE(source.find("gdpp::runtime::strict_typed_storage<godot::TypedArray<int64_t>>(") !=
+            std::string::npos);
+    REQUIRE(source.find("gdpp::runtime::iter_init(") != std::string::npos);
+    REQUIRE(source.find("gdpp::runtime::integer_divide(") != std::string::npos);
+    REQUIRE(std::count(source.begin(), source.end(), '\n') > 10);
+
+    std::size_t located_boundary_count = 0;
+    for (auto position = source.find(location); position != std::string::npos;
+         position = source.find(location, position + location.size()))
+        ++located_boundary_count;
+    REQUIRE(located_boundary_count >= std::size_t{10});
 }
 
 TEST_CASE("compiler handles generated logical guard chains with bounded stack depth") {

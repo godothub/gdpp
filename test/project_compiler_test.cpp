@@ -1199,8 +1199,8 @@ TEST_CASE("project compiler resolves class and path inheritance in parent-first 
     REQUIRE(child_header.find("godot::Object* typed_identity(godot::Object* value)") !=
             std::string::npos);
     REQUIRE(child_source.find(base_class + "::static_answer()") != std::string::npos);
-    REQUIRE(child_source.find("get_named(value, godot::StringName(\"base_value\"))") !=
-            std::string::npos);
+    REQUIRE(child_source.find("get_named(value, godot::StringName(\"base_value\"), "
+                              "gdpp::runtime::ScriptSourceLocation{") != std::string::npos);
     REQUIRE(child_source.find("set_named(_gdpp_dynamic_root_") != std::string::npos);
     REQUIRE(child_source.find("godot::StringName(\"base_value\")") != std::string::npos);
     REQUIRE(child_source.find("is_attached_script_instance") != std::string::npos);
@@ -1369,7 +1369,7 @@ TEST_CASE("project compiler dynamically dispatches ABI-changing internal overrid
             std::string::npos);
     REQUIRE(header.find("_gdpp_native_override_transform(godot::Object* value) override") ==
             std::string::npos);
-    REQUIRE(source.find("gdpp::runtime::call_dynamic(") != std::string::npos);
+    REQUIRE(source.find("gdpp::runtime::call_dynamic_at(") != std::string::npos);
     REQUIRE(source.find("_gdpp_native_override_transform(") != std::string::npos);
 }
 
@@ -1404,7 +1404,7 @@ TEST_CASE("project compiler preserves internal default vararg and super call ABI
     REQUIRE(header.find("godot::Array extras) override;") != std::string::npos);
     REQUIRE(source.find("__Base::combine(") != std::string::npos);
     REQUIRE(source.find("godot::Array _gdpp_call_rest_") != std::string::npos);
-    REQUIRE(source.find("gdpp::runtime::call_dynamic(") != std::string::npos);
+    REQUIRE(source.find("gdpp::runtime::call_dynamic_at(") != std::string::npos);
     REQUIRE(source.find("godot::StringName(\"collect\")") != std::string::npos);
 }
 
@@ -2176,7 +2176,7 @@ TEST_CASE("project compiler preserves cross-script call contracts through cache 
         read_text(options.output_directory / "generated" / consumer->source_file_name);
     REQUIRE(initial_source.find("gdpp::runtime::packed_array_storage<godot::PackedByteArray>(") !=
             std::string::npos);
-    REQUIRE(initial_source.find("gdpp::runtime::call_dynamic(") != std::string::npos);
+    REQUIRE(initial_source.find("gdpp::runtime::call_dynamic_at(") != std::string::npos);
     REQUIRE(initial_source.find("godot::StringName(\"parse\")") != std::string::npos);
     REQUIRE(initial_source.find("gdpp::runtime::to_variant(value)") != std::string::npos);
 
@@ -2265,7 +2265,7 @@ TEST_CASE("attached internal classes dispatch self locally and other instances t
     REQUIRE(source.find("record->_gdpp_set_value") == std::string::npos);
     REQUIRE(source.find("gdpp::runtime::get_named(") != std::string::npos);
     REQUIRE(source.find("gdpp::runtime::set_named(") != std::string::npos);
-    REQUIRE(source.find("gdpp::runtime::call_dynamic(") != std::string::npos);
+    REQUIRE(source.find("gdpp::runtime::call_dynamic_at(") != std::string::npos);
     REQUIRE(source.find("-> godot::Ref<godot::RefCounted>") != std::string::npos);
     REQUIRE(source.find("property.getter = [](") != std::string::npos);
     REQUIRE(source.find("typed->_gdpp_get_value()") != std::string::npos);
@@ -2521,7 +2521,7 @@ TEST_CASE("preload alias casts preserve void coroutine ABI at call sites") {
     REQUIRE(consumer_source.find("[&]() -> godot::Variant") != std::string::npos);
     REQUIRE(consumer_source.find("cast_attached_script") != std::string::npos);
     REQUIRE(consumer_source.find("godot::String(\"res://producer.gd\")") != std::string::npos);
-    REQUIRE(consumer_source.find("gdpp::runtime::call_dynamic(") != std::string::npos);
+    REQUIRE(consumer_source.find("gdpp::runtime::call_dynamic_at(") != std::string::npos);
     REQUIRE(consumer_source.find("godot::StringName(\"run\")") != std::string::npos);
 }
 
@@ -2555,7 +2555,7 @@ TEST_CASE("project compiler isolates coroutine overrides behind dynamic script d
     REQUIRE(source.find("&" + child->class_name + "::_gdpp_variant_call_answer") !=
             std::string::npos);
     REQUIRE(source.find("_gdpp_native_override_answer()") != std::string::npos);
-    REQUIRE(source.find("gdpp::runtime::call_dynamic(") != std::string::npos);
+    REQUIRE(source.find("gdpp::runtime::call_dynamic_at(") != std::string::npos);
 }
 
 TEST_CASE("project symbol refinement keeps immediate await functions on their typed ABI") {
@@ -3012,7 +3012,7 @@ TEST_CASE("project compiler resolves the root script of a scene autoload") {
         read_text(options.output_directory / "generated" / generated_source->source_file_name);
     REQUIRE(source.find("gdpp::runtime::find_autoload(godot::StringName(\"Transition\"))") !=
             std::string::npos);
-    REQUIRE(source.find("gdpp::runtime::call_dynamic(") != std::string::npos);
+    REQUIRE(source.find("gdpp::runtime::call_dynamic_at(") != std::string::npos);
     REQUIRE(source.find("godot::StringName(\"change_scene\")") != std::string::npos);
     REQUIRE(source.find("Object::cast_to<GDPPNative_") == std::string::npos);
 }
@@ -3047,7 +3047,7 @@ TEST_CASE("project autoloads shadow same-named engine globals") {
     REQUIRE(source.find("#include \"" + setting->header_file_name + "\"") != std::string::npos);
     REQUIRE(source.find("gdpp::runtime::find_autoload(godot::StringName(\"Setting\"))") !=
             std::string::npos);
-    REQUIRE(source.find("gdpp::runtime::call_dynamic(") != std::string::npos);
+    REQUIRE(source.find("gdpp::runtime::call_dynamic_at(") != std::string::npos);
     REQUIRE(source.find("godot::StringName(\"save_project\")") != std::string::npos);
     REQUIRE(source.find("Object::cast_to<GDPPNative_") == std::string::npos);
 }
