@@ -1,172 +1,225 @@
-# 项目构建流程
+# 项目构建与导出
 
-## 商业用户依赖
+## 用户需要什么
 
-正式用户只需 Godot 与目标平台 C++ 工具链。插件不会调用 CMake、Python、Ninja、SCons，
-也不会在用户机器上生成或编译 godot-cpp。
+正式插件包已经包含 compiler、GDPP runtime、生成所需头文件和 Godot 4.4～4.7 的
+`template_release` 静态绑定。客户不需要 CMake、Ninja、Python、SCons，也不需要自行构建
+godot-cpp。
 
-| 平台 | 必需工具链 | 已交付架构 |
+客户只需要 Godot 和目标平台工具链：
+
+| 导出目标 | 工具链 | 交付架构 |
 |---|---|---|
-| Windows | MSVC Build Tools、Windows SDK | x86_64 |
-| macOS | Xcode Command Line Tools | arm64 / Universal 2 |
+| Windows | Visual Studio/Build Tools 的 MSVC x64 C++ 工具与 Windows SDK | x86_64 |
+| macOS | Xcode Command Line Tools | Universal 2 |
 | Linux | GCC 或 Clang | x86_64 |
 | Android | Android NDK r28+ | arm64-v8a |
 | iOS | 完整 Xcode | device arm64、Simulator arm64/x86_64 |
-| Web | Emscripten | wasm32 threads / nothreads |
+| Web | Emscripten | wasm32 threads/nothreads |
 
-Windows arm64、Linux arm64 与 Android x86_64 尚未交付。导出预检会在生成或编译客户源码前
-失败关闭，不会尝试用错误架构的静态库完成链接。
+未交付：Windows arm64、Linux arm64、Android x86_64。
 
-## 两个彼此隔离的原生角色
+## 安装
 
-GDPP 只有两个原生 ABI 域：
-
-1. compiler 插件运行在 Godot 编辑器进程中，开发 GDPP 时使用 godot-cpp 的 `editor` target
-   构建。editor 静态库只属于 GDPP 自身构建树；发行包只携带已经链接完成的 compiler 动态库。
-2. 客户项目运行时由导出目标加载，客户 SDK 只携带一份优化后的
-   `template_release` godot-cpp 静态库。Debug 与 Release 导出都复用这份 ABI 绑定。
-
-客户 SDK 不包含 `editor` 或 `template_debug` 静态库。compiler 动态库内部已经链接的代码不会
-参与客户项目链接，也不会让客户源码再次编译。
+下载当前桌面宿主包并直接解压到项目根目录：
 
 ```text
-Godot 编辑器
-└── gdpp_compiler.<host>          # 预编译，客户不重建
-
-客户 SDK/<Godot 版本>/<target>
-└── libgodot-cpp.*.template_release.*
-                                  # 唯一项目链接绑定
+project/
+└── addons/
+    └── gdpp/
+        ├── plugin.cfg
+        ├── gdpp.gdextension
+        ├── binary/
+        └── sdk/
+            ├── 4.4/
+            ├── 4.5/
+            ├── 4.6/
+            └── 4.7/
 ```
 
-Debug 导出仍保留 GDScript 的 `assert()` 等调试语义；这是 GDPP 的
-`GDPP_SCRIPT_DEBUG_ENABLED` 代码生成契约，与 godot-cpp 的构建 target 无关。两种导出均使用
-优化、死代码删除和符号白名单，只在脚本调试语义上不同。
+ZIP 外层包含 `addons/gdpp`，不需要手工移动文件。然后在 Godot 的插件设置中启用 GDPP。
 
-## 零源码改动的 Attached 模型
+三个发布包：
 
-所有兼容 `.gd` 在导出时统一生成 Attached 行为类，而不是把脚本声明成新的 Godot 原生
-Node/Resource 子类：
+- `gdpp-mac.zip`：macOS Universal 2 + Android + iOS + Web；
+- `gdpp-linux.zip`：Linux x86_64 + Android + Web；
+- `gdpp-win.zip`：Windows x86_64 + Android + Web。
+
+每个包都同时包含 4.4～4.7，不按 SDK 版本拆成多个 ZIP。
+
+## 项目设置
+
+插件创建或使用以下项目设置：
+
+| 设置 | 默认/用途 |
+|---|---|
+| `gdpp/target_godot_version` | 从当前编辑器检测；可选 4.4、4.5、4.6、4.7 |
+| `gdpp/build/sdk_root` | 当前包内 SDK 根目录 |
+| `gdpp/build/cpp_compiler` | Windows 默认 `cl.exe`，macOS/Linux 默认 `c++` |
+| `gdpp/build/android_ndk_root` | Android NDK 根目录 |
+| `gdpp/build/emscripten_cxx` | 默认 `em++` |
+| `gdpp/strip_gdscript_sources` | AOT 预设应为 `true` |
+| `gdpp/allow_source_fallback` | 商业二进制预设应为 `false` |
+
+目标 Godot 版本影响 API 表、SDK、缓存、项目库和运行描述符，不只是一个文档标签。
+
+## 工具链发现
+
+### Windows
+
+默认配置是 `cl.exe`，不包含任何测试机专用路径。GDPP 按以下顺序寻找并初始化 MSVC：
+
+1. 可选环境变量 `GDPP_VCVARS_PATH`；
+2. 用户配置的绝对 compiler 路径附近；
+3. Visual Studio Installer 的 `vswhere.exe`；
+4. `VSINSTALLDIR` / `VCINSTALLDIR`；
+5. Program Files 下 Visual Studio 2026/2022/2019 的 BuildTools、Community、Professional、
+   Enterprise、Preview 标准布局。
+
+找到 `vcvars64.bat` 后，在隐藏的隔离进程中只初始化一次环境，缓存结果，再解析 `cl.exe` 和同目录
+链接器。`cl.exe`、`link.exe` 和 bootstrap 不创建可见控制台窗口。找不到时导出预检给出安装
+x64 C++ tools 或配置 `gdpp/build/cpp_compiler` 的错误，不尝试硬编码用户目录。
+
+### macOS
+
+桌面目标使用配置的 `c++`/AppleClang。iOS 使用 `xcrun --find clang++`、当前
+`xcode-select` Developer 目录和目标 SDK；完整 Xcode 缺失时在构建客户源码前失败。
+
+### Linux
+
+默认从 `PATH` 使用 `c++`，可以配置 GCC 或 Clang 绝对路径。发行 SDK 的 glibc 基线为 2.35；
+客户工具链仍需能链接匹配的 C++17、PIC 和系统库。
+
+### Android/Web
+
+Android 从显式设置或标准环境确定 NDK，Web 使用 `em++`。目标 SDK manifest 会校验 NDK API/
+STL 或 Web threads 模式，不能用另一个模式的静态库勉强链接。
+
+## 导出期流水线
+
+平时编辑、导入和运行项目不编译客户项目库。启用 AOT 的导出执行一次事务：
 
 ```text
-原场景或资源中的真实对象
-    ├── Godot Node/Resource，或第三方 GDExtension 类
-    └── AttachedCompiledScript
-        └── 生成的 C++17 行为、字段、方法、属性、Signal、RPC
+扫描项目脚本
+  -> 解析
+  -> 语义分析和项目固定点
+  -> 预编译脚本行为
+  -> 写入生成 C++17/metadata
+  -> 顺序编译每个翻译单元一次
+  -> 链接一个目标项目库
+  -> 转换 PackedScene/Resource/Autoload
+  -> 写入运行描述符并剥离 .gd/.gdc
+  -> 交还 Godot 标准打包
+  -> 审计并恢复源工程事务
 ```
 
-因此客户项目、场景、资源、Autoload 和第三方 GDExtension 都不需要改动。真实对象继续由
-Godot 或供应商插件创建和拥有；GDPP 的 `ScriptLanguageExtension`、`ScriptExtension` 与
-`ScriptInstance` 只提供原脚本行为。
+一次 Debug 导出只构建 Debug，一次 Release 只构建 Release。不会先构建 editor/development 项目
+库，也不会同时编译两种 profile。Debug/Release 均链接唯一的 Release 优化
+`template_release`，Debug 区别只在脚本 `assert` 等语义。
 
-导出前，compiler 插件从主线程快照 ClassDB 中的第三方类契约。项目编译器随后直接从语义图生成
-declaration-local metadata，并通过 metadata-only ScriptExtension 暂时向编辑器描述生成脚本的
-属性、方法、Signal 和继承关系。这个过程不为反射加载客户 `.gd`，因此不会执行静态初始化或保留
-互相引用的 GDScript 资源；也不加载客户目标动态库、不生成 editor 项目库。后台编译线程只消费
-快照，不访问实时 ClassDB 或 UI。
+每个翻译单元和链接命令严格串行。构建运行在后台线程，主线程继续渲染、处理窗口和驱动导出。
+一个连续进度条覆盖全部大阶段；逐文件步骤显示 `(当前/总数)`，结束后让出 Godot 自己的打包进度。
 
-场景/Resource 转换时，每个临时 ScriptInstance 只把原 SceneState 实际保存的字段标记为
-`PROPERTY_USAGE_STORAGE`。未覆盖字段不写入包内，由目标 C++ 行为构造器执行原脚本默认初始化，
-避免空类型化容器或 `nil` 覆盖真实默认值。
+## Attached 转换
 
-外部 `.gd`、`.tres` 子资源和 `.tscn` 内嵌资源都按准确 `resource_path` 建立脚本身份。跨脚本
-`is`/`as`、Autoload、内部类以及字段和方法分派统一查询 Attached ScriptInstance，不把行为类
-指针错误当成真实 Godot 对象指针。
+客户脚本不会变成取代原对象的第二个原生类。场景或资源中的真实 Godot/第三方对象保持原类型，
+GDPP 通过 `AttachedCompiledScript` 提供生成行为。
 
-## 单次导出构建
+转换规则：
 
-普通编辑、运行和资源导入继续使用客户原有 `.gd`，GDPP 不在这些阶段构建项目动态库。只有用户
-执行启用 AOT 的导出时，插件才运行以下事务：
+- 只复制原 SceneState/Resource 实际保存的存储属性；
+- 未覆盖默认字段由生成 C++ 构造逻辑初始化；
+- onready 在用户 `_ready` 前执行；
+- 继承脚本、内部类、Signal、RPC 和 Autoload 保持脚本语义；
+- 动态 Material/Shader 参数、网络资源和运行期属性仍走 Godot Object/Variant ABI；
+- 第三方 provider 描述符和二进制保持独立。
 
-```text
-扫描客户脚本
-    -> 解析和语义分析
-    -> 生成 Attached GDExtension C++17
-    -> 为所选导出 profile 顺序编译每个翻译单元一次
-    -> 链接一个目标项目动态库
-    -> 安装导出期 metadata 描述
-    -> 转换 PackedScene、Resource 与 Autoload 的脚本附着
-    -> 写入目标运行描述符并剥离 .gd
-    -> 交还 Godot 执行普通打包
-```
+转换失败不会提交部分场景或剥离部分源码。
 
-一次 Debug 导出生成一个 `gdpp.debug.*`，一次 Release 导出生成一个
-`gdpp.release.*`。同一次导出不会先构建 editor/development 项目库，也不会同时构建
-Debug 与 Release。`register_types.cpp`、GDPP runtime 和每个生成的 `.gd.cpp` 在所选目标中各有
-一个对象文件。
+## SDK 与项目库
 
-编译和链接命令严格串行执行，Windows 隐藏 `cl.exe`、`link.exe` 与唯一一次 MSVC 环境引导
-窗口。构建在后台线程运行；编辑器主线程持续处理窗口、渲染和导出协调，因此进度覆盖层能实时
-刷新且不会占用 Godot 主循环。
-
-一个连续进度条覆盖扫描、解析、语义分析、脚本预编译、原生文件生成、C++ 编译和链接。每个
-阶段占固定区间，逐文件阶段继续按文件数量细分，并显示 `(当前/总数)`。
-
-## SDK 与缓存
-
-发行物按桌面宿主固定为 `gdpp-mac.zip`、`gdpp-linux.zip`、`gdpp-win.zip` 三个包。每个包只
-携带当前宿主的 compiler/fallback 和桌面 SDK，但同时包含 Godot 4.4～4.7 全部版本。三个包
-均包含 Android arm64 与 Web threads/nothreads；mac 包另外包含 iOS device 和 Universal
-Simulator。每个平台/架构/线程模式都只允许一份 `template_release` 绑定。
-
-SDK schema 11 固定：
+SDK schema 11 固定以下契约：
 
 - Godot API、平台、架构和最低系统；
-- C++17、异常关闭、编译器族和 MSVC 静态 CRT；
-- `debug,release` 两个可选项目 profile；
-- 唯一 `distribution_binding template_release` 与 Release 优化；
-- runtime ABI 13 及全部运行时头/源文件 SHA-256；
-- Android STL/API、iOS slices、Web 线程模式等目标契约。
+- C++17、异常关闭、工具链族和 MSVC 静态 CRT；
+- `debug,release` 项目 profile；
+- 唯一 `distribution_binding template_release`；
+- runtime ABI 13 和所有 runtime 文件 SHA-256；
+- Android API/STL、iOS slices、Web threads 等目标字段。
 
-NativeBuilder 在创建第一条编译命令前验证整个清单。错误 SDK、旧 schema、混入 editor/debug
-绑定、损坏 runtime 或错误工具链都会失败关闭。
+NativeBuilder 在创建第一条编译命令前验证完整 manifest。旧 schema、错误 API/架构、损坏
+runtime、混入 editor/template_debug 或错误工具链都会失败关闭。
 
-对象缓存位于：
+输出名称：
 
 ```text
-addons/gdpp/build/project/native-direct/
-└── <api>/<platform>/<arch>[/<web-mode>]/<debug|release>/objects/
+gdpp.debug.windows.x86_64.dll
+gdpp.release.windows.x86_64.dll
+libgdpp.release.linux.x86_64.so
+libgdpp.release.macos.universal.dylib
+libgdpp.release.android.arm64.so
+libgdpp.release.web.wasm32.nothreads.wasm
+libgdpp.release.web.wasm32.threads.wasm
+libgdpp.release.ios.arm64.xcframework/
 ```
 
-缓存签名包含构建策略、API、平台、架构、profile、编译器绝对路径和可复现路径映射；翻译单元
-还使用真实 include/depfile 与 SDK、桥接契约作为输入。Debug 与 Release 的对象隔离，但它们
-共享项目级前端清单和生成源，普通脚本在同一次导出中不会重复解析或生成。
+动态库文件前缀是 `gdpp`；GDExtension C 入口固定为 `gdpp_project_library_init`。二者不要混淆。
+
+## 缓存
+
+```text
+addons/gdpp/build/project/
+├── generated/
+├── manifest.txt
+├── bridge.lock
+└── native-direct/
+    └── <api>/<platform>/<arch>[/<web-mode>]/<profile>/
+        ├── objects/
+        └── build-configuration.txt
+```
+
+项目 manifest 区分源码实现哈希和公开 ABI 哈希，只让真实依赖方失效。对象缓存再包含 include/
+depfile、SDK/runtime、第三方 bridge、工具链绝对路径、profile 和可复现路径映射。
+
+当前缓存事务在单进程内安全；多个编辑器或 CLI 同时写同一项目尚无跨进程锁，不属于支持用法。
+新进程仍需重新执行前端，持久化 AST/符号摘要尚未实现。
 
 ## 产物边界
 
-| 目录 | 内容 | 是否进入插件发行包 | 是否进入成功游戏导出 |
-|---|---|---|---|
-| 根 `build/<preset>/` | GDPP 自身 CMake 构建与 QA 证据 | 否 | 否 |
-| `addons/gdpp/build/` | 生成 C++、清单、对象缓存 | 否 | 否 |
-| `addons/gdpp/binary/` | compiler、fallback、当前项目目标库 | 按角色筛选 | 仅所选项目目标库 |
-| `addons/gdpp/sdk/` | 客户目标头文件、runtime、唯一静态绑定 | 是 | 否 |
-| `.godot/` | Godot 缓存和导出事务备份 | 否 | 否 |
+成功游戏只包含：
 
-编辑态只有 `addons/gdpp/gdpp.gdextension` 一个物理描述符。导出事务暂时把同一路径改成目标扫描
-描述符，包内同一路径写入项目运行描述符，结束或异常恢复后还原 compiler 描述符。成功导出只
-携带一个匹配 profile/平台/架构的项目动态库，不携带 compiler、fallback、SDK、生成源码、对象
-或客户 `.gd`。
+- 一个匹配 profile/平台/架构的 `gdpp.*` 项目库；
+- 同路径的项目运行描述符；
+- 原项目非脚本资源；
+- 第三方目标 GDExtension 及其描述符。
 
-## 第三方 GDExtension
+不会包含：
 
-供应商描述符与二进制保持原样。GDPP 不读取或修改供应商源码，不要求供应商头文件，不链接
-供应商库，也不尝试跨动态库继承供应商 C++ 类型。compiler 从 ClassDB 捕获公开契约；CLI 可用
-`gdpp_bridge.json` 提供等价离线契约。
+- 客户 `.gd/.gdc`；
+- GDPP compiler/fallback；
+- SDK、godot-cpp 静态库或头文件；
+- 生成 C++、对象、depfile、manifest 或构建日志；
+- 另一个 profile/架构的项目库。
 
-项目运行时注册 Attached 行为不依赖 provider 加载顺序；真正实例化脚本时才验证目标原生类。
-外部 `super` 通过精确 MethodBind compatibility hash 调用。契约不完整、供应商类缺失或 ABI
-不匹配时阻断无源码导出，不退化成猜测式 C++ 调用。
+## 失败恢复
 
-## 失败关闭
+严格二进制导出推荐：
 
-启用 `gdpp/strip_gdscript_sources=true` 且未显式允许源码回退时，下列任一情况都会阻断商业
-导出：
+```text
+gdpp/strip_gdscript_sources=true
+gdpp/allow_source_fallback=false
+```
 
-- 前端、语义或生成代码失败；
-- SDK/工具链/目标 ABI 不匹配；
-- 任一 C++ 编译或链接命令失败；
-- metadata bridge、ClassDB 类或第三方契约校验失败；
-- 场景、资源、Autoload 不能原子替换；
-- 目标库、运行描述符或导出后源码审计不符合唯一性约束。
+任一步失败都会注入不可满足的目标库并阻断 Godot 打包，同时恢复 compiler 描述符、extension
+registry、供应商扫描描述和 Autoload。插件下次启动也会检查中断事务备份。
 
-只有用户显式设置 `gdpp/allow_source_fallback=true`，或使用关闭源码剥离的独立预设，才允许
-回到普通 GDScript 交付。
+已知尚未闭合的构建可靠性边界：
+
+- 多进程同时导出；
+- 用户取消和编辑器关闭期间的子进程终止；
+- 断电、低磁盘、只读目录和跨卷原子提交；
+- 动态拼接 `.gd` 路径的无源码保留策略；
+- 运行期热重载（明确不提供）。
+
+需要普通 GDScript 包时必须显式启用 source fallback 或使用独立非剥离预设，不能把 AOT 失败
+静默当成功。
