@@ -262,6 +262,7 @@ jobs:
           print(result.stdout, end="")
           raise SystemExit(result.returncode)
           PY
+          grep -q '^GDPP_DYNAMIC_SCRIPT_RUNTIME_OK$' "$root/runtime.log"
           grep -q '^GDPP_RPC_RUNTIME_OK$' "$root/runtime.log"
           grep -q '^GDPP_ATTACHED_EXPORT_RUNTIME_OK$' "$root/runtime.log"
           grep -q 'GDPP_AOT_SUMMARY scenes=' "$root/export.log"

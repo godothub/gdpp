@@ -219,6 +219,7 @@ jobs:
             -name 'libgdpp_test_vendor.release.macos.universal.dylib' | wc -l)" -eq 1
           "$root/GDPPAttached.app/Contents/MacOS/GDPP Attached Extension Integration" \
             --headless 2>&1 | tee "$root/runtime.log"
+          grep -q '^GDPP_DYNAMIC_SCRIPT_RUNTIME_OK$' "$root/runtime.log"
           grep -q '^GDPP_ATTACHED_EXPORT_RUNTIME_OK$' "$root/runtime.log"
           grep -q 'GDPP_AOT_SUMMARY scenes=' "$root/export.log"
           if grep -E -q '(^| )ERROR:|SCRIPT ERROR:|Parse Error:|WARNING:|Unable to open' \
