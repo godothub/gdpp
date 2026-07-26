@@ -4728,7 +4728,8 @@ TEST_CASE("third-party GDExtension singletons resolve through Engine at runtime"
 
     REQUIRE(result.success);
     REQUIRE(result.unit.source.find(
-                "gdpp::runtime::find_engine_singleton(godot::StringName(\"Steam\"))") !=
+                "gdpp::runtime::find_engine_singleton_at(godot::StringName(\"Steam\"), "
+                "gdpp::runtime::ScriptSourceLocation{_gdpp_source_path, 3, 5})") !=
             std::string::npos);
     REQUIRE(result.unit.source.find("gdpp::runtime::call_dynamic") != std::string::npos);
     REQUIRE(result.unit.source.find("static const godot::StringName _gdpp_dynamic_method_") !=

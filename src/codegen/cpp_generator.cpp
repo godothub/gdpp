@@ -2722,7 +2722,8 @@ std::string CodeGenerator::emit_expression(const ir::Expression& expression) con
             return "godot::" + godot_cpp_class_name(expression.resolved_owner) +
                    "::get_singleton()";
         if (expression.resolution == ir::ResolutionKind::external_singleton)
-            return "gdpp::runtime::find_engine_singleton(" + godot_string_name(expression.value) +
+            return "gdpp::runtime::find_engine_singleton_at(" +
+                   godot_string_name(expression.value) + ", " + script_location(expression.span) +
                    ")";
         if (expression.resolution == ir::ResolutionKind::godot_type)
             return expression.type.kind == TypeKind::object
@@ -2731,11 +2732,13 @@ std::string CodeGenerator::emit_expression(const ir::Expression& expression) con
         if (expression.resolution == ir::ResolutionKind::external_type)
             return godot_string_name(expression.resolved_owner);
         if (expression.resolution == ir::ResolutionKind::external_callable)
-            return "gdpp::runtime::external_callable(gdpp::runtime::to_variant(" +
-                   self_object_expression() + "), " + godot_string_name(expression.value) + ")";
+            return "gdpp::runtime::external_callable_at(gdpp::runtime::to_variant(" +
+                   self_object_expression() + "), " + godot_string_name(expression.value) + ", " +
+                   script_location(expression.span) + ")";
         if (expression.resolution == ir::ResolutionKind::external_signal)
-            return "gdpp::runtime::external_signal(gdpp::runtime::to_variant(" +
-                   self_object_expression() + "), " + godot_string_name(expression.value) + ")";
+            return "gdpp::runtime::external_signal_at(gdpp::runtime::to_variant(" +
+                   self_object_expression() + "), " + godot_string_name(expression.value) + ", " +
+                   script_location(expression.span) + ")";
         if (expression.resolution == ir::ResolutionKind::script_type)
             return godot_string_name(expression.resolved_owner);
         if (expression.resolution == ir::ResolutionKind::script_resource)
@@ -3207,8 +3210,9 @@ std::string CodeGenerator::emit_expression(const ir::Expression& expression) con
             return cpp_type(expression.type) + "{}";
         const auto& callee = *expression.operands.at(0);
         if (callee.resolution == ir::ResolutionKind::external_constructor) {
-            return "gdpp::runtime::instantiate_external_class(" +
-                   godot_string_name(callee.resolved_owner) + ")";
+            return "gdpp::runtime::instantiate_external_class_at(" +
+                   godot_string_name(callee.resolved_owner) + ", " +
+                   script_location(expression.span) + ")";
         }
         if (callee.resolution == ir::ResolutionKind::external_super_method) {
             const auto suffix = std::to_string(temporary_counter_++);
@@ -3250,7 +3254,8 @@ std::string CodeGenerator::emit_expression(const ir::Expression& expression) con
                               emit_expression(*expression.operands[index]) +
                               "); if (gdpp::runtime::script_function_failed()) return {}; ";
             }
-            invocation += "return gdpp::runtime::call_external_static(" +
+            invocation += "return gdpp::runtime::call_external_static_at(" +
+                          script_location(expression.span) + ", " +
                           godot_string_name(callee.resolved_owner) + ", " +
                           godot_string_name(callee.value);
             for (std::size_t index = 1; index < expression.operands.size(); ++index) {
@@ -3259,7 +3264,8 @@ std::string CodeGenerator::emit_expression(const ir::Expression& expression) con
             invocation += "); if (gdpp::runtime::script_function_failed()) return {}; return "
                           "_gdpp_static_result_" +
                           suffix + "; }())";
-            const auto call_begin = invocation.rfind("return gdpp::runtime::call_external_static");
+            const auto call_begin =
+                invocation.rfind("return gdpp::runtime::call_external_static_at");
             if (call_begin != std::string::npos) {
                 invocation.replace(call_begin, std::string{"return "}.size(),
                                    "const godot::Variant _gdpp_static_result_" + suffix + " = ");
@@ -3985,14 +3991,16 @@ std::string CodeGenerator::emit_expression(const ir::Expression& expression) con
         if (expression.resolution == ir::ResolutionKind::inner_type)
             return inner_cpp_type(expression.resolved_owner);
         if (expression.resolution == ir::ResolutionKind::external_callable) {
-            return "gdpp::runtime::external_callable(gdpp::runtime::to_variant(" +
+            return "gdpp::runtime::external_callable_at(gdpp::runtime::to_variant(" +
                    emit_expression(*expression.operands.at(0)) + "), " +
-                   godot_string_name(expression.value) + ")";
+                   godot_string_name(expression.value) + ", " + script_location(expression.span) +
+                   ")";
         }
         if (expression.resolution == ir::ResolutionKind::external_signal) {
-            return "gdpp::runtime::external_signal(gdpp::runtime::to_variant(" +
+            return "gdpp::runtime::external_signal_at(gdpp::runtime::to_variant(" +
                    emit_expression(*expression.operands.at(0)) + "), " +
-                   godot_string_name(expression.value) + ")";
+                   godot_string_name(expression.value) + ", " + script_location(expression.span) +
+                   ")";
         }
         if (expression.resolution == ir::ResolutionKind::script_enum_type)
             return sanitize_qualified_identifier(expression.resolved_owner);

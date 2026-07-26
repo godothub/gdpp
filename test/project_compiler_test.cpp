@@ -1673,11 +1673,13 @@ TEST_CASE("project compiler dynamically bridges a binary-only GDExtension class"
     REQUIRE(first.success);
     const auto source =
         read_text(options.output_directory / "generated/runtime_bridge_consumer.gd.cpp");
-    REQUIRE(source.find("instantiate_external_class") != std::string::npos);
+    REQUIRE(source.find("instantiate_external_class_at") != std::string::npos);
     REQUIRE(source.find("is_external_instance") != std::string::npos);
     REQUIRE(source.find("call_dynamic") != std::string::npos);
-    REQUIRE(source.find("external_callable") != std::string::npos);
-    REQUIRE(source.find("external_signal") != std::string::npos);
+    REQUIRE(source.find("external_callable_at") != std::string::npos);
+    REQUIRE(source.find("external_signal_at") != std::string::npos);
+    REQUIRE(source.find("gdpp::runtime::ScriptSourceLocation{_gdpp_source_path") !=
+            std::string::npos);
     REQUIRE(source.find("format = 1;") != std::string::npos);
     REQUIRE(source.find("exact = 9007199254740993;") != std::string::npos);
     const auto lock = read_text(options.output_directory / "bridge.lock");
@@ -1823,9 +1825,9 @@ TEST_CASE("project compiler consumes runtime contracts reflected from ClassDB") 
     REQUIRE_EQ(result.scripts.size(), std::size_t{1});
     const auto source = read_text(options.output_directory / "generated/waveform_consumer.gd.cpp");
     const auto header = read_text(options.output_directory / "generated/waveform_consumer.gd.hpp");
-    REQUIRE(source.find("instantiate_external_class") != std::string::npos);
+    REQUIRE(source.find("instantiate_external_class_at") != std::string::npos);
     REQUIRE(source.find("call_dynamic") != std::string::npos);
-    REQUIRE(source.find("call_external_static") != std::string::npos);
+    REQUIRE(source.find("call_external_static_at") != std::string::npos);
     REQUIRE(source.find("gdpp::integer::add(") != std::string::npos);
     REQUIRE(source.find(" = 40;") != std::string::npos);
     REQUIRE(source.find("FORMAT_PCM:1,FORMAT_FLOAT:2") != std::string::npos);
