@@ -61,6 +61,7 @@ class AttachedScriptInstance final {
     godot::Dictionary metadata_values;
     godot::Dictionary editor_stored_properties;
     bool has_editor_storage_state{false};
+    void* godot_instance_handle{nullptr};
 };
 
 struct PendingConstruction {
@@ -519,9 +520,15 @@ void* AttachedCompiledScript::_instance_create(godot::Object* object) const {
             return nullptr;
         }
     }
-    if (behavior.is_null())
-        return godot::gdextension_interface::script_instance_create3(&script_instance_info(),
-                                                                     instance);
+    if (behavior.is_null()) {
+        instance->godot_instance_handle = godot::gdextension_interface::script_instance_create3(
+            &script_instance_info(), instance);
+        if (!instance->godot_instance_handle) {
+            godot::memdelete(instance);
+            return nullptr;
+        }
+        return instance->godot_instance_handle;
+    }
 
     behavior->_gdpp_initialize_instance();
 
@@ -543,7 +550,13 @@ void* AttachedCompiledScript::_instance_create(godot::Object* object) const {
             return nullptr;
         }
     }
-    return godot::gdextension_interface::script_instance_create3(&script_instance_info(), instance);
+    instance->godot_instance_handle =
+        godot::gdextension_interface::script_instance_create3(&script_instance_info(), instance);
+    if (!instance->godot_instance_handle) {
+        godot::memdelete(instance);
+        return nullptr;
+    }
+    return instance->godot_instance_handle;
 }
 
 void* AttachedCompiledScript::_placeholder_instance_create(godot::Object*) const { return nullptr; }
@@ -588,7 +601,9 @@ void* attached_script_instance_handle(godot::Object* object) {
         return nullptr;
     std::lock_guard<std::mutex> lock{AttachedScriptInstance::instances_mutex()};
     const auto found = AttachedScriptInstance::instances().find(object);
-    return found == AttachedScriptInstance::instances().end() ? nullptr : found->second;
+    return found == AttachedScriptInstance::instances().end()
+               ? nullptr
+               : found->second->godot_instance_handle;
 }
 
 bool set_attached_editor_storage_state(godot::Object* object,
