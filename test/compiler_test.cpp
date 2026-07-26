@@ -1969,17 +1969,34 @@ TEST_CASE("compiler infers exported PackedScene resources from preload paths") {
     REQUIRE(result.unit.source.find("gdpp::runtime::load_resource(") != std::string::npos);
 }
 
-TEST_CASE("compiler permits fire-and-forget awaits in dynamic lambdas") {
+TEST_CASE("compiler preserves typed results and independent state in coroutine lambdas") {
     const gdpp::Compiler compiler;
-    const auto result = compiler.compile("lambda_await.gd", "extends Node\n"
-                                                            "signal resumed\n"
-                                                            "func callback() -> Callable:\n"
-                                                            "    return func():\n"
-                                                            "        await resumed\n"
-                                                            "        print(1)\n");
+    const auto result =
+        compiler.compile("lambda_await.gd", "extends Node\n"
+                                            "signal resumed\n"
+                                            "func callback() -> Callable:\n"
+                                            "    var captured := 38\n"
+                                            "    return func delayed(addend: int) -> int:\n"
+                                            "        await resumed\n"
+                                            "        return captured + addend\n"
+                                            "func invoke() -> int:\n"
+                                            "    return await callback().call(4)\n");
 
     REQUIRE(result.success);
     REQUIRE(result.unit.source.find("gdpp::runtime::await_signal") != std::string::npos);
+    REQUIRE(result.unit.source.find("gdpp::runtime::begin_coroutine(this)") != std::string::npos);
+    REQUIRE(result.unit.source.find("_gdpp_lambda_coroutine_state_") != std::string::npos);
+    REQUIRE(result.unit.source.find(
+                "gdpp::runtime::complete_coroutine(_gdpp_lambda_coroutine_state_") !=
+            std::string::npos);
+    const auto lambda_state = result.unit.source.find("const auto _gdpp_lambda_coroutine_state_");
+    const auto typed_sum =
+        result.unit.source.find("gdpp::integer::add(_gdpp_integer_left_", lambda_state);
+    const auto completion = result.unit.source.find(
+        "gdpp::runtime::complete_coroutine(_gdpp_lambda_coroutine_state_", lambda_state);
+    REQUIRE(lambda_state != std::string::npos);
+    REQUIRE(typed_sum != std::string::npos);
+    REQUIRE(completion != std::string::npos);
 }
 
 TEST_CASE("compiler preserves dynamic coroutine return values through the native ABI") {
