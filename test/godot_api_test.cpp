@@ -42,6 +42,27 @@ TEST_CASE("generated Godot metadata validates every record and argument range") 
     }
 }
 
+TEST_CASE("Godot API native metadata is exhaustive and type-safe") {
+    using Meta = gdpp::GodotNativeMeta;
+
+    REQUIRE_EQ(gdpp::godot_native_meta(""), Meta::none);
+    REQUIRE_EQ(gdpp::godot_native_meta("real_t"), Meta::real);
+    REQUIRE_EQ(gdpp::godot_native_meta("char16"), Meta::char16);
+    REQUIRE_EQ(gdpp::godot_native_meta("char32"), Meta::char32);
+    REQUIRE_EQ(gdpp::godot_native_meta("required"), Meta::required_object);
+    REQUIRE_EQ(gdpp::godot_native_meta("future_meta"), Meta::unknown);
+    REQUIRE_EQ(gdpp::godot_native_scalar_cpp_type(Meta::char32), std::string_view{"char32_t"});
+    REQUIRE_EQ(gdpp::godot_native_scalar_cpp_type(Meta::real), std::string_view{"godot::real_t"});
+    REQUIRE(gdpp::godot_native_scalar_cpp_type(Meta::required_object).empty());
+    REQUIRE(gdpp::godot_api_meta_matches("int", "char32"));
+    REQUIRE(gdpp::godot_api_meta_matches("InputEvent", "required"));
+    REQUIRE(!gdpp::godot_api_meta_matches("float", "char32"));
+    REQUIRE(!gdpp::godot_api_meta_matches("String", "required"));
+    REQUIRE(!gdpp::godot_api_meta_matches("int", "future_meta"));
+    REQUIRE(gdpp::godot_api_type_is_native_pointer("const uint8_t **"));
+    REQUIRE(!gdpp::godot_api_type_is_native_pointer("PackedByteArray"));
+}
+
 TEST_CASE("Godot API lookup follows inherited class constants and named enums") {
     const auto& api = gdpp::GodotApi::for_version(gdpp::GodotVersion::v4_5);
 
@@ -228,8 +249,7 @@ TEST_CASE("Godot API independently validates every property read and write contr
             if (!property->direct && property->setter[0] != '\0') {
                 const auto* setter = api.find_method(property->owner, property->setter);
                 if (setter) {
-                    const auto value_index =
-                        property->index >= 0 ? std::size_t{1} : std::size_t{0};
+                    const auto value_index = property->index >= 0 ? std::size_t{1} : std::size_t{0};
                     const auto* value = api.argument(*setter, value_index);
                     REQUIRE(value != nullptr);
                     REQUIRE_EQ(setter_type, gdpp::type_from_godot_api(value->type));

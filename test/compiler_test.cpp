@@ -3453,6 +3453,28 @@ TEST_CASE("compiler adapts flexible GDScript virtual signatures to the exact eng
                         [](const auto& diagnostic) { return diagnostic.code == "GDS4118"; }));
 }
 
+TEST_CASE("compiler preserves character scalar ABI and rejects native pointer calls") {
+    const gdpp::Compiler compiler;
+    gdpp::CompileOptions latest_options;
+    latest_options.target_version = gdpp::GodotVersion::v4_7;
+    const auto character = compiler.compile(
+        "character_api.gd", "extends Node\n"
+                            "func contains_character(font: Font, value: int) -> bool:\n"
+                            "    return font.has_char(value)\n");
+    const auto pointer =
+        compiler.compile("pointer_api.gd",
+                         "extends Node\n"
+                         "func load_native(manager: GDExtensionManager, path: String) -> int:\n"
+                         "    return manager.load_extension_from_function(path, null)\n",
+                         latest_options);
+
+    REQUIRE(character.success);
+    REQUIRE(character.unit.source.find("static_cast<char32_t>(") != std::string::npos);
+    REQUIRE(!pointer.success);
+    REQUIRE(std::any_of(pointer.diagnostics.begin(), pointer.diagnostics.end(),
+                        [](const auto& diagnostic) { return diagnostic.code == "GDS4118"; }));
+}
+
 TEST_CASE("compiler preserves coroutine state behind every engine virtual return ABI") {
     const gdpp::Compiler compiler;
     const auto result = compiler.compile("async_virtuals.gd",
