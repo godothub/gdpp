@@ -85,7 +85,7 @@ def main() -> None:
     methods: list[tuple] = []
     constructors: list[tuple[str, tuple[tuple[str, str, str, bool], ...]]] = []
     properties: list[tuple[str, str, str, str, str, bool, int]] = []
-    signals: list[tuple[str, str]] = []
+    signals: list[tuple[str, str, tuple[tuple[str, str, str, bool], ...]]] = []
     utility_functions: list[tuple] = []
     global_constants: list[tuple[str, int]] = []
     global_enum_values: list[tuple[str, str, int, bool]] = []
@@ -116,7 +116,22 @@ def main() -> None:
                 for value in enumeration.get("values", [])
             )
         methods.extend(method_record(owner, method, False) for method in item.get("methods", []))
-        signals.extend((owner, signal["name"]) for signal in item.get("signals", []))
+        signals.extend(
+            (
+                owner,
+                signal["name"],
+                tuple(
+                    (
+                        argument.get("name", ""),
+                        argument.get("type", "Variant"),
+                        argument.get("meta", ""),
+                        False,
+                    )
+                    for argument in signal.get("arguments", [])
+                ),
+            )
+            for signal in item.get("signals", [])
+        )
         for prop in item.get("properties", []):
             getter = prop.get("getter", "")
             setter = prop.get("setter", "")
@@ -311,6 +326,11 @@ def main() -> None:
     if not utility_functions:
         lines.append('    {"", "void", 0, 0, 0, false, false},')
     lines.append("};")
+    generated_signals: list[tuple[str, str, int, int]] = []
+    for owner, name, args in signals:
+        first_argument = len(generated_arguments)
+        generated_arguments.extend(args)
+        generated_signals.append((owner, name, first_argument, len(args)))
     lines.append("inline constexpr GodotArgumentRecord arguments[] = {")
     for name, type_name, meta, has_default in generated_arguments:
         lines.append(
@@ -358,10 +378,13 @@ def main() -> None:
         lines.append('    {"", "", "Variant", "Variant()"},')
     lines.append("};")
     lines.append("inline constexpr GodotSignalRecord signals[] = {")
-    for owner, name in signals:
-        lines.append(f"    {{{cpp_string(owner)}, {cpp_string(name)}}},")
+    for owner, name, first_argument, argument_count in generated_signals:
+        lines.append(
+            f"    {{{cpp_string(owner)}, {cpp_string(name)}, {first_argument}, "
+            f"{argument_count}}},"
+        )
     if not signals:
-        lines.append('    {"", ""},')
+        lines.append('    {"", "", 0, 0},')
     lines.append("};")
     lines.append("inline constexpr GodotPropertyRecord properties[] = {")
     for owner, name, type_name, getter, setter, direct, index in properties:

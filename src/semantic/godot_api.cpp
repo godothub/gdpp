@@ -227,6 +227,83 @@ std::size_t GodotApi::global_enum_value_count() const noexcept { return global_e
 std::size_t GodotApi::builtin_operator_count() const noexcept { return builtin_operator_count_; }
 std::size_t GodotApi::builtin_constant_count() const noexcept { return builtin_constant_count_; }
 
+bool GodotApi::validate_metadata() const noexcept {
+    const auto arguments_valid = [&](const std::size_t first, const std::size_t count) {
+        return first <= argument_count_ && count <= argument_count_ - first;
+    };
+    if (!std::is_sorted(classes_, classes_ + class_count_, [](const auto& left, const auto& right) {
+            return std::string_view{left.name} < std::string_view{right.name};
+        })) {
+        return false;
+    }
+    for (std::size_t index = 0; index < class_count_; ++index) {
+        const auto& type = classes_[index];
+        if (type.name[0] == '\0' ||
+            (index != 0 &&
+             std::string_view{classes_[index - 1].name} == std::string_view{type.name}) ||
+            (type.inherits[0] != '\0' && !find_class(type.inherits))) {
+            return false;
+        }
+    }
+    for (std::size_t index = 0; index < method_count_; ++index) {
+        const auto& method = methods_[index];
+        if (!find_class(method.owner) || method.name[0] == '\0' ||
+            method.required_arguments > method.maximum_arguments ||
+            !arguments_valid(method.first_argument, method.maximum_arguments)) {
+            return false;
+        }
+        for (std::size_t argument_index = 0; argument_index < method.maximum_arguments;
+             ++argument_index) {
+            const auto* value = argument(method, argument_index);
+            if (!value || value->type[0] == '\0' ||
+                (argument_index < method.required_arguments && value->has_default) ||
+                (argument_index >= method.required_arguments && !value->has_default)) {
+                return false;
+            }
+        }
+    }
+    for (std::size_t index = 0; index < constructor_count_; ++index) {
+        const auto& constructor = constructors_[index];
+        const auto* owner = find_class(constructor.owner);
+        if (!owner || !owner->builtin ||
+            !arguments_valid(constructor.first_argument, constructor.argument_count)) {
+            return false;
+        }
+    }
+    for (std::size_t index = 0; index < signal_count_; ++index) {
+        const auto& signal = signals_[index];
+        if (!find_class(signal.owner) || signal.name[0] == '\0' ||
+            !arguments_valid(signal.first_argument, signal.argument_count)) {
+            return false;
+        }
+        for (std::size_t argument_index = 0; argument_index < signal.argument_count;
+             ++argument_index) {
+            const auto* value = argument(signal, argument_index);
+            if (!value || value->type[0] == '\0' || value->has_default)
+                return false;
+        }
+    }
+    for (std::size_t index = 0; index < utility_function_count_; ++index) {
+        const auto& function = utility_functions_[index];
+        if (function.name[0] == '\0' ||
+            function.required_arguments > function.maximum_arguments ||
+            !arguments_valid(function.first_argument, function.maximum_arguments)) {
+            return false;
+        }
+    }
+    for (std::size_t index = 0; index < property_count_; ++index) {
+        if (!find_class(properties_[index].owner) || properties_[index].name[0] == '\0' ||
+            properties_[index].type[0] == '\0') {
+            return false;
+        }
+    }
+    for (std::size_t index = 0; index < singleton_count_; ++index) {
+        if (singletons_[index].name[0] == '\0' || !find_class(singletons_[index].type))
+            return false;
+    }
+    return true;
+}
+
 const GodotClassRecord* GodotApi::find_class(std::string_view name) const noexcept {
     const auto found = std::lower_bound(classes_, classes_ + class_count_, name,
                                         [](const GodotClassRecord& record, std::string_view value) {
@@ -404,6 +481,14 @@ const GodotSignalRecord* GodotApi::find_signal(std::string_view owner, std::stri
         owner = type->inherits;
     }
     return nullptr;
+}
+
+const GodotArgumentRecord* GodotApi::argument(const GodotSignalRecord& signal,
+                                              std::size_t index) const noexcept {
+    if (index >= signal.argument_count)
+        return nullptr;
+    const auto offset = static_cast<std::size_t>(signal.first_argument) + index;
+    return offset < argument_count_ ? &arguments_[offset] : nullptr;
 }
 
 bool GodotApi::inherits(std::string_view type, std::string_view base) const noexcept {

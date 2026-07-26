@@ -69,6 +69,8 @@ struct GodotPropertyRecord {
 struct GodotSignalRecord {
     const char* owner;
     const char* name;
+    std::uint32_t first_argument;
+    std::uint16_t argument_count;
 };
 
 struct GodotUtilityFunctionRecord {
@@ -126,6 +128,7 @@ class GodotApi final {
     [[nodiscard]] std::size_t global_enum_value_count() const noexcept;
     [[nodiscard]] std::size_t builtin_operator_count() const noexcept;
     [[nodiscard]] std::size_t builtin_constant_count() const noexcept;
+    [[nodiscard]] bool validate_metadata() const noexcept;
     [[nodiscard]] const GodotClassRecord* find_class(std::string_view name) const noexcept;
     [[nodiscard]] bool is_editor_class(std::string_view name) const noexcept;
     [[nodiscard]] const GodotClassConstantRecord*
@@ -156,6 +159,8 @@ class GodotApi final {
     [[nodiscard]] const GodotSignalRecord*
     find_signal(std::string_view owner, std::string_view name,
                 bool include_inherited = true) const noexcept;
+    [[nodiscard]] const GodotArgumentRecord* argument(const GodotSignalRecord& signal,
+                                                      std::size_t index) const noexcept;
     [[nodiscard]] bool inherits(std::string_view type, std::string_view base) const noexcept;
     [[nodiscard]] const GodotArgumentRecord* argument(const GodotMethodRecord& method,
                                                       std::size_t index) const noexcept;

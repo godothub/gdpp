@@ -24,6 +24,22 @@ TEST_CASE("Godot API lookup follows inherited engine signals") {
     REQUIRE_EQ(std::string_view{resized->owner}, std::string_view{"Control"});
     REQUIRE(pressed != nullptr);
     REQUIRE_EQ(std::string_view{pressed->owner}, std::string_view{"BaseButton"});
+    const auto* input_event = api.find_signal("Control", "gui_input");
+    REQUIRE(input_event != nullptr);
+    REQUIRE_EQ(input_event->argument_count, std::uint16_t{1});
+    REQUIRE_EQ(std::string_view{api.argument(*input_event, 0)->type},
+               std::string_view{"InputEvent"});
+    REQUIRE(api.argument(*input_event, 1) == nullptr);
+}
+
+TEST_CASE("generated Godot metadata validates every record and argument range") {
+    for (const auto version : {gdpp::GodotVersion::v4_4, gdpp::GodotVersion::v4_5,
+                               gdpp::GodotVersion::v4_6, gdpp::GodotVersion::v4_7}) {
+        const auto& api = gdpp::GodotApi::for_version(version);
+        REQUIRE(api.validate_metadata());
+        REQUIRE(api.argument_count() > api.method_count());
+        REQUIRE(api.constructor_count() > std::size_t{150});
+    }
 }
 
 TEST_CASE("Godot API lookup follows inherited class constants and named enums") {
