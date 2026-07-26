@@ -1452,6 +1452,17 @@ TEST_CASE("tool scripts execute initialization paths inside the editor") {
     REQUIRE(result.unit.source.find("    _init();") != std::string::npos);
 }
 
+TEST_CASE("compiler preserves static unload as an explicit generated lifecycle contract") {
+    const auto result = gdpp::Compiler{}.compile("static_lifecycle.gd", "@static_unload\n"
+                                                                        "extends Node\n"
+                                                                        "static var value := 42\n");
+
+    REQUIRE(result.success);
+    REQUIRE(result.unit.static_unload);
+    REQUIRE(result.unit.header.find("inline static constexpr bool _gdpp_static_unload = true;") !=
+            std::string::npos);
+}
+
 TEST_CASE("editor extension base classes require tool execution mode") {
     const gdpp::Compiler compiler;
     const auto invalid_plugin = compiler.compile(

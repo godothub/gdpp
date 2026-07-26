@@ -6796,6 +6796,7 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
     unit.icon_path = module.icon_path;
     unit.is_abstract = module.is_abstract;
     unit.is_tool = module.is_tool;
+    unit.static_unload = module.static_unload;
     unit.is_attached = attached_script;
     unit.attached_native_base = attached_native_base;
     match_counter_ = 0;
@@ -7305,6 +7306,8 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
            << "public:\n"
            << "    inline static constexpr bool _gdpp_tool_mode = "
            << (module.is_tool ? "true" : "false") << ";\n"
+           << "    inline static constexpr bool _gdpp_static_unload = "
+           << (module.static_unload ? "true" : "false") << ";\n"
            << "    inline static constexpr bool _gdpp_attached = "
            << (attached_script ? "true" : "false") << ";\n"
            << "    inline static constexpr bool _gdpp_attached_ref_counted = "

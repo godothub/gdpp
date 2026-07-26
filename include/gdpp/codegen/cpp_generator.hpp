@@ -28,6 +28,7 @@ struct GeneratedUnit {
     std::optional<std::string> icon_path;
     bool is_abstract{false};
     bool is_tool{false};
+    bool static_unload{false};
     bool is_attached{false};
     std::string attached_native_base;
 };
