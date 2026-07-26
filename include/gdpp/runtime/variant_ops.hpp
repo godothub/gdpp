@@ -3,6 +3,7 @@
 #include "gdpp/runtime/reference_semantics.hpp"
 
 #include <godot_cpp/classes/class_db_singleton.hpp>
+#include <godot_cpp/classes/ref.hpp>
 #include <godot_cpp/core/object.hpp>
 #include <godot_cpp/variant/array.hpp>
 #include <godot_cpp/variant/callable.hpp>
@@ -106,10 +107,78 @@ void report_script_failure(const godot::String& message, ScriptSourceLocation lo
 void report_script_failure(const godot::String& message, const char* source_path, std::int64_t line,
                            std::int64_t column);
 
+// GDScript's typed builtin assignment bytecode accepts an exact Variant type or one of Godot's
+// strict implicit conversions. A raw godot-cpp Variant cast is intentionally more permissive and
+// can silently turn invalid customer data into a default value, so every dynamic storage boundary
+// must validate before materializing native C++ storage.
+template <typename Target>
+[[nodiscard]] Target strict_builtin_storage(const godot::Variant& value,
+                                            const godot::Variant::Type target_type,
+                                            const ScriptSourceLocation location = {}) {
+    if (script_function_failed())
+        return {};
+    if (value.get_type() != target_type &&
+        !godot::Variant::can_convert_strict(value.get_type(), target_type)) {
+        report_script_failure(godot::String{"Cannot assign "} + describe_variant_type(value) +
+                                  " to " + godot::Variant::get_type_name(target_type) + ".",
+                              location);
+        return {};
+    }
+    return static_cast<Target>(value);
+}
+
+[[nodiscard]] godot::Object*
+strict_native_object_storage(const godot::Variant& value, const godot::StringName& expected_class,
+                             ScriptSourceLocation location = {});
+
+template <typename ObjectType>
+[[nodiscard]] ObjectType*
+strict_native_pointer_storage(const godot::Variant& value,
+                              const godot::StringName& expected_class,
+                              const ScriptSourceLocation location = {}) {
+    return godot::Object::cast_to<ObjectType>(
+        strict_native_object_storage(value, expected_class, location));
+}
+
+template <typename ObjectType>
+[[nodiscard]] godot::Ref<ObjectType>
+strict_native_ref_storage(const godot::Variant& value, const godot::StringName& expected_class,
+                          const ScriptSourceLocation location = {}) {
+    return godot::Ref<ObjectType>(godot::Object::cast_to<ObjectType>(
+        strict_native_object_storage(value, expected_class, location)));
+}
+
+[[nodiscard]] godot::Variant
+strict_external_object_storage(const godot::Variant& value,
+                               const godot::StringName& expected_class,
+                               ScriptSourceLocation location = {});
+
+template <typename PackedArray>
+[[nodiscard]] SharedPackedArray<PackedArray>
+strict_packed_array_storage(const godot::Variant& value,
+                            const ScriptSourceLocation location = {}) {
+    if (script_function_failed())
+        return {};
+    const auto expected = static_cast<godot::Variant::Type>(
+        godot::internal::VariantInternalType<PackedArray>::type);
+    if (value.get_type() != expected &&
+        !godot::Variant::can_convert_strict(value.get_type(), expected)) {
+        report_script_failure(godot::String{"Cannot assign "} + describe_variant_type(value) +
+                                  " to " + godot::Variant::get_type_name(expected) + ".",
+                              location);
+        return {};
+    }
+    if (value.get_type() == expected)
+        return SharedPackedArray<PackedArray>(value);
+    return SharedPackedArray<PackedArray>(static_cast<PackedArray>(value));
+}
+
 template <typename Target>
 [[nodiscard]] Target explicit_variant_cast(const godot::Variant& value,
                                            const godot::Variant::Type target_type,
                                            const ScriptSourceLocation location = {}) {
+    if (script_function_failed())
+        return {};
     bool compatible = godot::Variant::can_convert(value.get_type(), target_type);
     if (target_type == godot::Variant::STRING) {
         compatible = value.get_type() == godot::Variant::STRING ||
@@ -133,6 +202,8 @@ template <typename TypedContainer>
 [[nodiscard]] TypedContainer strict_typed_storage(const godot::Variant& value,
                                                   const ScriptSourceLocation location = {}) {
     TypedContainer result;
+    if (script_function_failed())
+        return result;
     if constexpr (std::is_base_of_v<godot::Array, TypedContainer>) {
         if (value.get_type() != godot::Variant::ARRAY) {
             report_script_failure(godot::String{"Cannot assign "} + describe_variant_type(value) +

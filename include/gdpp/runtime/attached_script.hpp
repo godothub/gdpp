@@ -27,6 +27,8 @@
 
 namespace gdpp::runtime {
 
+struct ScriptSourceLocation;
+
 // The generated behavior object owns script fields and methods. The Godot object remains an
 // instance of its original ClassDB type, including when that type belongs to another
 // GDExtension. Keeping the owner as a non-owning pointer avoids a reference cycle: Godot owns the
@@ -166,6 +168,9 @@ set_attached_editor_storage_state(godot::Object* object,
                                   const godot::PackedStringArray& stored_properties);
 [[nodiscard]] godot::Object* cast_attached_script(const godot::Variant& value,
                                                   const godot::String& source_path);
+[[nodiscard]] godot::Object*
+strict_attached_script_storage(const godot::Variant& value, const godot::String& source_path,
+                               const ScriptSourceLocation& location);
 // Returns the opaque ScriptInstance handle Godot expects from debugger callbacks. The handle is
 // valid only while the owner retains the attached compiled script.
 [[nodiscard]] void* attached_script_instance_handle(godot::Object* object);

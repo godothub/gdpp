@@ -641,6 +641,24 @@ godot::Object* cast_attached_script(const godot::Variant& value, const godot::St
     return is_attached_script_instance(object, source_path) ? object : nullptr;
 }
 
+godot::Object* strict_attached_script_storage(const godot::Variant& value,
+                                              const godot::String& source_path,
+                                              const ScriptSourceLocation& location) {
+    if (value.get_type() == godot::Variant::NIL)
+        return nullptr;
+    auto* object = strict_native_object_storage(value, godot::Object::get_class_static(), location);
+    if (!object || script_function_failed())
+        return nullptr;
+    if (!is_attached_script_instance(object, source_path)) {
+        report_script_failure(godot::String{"Cannot assign object of type "} +
+                                  godot::String{object->get_class()} + " to script type " +
+                                  source_path + ".",
+                              location);
+        return nullptr;
+    }
+    return object;
+}
+
 godot::Variant instantiate_attached_script(const godot::String& source_path,
                                            const godot::Array& arguments, godot::String* error) {
     const auto fail = [error](const godot::String& message) {

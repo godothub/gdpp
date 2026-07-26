@@ -229,6 +229,44 @@ void report_script_failure(const godot::String& message, const char* source_path
     report_script_failure(message, ScriptSourceLocation{source_path, line, column});
 }
 
+godot::Object* strict_native_object_storage(const godot::Variant& value,
+                                            const godot::StringName& expected_class,
+                                            const ScriptSourceLocation location) {
+    if (script_function_failed())
+        return nullptr;
+    if (value.get_type() == godot::Variant::NIL)
+        return nullptr;
+    if (value.get_type() != godot::Variant::OBJECT) {
+        report_script_failure(godot::String{"Cannot assign "} + describe_variant_type(value) +
+                                  " to " + godot::String{expected_class} + ".",
+                              location);
+        return nullptr;
+    }
+    auto* object = value.get_validated_object();
+    if (!object) {
+        const auto id = static_cast<godot::ObjectID>(value);
+        if (id.is_valid())
+            report_script_failure("Cannot assign a previously freed object instance.", location);
+        return nullptr;
+    }
+    if (!object->is_class(expected_class)) {
+        report_script_failure(godot::String{"Cannot assign object of type "} +
+                                  godot::String{object->get_class()} + " to " +
+                                  godot::String{expected_class} + ".",
+                              location);
+        return nullptr;
+    }
+    return object;
+}
+
+godot::Variant strict_external_object_storage(const godot::Variant& value,
+                                              const godot::StringName& expected_class,
+                                              const ScriptSourceLocation location) {
+    if (value.get_type() == godot::Variant::NIL)
+        return {};
+    return strict_native_object_storage(value, expected_class, location) ? value : godot::Variant{};
+}
+
 void emit_local_signal_variants(godot::Object* owner, const godot::Variant** arguments,
                                 const std::int64_t argument_count,
                                 const ScriptSourceLocation location) {
