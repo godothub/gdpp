@@ -135,15 +135,25 @@ TEST_CASE("project compiler incrementally generates a unified native extension")
     REQUIRE(!std::filesystem::exists(options.output_directory / "prune_stale_development.cmake"));
     REQUIRE(!std::filesystem::exists(options.output_directory / "patch_godot_cpp_class_db.cmake"));
     REQUIRE(std::filesystem::is_regular_file(options.output_directory / "register_types.cpp"));
+    REQUIRE(std::filesystem::is_regular_file(options.output_directory / "symbols.map"));
     REQUIRE_EQ(first.native_library_directory, root / "addons/gdpp/binary");
     REQUIRE_EQ(first.build_id.size(), std::size_t{16});
-    for (const auto& script : first.scripts)
+    for (const auto& script : first.scripts) {
         REQUIRE(script.class_name.find("GDPPNative_") == 0);
+        REQUIRE(std::filesystem::is_regular_file(options.output_directory / "generated" /
+                                                 script.symbol_file_name));
+    }
     REQUIRE(std::filesystem::is_regular_file(options.output_directory / "build_id.txt"));
     REQUIRE(std::filesystem::is_regular_file(root / "addons/gdpp/build/.gdignore"));
     REQUIRE(read_text(options.output_directory / "manifest.txt")
-                .find(std::string{"GDPP_MANIFEST 3 "} + GDPP_VERSION_STRING + " " +
+                .find(std::string{"GDPP_MANIFEST 4 "} + GDPP_VERSION_STRING + " " +
                       GDPP_CODEGEN_FINGERPRINT + "\n") == 0);
+    const auto symbol_index = read_text(options.output_directory / "symbols.map");
+    REQUIRE(symbol_index.rfind("GDPP_PROJECT_SYMBOL_MAP 1\n", 0) == 0);
+    REQUIRE(symbol_index.find(first.build_id) != std::string::npos);
+    REQUIRE(symbol_index.find("generated/project_player.gd.symbols") != std::string::npos);
+    REQUIRE(read_text(options.output_directory / "generated/project_player.gd.symbols")
+                .find("method \"ready\"") != std::string::npos);
 
     const auto second = compiler.compile(options);
     REQUIRE(second.success);
@@ -600,9 +610,11 @@ TEST_CASE("project compiler transactionally replaces renamed and incompatible ge
     REQUIRE_EQ(initial.scripts.size(), std::size_t{1});
     const auto old_header = initial.scripts.front().header_file_name;
     const auto old_source = initial.scripts.front().source_file_name;
+    const auto old_symbols = initial.scripts.front().symbol_file_name;
     REQUIRE(old_header.find("path_widget_") == 0);
     write_text(options.output_directory / "generated/orphan.gd.hpp", "orphan");
     write_text(options.output_directory / "generated/orphan.gd.cpp", "orphan");
+    write_text(options.output_directory / "generated/orphan.gd.symbols", "orphan");
 
     auto incompatible_manifest = read_text(options.output_directory / "manifest.txt");
     const auto header_end = incompatible_manifest.find('\n');
@@ -623,10 +635,13 @@ TEST_CASE("project compiler transactionally replaces renamed and incompatible ge
     REQUIRE_EQ(renamed.removed_count, std::size_t{1});
     REQUIRE_EQ(renamed.scripts.front().header_file_name, std::string{"renamed_widget.gd.hpp"});
     REQUIRE_EQ(renamed.scripts.front().source_file_name, std::string{"renamed_widget.gd.cpp"});
+    REQUIRE_EQ(renamed.scripts.front().symbol_file_name, std::string{"renamed_widget.gd.symbols"});
     REQUIRE(!std::filesystem::exists(options.output_directory / "generated" / old_header));
     REQUIRE(!std::filesystem::exists(options.output_directory / "generated" / old_source));
+    REQUIRE(!std::filesystem::exists(options.output_directory / "generated" / old_symbols));
     REQUIRE(!std::filesystem::exists(options.output_directory / "generated/orphan.gd.hpp"));
     REQUIRE(!std::filesystem::exists(options.output_directory / "generated/orphan.gd.cpp"));
+    REQUIRE(!std::filesystem::exists(options.output_directory / "generated/orphan.gd.symbols"));
     REQUIRE(!std::filesystem::exists(options.output_directory / "CMakeLists.txt"));
     const auto manifest = read_text(options.output_directory / "manifest.txt");
     REQUIRE(manifest.find(old_source) == std::string::npos);
@@ -1205,9 +1220,9 @@ TEST_CASE("project compiler resolves class and path inheritance in parent-first 
             std::string::npos);
     REQUIRE(child_header.find("gdpp::runtime::ObjectStorage<godot::Object> linked") !=
             std::string::npos);
-    REQUIRE(child_header.find(
-                "gdpp::runtime::ObjectStorage<godot::Object> typed_identity("
-                "gdpp::runtime::ObjectStorage<godot::Object> value)") != std::string::npos);
+    REQUIRE(child_header.find("gdpp::runtime::ObjectStorage<godot::Object> typed_identity("
+                              "gdpp::runtime::ObjectStorage<godot::Object> value)") !=
+            std::string::npos);
     REQUIRE(child_source.find(base_class + "::static_answer()") != std::string::npos);
     REQUIRE(child_source.find("get_named(value, godot::StringName(\"base_value\"), "
                               "gdpp::runtime::ScriptSourceLocation{") != std::string::npos);
@@ -1376,8 +1391,7 @@ TEST_CASE("project compiler dynamically dispatches ABI-changing internal overrid
     const auto source =
         read_text(options.output_directory / "generated" / result.scripts.front().source_file_name);
     REQUIRE(header.find("_gdpp_native_override_transform("
-                        "gdpp::runtime::ObjectStorage<godot::Object> value)") !=
-            std::string::npos);
+                        "gdpp::runtime::ObjectStorage<godot::Object> value)") != std::string::npos);
     REQUIRE(header.find("gdpp::runtime::ObjectStorage<godot::Object> value) override") ==
             std::string::npos);
     REQUIRE(source.find("gdpp::runtime::call_dynamic_at(") != std::string::npos);

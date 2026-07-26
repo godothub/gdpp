@@ -16,13 +16,32 @@
 
 namespace gdpp {
 
+enum class GeneratedSymbolKind {
+    method,
+    virtual_adapter,
+    variant_callback,
+    property_getter,
+    property_setter,
+    synthesized_ready,
+};
+
+struct GeneratedSymbol {
+    GeneratedSymbolKind kind{GeneratedSymbolKind::method};
+    std::string source_symbol;
+    std::string native_symbol;
+    SourceSpan span{};
+};
+
 struct GeneratedUnit {
     std::string script_class_name;
     std::string class_name;
     std::string header_file_name;
     std::string source_file_name;
+    std::string symbol_file_name;
     std::string header;
     std::string source;
+    std::string symbol_map;
+    std::vector<GeneratedSymbol> symbols;
     std::vector<std::string> inner_class_names;
     std::vector<std::string> abstract_inner_class_names;
     std::optional<std::string> icon_path;
@@ -181,6 +200,9 @@ class CodeGenerator final {
     [[nodiscard]] std::string inner_cpp_type(std::string_view name) const;
     [[nodiscard]] std::string inner_godot_base_type(std::string_view name) const;
     [[nodiscard]] std::string inner_attached_native_base_type(std::string_view name) const;
+    void record_generated_symbol(GeneratedSymbolKind kind, std::string source_symbol,
+                                 std::string native_symbol, SourceSpan span) const;
+    [[nodiscard]] std::string serialize_generated_symbols(const GeneratedUnit& unit) const;
     [[nodiscard]] std::string
     attached_script_source_path(const Type& type, std::string_view resolved_owner = {}) const;
     [[nodiscard]] std::string
@@ -273,6 +295,7 @@ class CodeGenerator final {
     mutable std::string current_debug_function_;
     mutable std::string current_debug_instance_;
     mutable std::vector<std::pair<std::string, std::string>> current_debug_members_;
+    mutable std::vector<GeneratedSymbol> generated_symbols_;
     mutable std::string current_native_class_name_;
     mutable std::string current_godot_base_type_;
     mutable std::size_t match_counter_{0};

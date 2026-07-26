@@ -6,6 +6,7 @@
 #include <cctype>
 #include <cstddef>
 #include <filesystem>
+#include <iomanip>
 #include <map>
 #include <optional>
 #include <set>
@@ -1503,6 +1504,46 @@ std::string CodeGenerator::inner_attached_native_base_type(std::string_view name
                                                             : found->second;
 }
 
+void CodeGenerator::record_generated_symbol(const GeneratedSymbolKind kind,
+                                            std::string source_symbol, std::string native_symbol,
+                                            const SourceSpan span) const {
+    generated_symbols_.push_back({kind, std::move(source_symbol), std::move(native_symbol), span});
+}
+
+std::string CodeGenerator::serialize_generated_symbols(const GeneratedUnit& unit) const {
+    const auto kind_name = [](const GeneratedSymbolKind kind) -> std::string_view {
+        switch (kind) {
+        case GeneratedSymbolKind::method:
+            return "method";
+        case GeneratedSymbolKind::virtual_adapter:
+            return "virtual_adapter";
+        case GeneratedSymbolKind::variant_callback:
+            return "variant_callback";
+        case GeneratedSymbolKind::property_getter:
+            return "property_getter";
+        case GeneratedSymbolKind::property_setter:
+            return "property_setter";
+        case GeneratedSymbolKind::synthesized_ready:
+            return "synthesized_ready";
+        }
+        return "invalid";
+    };
+    std::ostringstream output;
+    output << "GDPP_SYMBOL_MAP 1\n"
+           << "source " << std::quoted("res://" + current_source_path_) << '\n'
+           << "generated " << std::quoted(unit.source_file_name) << '\n'
+           << "class " << std::quoted(unit.class_name) << '\n'
+           << "symbols " << generated_symbols_.size() << '\n';
+    for (const auto& symbol : generated_symbols_) {
+        output << kind_name(symbol.kind) << ' ' << std::quoted(symbol.source_symbol) << ' '
+               << std::quoted(symbol.native_symbol) << ' ' << symbol.span.begin.offset << ' '
+               << symbol.span.begin.line << ' ' << symbol.span.begin.column << ' '
+               << symbol.span.end.offset << ' ' << symbol.span.end.line << ' '
+               << symbol.span.end.column << '\n';
+    }
+    return output.str();
+}
+
 std::string
 CodeGenerator::attached_script_source_path(const Type& type,
                                            const std::string_view resolved_owner) const {
@@ -1979,8 +2020,8 @@ std::string CodeGenerator::emit_conversion(const Type& target, const Type& sourc
                    location + ")";
         }
         const std::string storage_prefix{"gdpp::runtime::ObjectStorage<"};
-        const auto object_cpp = target_cpp.substr(
-            storage_prefix.size(), target_cpp.size() - storage_prefix.size() - 1);
+        const auto object_cpp =
+            target_cpp.substr(storage_prefix.size(), target_cpp.size() - storage_prefix.size() - 1);
         return "gdpp::runtime::strict_native_object_value_storage<" + object_cpp +
                ">(gdpp::runtime::to_variant(" + value + "), " + godot_string_name(target.name) +
                location + ")";
@@ -7154,6 +7195,13 @@ void CodeGenerator::emit_inner_class_definition(const ir::Class& declaration,
         if (field.is_constant)
             continue;
         const auto name = sanitize_identifier(field.name);
+        const auto source_owner = source_name + "::" + field.name;
+        record_generated_symbol(GeneratedSymbolKind::property_getter, source_owner + ":get",
+                                native_name + "::_gdpp_get_" + name,
+                                field.getter ? field.getter->span : field.span);
+        record_generated_symbol(GeneratedSymbolKind::property_setter, source_owner + ":set",
+                                native_name + "::_gdpp_set_" + name,
+                                field.setter ? field.setter->span : field.span);
         source << cpp_type(field.type) << ' ' << native_name << "::_gdpp_get_" << name << "() {\n";
         if (field.is_static && has_static_initialization) {
             source << "    gdpp::runtime::ScriptFunctionScope _gdpp_script_initialization_scope("
@@ -7218,7 +7266,11 @@ void CodeGenerator::emit_inner_class_definition(const ir::Class& declaration,
         current_debug_instance_ = function.is_static ? "nullptr" : "owner()";
         const auto* engine_virtual = engine_virtual_for(function);
         const auto native_function_name = function_native_name(function);
+        const auto source_symbol = source_name + "::" + function.name;
         if (engine_virtual) {
+            record_generated_symbol(GeneratedSymbolKind::virtual_adapter, source_symbol,
+                                    native_name + "::" + sanitize_identifier(function.name),
+                                    function.span);
             source << virtual_return_type(*engine_virtual) << ' ' << native_name
                    << "::" << sanitize_identifier(function.name) << '(';
             for (std::size_t index = 0; index < engine_virtual->maximum_arguments; ++index) {
@@ -7272,6 +7324,8 @@ void CodeGenerator::emit_inner_class_definition(const ir::Class& declaration,
             current_coroutine_state_.clear();
             continue;
         }
+        record_generated_symbol(GeneratedSymbolKind::method, source_symbol,
+                                native_name + "::" + native_function_name, function.span);
         source << function_return_type(function) << ' ' << native_name
                << "::" << native_function_name << '(';
         for (std::size_t index = 0; index < function.parameters.size(); ++index) {
@@ -7315,6 +7369,9 @@ void CodeGenerator::emit_inner_class_definition(const ir::Class& declaration,
         if (function.name == "_static_init" || engine_virtual_for(function)) {
             continue;
         }
+        record_generated_symbol(GeneratedSymbolKind::variant_callback,
+                                source_name + "::" + function.name,
+                                native_name + "::" + method_callback_name(function), function.span);
         source << emit_method_callback_definition(
             function, native_name, function_native_name(function), function_return_type(function));
     }
@@ -7351,6 +7408,7 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
     const std::filesystem::path path{source_path};
     const auto base_name = path.stem().string();
     GeneratedUnit unit;
+    generated_symbols_.clear();
     unit.icon_path = module.icon_path;
     unit.is_abstract = module.is_abstract;
     unit.is_tool = module.is_tool;
@@ -7564,6 +7622,8 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
         current_script_
             ? std::filesystem::path{unit.header_file_name}.replace_extension(".cpp").string()
             : file_stem + ".gd.cpp";
+    unit.symbol_file_name =
+        std::filesystem::path{unit.source_file_name}.replace_extension(".symbols").string();
     auto base = module.base_type.value_or("Node");
     if (native_base_class.empty() && !is_valid_base_type(base)) {
         diagnostics_.error("GDS3002",
@@ -8694,6 +8754,12 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
         if (variable.is_constant)
             continue;
         const auto name = sanitize_identifier(variable.name);
+        record_generated_symbol(GeneratedSymbolKind::property_getter, variable.name + ":get",
+                                unit.class_name + "::_gdpp_get_" + name,
+                                variable.getter ? variable.getter->span : variable.span);
+        record_generated_symbol(GeneratedSymbolKind::property_setter, variable.name + ":set",
+                                unit.class_name + "::_gdpp_set_" + name,
+                                variable.setter ? variable.setter->span : variable.span);
         source << cpp_type(variable.type) << ' ' << unit.class_name << "::_gdpp_get_" << name
                << "() {\n";
         if (variable.is_static && has_static_initialization) {
@@ -8769,7 +8835,11 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
         current_debug_instance_ =
             function.is_static ? "nullptr" : (attached_script ? "owner()" : "this");
         const auto* engine_virtual = virtual_method_for(function);
+        const auto native_function_name = function_native_name(function);
         if (engine_virtual) {
+            record_generated_symbol(GeneratedSymbolKind::virtual_adapter, function.name,
+                                    unit.class_name + "::" + sanitize_identifier(function.name),
+                                    function.span);
             source << virtual_return_type(*engine_virtual) << ' ' << unit.class_name
                    << "::" << sanitize_identifier(function.name) << '(';
             for (std::size_t index = 0; index < engine_virtual->maximum_arguments; ++index) {
@@ -8785,7 +8855,7 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
             std::string call = engine_virtual->is_const
                                    ? "const_cast<" + unit.class_name + "*>(this)->"
                                    : "this->";
-            call += function_native_name(function) + "(";
+            call += native_function_name + "(";
             for (std::size_t index = 0; index < function.parameters.size(); ++index) {
                 if (index != 0)
                     call += ", ";
@@ -8843,8 +8913,10 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
             current_coroutine_state_.clear();
             continue;
         }
+        record_generated_symbol(GeneratedSymbolKind::method, function.name,
+                                unit.class_name + "::" + native_function_name, function.span);
         source << function_return_type(function) << ' ' << unit.class_name
-               << "::" << function_native_name(function) << '(';
+               << "::" << native_function_name << '(';
         for (std::size_t index = 0; index < function.parameters.size(); ++index) {
             if (index != 0)
                 source << ", ";
@@ -8914,11 +8986,16 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
             virtual_method_for(function)) {
             continue;
         }
+        record_generated_symbol(GeneratedSymbolKind::variant_callback, function.name,
+                                unit.class_name + "::" + method_callback_name(function),
+                                function.span);
         source << emit_method_callback_definition(function, unit.class_name,
                                                   function_native_name(function),
                                                   function_return_type(function));
     }
     if (!attached_script && has_onready_fields && ready == module.functions.end()) {
+        record_generated_symbol(GeneratedSymbolKind::synthesized_ready, "@onready",
+                                unit.class_name + "::_ready", module.span);
         current_return_type_ = {TypeKind::void_type, "void"};
         in_function_body_ = true;
         source << "void " << unit.class_name << "::_ready() {\n";
@@ -8944,6 +9021,8 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
            << "#pragma warning(pop)\n"
            << "#endif\n";
     unit.source = source.str();
+    unit.symbols = generated_symbols_;
+    unit.symbol_map = serialize_generated_symbols(unit);
     return unit;
 }
 

@@ -200,8 +200,10 @@ int main(int argc, char** argv) {
     }
     const auto header_path = output_path / result.unit.header_file_name;
     const auto source_path = output_path / result.unit.source_file_name;
+    const auto symbol_path = output_path / result.unit.symbol_file_name;
     if (!write_file(header_path, result.unit.header) ||
-        !write_file(source_path, result.unit.source)) {
+        !write_file(source_path, result.unit.source) ||
+        !write_file(symbol_path, result.unit.symbol_map)) {
         std::cerr << "cannot write generated files under: " << gdpp::path_to_utf8(output_path)
                   << '\n';
         return 2;

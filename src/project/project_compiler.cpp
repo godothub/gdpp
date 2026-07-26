@@ -40,6 +40,7 @@ struct ManifestEntry {
     std::string class_name;
     std::string header;
     std::string source;
+    std::string symbols;
     std::vector<std::string> dependencies;
 };
 
@@ -749,6 +750,12 @@ bool managed_translation_unit_name(std::string_view name) {
            (name.size() > 7U && name.substr(name.size() - 7U) == ".gd.cpp");
 }
 
+bool managed_symbol_map_name(std::string_view name) {
+    constexpr std::string_view suffix{".gd.symbols"};
+    return name.size() > suffix.size() && name.substr(name.size() - suffix.size()) == suffix &&
+           name.find_first_of("/\\") == std::string_view::npos;
+}
+
 struct IconPathResolution {
     std::optional<std::string> resource_path;
     std::string error;
@@ -812,7 +819,7 @@ LoadedManifest read_manifest(const std::filesystem::path& path) {
     std::string codegen_fingerprint;
     if (!(input >> magic >> version >> compiler_version >> codegen_fingerprint))
         return loaded;
-    if (magic != "GDPP_MANIFEST" || version != "3")
+    if (magic != "GDPP_MANIFEST" || version != "4")
         return loaded;
     loaded.cache_compatible =
         compiler_version == GDPP_VERSION_STRING && codegen_fingerprint == GDPP_CODEGEN_FINGERPRINT;
@@ -821,7 +828,8 @@ LoadedManifest read_manifest(const std::filesystem::path& path) {
     std::size_t dependency_count = 0;
     while (input >> std::quoted(source_path) >> std::quoted(entry.implementation_hash) >>
            std::quoted(entry.public_abi_hash) >> std::quoted(entry.class_name) >>
-           std::quoted(entry.header) >> std::quoted(entry.source) >> dependency_count) {
+           std::quoted(entry.header) >> std::quoted(entry.source) >> std::quoted(entry.symbols) >>
+           dependency_count) {
         entry.dependencies.clear();
         entry.dependencies.reserve(dependency_count);
         for (std::size_t index = 0; index < dependency_count; ++index) {
@@ -831,7 +839,8 @@ LoadedManifest read_manifest(const std::filesystem::path& path) {
             entry.dependencies.push_back(std::move(dependency));
         }
         if (!managed_translation_unit_name(entry.header) ||
-            !managed_translation_unit_name(entry.source)) {
+            !managed_translation_unit_name(entry.source) ||
+            !managed_symbol_map_name(entry.symbols)) {
             return {};
         }
         loaded.entries.emplace(source_path, entry);
@@ -841,12 +850,12 @@ LoadedManifest read_manifest(const std::filesystem::path& path) {
 
 std::string write_manifest(const Manifest& manifest) {
     std::ostringstream output;
-    output << "GDPP_MANIFEST 3 " << GDPP_VERSION_STRING << ' ' << GDPP_CODEGEN_FINGERPRINT << '\n';
+    output << "GDPP_MANIFEST 4 " << GDPP_VERSION_STRING << ' ' << GDPP_CODEGEN_FINGERPRINT << '\n';
     for (const auto& [path, entry] : manifest) {
         output << std::quoted(path) << ' ' << std::quoted(entry.implementation_hash) << ' '
                << std::quoted(entry.public_abi_hash) << ' ' << std::quoted(entry.class_name) << ' '
                << std::quoted(entry.header) << ' ' << std::quoted(entry.source) << ' '
-               << entry.dependencies.size();
+               << std::quoted(entry.symbols) << ' ' << entry.dependencies.size();
         for (const auto& dependency : entry.dependencies)
             output << ' ' << std::quoted(dependency);
         output << '\n';
@@ -2533,6 +2542,7 @@ ProjectCompileResult ProjectCompiler::compile_impl(const ProjectCompileOptions& 
         std::size_t script_index;
         std::string header;
         std::string source;
+        std::string symbols;
     };
     std::vector<PendingOutput> pending;
     Manifest new_manifest;
@@ -2586,10 +2596,12 @@ ProjectCompileResult ProjectCompiler::compile_impl(const ProjectCompileOptions& 
             cached->second.public_abi_hash == input.public_abi_hash &&
             cached->second.class_name == expected_class_name &&
             std::filesystem::is_regular_file(generated / cached->second.header) &&
-            std::filesystem::is_regular_file(generated / cached->second.source)) {
+            std::filesystem::is_regular_file(generated / cached->second.source) &&
+            std::filesystem::is_regular_file(generated / cached->second.symbols)) {
             script.class_name = cached->second.class_name;
             script.header_file_name = cached->second.header;
             script.source_file_name = cached->second.source;
+            script.symbol_file_name = cached->second.symbols;
             script.cache_hit = true;
             ++result.cache_hit_count;
         } else {
@@ -2633,13 +2645,15 @@ ProjectCompileResult ProjectCompiler::compile_impl(const ProjectCompileOptions& 
             script.class_name = compilation.unit.class_name;
             script.header_file_name = compilation.unit.header_file_name;
             script.source_file_name = compilation.unit.source_file_name;
+            script.symbol_file_name = compilation.unit.symbol_file_name;
             script.inner_class_names = compilation.unit.inner_class_names;
             script.abstract_inner_class_names = compilation.unit.abstract_inner_class_names;
             script.is_abstract = compilation.unit.is_abstract;
             script.is_tool = compilation.unit.is_tool;
             script.static_unload = compilation.unit.static_unload;
             pending.push_back({result.scripts.size(), std::move(compilation.unit.header),
-                               std::move(compilation.unit.source)});
+                               std::move(compilation.unit.source),
+                               std::move(compilation.unit.symbol_map)});
             ++result.compiled_count;
         }
         const auto [owner, unique_class] = class_owners.emplace(script.class_name, input.relative);
@@ -2650,14 +2664,16 @@ ProjectCompileResult ProjectCompiler::compile_impl(const ProjectCompileOptions& 
                                               "' is also produced by " + owner->second)});
         }
         if (!output_names.insert(script.header_file_name).second ||
-            !output_names.insert(script.source_file_name).second) {
+            !output_names.insert(script.source_file_name).second ||
+            !output_names.insert(script.symbol_file_name).second) {
             result.diagnostics.push_back(
                 {input.path, project_error("PRJ0006", "generated file name collision")});
         }
         new_manifest.emplace(input.relative,
                              ManifestEntry{input.implementation_hash, input.public_abi_hash,
                                            script.class_name, script.header_file_name,
-                                           script.source_file_name, input.dependencies});
+                                           script.source_file_name, script.symbol_file_name,
+                                           input.dependencies});
         result.scripts.push_back(std::move(script));
         report_project_progress(options, ProjectCompilePhase::translate, ++translated_inputs,
                                 translation_total);
@@ -2677,7 +2693,8 @@ ProjectCompileResult ProjectCompiler::compile_impl(const ProjectCompileOptions& 
     for (const auto& item : pending) {
         const auto& script = result.scripts[item.script_index];
         if (!write_file_if_changed(generated / script.header_file_name, item.header) ||
-            !write_file_if_changed(generated / script.source_file_name, item.source)) {
+            !write_file_if_changed(generated / script.source_file_name, item.source) ||
+            !write_file_if_changed(generated / script.symbol_file_name, item.symbols)) {
             result.diagnostics.push_back(
                 {generated, project_error("PRJ0008", "cannot write generated translation unit")});
             return result;
@@ -2686,7 +2703,8 @@ ProjectCompileResult ProjectCompiler::compile_impl(const ProjectCompileOptions& 
     for (const auto& [path, entry] : old_manifest) {
         const auto replacement = new_manifest.find(path);
         if (replacement != new_manifest.end() && replacement->second.header == entry.header &&
-            replacement->second.source == entry.source) {
+            replacement->second.source == entry.source &&
+            replacement->second.symbols == entry.symbols) {
             continue;
         }
         // A moved globally named script can keep the same generated file names. The new
@@ -2697,6 +2715,8 @@ ProjectCompileResult ProjectCompiler::compile_impl(const ProjectCompileOptions& 
             std::filesystem::remove(generated / entry.header, error);
         if (!error && !output_names.count(entry.source))
             std::filesystem::remove(generated / entry.source, error);
+        if (!error && !output_names.count(entry.symbols))
+            std::filesystem::remove(generated / entry.symbols, error);
         if (error) {
             result.diagnostics.push_back(
                 {generated,
@@ -2718,7 +2738,8 @@ ProjectCompileResult ProjectCompiler::compile_impl(const ProjectCompileOptions& 
             continue;
         }
         const auto name = path_to_utf8(generated_iterator->path().filename());
-        if (managed_translation_unit_name(name) && !output_names.count(name))
+        if ((managed_translation_unit_name(name) || managed_symbol_map_name(name)) &&
+            !output_names.count(name))
             orphaned_outputs.push_back(generated_iterator->path());
     }
     for (const auto& orphan : orphaned_outputs) {
@@ -2755,8 +2776,19 @@ ProjectCompileResult ProjectCompiler::compile_impl(const ProjectCompileOptions& 
 
     const auto relative_output = output.lexically_relative(root);
     const auto build_directory = containing_build_directory(root, relative_output);
+    std::ostringstream symbol_index;
+    symbol_index << "GDPP_PROJECT_SYMBOL_MAP 1\n"
+                 << "build_id " << std::quoted(result.build_id) << '\n'
+                 << "units " << result.scripts.size() << '\n';
+    for (const auto& script : result.scripts) {
+        symbol_index << "unit " << std::quoted(generic_path_to_utf8(script.relative_path)) << ' '
+                     << std::quoted(script.class_name) << ' '
+                     << std::quoted("generated/" + script.source_file_name) << ' '
+                     << std::quoted("generated/" + script.symbol_file_name) << '\n';
+    }
     if (!write_file_if_changed(output / "register_types.cpp",
                                generated_registration(result.scripts)) ||
+        !write_file_if_changed(output / "symbols.map", symbol_index.str()) ||
         !write_file_if_changed(output / "build_id.txt", result.build_id + "\n") ||
         !write_file_if_changed(output / "bridge.lock",
                                write_extension_bridge_lock(bridge_load.bridges)) ||

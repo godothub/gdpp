@@ -30,6 +30,17 @@ TEST_CASE("compiler generates bindable GDExtension C++") {
     REQUIRE(result.unit.source.find("const auto _gdpp_property_right_") != std::string::npos);
     REQUIRE(result.unit.source.find("gdpp::integer::add(") != std::string::npos);
     REQUIRE(result.unit.source.find("ADD_SIGNAL") != std::string::npos);
+    REQUIRE_EQ(result.unit.symbol_file_name, std::string{"counter.gd.symbols"});
+    REQUIRE(result.unit.symbol_map.rfind("GDPP_SYMBOL_MAP 1\n", 0) == 0);
+    REQUIRE(result.unit.symbol_map.find("source \"res://counter.gd\"") != std::string::npos);
+    REQUIRE(result.unit.symbol_map.find("method \"increment\" \"GDPPNative_Counter::increment\"") !=
+            std::string::npos);
+    REQUIRE(result.unit.symbol_map.find("variant_callback \"increment\" "
+                                        "\"GDPPNative_Counter::_gdpp_variant_call_increment\"") !=
+            std::string::npos);
+    REQUIRE(result.unit.symbol_map.find(
+                "property_getter \"value:get\" \"GDPPNative_Counter::_gdpp_get_value\"") !=
+            std::string::npos);
 }
 
 TEST_CASE("semantic analysis accepts Godot rest parameters and unbounded calls") {
@@ -520,8 +531,7 @@ TEST_CASE("compiler applies internal call contracts to every native storage fami
                 "int64_t>>(gdpp::runtime::to_variant(_gdpp_call_argument_") != std::string::npos);
     REQUIRE(result.unit.source.find(
                 "gdpp::runtime::strict_native_object_value_storage<godot::Node>("
-                "gdpp::runtime::to_variant(_gdpp_call_argument_") !=
-            std::string::npos);
+                "gdpp::runtime::to_variant(_gdpp_call_argument_") != std::string::npos);
     REQUIRE(result.unit.source.find("gdpp::runtime::strict_builtin_storage<godot::String>("
                                     "gdpp::runtime::to_variant(_gdpp_call_argument_") !=
             std::string::npos);
@@ -1388,8 +1398,7 @@ TEST_CASE("compiler initializes onready fields immediately before ready") {
                                    "    node_label.text = \"ready\"\n");
 
     REQUIRE(result.success);
-    REQUIRE(result.unit.header.find(
-                "gdpp::runtime::ObjectStorage<godot::Label> node_label{}") !=
+    REQUIRE(result.unit.header.find("gdpp::runtime::ObjectStorage<godot::Label> node_label{}") !=
             std::string::npos);
     const auto initialization = result.unit.source.find("node_label =");
     const auto user_body = result.unit.source.find("->set_text");
@@ -2653,8 +2662,8 @@ TEST_CASE("uninitialized locals preserve Godot default initialization") {
     REQUIRE(result.success);
     REQUIRE(result.unit.source.find("int64_t typed{};") != std::string::npos);
     REQUIRE(result.unit.source.find("godot::Variant dynamic{};") != std::string::npos);
-    REQUIRE(result.unit.source.find(
-                "gdpp::runtime::ObjectStorage<godot::Node> object{};") != std::string::npos);
+    REQUIRE(result.unit.source.find("gdpp::runtime::ObjectStorage<godot::Node> object{};") !=
+            std::string::npos);
 }
 
 TEST_CASE("compiler preserves typed subscript and builtin component scalar semantics") {
@@ -4867,28 +4876,23 @@ TEST_CASE("typed Godot object parameters generate pointer calls") {
                                                        "    node.queue_free()\n");
 
     REQUIRE(result.success);
-    REQUIRE(result.unit.header.find(
-                "gdpp::runtime::ObjectStorage<godot::Node> node") != std::string::npos);
+    REQUIRE(result.unit.header.find("gdpp::runtime::ObjectStorage<godot::Node> node") !=
+            std::string::npos);
     REQUIRE(result.unit.source.find("->queue_free()") != std::string::npos);
 }
 
 TEST_CASE("compiler validates every reflected engine signal argument contract") {
     const gdpp::Compiler compiler;
-    const auto valid = compiler.compile(
-        "engine_signal.gd",
-        "extends Control\n"
-        "func relay(event: InputEvent) -> void:\n"
-        "    gui_input.emit(event)\n");
-    const auto wrong_count = compiler.compile(
-        "engine_signal_count.gd",
-        "extends Control\n"
-        "func relay() -> void:\n"
-        "    gui_input.emit()\n");
-    const auto wrong_type = compiler.compile(
-        "engine_signal_type.gd",
-        "extends Control\n"
-        "func relay() -> void:\n"
-        "    gui_input.emit(42)\n");
+    const auto valid =
+        compiler.compile("engine_signal.gd", "extends Control\n"
+                                             "func relay(event: InputEvent) -> void:\n"
+                                             "    gui_input.emit(event)\n");
+    const auto wrong_count = compiler.compile("engine_signal_count.gd", "extends Control\n"
+                                                                        "func relay() -> void:\n"
+                                                                        "    gui_input.emit()\n");
+    const auto wrong_type = compiler.compile("engine_signal_type.gd", "extends Control\n"
+                                                                      "func relay() -> void:\n"
+                                                                      "    gui_input.emit(42)\n");
 
     REQUIRE(valid.success);
     REQUIRE(!wrong_count.success);
@@ -4902,19 +4906,18 @@ TEST_CASE("compiler validates every reflected engine signal argument contract") 
 TEST_CASE("non-RefCounted object storage preserves weak identity in every generated frame") {
     const gdpp::Compiler compiler;
     const auto result = compiler.compile(
-        "weak_objects.gd",
-        "extends Node\n"
-        "var retained: Node\n"
-        "func exercise(parameter: Node, signal_value: Signal) -> Callable:\n"
-        "    var local := Node.new()\n"
-        "    retained = local\n"
-        "    return func() -> int:\n"
-        "        retained = parameter\n"
-        "        return local.get_child_count()\n"
-        "func suspend(signal_value: Signal) -> int:\n"
-        "    var suspended := Node.new()\n"
-        "    await signal_value\n"
-        "    return suspended.get_child_count()\n");
+        "weak_objects.gd", "extends Node\n"
+                           "var retained: Node\n"
+                           "func exercise(parameter: Node, signal_value: Signal) -> Callable:\n"
+                           "    var local := Node.new()\n"
+                           "    retained = local\n"
+                           "    return func() -> int:\n"
+                           "        retained = parameter\n"
+                           "        return local.get_child_count()\n"
+                           "func suspend(signal_value: Signal) -> int:\n"
+                           "    var suspended := Node.new()\n"
+                           "    await signal_value\n"
+                           "    return suspended.get_child_count()\n");
 
     REQUIRE(result.success);
     const std::string storage = "gdpp::runtime::ObjectStorage<godot::Node>";
