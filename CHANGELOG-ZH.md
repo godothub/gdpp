@@ -18,7 +18,21 @@
 - 在 Clang、GCC 和 MSVC 严格 warning-as-error 构建下保留 GDScript 合法的词法遮蔽，同时不关闭其他原生编译诊断。
 - macOS Universal Debug 导出可以复用经过验证、仅提供 Release 的第三方 provider fat binary；GDPP 只在导出包内的描述符字节中增加 Debug 别名，不修改客户源码目录中的描述符或动态库。
 - 生成的 breakpoint fixture 会与真实 godot-cpp 一同编译，并使用官方 Godot 4.6.2 对附着第三方 GDExtension 的 Debug、Release 项目执行导出和运行验证。
-- 发行 runtime ABI 升级到 15；缺少调试帧、规范 ScriptInstance 或 FunctionState 契约的旧 SDK 会在预检阶段失败关闭，不会生成 ABI 不兼容的客户库。
+- 前端新增有界多错误恢复、完整源码范围 AST 序列化 golden、coverage-guided fuzz 和 Godot 4.7.1 stable 语言漂移报告，覆盖官方 114 个合法及 76 个非法 parser fixture。
+- MIR 的 value/operation 使用稳定且不含地址的身份，支持版本化控制流快照序列化、source ownership 与密集前驱校验；优化预算和失败均保持事务，不会破坏输入。
+- 在完整重映射 operand 的前提下删除无效 MIR value，同时保留调试器、分配、故障和挂起等可观察操作；CSE、内联、逃逸与循环变换在取得独立等价证明前不会默认启用。
+- 穷举验证 Godot 4.4～4.7 API 表中的每条生成元数据、参数范围、属性读写 ABI、Signal 契约、enum/bitfield、标量返回和禁止的原生指针边界。
+- 无源码成品为完全由运行时拼接的脚本路径保留规范 Script 身份，覆盖相对路径、UID、同步/线程 ResourceLoader、缓存相等、`exists()`、`get_script()` 和 `.new()`；编译项目清单外路径确定失败。
+- 使用真实导出后的 ENet 多 peer 验证 authority/any-peer RPC、本地/远端执行、传输模式、channel、顺序、拒绝和继承 override 配置，不再用单进程 metadata 代替网络行为。
+- 对全部非 MAX Variant 值家族和完整 fault 矩阵执行原生 GDScript/AOT 对照，覆盖普通/强类型容器、全部 PackedArray、错误键、越界、整数故障、Callable、空/失效 Object、Ref 和第三方调用。
+- await 赋值先以 A-normal form 固定接收者与下标，再求右值；局部、字段、属性和动态下标在挂起前后保持单次求值、写回所有权、惰性分支和生命周期。
+- 缺失的默认参数在有序调用 prologue 内求值，并允许默认表达式真正挂起；接收者、此前显式/默认参数、vararg 和逐次调用状态均跨恢复保留。
+- 内联及方法绑定属性 getter/setter 在实例、静态、内部类、跨脚本、继承和并发调用中统一保留协程 ABI，并对项目缓存执行传递式依赖失效。
+- 静态协程的无 owner 状态与嵌套协程 lambda continuation 完全隔离于外层 emitter 上下文，避免捕获实例、丢失类型化返回或在内部失败路径生成非法 C++ return。
+- 注解常量参数中的 `await` 在语义阶段稳定拒绝，不让不可能的编译期挂起进入 HIR 或 C++ 生成。
+- 项目脚本 `Object.free()` 改经 Godot Variant 调度而非直接 `memdelete`，保留普通 Object 销毁、RefCounted 拒绝、锁定对象保护、已释放身份、源码位置和当前函数失败语义。
+- custom/double precision 插件由目标引擎导出的精确 `extension_api.json` 生产，compiler、editor/fallback、godot-cpp、SDK、描述符 feature、API SHA-256、precision 与 runtime ABI 全部绑定；CI 会干净构建并审计 Godot 4.7 double 完整包。
+- SDK 升级到 schema 12、发行 runtime ABI 升级到 18；缺少完整调试器、FunctionState、动态 Script、严格 Variant、协程访问器、await 默认参数、自定义精度或 Object 生命周期契约的旧 SDK 会在创建任何客户编译命令前失败关闭。
 
 ## 1.7.10
 
