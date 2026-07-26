@@ -46,6 +46,15 @@ void rebuild_predecessors(mir::Function& function) {
     }
 }
 
+void rebuild_operation_ids(mir::Function& function) {
+    mir::OperationId next{0};
+    for (auto& block : function.blocks) {
+        for (auto& instruction : block.instructions)
+            instruction.id = next++;
+        block.terminator.id = next++;
+    }
+}
+
 void prune_unreachable(mir::Function& function, MirOptimizationStats& stats) {
     std::vector<bool> reachable(function.blocks.size(), false);
     std::vector<mir::BlockId> worklist{function.entry};
@@ -83,6 +92,7 @@ void prune_unreachable(mir::Function& function, MirOptimizationStats& stats) {
             return block.terminator.kind == mir::TerminatorKind::suspend;
         });
     rebuild_predecessors(function);
+    rebuild_operation_ids(function);
 }
 
 } // namespace
@@ -97,6 +107,7 @@ MirOptimizationStats MirOptimizer::optimize(mir::Module& module) const {
             const auto target = block.terminator.targets[*value ? 0U : 1U];
             block.terminator.kind = mir::TerminatorKind::jump;
             block.terminator.condition = nullptr;
+            block.terminator.condition_value = mir::invalid_value;
             block.terminator.targets = {target};
             block.terminator.branch_role = mir::BranchRole::none;
             ++stats.branches_simplified;

@@ -561,6 +561,7 @@ set(GDPP_IR_SOURCES
     src/ir/lowering.cpp
     src/ir/mir.cpp
     src/ir/mir_optimizer.cpp
+    src/ir/mir_serializer.cpp
     src/ir/optimizer.cpp
 )
 set(GDPP_CODEGEN_SOURCES

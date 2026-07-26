@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <functional>
 #include <string_view>
+#include <unordered_map>
 #include <unordered_set>
 
 namespace gdpp {
@@ -18,8 +19,10 @@ bool await_can_suspend(const ir::Statement& statement) {
 
 class FunctionBuilder final {
   public:
-    FunctionBuilder(std::string name, mir::FunctionRole role, SourceSpan span)
-        : function_{std::move(name), role, mir::invalid_block, {}, false, span} {
+    FunctionBuilder(std::string name, mir::FunctionRole role, SourceSpan span) : function_{} {
+        function_.name = std::move(name);
+        function_.role = role;
+        function_.span = span;
         function_.entry = add_block();
     }
 
@@ -52,13 +55,86 @@ class FunctionBuilder final {
     void terminate(mir::BlockId block, mir::TerminatorKind kind, std::vector<mir::BlockId> targets,
                    const ir::Expression* condition, SourceSpan span,
                    mir::BranchRole branch_role = mir::BranchRole::none) {
-        function_.blocks[block].terminator = {kind, condition, std::move(targets), span,
-                                              branch_role};
+        auto& terminator = function_.blocks[block].terminator;
+        terminator.id = next_operation_++;
+        terminator.kind = kind;
+        terminator.condition = condition;
+        terminator.condition_value = register_expression(condition);
+        terminator.targets = std::move(targets);
+        terminator.span = span;
+        terminator.branch_role = branch_role;
     }
 
     void append(mir::BlockId block, mir::InstructionKind kind, mir::Effect effects,
                 const ir::Statement& statement) {
-        function_.blocks[block].instructions.push_back({kind, effects, &statement, statement.span});
+        mir::Instruction instruction;
+        instruction.id = next_operation_++;
+        instruction.kind = kind;
+        instruction.effects = effects;
+        instruction.source = &statement;
+        append_statement_inputs(statement, instruction.inputs);
+        instruction.span = statement.span;
+        function_.blocks[block].instructions.push_back(std::move(instruction));
+    }
+
+    [[nodiscard]] mir::ValueId register_expression(const ir::Expression* expression) {
+        if (!expression)
+            return mir::invalid_value;
+        if (const auto existing = value_ids_.find(expression); existing != value_ids_.end())
+            return existing->second;
+
+        const auto id = static_cast<mir::ValueId>(function_.values.size());
+        value_ids_.emplace(expression, id);
+        mir::Value value;
+        value.id = id;
+        value.kind = expression->kind;
+        value.type = expression->type;
+        value.storage_type = expression->storage_type;
+        value.assignment_type = expression->assignment_type;
+        value.ownership = expression->type.ownership();
+        value.non_null = expression->non_null;
+        value.literal_kind = expression->literal_kind;
+        value.resolution = expression->resolution;
+        value.payload = expression->value;
+        value.resolved_owner = expression->resolved_owner;
+        value.getter = expression->getter;
+        value.setter = expression->setter;
+        value.direct_access = expression->direct_access;
+        value.coroutine_call = expression->coroutine_call;
+        value.indexed_argument = expression->indexed_argument;
+        value.symbol_identity = expression->symbol_identity;
+        value.intrinsic = expression->intrinsic;
+        value.call_contract = expression->call_contract;
+        value.span = expression->span;
+        value.source = expression;
+        function_.values.push_back(std::move(value));
+
+        auto& operands = function_.values[id].operands;
+        operands.reserve(expression->operands.size());
+        for (const auto& operand : expression->operands)
+            operands.push_back(register_expression(operand.get()));
+        return id;
+    }
+
+    void append_pattern_inputs(const ir::MatchPattern& pattern, std::vector<mir::ValueId>& inputs) {
+        if (pattern.expression)
+            inputs.push_back(register_expression(pattern.expression.get()));
+        for (const auto& key : pattern.keys) {
+            if (key)
+                inputs.push_back(register_expression(key.get()));
+        }
+        for (const auto& element : pattern.elements)
+            append_pattern_inputs(element, inputs);
+    }
+
+    void append_statement_inputs(const ir::Statement& statement,
+                                 std::vector<mir::ValueId>& inputs) {
+        if (statement.condition)
+            inputs.push_back(register_expression(statement.condition.get()));
+        if (statement.expression)
+            inputs.push_back(register_expression(statement.expression.get()));
+        for (const auto& pattern : statement.patterns)
+            append_pattern_inputs(pattern, inputs);
     }
 
     [[nodiscard]] mir::BlockId lower_statements(const std::vector<ir::Statement>& statements,
@@ -285,6 +361,8 @@ class FunctionBuilder final {
     }
 
     mir::Function function_;
+    mir::OperationId next_operation_{0};
+    std::unordered_map<const ir::Expression*, mir::ValueId> value_ids_;
 };
 
 void collect_expression_lambdas(const ir::Expression& expression, std::string_view owner,
@@ -392,21 +470,59 @@ mir::Module MirLowerer::lower(const ir::Module& module) const {
     lower_functions(module.functions, owner, lowered.functions);
     for (const auto& declaration : module.classes)
         lower_class(declaration, owner, lowered.functions);
+    for (std::size_t index = 0; index < lowered.functions.size(); ++index)
+        lowered.functions[index].id = static_cast<mir::FunctionId>(index);
     return lowered;
 }
 
 bool MirVerifier::verify(const mir::Module& module) const {
+    if (module.format_version != mir::schema_version) {
+        diagnostics_.error("GDS5109", "MIR module has an unsupported schema version", {});
+        return false;
+    }
     if (!module.hir) {
         diagnostics_.error("GDS5100", "MIR module is detached from its typed HIR", {});
         return false;
     }
     bool valid = true;
-    for (const auto& function : module.functions) {
+    for (std::size_t function_index = 0; function_index < module.functions.size();
+         ++function_index) {
+        const auto& function = module.functions[function_index];
+        if (function.id != function_index) {
+            diagnostics_.error("GDS5110", "MIR function IDs are not dense and deterministic",
+                               function.span);
+            valid = false;
+        }
         if (function.entry >= function.blocks.size()) {
             diagnostics_.error("GDS5101", "MIR function has an invalid entry block", function.span);
             valid = false;
             continue;
         }
+        for (std::size_t value_index = 0; value_index < function.values.size(); ++value_index) {
+            const auto& value = function.values[value_index];
+            if (value.id != value_index) {
+                diagnostics_.error("GDS5111", "MIR value IDs are not dense and deterministic",
+                                   value.span);
+                valid = false;
+            }
+            if (!value.source) {
+                diagnostics_.error("GDS5112", "MIR value has no typed HIR source", value.span);
+                valid = false;
+            }
+            if (value.ownership != value.type.ownership()) {
+                diagnostics_.error("GDS5113", "MIR value ownership contradicts its semantic type",
+                                   value.span);
+                valid = false;
+            }
+            for (const auto operand : value.operands) {
+                if (operand >= function.values.size()) {
+                    diagnostics_.error("GDS5114", "MIR value references an unknown operand",
+                                       value.span);
+                    valid = false;
+                }
+            }
+        }
+        std::vector<bool> operation_ids;
         std::vector<bool> reachable(function.blocks.size(), false);
         std::vector<mir::BlockId> worklist{function.entry};
         while (!worklist.empty()) {
@@ -426,6 +542,23 @@ bool MirVerifier::verify(const mir::Module& module) const {
                 valid = false;
             }
             const auto target_count = block.terminator.targets.size();
+            const auto record_operation = [&](const mir::OperationId operation,
+                                              const SourceSpan span) {
+                if (operation == mir::invalid_operation) {
+                    diagnostics_.error("GDS5115", "MIR operation has no stable identity", span);
+                    valid = false;
+                    return;
+                }
+                if (operation >= operation_ids.size())
+                    operation_ids.resize(static_cast<std::size_t>(operation) + 1U, false);
+                if (operation_ids[operation]) {
+                    diagnostics_.error("GDS5116", "MIR operation identity is duplicated", span);
+                    valid = false;
+                    return;
+                }
+                operation_ids[operation] = true;
+            };
+            record_operation(block.terminator.id, block.terminator.span);
             const bool valid_target_count =
                 (block.terminator.kind == mir::TerminatorKind::jump && target_count == 1) ||
                 (block.terminator.kind == mir::TerminatorKind::branch && target_count == 2) ||
@@ -441,8 +574,12 @@ bool MirVerifier::verify(const mir::Module& module) const {
             const bool branch_contract_valid =
                 block.terminator.kind == mir::TerminatorKind::branch
                     ? block.terminator.condition != nullptr &&
+                          block.terminator.condition_value < function.values.size() &&
                           block.terminator.branch_role != mir::BranchRole::none
-                    : block.terminator.branch_role == mir::BranchRole::none;
+                    : block.terminator.branch_role == mir::BranchRole::none &&
+                          (block.terminator.condition == nullptr
+                               ? block.terminator.condition_value == mir::invalid_value
+                               : block.terminator.condition_value < function.values.size());
             if (!branch_contract_valid) {
                 diagnostics_.error("GDS5108", "MIR branch has an invalid semantic role",
                                    block.terminator.span);
@@ -468,12 +605,25 @@ bool MirVerifier::verify(const mir::Module& module) const {
                 valid = false;
             }
             for (const auto& instruction : block.instructions) {
+                record_operation(instruction.id, instruction.span);
                 if (!instruction.source) {
                     diagnostics_.error("GDS5107", "MIR instruction has no typed HIR source",
                                        instruction.span);
                     valid = false;
                 }
+                for (const auto input : instruction.inputs) {
+                    if (input >= function.values.size()) {
+                        diagnostics_.error("GDS5117", "MIR instruction references an unknown value",
+                                           instruction.span);
+                        valid = false;
+                    }
+                }
             }
+        }
+        if (std::find(operation_ids.begin(), operation_ids.end(), false) != operation_ids.end()) {
+            diagnostics_.error("GDS5118", "MIR operation IDs are not dense and deterministic",
+                               function.span);
+            valid = false;
         }
     }
     return valid;

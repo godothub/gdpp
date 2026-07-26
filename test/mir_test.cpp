@@ -4,6 +4,7 @@
 #include "gdpp/ir/mir_optimizer.hpp"
 
 #include <algorithm>
+#include <string>
 
 namespace {
 
@@ -304,6 +305,78 @@ TEST_CASE("MIR verifier rejects corrupt edge and predecessor metadata") {
     hir.functions.push_back(std::move(function));
     auto mir = gdpp::MirLowerer{}.lower(hir);
     mir.functions.front().blocks.front().terminator.targets.push_back(999);
+
+    gdpp::DiagnosticBag diagnostics;
+    REQUIRE(!gdpp::MirVerifier{diagnostics}.verify(mir));
+    REQUIRE(diagnostics.has_errors());
+}
+
+TEST_CASE("MIR has stable value and operation identities with address-free serialization") {
+    gdpp::ir::Module hir;
+    hir.class_name = "Deterministic";
+    gdpp::ir::Function function;
+    function.name = "compute";
+
+    gdpp::ir::Statement variable;
+    variable.kind = gdpp::ir::StatementKind::variable;
+    variable.symbol_identity = 17;
+    variable.expression = literal("41");
+    variable.expression->type = {gdpp::TypeKind::integer, "int"};
+    variable.expression->storage_type = variable.expression->type;
+    variable.expression->assignment_type = variable.expression->type;
+    variable.expression->symbol_identity = 17;
+    variable.expression->span = {{12, 2, 9}, {14, 2, 11}};
+    variable.span = {{4, 2, 1}, {14, 2, 11}};
+    function.body.push_back(std::move(variable));
+
+    gdpp::ir::Statement returned;
+    returned.kind = gdpp::ir::StatementKind::return_statement;
+    returned.expression = literal("41");
+    returned.expression->type = {gdpp::TypeKind::integer, "int"};
+    returned.expression->storage_type = returned.expression->type;
+    returned.expression->assignment_type = returned.expression->type;
+    returned.expression->span = {{23, 3, 9}, {25, 3, 11}};
+    returned.span = {{16, 3, 1}, {25, 3, 11}};
+    function.body.push_back(std::move(returned));
+    hir.functions.push_back(std::move(function));
+
+    const auto first = gdpp::MirLowerer{}.lower(hir);
+    const auto second = gdpp::MirLowerer{}.lower(hir);
+    gdpp::DiagnosticBag diagnostics;
+    REQUIRE(gdpp::MirVerifier{diagnostics}.verify(first));
+    REQUIRE(gdpp::MirVerifier{diagnostics}.verify(second));
+    REQUIRE_EQ(first.functions.front().id, gdpp::mir::FunctionId{0});
+    REQUIRE_EQ(first.functions.front().values.size(), std::size_t{2});
+    REQUIRE_EQ(first.functions.front().values[0].id, gdpp::mir::ValueId{0});
+    REQUIRE_EQ(first.functions.front().values[0].ownership, gdpp::OwnershipKind::value);
+
+    const auto first_snapshot = gdpp::MirSerializer{}.serialize(first);
+    const auto second_snapshot = gdpp::MirSerializer{}.serialize(second);
+    REQUIRE_EQ(first_snapshot, second_snapshot);
+    REQUIRE(first_snapshot.rfind("GDPP_MIR 1\n", 0) == 0);
+    REQUIRE(first_snapshot.find("function f0 role method name \"Deterministic::compute\"") !=
+            std::string::npos);
+    REQUIRE(first_snapshot.find("value v0 kind literal literal integer type integer:\"int\"") !=
+            std::string::npos);
+    REQUIRE(first_snapshot.find("operation o0 instruction declare_variable") != std::string::npos);
+    REQUIRE(first_snapshot.find("0x") == std::string::npos);
+}
+
+TEST_CASE("MIR verifier rejects corrupt stable identities and value ownership") {
+    gdpp::ir::Module hir;
+    gdpp::ir::Function function;
+    function.name = "broken_identity";
+    gdpp::ir::Statement statement;
+    statement.kind = gdpp::ir::StatementKind::expression;
+    statement.expression = literal("7");
+    statement.expression->type = {gdpp::TypeKind::integer, "int"};
+    function.body.push_back(std::move(statement));
+    hir.functions.push_back(std::move(function));
+
+    auto mir = gdpp::MirLowerer{}.lower(hir);
+    mir.functions.front().values.front().ownership = gdpp::OwnershipKind::object_reference;
+    mir.functions.front().blocks.front().instructions.front().id =
+        mir.functions.front().blocks.front().terminator.id;
 
     gdpp::DiagnosticBag diagnostics;
     REQUIRE(!gdpp::MirVerifier{diagnostics}.verify(mir));
