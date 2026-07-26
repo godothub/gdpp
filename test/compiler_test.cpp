@@ -114,8 +114,9 @@ TEST_CASE("compiler centralizes packed values at every generated Variant boundar
                                     "_gdpp_callable_argument_") != std::string::npos);
     REQUIRE(result.unit.source.find("const godot::Variant _gdpp_dynamic_argument_") !=
             std::string::npos);
-    REQUIRE(result.unit.source.find(" = gdpp::runtime::to_variant(bytes); "
-                                    "return gdpp::runtime::call_dynamic") != std::string::npos);
+    REQUIRE(result.unit.source.find(" = gdpp::runtime::to_variant(bytes);") != std::string::npos);
+    REQUIRE(result.unit.source.find("_gdpp_dynamic_result_") != std::string::npos);
+    REQUIRE(result.unit.source.find(" = gdpp::runtime::call_dynamic(") != std::string::npos);
     REQUIRE(result.unit.source.find(" = godot::Variant(_gdpp_dynamic_argument_") ==
             std::string::npos);
     REQUIRE(result.unit.source.find(" = gdpp::runtime::to_variant(_gdpp_call_argument_") !=
@@ -1636,8 +1637,12 @@ TEST_CASE("compiler restores signal arguments for await-initialized locals") {
     REQUIRE(result.success);
     REQUIRE(result.unit.source.find("gdpp::runtime::await_result(") != std::string::npos);
     REQUIRE(result.unit.source.find("godot::Variant side =") != std::string::npos);
-    REQUIRE(result.unit.source.find("= side; godot::UtilityFunctions::print(") !=
-            std::string::npos);
+    const auto argument = result.unit.source.find("= side;");
+    const auto failure =
+        result.unit.source.find("gdpp::runtime::script_function_failed()", argument);
+    const auto print = result.unit.source.find("godot::UtilityFunctions::print(", failure);
+    REQUIRE(argument < failure);
+    REQUIRE(failure < print);
 }
 
 TEST_CASE("compiler lowers await expressions through ordered continuation temporaries") {
@@ -4969,6 +4974,44 @@ TEST_CASE("compiler contains fatal expression faults and preserves Godot assignm
     REQUIRE(target_call < rhs_call);
     REQUIRE(rhs_call < index_call);
     REQUIRE(index_call < write);
+}
+
+TEST_CASE("specialized calls stop argument evaluation at the first fatal fault") {
+    const gdpp::Compiler compiler;
+    const auto result = compiler.compile(
+        "call_fault_order.gd",
+        "extends RefCounted\n"
+        "signal pulse(first, second, third)\n"
+        "func marker(name: String) -> int:\n"
+        "    return 1\n"
+        "func utility() -> void:\n"
+        "    print(marker(\"utility-first\"), [1][4], marker(\"utility-last\"))\n"
+        "func invoke_callable(callback: Callable) -> void:\n"
+        "    callback.call(marker(\"callable-first\"), [1][4], marker(\"callable-last\"))\n"
+        "func invoke_dynamic(target: Variant) -> void:\n"
+        "    target.accept(marker(\"dynamic-first\"), [1][4], marker(\"dynamic-last\"))\n"
+        "func emit_signal_arguments() -> void:\n"
+        "    pulse.emit(marker(\"signal-first\"), [1][4], marker(\"signal-last\"))\n");
+
+    REQUIRE(result.success);
+    const auto& source = result.unit.source;
+    const auto require_stopped_call = [&](const std::string& method, const std::string& last_marker,
+                                          const std::string& invocation) {
+        const auto start = source.find("::" + method + "(");
+        const auto bounds = source.find("gdpp::runtime::checked_array_get", start);
+        const auto failure = source.find("gdpp::runtime::script_function_failed()", bounds);
+        const auto last = source.find("godot::String(\"" + last_marker + "\")", bounds);
+        const auto call = source.find(invocation, last);
+        REQUIRE(start != std::string::npos);
+        REQUIRE(bounds < failure);
+        REQUIRE(failure < last);
+        REQUIRE(last < call);
+    };
+    require_stopped_call("utility", "utility-last", "godot::UtilityFunctions::print(");
+    require_stopped_call("invoke_callable", "callable-last", ".call(");
+    require_stopped_call("invoke_dynamic", "dynamic-last", "gdpp::runtime::call_dynamic(");
+    require_stopped_call("emit_signal_arguments", "signal-last",
+                         "gdpp::runtime::emit_local_signal(");
 }
 
 TEST_CASE("compiler handles generated logical guard chains with bounded stack depth") {
