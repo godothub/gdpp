@@ -8,6 +8,7 @@ const NETWORK_IMAGE := preload("res://network_image.gd")
 const RPC_RUNTIME_HARNESS := preload("res://rpc_runtime_harness.gd")
 const RUNTIME_FAULT_MATRIX := preload("res://runtime_fault_matrix.gd")
 const RUNTIME_VALUE_MATRIX := preload("res://runtime_value_matrix.gd")
+const AWAIT_DEFAULT_PROBE := preload("res://await_default_probe.gd")
 const RUNTIME_SHADER := preload("res://runtime_shader.gdshader")
 const ATTACHED_SCENE := preload("res://attached_scene.tscn")
 
@@ -72,6 +73,12 @@ func _verify_fault_matrix() -> void:
     print("GDPP_FAULT_MATRIX=" + matrix.run())
     var value_matrix: Variant = RUNTIME_VALUE_MATRIX.new()
     print("GDPP_VALUE_MATRIX=" + value_matrix.run())
+    var await_default_probe: Variant = AWAIT_DEFAULT_PROBE.new()
+    var await_default_failure: String = await await_default_probe.verify(get_tree())
+    if not await_default_failure.is_empty():
+        _fail(await_default_failure)
+        return
+    print("GDPP_AWAIT_DEFAULT_MATRIX=ok")
     get_tree().quit(0)
 
 
