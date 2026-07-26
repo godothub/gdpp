@@ -1,6 +1,7 @@
 #include "gdpp/runtime/variant_ops.hpp"
 
 #include "gdpp/numeric/integer_semantics.hpp"
+#include "gdpp/runtime/attached_script.hpp"
 
 #include <godot_cpp/classes/class_db_singleton.hpp>
 #include <godot_cpp/classes/engine.hpp>
@@ -922,6 +923,18 @@ bool is_instance_of(const godot::Variant& value, const godot::Variant& type_desc
 }
 
 godot::Variant load_resource(const godot::String& path) {
+    const auto script_path = resolve_attached_script_resource_path(path);
+    if (!script_path.is_empty()) {
+        if (const auto descriptor = find_attached_script(script_path); descriptor) {
+            godot::String error;
+            const auto script = attached_script_resource(script_path, &error);
+            if (script.is_valid())
+                return godot::Variant(static_cast<const godot::Object*>(script.ptr()));
+            godot::UtilityFunctions::push_error(
+                godot::String{"GDPP: cannot materialize compiled script '"} + path + "': " + error);
+            return {};
+        }
+    }
     const auto resource = godot::ResourceLoader::get_singleton()->load(path);
     if (resource.is_null())
         godot::UtilityFunctions::push_error(godot::String("GDPP: cannot load resource '") + path +
@@ -1392,10 +1405,33 @@ godot::Variant call_dynamic_impl(godot::Variant& target, const godot::StringName
     if (reject_invalid_object_target(target, "call method", &method, location))
         return {};
     static const godot::StringName get_script_method{"get_script"};
+    static const godot::StringName new_method{"new"};
     static const godot::StringName set_script_method{"set_script"};
     if (argument_count == 0 && method == get_script_method &&
         target.get_type() == godot::Variant::OBJECT) {
         return script_identity(static_cast<godot::Object*>(target));
+    }
+    // `Script.new()` is a language-level constructor operation, not a ClassDB method. Calling
+    // Variant::callp("new") works for GDScript only because that language intercepts its own
+    // Script resource; a ScriptExtension otherwise reports an invalid dynamic call before
+    // `_instance_create()` can run. Route every runtime-discovered AOT Script through the same
+    // constructor used by statically resolved script resources, including varargs `_init`.
+    if (method == new_method && target.get_type() == godot::Variant::OBJECT) {
+        auto* script =
+            godot::Object::cast_to<AttachedCompiledScript>(target.get_validated_object());
+        if (script) {
+            godot::Array constructor_arguments;
+            constructor_arguments.resize(static_cast<std::int64_t>(argument_count));
+            for (std::size_t index = 0; index < argument_count; ++index)
+                constructor_arguments[static_cast<std::int64_t>(index)] = *arguments[index];
+            godot::String error;
+            auto result = instantiate_attached_script(script->get_source_path(),
+                                                      constructor_arguments, &error);
+            if (!error.is_empty())
+                report_script_failure("GDPP: dynamic compiled Script construction failed: " + error,
+                                      location);
+            return result;
+        }
     }
     // Export conversion has already replaced every scene-owned GDScript instance with its
     // generated native class. Some projects defensively call set_script(preload("type.gd")) on
