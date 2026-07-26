@@ -4532,10 +4532,12 @@ std::string CodeGenerator::emit_expression(const typed::Expression& expression) 
         // GDScript captures the value visible when the Callable is created, then copies that
         // snapshot into a fresh invocation frame for every call. Scalar writes inside one call
         // therefore do not persist into the next call, while Array/Dictionary/Object copies keep
-        // their normal shared identity. The outer immutable closure owns the creation snapshot;
-        // the inner mutable closure is the per-call frame and also becomes the root captured by
-        // asynchronous continuations and nested lambdas.
-        result += ", [=](const auto &" + arguments + ") -> godot::Variant {\n";
+        // their normal shared identity. The outer closure owns the creation snapshot and must be
+        // mutable: its call operator is also instantiated by the erased Godot Callable bridge, and
+        // a const operator would make every value copied into the inner per-call frame const on
+        // GCC. The inner mutable closure is the fresh invocation frame and also becomes the root
+        // captured by asynchronous continuations and nested lambdas.
+        result += ", [=](const auto &" + arguments + ") mutable -> godot::Variant {\n";
         result += "    return [=]() mutable -> godot::Variant {\n";
 
         const auto saved_return = current_return_type_;

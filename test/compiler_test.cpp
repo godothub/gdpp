@@ -907,7 +907,8 @@ TEST_CASE("lambda call frames copy creation snapshots per invocation") {
 
     REQUIRE(result.success);
     const auto callable = result.unit.source.find("gdpp::runtime::make_local_callable(");
-    const auto creation_snapshot = result.unit.source.find(") -> godot::Variant {", callable);
+    const auto creation_snapshot =
+        result.unit.source.find(") mutable -> godot::Variant {", callable);
     const auto invocation_snapshot =
         result.unit.source.find("return [=]() mutable -> godot::Variant {", creation_snapshot);
     const auto invocation = result.unit.source.find("captured", invocation_snapshot);
@@ -4054,6 +4055,7 @@ TEST_CASE("compiler retains local lambda adapters for direct native calls") {
             std::string::npos);
     REQUIRE(result.unit.source.find("[=](const auto &_gdpp_lambda_arguments_") !=
             std::string::npos);
+    REQUIRE(result.unit.source.find(") mutable -> godot::Variant {") != std::string::npos);
     REQUIRE(result.unit.source.find("godot::Callable operation") == std::string::npos);
 }
 
