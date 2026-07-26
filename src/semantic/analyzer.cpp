@@ -4768,7 +4768,7 @@ void SemanticAnalyzer::analyze_lambda(const ast::LambdaExpression& expression) {
     in_function_ = true;
     current_function_name_ = expression.name.empty() ? "<lambda>" : expression.name;
     loop_depth_ = 0;
-    allow_dynamic_await_return_ = !expression.return_type;
+    allow_dynamic_await_return_ = true;
     current_callable_suspends_ = false;
     scopes_.emplace_back();
     for (const auto& parameter : expression.parameters) {
