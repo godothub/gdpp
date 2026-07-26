@@ -880,13 +880,14 @@ godot::Object* find_autoload(const godot::StringName& name) {
                                               : godot::ObjectDB::get_instance(found->second);
 }
 
-godot::Object* find_engine_singleton(const godot::StringName& name) {
+godot::Object* find_engine_singleton_at(const godot::StringName& name,
+                                        const ScriptSourceLocation location) {
     const auto* engine = godot::Engine::get_singleton();
     auto* singleton = engine ? engine->get_singleton(name) : nullptr;
-    if (!singleton) {
-        godot::UtilityFunctions::push_error(godot::String("GDPP: engine singleton '") +
-                                            godot::String(name) + "' is unavailable");
-    }
+    if (!singleton)
+        report_script_failure(godot::String{"Engine singleton '"} + godot::String{name} +
+                                  godot::String{"' is unavailable."},
+                              location);
     return singleton;
 }
 
@@ -923,15 +924,56 @@ godot::Variant call_callable_impl(const godot::Callable& callable, const godot::
     return result;
 }
 
-godot::Variant instantiate_external_class(const godot::StringName& name) {
+godot::Variant instantiate_external_class_at(const godot::StringName& name,
+                                             const ScriptSourceLocation location) {
     auto* class_db = godot::ClassDBSingleton::get_singleton();
     if (!class_db || !class_db->class_exists(name) || !class_db->can_instantiate(name)) {
-        godot::UtilityFunctions::push_error(godot::String("GDPP: external class '") +
-                                            godot::String(name) +
-                                            "' is unavailable or cannot be instantiated");
+        report_script_failure(godot::String{"External class '"} + godot::String{name} +
+                                  godot::String{"' is unavailable or cannot be instantiated."},
+                              location);
         return {};
     }
-    return class_db->instantiate(name);
+    godot::Variant result{class_db->instantiate(name)};
+    if (result.get_type() != godot::Variant::OBJECT || !result.get_validated_object()) {
+        report_script_failure(godot::String{"External class '"} + godot::String{name} +
+                                  godot::String{"' returned no live instance."},
+                              location);
+        return {};
+    }
+    return result;
+}
+
+godot::Variant call_external_static_impl(const godot::StringName& class_name,
+                                         const godot::StringName& method,
+                                         const godot::Variant** arguments,
+                                         const std::size_t argument_count,
+                                         const ScriptSourceLocation location) {
+    auto* class_db = godot::ClassDBSingleton::get_singleton();
+    if (!class_db || !class_db->class_exists(class_name) ||
+        !class_db->class_has_method(class_name, method)) {
+        report_script_failure(godot::String{"External static method '"} +
+                                  godot::String{class_name} + godot::String{"."} +
+                                  godot::String{method} + godot::String{"' is unavailable."},
+                              location);
+        return {};
+    }
+
+    static const godot::StringName class_call_static_method{"class_call_static"};
+    godot::Variant class_db_value{class_db};
+    godot::Variant result;
+    GDExtensionCallError error{GDEXTENSION_CALL_OK, 0, 0};
+    class_db_value.callp(class_call_static_method, arguments, static_cast<int>(argument_count),
+                         result, error);
+    if (error.error != GDEXTENSION_CALL_OK) {
+        report_script_failure(call_error_message(godot::String{"External static method '"} +
+                                                     godot::String{class_name} +
+                                                     godot::String{"."} + godot::String{method} +
+                                                     godot::String{"'"},
+                                                 error),
+                              location);
+        return {};
+    }
+    return result;
 }
 
 bool is_external_instance(const godot::Variant& value, const godot::StringName& class_name) {
@@ -941,21 +983,35 @@ bool is_external_instance(const godot::Variant& value, const godot::StringName& 
     return object && object->is_class(class_name);
 }
 
-godot::Callable external_callable(const godot::Variant& value, const godot::StringName& method) {
+godot::Callable external_callable_at(const godot::Variant& value, const godot::StringName& method,
+                                     const ScriptSourceLocation location) {
     auto* object = value.get_validated_object();
     if (!object) {
-        godot::UtilityFunctions::push_error(
-            "GDPP: cannot create a Callable for a null external object");
+        report_script_failure("Cannot create a Callable for a null or freed external object.",
+                              location);
+        return {};
+    }
+    if (!object->has_method(method)) {
+        report_script_failure(godot::String{"External object has no method '"} +
+                                  godot::String{method} + godot::String{"'."},
+                              location);
         return {};
     }
     return {object, method};
 }
 
-godot::Signal external_signal(const godot::Variant& value, const godot::StringName& signal) {
+godot::Signal external_signal_at(const godot::Variant& value, const godot::StringName& signal,
+                                 const ScriptSourceLocation location) {
     auto* object = value.get_validated_object();
     if (!object) {
-        godot::UtilityFunctions::push_error(
-            "GDPP: cannot access a Signal on a null external object");
+        report_script_failure("Cannot access a Signal on a null or freed external object.",
+                              location);
+        return {};
+    }
+    if (!object->has_signal(signal)) {
+        report_script_failure(godot::String{"External object has no signal '"} +
+                                  godot::String{signal} + godot::String{"'."},
+                              location);
         return {};
     }
     return {object, signal};

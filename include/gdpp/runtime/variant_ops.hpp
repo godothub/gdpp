@@ -278,28 +278,40 @@ void assign_native_storage(Target& target, Value&& value) {
 [[nodiscard]] bool is_editor_hint() noexcept;
 void register_autoload(const godot::StringName& name, godot::Object* instance);
 [[nodiscard]] godot::Object* find_autoload(const godot::StringName& name);
-[[nodiscard]] godot::Object* find_engine_singleton(const godot::StringName& name);
+[[nodiscard]] godot::Object* find_engine_singleton_at(const godot::StringName& name,
+                                                      ScriptSourceLocation location = {});
 [[nodiscard]] godot::Variant script_identity(godot::Object* object);
-[[nodiscard]] godot::Variant instantiate_external_class(const godot::StringName& name);
+[[nodiscard]] godot::Variant instantiate_external_class_at(const godot::StringName& name,
+                                                           ScriptSourceLocation location = {});
+
+[[nodiscard]] godot::Variant call_external_static_impl(const godot::StringName& class_name,
+                                                       const godot::StringName& method,
+                                                       const godot::Variant** arguments,
+                                                       std::size_t argument_count,
+                                                       ScriptSourceLocation location = {});
 
 template <typename... Arguments>
-[[nodiscard]] godot::Variant call_external_static(const godot::StringName& class_name,
-                                                  const godot::StringName& method,
-                                                  Arguments&&... arguments) {
-    auto* class_db = godot::ClassDBSingleton::get_singleton();
-    if (!class_db || !class_db->class_exists(class_name) ||
-        !class_db->class_has_method(class_name, method)) {
-        return {};
-    }
-    return class_db->class_call_static(class_name, method, std::forward<Arguments>(arguments)...);
+[[nodiscard]] godot::Variant
+call_external_static_at(const ScriptSourceLocation location, const godot::StringName& class_name,
+                        const godot::StringName& method, Arguments&&... arguments) {
+    std::array<godot::Variant, 2 + sizeof...(Arguments)> values{
+        godot::Variant{class_name}, godot::Variant{method},
+        to_variant(std::forward<Arguments>(arguments))...};
+    std::array<const godot::Variant*, 2 + sizeof...(Arguments)> pointers{};
+    for (std::size_t index = 0; index < values.size(); ++index)
+        pointers[index] = &values[index];
+    return call_external_static_impl(class_name, method, pointers.data(), pointers.size(),
+                                     location);
 }
 
 [[nodiscard]] bool is_external_instance(const godot::Variant& value,
                                         const godot::StringName& class_name);
-[[nodiscard]] godot::Callable external_callable(const godot::Variant& value,
-                                                const godot::StringName& method);
-[[nodiscard]] godot::Signal external_signal(const godot::Variant& value,
-                                            const godot::StringName& signal);
+[[nodiscard]] godot::Callable external_callable_at(const godot::Variant& value,
+                                                   const godot::StringName& method,
+                                                   ScriptSourceLocation location = {});
+[[nodiscard]] godot::Signal external_signal_at(const godot::Variant& value,
+                                               const godot::StringName& signal,
+                                               ScriptSourceLocation location = {});
 
 using AwaitContinuation = std::function<void(const godot::Array&)>;
 [[nodiscard]] bool await_signal(const godot::Variant& signal, godot::Object* owner,
