@@ -6829,7 +6829,10 @@ void CodeGenerator::emit_inner_class_declaration(const typed::Class& declaration
         const auto setter_parameter = field.setter && field.setter->method.empty()
                                           ? sanitize_identifier(field.setter->parameter)
                                           : "value";
-        header << "    " << (field.is_static ? "static " : "") << cpp_type(field.type)
+        const auto getter_type =
+            field.getter && field.getter->is_coroutine ? std::string{"godot::Variant"}
+                                                       : cpp_type(field.type);
+        header << "    " << (field.is_static ? "static " : "") << getter_type
                << " _gdpp_get_" << name << "();\n"
                << "    " << (field.is_static ? "static " : "") << "void _gdpp_set_" << name << '('
                << cpp_type(field.type) << ' ' << setter_parameter << ");\n";
@@ -7407,12 +7410,25 @@ void CodeGenerator::emit_inner_class_definition(const typed::Class& declaration,
         record_generated_symbol(GeneratedSymbolKind::property_setter, source_owner + ":set",
                                 native_name + "::_gdpp_set_" + name,
                                 field.setter ? field.setter->span : field.span);
-        source << cpp_type(field.type) << ' ' << native_name << "::_gdpp_get_" << name << "() {\n";
+        const bool inline_getter_coroutine =
+            field.getter && field.getter->method.empty() && field.getter->is_coroutine;
+        current_return_type_ = field.type;
+        current_coroutine_abi_ = inline_getter_coroutine;
+        current_coroutine_state_ =
+            inline_getter_coroutine ? "_gdpp_property_coroutine_state" : "";
+        source << (field.getter && field.getter->is_coroutine ? "godot::Variant"
+                                                              : cpp_type(field.type))
+               << ' ' << native_name << "::_gdpp_get_" << name << "() {\n";
+        if (inline_getter_coroutine) {
+            source << "    const auto " << current_coroutine_state_
+                   << " = gdpp::runtime::begin_coroutine("
+                   << (field.is_static ? "nullptr" : self_object_expression()) << ");\n";
+        }
         if (field.is_static && has_static_initialization) {
             source << "    gdpp::runtime::ScriptFunctionScope _gdpp_script_initialization_scope("
                       "gdpp::runtime::ScriptFaultPolicy::inherit_existing);\n"
-                   << "    (void)_gdpp_ensure_static_initialized();\n"
-                   << "    if (gdpp::runtime::script_function_failed()) return {};\n";
+                   << "    (void)_gdpp_ensure_static_initialized();\n";
+            source << emit_script_failure_return(1, false);
         }
         if (field.getter && !field.getter->method.empty()) {
             source << "    return " << sanitize_identifier(field.getter->method) << "();\n";
@@ -7430,7 +7446,11 @@ void CodeGenerator::emit_inner_class_definition(const typed::Class& declaration,
             source << "    return "
                    << (field.is_static ? "_gdpp_static_" + name + "_storage()" : name) << ";\n";
         }
-        source << "}\n\nvoid " << native_name << "::_gdpp_set_" << name << '('
+        source << "}\n\n";
+        current_coroutine_abi_ = false;
+        current_coroutine_state_.clear();
+        current_return_type_ = {TypeKind::void_type, "void"};
+        source << "void " << native_name << "::_gdpp_set_" << name << '('
                << "[[maybe_unused]] " << cpp_type(field.type) << ' '
                << (field.setter && field.setter->method.empty()
                        ? sanitize_identifier(field.setter->parameter)
@@ -7461,6 +7481,8 @@ void CodeGenerator::emit_inner_class_definition(const typed::Class& declaration,
         }
         source << "}\n\n";
         in_function_body_ = false;
+        current_coroutine_abi_ = false;
+        current_coroutine_state_.clear();
     }
     for (const auto& function : declaration.functions) {
         current_return_type_ = function.return_type;
@@ -8289,7 +8311,10 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
         const auto setter_parameter = variable.setter && variable.setter->method.empty()
                                           ? sanitize_identifier(variable.setter->parameter)
                                           : "value";
-        header << "    " << (variable.is_static ? "static " : "") << cpp_type(variable.type)
+        const auto getter_type =
+            variable.getter && variable.getter->is_coroutine ? std::string{"godot::Variant"}
+                                                             : cpp_type(variable.type);
+        header << "    " << (variable.is_static ? "static " : "") << getter_type
                << " _gdpp_get_" << name << "();\n"
                << "    " << (variable.is_static ? "static " : "") << "void _gdpp_set_" << name
                << "(" << cpp_type(variable.type) << ' ' << setter_parameter << ");\n";
@@ -8970,13 +8995,26 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
         record_generated_symbol(GeneratedSymbolKind::property_setter, variable.name + ":set",
                                 unit.class_name + "::_gdpp_set_" + name,
                                 variable.setter ? variable.setter->span : variable.span);
-        source << cpp_type(variable.type) << ' ' << unit.class_name << "::_gdpp_get_" << name
-               << "() {\n";
+        const bool inline_getter_coroutine =
+            variable.getter && variable.getter->method.empty() &&
+            variable.getter->is_coroutine;
+        current_return_type_ = variable.type;
+        current_coroutine_abi_ = inline_getter_coroutine;
+        current_coroutine_state_ =
+            inline_getter_coroutine ? "_gdpp_property_coroutine_state" : "";
+        source << (variable.getter && variable.getter->is_coroutine ? "godot::Variant"
+                                                                    : cpp_type(variable.type))
+               << ' ' << unit.class_name << "::_gdpp_get_" << name << "() {\n";
+        if (inline_getter_coroutine) {
+            source << "    const auto " << current_coroutine_state_
+                   << " = gdpp::runtime::begin_coroutine("
+                   << (variable.is_static ? "nullptr" : self_object_expression()) << ");\n";
+        }
         if (variable.is_static && has_static_initialization) {
             source << "    gdpp::runtime::ScriptFunctionScope _gdpp_script_initialization_scope("
                       "gdpp::runtime::ScriptFaultPolicy::inherit_existing);\n"
-                   << "    (void)_gdpp_ensure_static_initialized();\n"
-                   << "    if (gdpp::runtime::script_function_failed()) return {};\n";
+                   << "    (void)_gdpp_ensure_static_initialized();\n";
+            source << emit_script_failure_return(1, false);
         }
         if (variable.getter) {
             if (!variable.getter->method.empty()) {
@@ -9001,7 +9039,11 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
         const auto setter_parameter = variable.setter && variable.setter->method.empty()
                                           ? sanitize_identifier(variable.setter->parameter)
                                           : "value";
-        source << "}\n\nvoid " << unit.class_name << "::_gdpp_set_" << name << '('
+        source << "}\n\n";
+        current_coroutine_abi_ = false;
+        current_coroutine_state_.clear();
+        current_return_type_ = {TypeKind::void_type, "void"};
+        source << "void " << unit.class_name << "::_gdpp_set_" << name << '('
                << "[[maybe_unused]] " << cpp_type(variable.type) << ' ' << setter_parameter
                << ") {\n";
         if (variable.is_static && has_static_initialization) {
@@ -9034,6 +9076,8 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
                    << ";\n";
         }
         source << "}\n\n";
+        current_coroutine_abi_ = false;
+        current_coroutine_state_.clear();
     }
     const auto mir_owner = module.class_name.value_or("<script>");
     for (const auto& function : module.functions) {
