@@ -2003,6 +2003,20 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
         const auto resolve_method = [&](const GodotMethodRecord* method) {
             if (!method)
                 return false;
+            bool exposes_native_pointer = godot_api_type_is_native_pointer(method->return_type);
+            for (std::size_t index = 0; index < method->maximum_arguments; ++index) {
+                if (const auto* argument = api_.argument(*method, index)) {
+                    exposes_native_pointer =
+                        exposes_native_pointer || godot_api_type_is_native_pointer(argument->type);
+                }
+            }
+            if (exposes_native_pointer) {
+                diagnostics_.error(
+                    "GDS4118",
+                    "Godot method '" + std::string{method->name} +
+                        "' exposes an internal native pointer ABI that GDScript cannot represent",
+                    expression.span);
+            }
             if (argument_count < method->required_arguments ||
                 (!method->is_vararg && argument_count > method->maximum_arguments)) {
                 diagnostics_.error("GDS4011",
@@ -2501,22 +2515,22 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                 if (const auto* signal =
                         api_.find_signal(object_resolution->owner, callee.operand(0)->value())) {
                     if (argument_count != signal->argument_count) {
-                        diagnostics_.error(
-                            "GDS4164",
-                            "signal '" + std::string{signal->name} + "' expects " +
-                                std::to_string(signal->argument_count) + " argument(s), got " +
-                                std::to_string(argument_count),
-                            expression.span);
+                        diagnostics_.error("GDS4164",
+                                           "signal '" + std::string{signal->name} + "' expects " +
+                                               std::to_string(signal->argument_count) +
+                                               " argument(s), got " +
+                                               std::to_string(argument_count),
+                                           expression.span);
                     }
-                    const auto checked = std::min(
-                        argument_count, static_cast<std::size_t>(signal->argument_count));
+                    const auto checked =
+                        std::min(argument_count, static_cast<std::size_t>(signal->argument_count));
                     for (std::size_t index = 0; index < checked; ++index) {
                         if (const auto* argument = api_.argument(*signal, index)) {
-                            require_assignable(
-                                type_from_godot_api(argument->type), argument_types[index],
-                                expression.operand(index + 1)->span,
-                                "argument " + std::to_string(index + 1) + " of signal '" +
-                                    signal->name + "'");
+                            require_assignable(type_from_godot_api(argument->type),
+                                               argument_types[index],
+                                               expression.operand(index + 1)->span,
+                                               "argument " + std::to_string(index + 1) +
+                                                   " of signal '" + signal->name + "'");
                         }
                     }
                 }
