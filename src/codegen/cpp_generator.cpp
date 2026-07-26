@@ -4154,13 +4154,25 @@ std::string CodeGenerator::emit_expression(const ir::Expression& expression) con
         const auto saved_return = current_return_type_;
         const auto saved_callable = in_callable_lambda_;
         const auto saved_function = in_function_body_;
+        const auto saved_coroutine_abi = current_coroutine_abi_;
+        const auto saved_coroutine_state = current_coroutine_state_;
         const auto saved_debug_function = current_debug_function_;
         const auto saved_debug_instance = current_debug_instance_;
         current_return_type_ = lambda.return_type;
         in_callable_lambda_ = true;
         in_function_body_ = true;
+        current_coroutine_abi_ = lambda.is_coroutine;
+        current_coroutine_state_ = lambda.is_coroutine
+                                       ? "_gdpp_lambda_coroutine_state_" + std::to_string(identity)
+                                       : std::string{};
         current_debug_function_ = lambda.name.empty() ? "<lambda>" : lambda.name;
         current_debug_instance_ = lambda.owner_bound ? saved_debug_instance : "nullptr";
+        if (lambda.is_coroutine) {
+            result += "    const auto " + current_coroutine_state_ +
+                      " = gdpp::runtime::begin_coroutine(" +
+                      (lambda.owner_bound ? self_object_expression() : std::string{"nullptr"}) +
+                      ");\n";
+        }
         result += emit_debug_frame(lambda.span.begin.line, 1);
         result += emit_statements(lambda.body, 1, 0,
                                   parameter_locals(lambda.parameters, lambda.rest_parameter
@@ -4169,15 +4181,18 @@ std::string CodeGenerator::emit_expression(const ir::Expression& expression) con
         current_return_type_ = saved_return;
         in_callable_lambda_ = saved_callable;
         in_function_body_ = saved_function;
+        current_coroutine_abi_ = saved_coroutine_abi;
+        current_coroutine_state_ = saved_coroutine_state;
         current_debug_function_ = saved_debug_function;
         current_debug_instance_ = saved_debug_instance;
         // Typed non-void lambdas have already passed semantic all-path return
         // analysis. Adding a defensive return here creates unreachable C++ and
         // fails warning-clean MSVC builds. A void GDScript lambda still needs a
         // Variant result for Callable's native bridge.
-        if (lambda.return_type.kind == TypeKind::void_type ||
-            requires_native_fallback(lambda.body) ||
-            (lambda.return_type.is_dynamic() && native_statements_fall_through(lambda.body)))
+        if (!lambda.is_coroutine &&
+            (lambda.return_type.kind == TypeKind::void_type ||
+             requires_native_fallback(lambda.body) ||
+             (lambda.return_type.is_dynamic() && native_statements_fall_through(lambda.body))))
             result += "    return godot::Variant();\n";
         result += "})";
         return result;
@@ -4950,6 +4965,16 @@ std::string CodeGenerator::emit_statement_body(const ir::Statement& statement,
         // warning-clean under commercial -Wall/-Wextra builds.
         return prefix + "static_cast<void>(" + emit_expression(*statement.expression) + ");\n";
     case ir::StatementKind::return_statement:
+        if (current_coroutine_abi_) {
+            const auto value =
+                statement.expression
+                    ? (current_return_type_.is_dynamic()
+                           ? emit_expression(*statement.expression)
+                           : emit_conversion(current_return_type_, statement.expression->type,
+                                             emit_expression(*statement.expression)))
+                    : std::string{"godot::Variant{}"};
+            return coroutine_return(indentation, value, in_async_continuation_);
+        }
         if (in_callable_lambda_) {
             return prefix + "return " +
                    (statement.expression
@@ -4962,16 +4987,6 @@ std::string CodeGenerator::emit_statement_body(const ir::Statement& statement,
                               ")"
                         : "godot::Variant()") +
                    ";\n";
-        }
-        if (current_coroutine_abi_) {
-            const auto value =
-                statement.expression
-                    ? (current_return_type_.is_dynamic()
-                           ? emit_expression(*statement.expression)
-                           : emit_conversion(current_return_type_, statement.expression->type,
-                                             emit_expression(*statement.expression)))
-                    : std::string{"godot::Variant{}"};
-            return coroutine_return(indentation, value, in_async_continuation_);
         }
         if (in_async_continuation_)
             return prefix + "return;\n";
