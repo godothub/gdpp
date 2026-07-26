@@ -233,6 +233,31 @@ jobs:
 
           "$GODOT" --headless --editor --path "$fixture" --import \
             2>&1 | tee "$root/import.log"
+          python3 - "$GODOT" "$fixture" "$root/fault-source.log" <<'PY'
+          from pathlib import Path
+          import subprocess
+          import sys
+
+          executable, project, log_path = sys.argv[1:]
+          result = subprocess.run(
+              [
+                  executable,
+                  "--headless",
+                  "--path",
+                  project,
+                  "--script",
+                  "res://runtime_fault_oracle.gd",
+              ],
+              stdout=subprocess.PIPE,
+              stderr=subprocess.STDOUT,
+              text=True,
+              timeout=45,
+              check=False,
+          )
+          Path(log_path).write_text(result.stdout, encoding="utf-8")
+          print(result.stdout, end="")
+          raise SystemExit(result.returncode)
+          PY
           python3 tools/verify_export_immutability.py snapshot \
             --project "$fixture" --state "$root/extension-state.json"
           "$GODOT" --headless --editor --path "$fixture" \
@@ -244,27 +269,47 @@ jobs:
           test -f "$runtime"
           test -f "$project_library"
           test -f "$vendor_library"
-          python3 - "$runtime" "$root/runtime.log" <<'PY'
+          python3 - "$runtime" "$root/runtime.log" "$root/fault-aot.log" <<'PY'
           from pathlib import Path
           import subprocess
           import sys
 
-          executable, log_path = sys.argv[1:]
-          result = subprocess.run(
-              [executable, "--headless", "--audio-driver", "Dummy"],
-              stdout=subprocess.PIPE,
-              stderr=subprocess.STDOUT,
-              text=True,
-              timeout=45,
-              check=False,
+          executable, runtime_log, fault_log = sys.argv[1:]
+          cases = (
+              (["--headless", "--audio-driver", "Dummy"], runtime_log),
+              (
+                  [
+                      "--headless",
+                      "--audio-driver",
+                      "Dummy",
+                      "--",
+                      "--gdpp-fault-matrix",
+                  ],
+                  fault_log,
+              ),
           )
-          Path(log_path).write_text(result.stdout, encoding="utf-8")
-          print(result.stdout, end="")
-          raise SystemExit(result.returncode)
+          for arguments, log_path in cases:
+              result = subprocess.run(
+                  [executable, *arguments],
+                  stdout=subprocess.PIPE,
+                  stderr=subprocess.STDOUT,
+                  text=True,
+                  timeout=45,
+                  check=False,
+              )
+              Path(log_path).write_text(result.stdout, encoding="utf-8")
+              print(result.stdout, end="")
+              if result.returncode:
+                  raise SystemExit(result.returncode)
           PY
           grep -q '^GDPP_DYNAMIC_SCRIPT_RUNTIME_OK$' "$root/runtime.log"
           grep -q '^GDPP_RPC_RUNTIME_OK$' "$root/runtime.log"
           grep -q '^GDPP_ATTACHED_EXPORT_RUNTIME_OK$' "$root/runtime.log"
+          grep -q '^GDPP_FAULT_MATRIX=' "$root/fault-source.log"
+          grep -q '^GDPP_FAULT_MATRIX=' "$root/fault-aot.log"
+          source_fault="$(grep '^GDPP_FAULT_MATRIX=' "$root/fault-source.log" | tail -n 1)"
+          aot_fault="$(grep '^GDPP_FAULT_MATRIX=' "$root/fault-aot.log" | tail -n 1)"
+          test "$source_fault" = "$aot_fault"
           grep -q 'GDPP_AOT_SUMMARY scenes=' "$root/export.log"
           if grep -E -q '(^| )ERROR:|SCRIPT ERROR:|Parse Error:|WARNING:|Unable to open' \
               "$root/import.log" "$root/export.log" "$root/runtime.log"; then

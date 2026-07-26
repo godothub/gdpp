@@ -75,6 +75,13 @@ jobs:
 
           "$GODOT" --headless --editor --path "$fixture" --import \
             2>&1 | tee "$output/gdpp-attached-import.log"
+          if [[ "$GODOT_VERSION" == 4.7.* ]]; then
+            timeout 30s "$GODOT" --headless --path "$fixture" \
+              --script res://runtime_fault_oracle.gd \
+              2>&1 | tee "$output/gdpp-attached-fault-source.log"
+            grep -q '^GDPP_FAULT_MATRIX=' \
+              "$output/gdpp-attached-fault-source.log"
+          fi
           state="$GITHUB_WORKSPACE/build/ci/attached-${GODOT_VERSION}-extension-state.json"
           mkdir -p "$(dirname "$state")"
           python3 tools/verify_export_immutability.py snapshot \
@@ -92,10 +99,21 @@ jobs:
           test -f "$fixture/addons/gdpp/binary/libgdpp.release.linux.x86_64.so"
           timeout 15s "$output/gdpp-attached.x86_64" --headless \
             2>&1 | tee "$output/gdpp-attached-runtime.log"
+          timeout 30s "$output/gdpp-attached.x86_64" --headless -- \
+            --gdpp-fault-matrix \
+            2>&1 | tee "$output/gdpp-attached-fault-aot.log"
           grep -q '^GDPP_DYNAMIC_SCRIPT_RUNTIME_OK$' \
             "$output/gdpp-attached-runtime.log"
           grep -q '^GDPP_ATTACHED_EXPORT_RUNTIME_OK$' \
             "$output/gdpp-attached-runtime.log"
+          grep -q '^GDPP_FAULT_MATRIX=' "$output/gdpp-attached-fault-aot.log"
+          if [[ "$GODOT_VERSION" == 4.7.* ]]; then
+            source_fault="$(grep '^GDPP_FAULT_MATRIX=' \
+              "$output/gdpp-attached-fault-source.log" | tail -n 1)"
+            aot_fault="$(grep '^GDPP_FAULT_MATRIX=' \
+              "$output/gdpp-attached-fault-aot.log" | tail -n 1)"
+            test "$source_fault" = "$aot_fault"
+          fi
           grep -q 'GDPP_AOT_SUMMARY scenes=' "$output/gdpp-attached-export.log"
 
           audit=build/attached-pck-audit
