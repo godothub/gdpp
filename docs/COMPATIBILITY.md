@@ -41,7 +41,7 @@ Script loader 的能力缺失；GDPP 不改写客户模板，也不以开启路�
 |---|---|
 | Godot 4.7 官方合法 parser 语料 | 114 / 114 未被 lexer/parser 拒绝 |
 | Godot 4.7 官方非法 parser 语料 | 76 / 76 最终拒绝；接受、超时、崩溃均阻断 CI |
-| 固定编译器单元测试 | 546 / 546 |
+| 固定编译器单元测试 | 547 / 547 |
 | 恶意输入 | 非法 UTF-8、NUL、超深递归、超长链、诊断风暴和资源上限均失败关闭 |
 | Unicode | Unicode 17.0 XID、关键字 confusable 防护、稳定 ASCII C++ 标识符 |
 | 字面量 | 整数基数/边界、浮点非有限值、raw/三引号字符串和 Unicode 转义 |
@@ -101,7 +101,8 @@ PackedArray、Object/Ref 与所有 Variant 值家族已进入官方源码/AOT fa
 
 错误路径采用安全 runtime，避免未定义行为和进程崩溃。除零、模零、越界、失效对象、错误键、
 Callable、强类型存储和第三方调用均验证接收者/参数的左到右求值及当前函数中止；调用者继续执行
-与官方 GDScript 对照。诊断不承诺跨 Godot patch 逐字节相同。
+与官方 GDScript 对照。后端的保守故障效应只省略静态证明不会设置 fault state 的轮询；未知、
+动态或可重入边界始终保留检查。诊断不承诺跨 Godot patch 逐字节相同。
 
 `breakpoint` 覆盖普通函数、访问器、静态函数、lambda、Attached 第三方 GDExtension 基类和
 协程恢复点。调试器可读取原始 `.gd` 路径、函数、当前行、按词法遮蔽后的当前帧局部变量，以及

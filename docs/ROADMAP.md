@@ -85,8 +85,9 @@
 
 - 所有可达 HIR/MIR 节点要么生成有效 C++17，要么在前端/验证阶段失败，不输出注释占位。
 - runtime failure 携带 `.gd` 路径、行列、实际/期望类型并维持当前函数中止。
-- 同步 fault 检查在生成调用点内联，精确同类型 Variant 转换和未逃逸本地 Callable 消除可证明
-  的重复装箱/全局对象查询；官方 4.7.1 行为 oracle 与 10% 性能门禁同时通过。
+- 同步 fault 检查在生成调用点内联；类型化表达式/转换/赋值的保守故障效应只保留真正可能设置
+  fault state 的轮询，精确同类型 Variant 转换和未逃逸本地 Callable 进一步消除可证明的重复
+  装箱/全局对象查询；官方 4.7.1 行为 oracle 与 10% 性能门禁同时通过。
 - `.gd`→C++/native 符号图、全部 native meta/enum/bitfield/real_t/precision ABI 和 API 范围
   进入自动审计。
 - 项目脚本 `Object.free()` 通过 Godot Variant 调度，保留 RefCounted 和锁定对象保护。
