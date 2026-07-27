@@ -321,9 +321,9 @@ template <typename TypedContainer>
                                             const godot::Variant& right,
                                             ScriptSourceLocation location = {});
 void compound_assign(godot::Variant& target, godot::Variant::Operator operation,
-                     const godot::Variant& value);
+                     const godot::Variant& value, ScriptSourceLocation location = {});
 void compound_assign_integer(godot::Variant& target, godot::Variant::Operator operation,
-                             std::int64_t value);
+                             std::int64_t value, ScriptSourceLocation location = {});
 
 // Local script signals already have a statically known owner and name. The generated
 // godot-cpp Object::emit_signal wrapper reconstructs both the immutable signal-name Variant and

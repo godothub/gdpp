@@ -729,15 +729,39 @@ godot::Variant binary_integer(const godot::Variant::Operator operation, const st
 }
 
 void compound_assign(godot::Variant& target, const godot::Variant::Operator operation,
-                     const godot::Variant& value) {
-    const auto result = binary(operation, target, value);
+                     const godot::Variant& value, const ScriptSourceLocation location) {
+    if (target.get_type() == godot::Variant::INT &&
+        value.get_type() == godot::Variant::INT) {
+        const auto left = *godot::VariantInternal::get_int(&target);
+        const auto right = *godot::VariantInternal::get_int(&value);
+        if (const auto result = evaluate_integer_operator(operation, left, right)) {
+            if (!*result) {
+                report_integer_error(result->error, location);
+                return;
+            }
+            *godot::VariantInternal::get_int(&target) = result->value;
+            return;
+        }
+    }
+    const auto result = binary(operation, target, value, location);
     if (!script_function_failed())
         target = result;
 }
 
 void compound_assign_integer(godot::Variant& target, const godot::Variant::Operator operation,
-                             const std::int64_t value) {
-    const auto result = binary_integer(operation, target, value);
+                             const std::int64_t value, const ScriptSourceLocation location) {
+    if (target.get_type() == godot::Variant::INT) {
+        const auto left = *godot::VariantInternal::get_int(&target);
+        if (const auto result = evaluate_integer_operator(operation, left, value)) {
+            if (!*result) {
+                report_integer_error(result->error, location);
+                return;
+            }
+            *godot::VariantInternal::get_int(&target) = result->value;
+            return;
+        }
+    }
+    const auto result = binary_integer(operation, target, value, location);
     if (!script_function_failed())
         target = result;
 }
