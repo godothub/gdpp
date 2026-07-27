@@ -535,6 +535,7 @@ add_custom_target(gdpp_api_data DEPENDS ${GDPP_API_DATA_FILES})
 # architecture check enforces cross-module include direction; these named groups make target
 # ownership reviewable without introducing per-directory CMake files.
 set(GDPP_CORE_SOURCES
+    src/core/compiler_stack.cpp
     src/core/diagnostic.cpp
     src/core/godot_version.cpp
     src/core/source.cpp
@@ -582,6 +583,7 @@ set(GDPP_SUPPORT_SOURCES
     src/support/sha256.cpp
 )
 
+find_package(Threads REQUIRED)
 add_library(
     gdpp_core
     ${GDPP_CORE_SOURCES}
@@ -594,6 +596,7 @@ add_library(
     ${GDPP_SUPPORT_SOURCES}
 )
 add_dependencies(gdpp_core gdpp_api_data)
+target_link_libraries(gdpp_core PRIVATE Threads::Threads)
 set_source_files_properties(
     src/semantic/godot_api.cpp
     PROPERTIES OBJECT_DEPENDS "${GDPP_API_DATA_FILES}"
