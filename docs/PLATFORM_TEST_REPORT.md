@@ -28,6 +28,7 @@
 | 官方 Godot 4.7.1 性能 | 13/13 family、启动和固定帧全部通过 10% 门禁；最终 5 轮候选中 Dictionary AOT -38.57%、String AOT -6.87%、Variant AOT -28.74% |
 | 官方 Godot 4.5.2 AOT runtime | Universal 2 Release 导出后连续独立运行 10 次；动态 Script、Attached provider 与真实多 peer RPC 全部干净退出 |
 | custom/double add-on | 4.7 double 从精确 API 干净构建；compiler、SDK、descriptor、静态库和 manifest 审计成功 |
+| Windows DLL 装载边界 | Windows 11 / MSVC 19.50 同机探针对未修复 compiler 复现 `LoadLibraryExW` 1114，对当前 compiler 验证装载、`gdpp_library_init` 导出和卸载均成功 |
 | 官方 Godot 4.6.2 Release | Universal 2 Attached provider 导出、独立运行成功 |
 | 官方 Godot 4.6.2 Debug | Universal 2 Attached provider 导出、独立运行成功 |
 | PCK 审计 | Debug/Release 均 19 个文件、2 个转换场景、1 个转换资源、0 违规 |
@@ -71,7 +72,7 @@ String、Variant 的 AOT mean 相对 GDScript 分别为 -38.57%、-6.87%、-28.7
 | ASan | Ubuntu 22.04 | 地址错误和 leak 阻断 |
 | UBSan | Ubuntu 22.04 | 未定义行为阻断 |
 | TSan | Ubuntu 22.04 | 线程数据竞争阻断 |
-| Native plugin | 三桌面 runner | compiler GDExtension、SDK、直接项目构建、进度模型 |
+| Native plugin | 三桌面 runner | compiler GDExtension、SDK、直接项目构建、进度模型；Windows 另验证 ABI 前 DLL 装载/卸载 |
 | Quality | Ubuntu 24.04 | 架构、格式、workflow、固定 Action SHA、Node.js 24 MSVC action |
 
 开发 core CTest 当前 21 项；启用 plugin 的本地 CTest 当前 23 项。部分兼容语料只在 core
@@ -114,6 +115,10 @@ preset 注册，Godot editor 服务只在 plugin preset 注册；这里的 CTest
 三端均从 host component 实际导出、运行普通 oracle和 4996 项协程循环 oracle。macOS/Windows
 还把最终生成的 ZIP 安装到全新工程，再重复导入、导出、运行、库唯一性和 PCK 审计；这能发现
 “构建目录可用但发行包缺文件”的问题。
+
+Windows compiler 还必须在未调用 `gdpp_library_init` 时通过 `LoadLibraryExW`，暴露正确入口后
+可由 `FreeLibrary` 卸载。该门禁专门阻止包含 Godot 对象的静态/TLS 构造在 godot-cpp 取得引擎
+接口前运行；仅依赖 Godot 编辑器后续报错不足以定位这一类 DLL attach 失败。
 
 Linux 最终 ZIP 目前有完整结构/内容测试和 host component 实跑，但没有独立的“解压最终 ZIP 到
 干净工程”作业；这是发布流程仍可补齐的对称性缺口。

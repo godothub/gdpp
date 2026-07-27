@@ -153,6 +153,7 @@ editor-only 物理文件不变，在导出回调中跳过它，并在成品同�
 P0 语言/runtime、custom precision 和 ABI 18 回归：
 
 - macOS/Linux/Windows 编译器核心和 plugin 集成；
+- Windows compiler 在进入 GDExtension ABI 前的 `LoadLibraryExW`、入口导出与卸载安全；
 - ASan、UBSan、TSan；
 - 官方项目/parser 语料、coverage-guided fuzz、完整 AST span golden；
 - 全 Variant/fault 源码/AOT 差分、协程访问器与 await 默认参数；
