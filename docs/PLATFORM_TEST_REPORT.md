@@ -5,21 +5,21 @@
 | 项目 | 值 |
 |---|---|
 | GDPP | 1.8.2 |
-| 功能审计范围 | 1.8.2 候选分支当前提交 |
-| 最近正式发布运行 | 1.8.0 / `https://github.com/abandoft/gdpp/actions/runs/30262993367` |
-| 1.8.2 发布状态 | 本地候选门禁完成；正式发布矩阵由 release workflow 执行 |
+| 功能审计范围 | 1.8.2 发布提交 `0e1236e1d2e609328a4223a518da9817e9ed66f2` |
+| 最近正式发布运行 | 1.8.2 / `https://github.com/abandoft/gdpp/actions/runs/30311849463` |
+| 1.8.2 发布状态 | 已发布；48 个正式发布作业全部成功 |
 | 目标发行资产 | `gdpp-mac.zip`、`gdpp-linux.zip`、`gdpp-win.zip`、`SHA256SUMS` |
 | 本地编译器单元测试 | 560 / 560 |
 
 本报告只描述可重复证据。内部商业语料和客户项目不按名称公开；它们只能补充发现问题，不能替代
 产品级 fixture 与 CI。
 
-## 1.8.2 候选本地验证
+## 1.8.2 发布前本地验证
 
 | 门禁 | 结果 |
 |---|---|
-| 开发 core CTest | 23 项发布前合同 |
-| 开发 plugin CTest | 23 项发布前合同 |
+| 开发 core CTest | 24 项发布前合同 |
+| 开发 plugin CTest | 24 项发布前合同 |
 | 编译器单元 | 560 / 560 |
 | godot-cpp SDK | macOS 上完整重建 4.4、4.5、4.6、4.7 `template_release` |
 | 官方 Godot 4.7.1 直接构建 | 当前 compiler 生成、顺序编译并链接真实客户项目库成功 |
@@ -31,7 +31,7 @@
 | Windows DLL 装载边界 | Windows 11 / MSVC 19.50 同机探针对未修复 compiler 复现 `LoadLibraryExW` 1114，对当前 compiler 验证装载、`gdpp_library_init` 导出和卸载均成功 |
 | 官方 Godot 4.6.1 Windows 客户流程 | 清缓存安装、导入、Release AOT、原生编译、链接、导出及成品独立运行成功；嵌套终止分支不再误报 `GDS5118` |
 | Windows 回环协议 | HTTP/WebSocket/protobuf、双礼物平台、远程头像、扩展事件、97 包突发、正常关闭与损坏消息均退出 0；对象池总数保持 5000 |
-| Windows 成品 PCK | 391 个文件、42 个资源可加载、1 个项目库、0 个源码/SDK/compiler/中间产物违规 |
+| Windows 成品 PCK | 373 个文件、42 个资源可加载、1 个项目库、0 个源码/SDK/compiler/中间产物违规 |
 | 官方 Godot 4.6.2 Release | Universal 2 Attached provider 导出、独立运行成功 |
 | 官方 Godot 4.6.2 Debug | Universal 2 Attached provider 导出、独立运行成功 |
 | PCK 审计 | Debug/Release 均 19 个文件、2 个转换场景、1 个转换资源、0 违规 |
@@ -49,7 +49,7 @@
 release 模板默认关闭 path overrides 并忽略 `--script`，因此发布门禁不把官方模板明确禁用的
 CLI 入口误当成 GDPP 语义；每个 oracle 仍独占进程、退出码、无诊断日志与精确成功标记。
 
-本轮候选还在同一官方 4.7.1 引擎下分别运行源码 `runtime_fault_oracle.gd` 和导出的 Universal 2
+本轮发布提交还在同一官方 4.7.1 引擎下分别运行源码 `runtime_fault_oracle.gd` 和导出的 Universal 2
 成品。两端的 `GDPP_FAULT_MATRIX` 与 `GDPP_VALUE_MATRIX` 逐字一致；AOT 另在独立进程输出
 `GDPP_AWAIT_DEFAULT_AOT_RUNTIME_OK` 和 `GDPP_COROUTINE_ACCESSOR_AOT_RUNTIME_OK`。性能矩阵
 使用同一引擎/模板、5 轮 AB/BA、每轮 5 个样本、每个 family 10,000 次迭代，行为 oracle 先于
@@ -78,9 +78,9 @@ String、Variant 的 AOT mean 相对 GDScript 分别为 -38.57%、-6.87%、-28.7
 | Native plugin | 三桌面 runner | compiler GDExtension、SDK、直接项目构建、进度模型；Windows 另验证 ABI 前 DLL 装载/卸载 |
 | Quality | Ubuntu 24.04 | 架构、格式、workflow、固定 Action SHA、Node.js 24 MSVC action |
 
-开发 core CTest 当前 23 项；启用 plugin 的本地 CTest 当前 23 项。部分兼容语料只在 core
+开发 core CTest 当前 24 项；启用 plugin 的本地 CTest 当前 24 项。部分兼容语料只在 core
 preset 注册，Godot editor 服务只在 plugin preset 注册；这里的 CTest 项目会各自运行大量内部
-断言，不能把“23 项 CTest”误写成“只有 23 个测试”。
+断言，不能把“24 项 CTest”误写成“只有 24 个测试”。
 
 ### Godot 版本
 
