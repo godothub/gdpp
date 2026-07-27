@@ -41,7 +41,7 @@ Script loader 的能力缺失；GDPP 不改写客户模板，也不以开启路�
 |---|---|
 | Godot 4.7 官方合法 parser 语料 | 114 / 114 未被 lexer/parser 拒绝 |
 | Godot 4.7 官方非法 parser 语料 | 76 / 76 最终拒绝；接受、超时、崩溃均阻断 CI |
-| 固定编译器单元测试 | 549 / 549 |
+| 固定编译器单元测试 | 550 / 550 |
 | 恶意输入 | 非法 UTF-8、NUL、超深递归、超长链、诊断风暴和资源上限均失败关闭 |
 | Unicode | Unicode 17.0 XID、关键字 confusable 防护、稳定 ASCII C++ 标识符 |
 | 字面量 | 整数基数/边界、浮点非有限值、raw/三引号字符串和 Unicode 转义 |
