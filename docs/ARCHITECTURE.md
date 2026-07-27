@@ -32,7 +32,7 @@ compiler + project -----------------------------------------------------> cli
 
 | 模块 | 职责 |
 |---|---|
-| `core` | Source、SourceSpan、诊断、Godot 目标版本 |
+| `core` | Source、SourceSpan、诊断、Godot 目标版本、确定编译线程栈 |
 | `numeric` | 纯 C++17 的 64 位整数、移位、除余和 range 边界契约 |
 | `frontend` | Unicode/token、lexer、parser、强类型 AST、语言特性表、常量求值 |
 | `semantic` | 类型、作用域、流收窄、intrinsic、API/项目/第三方符号解析 |
@@ -47,6 +47,11 @@ compiler + project -----------------------------------------------------> cli
 
 `tools/check_architecture.py` 检查模块目录、公共头布局和 include 方向。`runtime` 不依赖编译器；
 编译器核心不包含 Godot 编辑器状态。
+
+`Compiler` 与 `ProjectCompiler` 的公开入口统一经 `core` 调度到 16 MiB 工作线程栈：Windows
+使用 `_beginthreadex`，POSIX 使用 `pthread`，线程局部重入标记避免递归创建工作线程。语义层
+把互斥的调用与成员分析分支隔离为独立帧，从而不继承 Godot 约 512 KiB 的脚本工作线程栈，也
+不依靠修改编辑器或客户进程的全局栈配置。
 
 ## 前端与语义
 
