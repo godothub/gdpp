@@ -137,6 +137,12 @@ Debug 生成代码在函数入口登记轻量原生帧，并在语句边界更�
 静态函数没有实例宿主；协程在原生入口帧已经返回后可为恢复点建立临时顶层帧。当前没有把编辑器
 gutter 行断点和全部单步协议冒充为已完成能力。
 
+线程调试状态包含 `String`、`StringName`、Array 和 PackedArray 等非平凡 Godot 值，因此由函数
+内 `thread_local` 访问器在第一次调试回调时构造。它不能成为命名空间级 TLS 对象：MSVC 可能在
+`LoadLibraryExW` 尚未调用 `gdpp_library_init`、godot-cpp 尚未取得 GDExtension 接口时执行 DLL
+TLS 初始化。Windows 门禁先独立装载、检查入口并卸载 compiler，再交给 Godot 执行完整初始化，
+同时覆盖“PE 可链接但 DLL attach 阶段失败”的装载边界。
+
 ## 项目编译
 
 `ProjectCompiler` 一次扫描项目范围内全部客户 GDScript，包括第三方 addon 的 `.gd`，只排除
