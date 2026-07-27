@@ -1,5 +1,6 @@
 #include "gdpp/compiler/compiler.hpp"
 
+#include "gdpp/core/compiler_stack.hpp"
 #include "gdpp/core/source.hpp"
 #include "gdpp/frontend/lexer.hpp"
 #include "gdpp/frontend/parser.hpp"
@@ -137,6 +138,14 @@ void count_hir(const ir::Module& module, CompileResult::Metrics& metrics) {
 
 CompileResult Compiler::compile(std::string path, std::string source_text,
                                 const CompileOptions& options) const {
+    CompileResult result;
+    run_on_compiler_stack(
+        [&]() { result = compile_impl(std::move(path), std::move(source_text), options); });
+    return result;
+}
+
+CompileResult Compiler::compile_impl(std::string path, std::string source_text,
+                                     const CompileOptions& options) const {
     const auto total_begin = Clock::now();
     const SourceFile source{std::move(path), std::move(source_text)};
     DiagnosticBag diagnostics{options.frontend_limits.max_diagnostics};

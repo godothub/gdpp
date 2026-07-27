@@ -66,6 +66,10 @@ class Compiler final {
   public:
     [[nodiscard]] CompileResult compile(std::string path, std::string source,
                                         const CompileOptions& options = {}) const;
+
+  private:
+    [[nodiscard]] CompileResult compile_impl(std::string path, std::string source,
+                                             const CompileOptions& options) const;
 };
 
 } // namespace gdpp
