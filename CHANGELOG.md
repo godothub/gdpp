@@ -1,3 +1,12 @@
+## 1.8.2
+
+- Accept contextual-keyword iterator names and enum bodies whose opening brace follows the declaration on a new line.
+- Resolve globally named scripts, their inner classes, and nested enums consistently in type annotations, constructors, member access, and type tests.
+- Preserve named script enums as read-only Dictionary values with their declared identity and standard Dictionary behavior.
+- Preserve exported `Variant` properties with the correct Inspector, storage, and runtime metadata.
+- Preserve compiled Script resources as canonical stateful objects across `load`/`preload`, nullability, Script APIs, properties, signals, object passing, type tests, and construction.
+- Route Godot properties without public godot-cpp accessors through the Object property ABI, and preserve receiver/argument evaluation order for calls in field and static initializers.
+
 ## 1.8.1
 
 - MIR operation identities are now assigned only after unreachable-block pruning and predecessor reconstruction, in canonical block/instruction/terminator order. Nested `if/else` trees whose branches all `return`, `break`, or `continue` no longer retain holes from discarded join blocks or fail with a spurious `GDS5118`.
