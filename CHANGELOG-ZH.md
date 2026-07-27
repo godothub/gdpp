@@ -8,6 +8,9 @@
 - 所有受支持 godot-cpp 版本的 Callable 创建快照统一通过可变类型擦除桥接实例化，避免 GCC 在 Godot 4.5/4.6 构建中把逐次调用的可写标量及共享容器帧错误限定为只读。
 - 真实 Godot 运行矩阵新增 Callable 相等性/有效性、bind/unbind 参数数量、一次性/延迟/引用计数 Signal 连接、发射期连接变更、宿主销毁、共享容器递归，以及两个原生 Thread 并发调用同一生成 Callable。
 - 引入脚本 fault frame：致命 GDScript 操作只终止当前生成函数，调用方可继续执行；同时保留源码求值顺序、惰性分支、专用调用参数顺序、Callable 默认返回，以及 Variant、容器、对象和第三方扩展边界的精确 `.gd` 路径、行列诊断。
+- 同步 fault frame 改为调用局部、线程局部状态，协程持久 fault 状态由 FunctionState 恢复互斥锁串行拥有；活动帧检查在生成调用点内联，失败标记不会跨线程、协程、嵌套调用或 GDExtension ABI 泄漏。
+- 将本地 lambda 的参数数量和变参身份编码进生成 C++ 类型，并仅在具体 Callable 仍处于创建调用栈内时保留原生参数 tuple；精确参数不再往返 Variant，赋值/逃逸、失效宿主、缺省参数、结构化容器和动态路径仍执行完整 Godot Callable 与严格 Variant 校验。
+- 精确同类型的显式 Variant 转换先于 Godot 通用转换矩阵执行快速路径；官方 Godot 4.7.1 候选矩阵的全部行为 oracle 和 10% 门禁均通过，本地 Callable family 实测比 GDScript 快 33.33%，Variant 运算慢 2.17%。
 - 动态标量、Object/Ref、Array/Dictionary、PackedArray 和 Attached 属性写入统一执行 Godot 严格运行时存储转换，不再接受 godot-cpp 更宽松的 cast，也不会把非法值静默变成默认值。
 - 静态/preload 初始化以及 Attached 字段、`_init`、`@onready` 阶段分别采用事务和故障隔离；失败的部分状态不会发布，后续对象构造与调用方仍能按 GDScript 默认值语义继续。
 - 异步引擎虚函数严格匹配 Godot ABI：挂起回调立即把 FunctionState 交给引擎执行 Variant→native 转换，同步类型化结果继续受检；官方 Godot 4.7.1 差分覆盖状态文本、完成、手动恢复、旧连接清理、有效性和 continuation。
