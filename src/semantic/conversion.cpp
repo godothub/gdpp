@@ -181,6 +181,8 @@ ConversionKind classify_conversion(const Type& target, const Type& source) noexc
     }
     if (target.kind == TypeKind::integer && source.kind == TypeKind::enumeration)
         return ConversionKind::implicit;
+    if (target.kind == TypeKind::script_resource && source.kind == TypeKind::nil)
+        return ConversionKind::implicit;
     if (target.kind == TypeKind::script_resource || source.kind == TypeKind::script_resource)
         return ConversionKind::incompatible;
 

@@ -496,12 +496,16 @@ void SemanticAnalyzer::require_assignable(const Type& target, const Type& source
     const bool compatible_objects =
         target.kind == TypeKind::object && source.kind == TypeKind::object &&
         (object_type_inherits(source, target) || object_type_inherits(target, source));
+    const bool compatible_script_resource = target.kind == TypeKind::object &&
+                                            source.kind == TypeKind::script_resource &&
+                                            api_.inherits("Script", target.name);
     const bool same_project_enum =
         current_script_ && target.kind == TypeKind::enumeration &&
         source.kind == TypeKind::enumeration &&
         (target.name == current_script_->script_name + "." + source.name ||
          source.name == current_script_->script_name + "." + target.name);
-    if (!is_implicitly_convertible(target, source) && !compatible_objects && !same_project_enum) {
+    if (!is_implicitly_convertible(target, source) && !compatible_objects &&
+        !compatible_script_resource && !same_project_enum) {
         diagnostics_.error("GDS4002",
                            context + ": cannot assign " + source.display_name() + " to " +
                                target.display_name(),
@@ -1305,7 +1309,8 @@ Type SemanticAnalyzer::resolve_binary_expression(const ast::Expression& expressi
             // GDScript object casts are runtime-checked and return null for unrelated object
             // classes. Requiring a statically provable inheritance relationship would reject
             // legal downcasts from broad engine properties such as Material.
-            valid_conversion = left.kind == TypeKind::nil || left.kind == TypeKind::object;
+            valid_conversion = left.kind == TypeKind::nil || left.kind == TypeKind::object ||
+                               left.kind == TypeKind::script_resource;
         } else {
             valid_conversion = is_explicitly_convertible(target_type, left);
         }
@@ -1352,9 +1357,12 @@ Type SemanticAnalyzer::resolve_binary_expression(const ast::Expression& expressi
                    : variant_type;
     }
     if ((operation == "==" || operation == "!=") &&
-        ((left.kind == TypeKind::object && right.kind == TypeKind::object) ||
-         (left.kind == TypeKind::object && right.kind == TypeKind::nil) ||
-         (left.kind == TypeKind::nil && right.kind == TypeKind::object))) {
+        (((left.kind == TypeKind::object || left.kind == TypeKind::script_resource) &&
+          (right.kind == TypeKind::object || right.kind == TypeKind::script_resource)) ||
+         ((left.kind == TypeKind::object || left.kind == TypeKind::script_resource) &&
+          right.kind == TypeKind::nil) ||
+         (left.kind == TypeKind::nil &&
+          (right.kind == TypeKind::object || right.kind == TypeKind::script_resource)))) {
         return {TypeKind::boolean, "bool"};
     }
     if ((operation == "in" || operation == "not in") &&
@@ -2047,9 +2055,13 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
             result = when_true.kind == TypeKind::floating || when_false.kind == TypeKind::floating
                          ? Type{TypeKind::floating, "float"}
                          : Type{TypeKind::integer, "int"};
-        } else if (when_true.kind == TypeKind::nil && when_false.kind == TypeKind::object) {
+        } else if (when_true.kind == TypeKind::nil &&
+                   (when_false.kind == TypeKind::object ||
+                    when_false.kind == TypeKind::script_resource)) {
             result = when_false;
-        } else if (when_false.kind == TypeKind::nil && when_true.kind == TypeKind::object) {
+        } else if (when_false.kind == TypeKind::nil &&
+                   (when_true.kind == TypeKind::object ||
+                    when_true.kind == TypeKind::script_resource)) {
             result = when_true;
         } else {
             result = variant_type;
@@ -2764,7 +2776,17 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                         if (callee.value() != "new") {
                             const auto* member =
                                 script_symbols_->find_member(*target, callee.value());
-                            if (!member || member->kind != ScriptMemberKind::function) {
+                            if (!member) {
+                                if (resolve_method(api_.find_method("Script", callee.value())))
+                                    break;
+                                diagnostics_.error("GDS4055",
+                                                   "script resource '" + target->script_name +
+                                                       "' has no method '" + callee.value() + "'",
+                                                   expression.span);
+                                call_result = unknown_type;
+                                break;
+                            }
+                            if (member->kind != ScriptMemberKind::function) {
                                 diagnostics_.error("GDS4055",
                                                    "script resource '" + target->script_name +
                                                        "' has no method '" + callee.value() + "'",
@@ -3461,6 +3483,22 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                     }
                     const auto* member = script_symbols_->find_member(*target, expression.value());
                     if (!member) {
+                        if (api_.find_signal("Script", expression.value())) {
+                            member_result = {TypeKind::builtin, "Signal"};
+                            model_.api_resolutions_.emplace(
+                                &expression,
+                                ApiResolution{ApiResolutionKind::script_signal, "Script", "", "",
+                                              member_result, 0, 0, false, false});
+                            break;
+                        }
+                        if (const auto* property =
+                                api_.find_property("Script", expression.value())) {
+                            auto resolution =
+                                property_resolution(ApiResolutionKind::property, *property);
+                            member_result = resolution.type;
+                            model_.api_resolutions_.emplace(&expression, std::move(resolution));
+                            break;
+                        }
                         diagnostics_.error("GDS4055",
                                            "script resource '" + target->script_name +
                                                "' has no member '" + expression.value() + "'",

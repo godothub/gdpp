@@ -654,6 +654,48 @@ target_link_libraries(gdpp_generated_smoke PRIVATE gdpp::runtime godot::cpp)
 target_compile_features(gdpp_generated_smoke PRIVATE cxx_std_17)
 gdpp_set_project_warnings(gdpp_generated_smoke)
 
+set(GDPP_SCRIPT_RESOURCE_SMOKE_SOURCE
+    "${CMAKE_SOURCE_DIR}/test/fixtures/script_resource_project")
+set(GDPP_SCRIPT_RESOURCE_SMOKE_DIR
+    "${CMAKE_BINARY_DIR}/script-resource-smoke")
+set(GDPP_SCRIPT_RESOURCE_SMOKE_PROJECT
+    "${GDPP_SCRIPT_RESOURCE_SMOKE_DIR}/project")
+set(GDPP_SCRIPT_RESOURCE_SMOKE_GENERATED
+    "${GDPP_SCRIPT_RESOURCE_SMOKE_PROJECT}/addons/gdpp/build/generated")
+add_custom_command(
+    OUTPUT
+        "${GDPP_SCRIPT_RESOURCE_SMOKE_GENERATED}/script_resource_service.gd.hpp"
+        "${GDPP_SCRIPT_RESOURCE_SMOKE_GENERATED}/script_resource_service.gd.cpp"
+        "${GDPP_SCRIPT_RESOURCE_SMOKE_GENERATED}/script_resource_consumer.gd.hpp"
+        "${GDPP_SCRIPT_RESOURCE_SMOKE_GENERATED}/script_resource_consumer.gd.cpp"
+    COMMAND "${CMAKE_COMMAND}" -E make_directory "${GDPP_SCRIPT_RESOURCE_SMOKE_PROJECT}"
+    COMMAND "${CMAKE_COMMAND}" -E copy_directory
+            "${GDPP_SCRIPT_RESOURCE_SMOKE_SOURCE}"
+            "${GDPP_SCRIPT_RESOURCE_SMOKE_PROJECT}"
+    COMMAND $<TARGET_FILE:gdpp> project "${GDPP_SCRIPT_RESOURCE_SMOKE_PROJECT}"
+            --output "${GDPP_SCRIPT_RESOURCE_SMOKE_PROJECT}/addons/gdpp/build"
+            --sdk-root "${CMAKE_SOURCE_DIR}"
+            --godot-cpp "${CMAKE_SOURCE_DIR}/third/godot-cpp"
+            --target-godot "${GDPP_GODOT_API_VERSION}"
+    DEPENDS
+        gdpp
+        "${GDPP_SCRIPT_RESOURCE_SMOKE_SOURCE}/service.gd"
+        "${GDPP_SCRIPT_RESOURCE_SMOKE_SOURCE}/consumer.gd"
+    VERBATIM
+)
+add_library(
+    gdpp_script_resource_smoke
+    STATIC
+    "${GDPP_SCRIPT_RESOURCE_SMOKE_GENERATED}/script_resource_service.gd.cpp"
+    "${GDPP_SCRIPT_RESOURCE_SMOKE_GENERATED}/script_resource_consumer.gd.cpp"
+)
+target_include_directories(
+    gdpp_script_resource_smoke
+    PRIVATE "${GDPP_SCRIPT_RESOURCE_SMOKE_GENERATED}")
+target_link_libraries(gdpp_script_resource_smoke PRIVATE gdpp::runtime godot::cpp)
+target_compile_features(gdpp_script_resource_smoke PRIVATE cxx_std_17)
+gdpp_set_project_warnings(gdpp_script_resource_smoke)
+
 add_custom_target(
     gdpp_addon ALL
     COMMAND "${CMAKE_COMMAND}" -E rm -f

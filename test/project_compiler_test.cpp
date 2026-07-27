@@ -2929,6 +2929,66 @@ TEST_CASE("project script resource loading rejects dynamic missing and unsupport
     REQUIRE(has_code("GDS4063"));
 }
 
+TEST_CASE("project script resources preserve Script APIs and nullability") {
+    const auto root = fixture_root("project-script-resource-api");
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
+    write_text(root / "service.gd", "extends Node\n"
+                                    "class_name ResourceApiService\n"
+                                    "signal executed\n"
+                                    "func execute() -> void:\n"
+                                    "    pass\n");
+    write_text(root / "consumer.gd", "extends Node\n"
+                                     "class_name ResourceApiConsumer\n"
+                                     "const Service = preload(\"service.gd\")\n"
+                                     "func validate() -> bool:\n"
+                                     "    var script := load(\"service.gd\")\n"
+                                     "    if script == null:\n"
+                                     "        return false\n"
+                                     "    return script != null and script.can_instantiate() and "
+                                     "script.has_script_signal(&\"executed\")\n"
+                                     "func global_name() -> StringName:\n"
+                                     "    return Service.get_global_name()\n"
+                                     "func rename_resource() -> String:\n"
+                                     "    var script := load(\"service.gd\")\n"
+                                     "    script.resource_name = \"compiled\"\n"
+                                     "    return script.resource_name\n"
+                                     "func changed_signal() -> Signal:\n"
+                                     "    return Service.changed\n"
+                                     "func accepts_script(script: Script) -> bool:\n"
+                                     "    return script != null\n"
+                                     "func passes_as_script() -> bool:\n"
+                                     "    return accepts_script(Service)\n"
+                                     "func has_script_type() -> bool:\n"
+                                     "    return Service is Script\n"
+                                     "func clear_resource() -> bool:\n"
+                                     "    var script := load(\"service.gd\")\n"
+                                     "    script = null\n"
+                                     "    return not script\n"
+                                     "func conditional_resource(enabled: bool) -> bool:\n"
+                                     "    var script := load(\"service.gd\") if enabled else null\n"
+                                     "    return script != null\n"
+                                     "func create() -> ResourceApiService:\n"
+                                     "    return Service.new()\n");
+
+    const auto options = project_options(root);
+    const auto result = gdpp::ProjectCompiler{}.compile(options);
+
+    REQUIRE(result.success);
+    const auto source =
+        read_text(options.output_directory / "generated/resource_api_consumer.gd.cpp");
+    REQUIRE(source.find(".resource()") != std::string::npos);
+    REQUIRE(source.find("->can_instantiate()") != std::string::npos);
+    REQUIRE(source.find("->has_script_signal(") != std::string::npos);
+    REQUIRE(source.find(".resource().is_null()") != std::string::npos);
+    REQUIRE(source.find("->set_name(") != std::string::npos);
+    REQUIRE(source.find("->get_name(") != std::string::npos);
+    REQUIRE(source.find("godot::Signal(") != std::string::npos);
+    REQUIRE(source.find("strict_native_ref_storage<godot::Script>") != std::string::npos);
+    REQUIRE(source.find(".resource().ptr()") != std::string::npos);
+    REQUIRE(source.find("::missing()") != std::string::npos);
+}
+
 TEST_CASE("project compiler lowers cross-script constants enums and resource factories") {
     const auto root = fixture_root("project-cross-symbol-values");
     std::error_code error;
@@ -2975,9 +3035,10 @@ TEST_CASE("project compiler lowers cross-script constants enums and resource fac
     REQUIRE(consumer_header.find("ScriptResource<GDPPNative_SharedValues_") != std::string::npos);
     REQUIRE(consumer_header.find("operator godot::Variant() const") != std::string::npos);
     REQUIRE(consumer_header.find("attached_script_resource(") != std::string::npos);
-    REQUIRE(consumer_header.find("static_cast<const godot::Object *>(script.ptr())") !=
+    REQUIRE(consumer_header.find("godot::Ref<godot::Script> resource() const") !=
             std::string::npos);
-    REQUIRE(consumer_header.find("godot::StringName(T::get_class_static())") != std::string::npos);
+    REQUIRE(consumer_header.find("return gdpp::runtime::to_variant(resource())") !=
+            std::string::npos);
     const auto consumer_source =
         read_text(options.output_directory / "generated/shared_consumer.gd.cpp");
     REQUIRE(consumer_source.find("SharedValues_") != std::string::npos);
@@ -2986,7 +3047,7 @@ TEST_CASE("project compiler lowers cross-script constants enums and resource fac
     REQUIRE(consumer_source.find("::_gdpp_enum_ANONYMOUS") != std::string::npos);
     REQUIRE(consumer_source.find("::MASK()") != std::string::npos);
     REQUIRE(consumer_source.find("ScriptResource<GDPPNative_SharedValues_") != std::string::npos);
-    REQUIRE(consumer_source.find(">{}.instantiate(") != std::string::npos);
+    REQUIRE(consumer_source.find(".instantiate(") != std::string::npos);
     REQUIRE(consumer_source.find("godot::StringName(\"" + base_class + "\")") != std::string::npos);
     REQUIRE(consumer_source.find("_gdpp_call_argument_") != std::string::npos);
     REQUIRE(consumer_source.find("IDLE:0,ACTIVE:4,BOOST:8") != std::string::npos);

@@ -124,6 +124,7 @@ std::set<Pair> strict_pairs() {
 TEST_CASE("semantic types preserve null, zero and void as separate domains") {
     const gdpp::Type variant{gdpp::TypeKind::variant, "Variant"};
     const gdpp::Type object{gdpp::TypeKind::object, "Object"};
+    const gdpp::Type script_resource{gdpp::TypeKind::script_resource, "res://service.gd"};
     const gdpp::Type nil{gdpp::TypeKind::nil, "null"};
     const gdpp::Type array{gdpp::TypeKind::array, "Array"};
     const gdpp::Type string{gdpp::TypeKind::string, "String"};
@@ -131,6 +132,7 @@ TEST_CASE("semantic types preserve null, zero and void as separate domains") {
 
     REQUIRE(variant.accepts_null());
     REQUIRE(object.accepts_null());
+    REQUIRE(script_resource.accepts_null());
     REQUIRE(nil.accepts_null());
     REQUIRE(!array.accepts_null());
     REQUIRE(!string.accepts_null());
@@ -139,7 +141,9 @@ TEST_CASE("semantic types preserve null, zero and void as separate domains") {
     REQUIRE_EQ(nil.truthiness(), gdpp::TruthinessKind::always_false);
     REQUIRE_EQ(array.truthiness(), gdpp::TruthinessKind::zero_value);
     REQUIRE_EQ(object.truthiness(), gdpp::TruthinessKind::object_validity);
+    REQUIRE_EQ(script_resource.truthiness(), gdpp::TruthinessKind::object_validity);
     REQUIRE_EQ(void_type.truthiness(), gdpp::TruthinessKind::invalid);
+    REQUIRE(gdpp::is_implicitly_convertible(script_resource, nil));
 }
 
 TEST_CASE("Variant type mapping covers the complete Godot 4 value domain") {

@@ -875,7 +875,7 @@ std::string variant_type(const Type& type) {
     case TypeKind::enumeration:
         return "godot::Variant::INT";
     case TypeKind::script_resource:
-        return "godot::Variant::NIL";
+        return "godot::Variant::OBJECT";
     case TypeKind::builtin: {
         static const std::unordered_map<std::string, std::string> builtin_types{
             {"Vector2", "VECTOR2"},
@@ -2125,6 +2125,8 @@ std::string CodeGenerator::emit_conversion(const Type& target, const Type& sourc
         return source.is_dynamic() ? value : "gdpp::runtime::to_variant(" + value + ")";
     if (target == source)
         return value;
+    if (target.kind == TypeKind::script_resource && source.kind == TypeKind::nil)
+        return cpp_type(target) + "::missing()";
     if (!attached_script_source_path(target).empty())
         return emit_attached_script_cast(target, std::move(value), source_span);
     const bool target_external = target.kind == TypeKind::object && script_symbols_ &&
@@ -3041,6 +3043,8 @@ bool CodeGenerator::conversion_may_fail(const Type& target, const Type& source) 
         return false;
     if (source.kind == TypeKind::nil && target.kind == TypeKind::object)
         return false;
+    if (source.kind == TypeKind::nil && target.kind == TypeKind::script_resource)
+        return false;
 
     // Dynamic-to-static storage is the principal checked conversion boundary. Packed arrays and
     // typed containers also validate their element contract even when the source itself is
@@ -3713,6 +3717,8 @@ std::string CodeGenerator::emit_expression(const typed::Expression& expression) 
                     object_value = "nullptr";
                 } else if (value.type.is_dynamic()) {
                     object_value = "(" + emitted_value + ").get_validated_object()";
+                } else if (value.type.kind == TypeKind::script_resource) {
+                    object_value = "(" + emitted_value + ").resource().ptr()";
                 } else if (value.type.kind != TypeKind::object) {
                     return type_test("(static_cast<void>(" + emitted_value + "), false)");
                 } else {
@@ -3803,8 +3809,11 @@ std::string CodeGenerator::emit_expression(const typed::Expression& expression) 
         }
         const auto& left_type = expression.operands.at(0)->type;
         const auto& right_type = expression.operands.at(1)->type;
-        if ((operation == "==" || operation == "!=") && left_type.kind == TypeKind::object &&
-            right_type.kind == TypeKind::object) {
+        const auto reference_like = [](const Type& type) {
+            return type.kind == TypeKind::object || type.kind == TypeKind::script_resource;
+        };
+        if ((operation == "==" || operation == "!=") && reference_like(left_type) &&
+            reference_like(right_type)) {
             // Attached RefCounted scripts store typed values as Ref<T>, while `self` is the
             // provider-owned Object*. Direct C++ comparison is ill-formed even when both values
             // identify the same Godot object. Variant equality is Godot's canonical identity
@@ -3817,10 +3826,14 @@ std::string CodeGenerator::emit_expression(const typed::Expression& expression) 
             });
         }
         if ((operation == "==" || operation == "!=") &&
-            ((left_type.kind == TypeKind::object && right_type.kind == TypeKind::nil) ||
-             (left_type.kind == TypeKind::nil && right_type.kind == TypeKind::object))) {
-            const auto& object = left_type.kind == TypeKind::object ? *expression.operands.at(0)
-                                                                    : *expression.operands.at(1);
+            ((reference_like(left_type) && right_type.kind == TypeKind::nil) ||
+             (left_type.kind == TypeKind::nil && reference_like(right_type)))) {
+            const auto& object =
+                reference_like(left_type) ? *expression.operands.at(0) : *expression.operands.at(1);
+            if (object.type.kind == TypeKind::script_resource) {
+                const auto null_test = emit_expression(object) + ".resource().is_null()";
+                return operation == "==" ? "(" + null_test + ")" : "(!(" + null_test + "))";
+            }
             if (script_symbols_ && script_symbols_->find_external(object.type.name)) {
                 const auto equality =
                     "static_cast<bool>(gdpp::runtime::binary(godot::Variant::OP_EQUAL, " +
@@ -4496,8 +4509,7 @@ std::string CodeGenerator::emit_expression(const typed::Expression& expression) 
         if (!in_function_body_) {
             std::string direct =
                 callee.resolution == typed::ResolutionKind::script_constructor
-                    ? detail_namespace_ + "::ScriptResource<" + callee.resolved_owner +
-                          ">{}.instantiate"
+                    ? emit_expression(*callee.operands.at(0)) + ".instantiate"
                 : callee.resolution == typed::ResolutionKind::inner_constructor
                     ? detail_namespace_ + "::InternalClassResource<" +
                           inner_cpp_type(callee.resolved_owner) + ">{}.instantiate"
@@ -4570,8 +4582,10 @@ std::string CodeGenerator::emit_expression(const typed::Expression& expression) 
         std::string receiver_name;
         const auto suffix = std::to_string(temporary_counter_++);
         if (callee.resolution == typed::ResolutionKind::script_constructor) {
-            invocation =
-                detail_namespace_ + "::ScriptResource<" + callee.resolved_owner + ">{}.instantiate";
+            const auto receiver = "_gdpp_script_resource_" + suffix;
+            receiver_setup =
+                "auto " + receiver + " = " + emit_expression(*callee.operands.at(0)) + "; ";
+            invocation = receiver + ".instantiate";
         } else if (callee.resolution == typed::ResolutionKind::inner_constructor) {
             invocation = detail_namespace_ + "::InternalClassResource<" +
                          inner_cpp_type(callee.resolved_owner) + ">{}.instantiate";
@@ -4582,6 +4596,14 @@ std::string CodeGenerator::emit_expression(const typed::Expression& expression) 
             invocation = callee.resolved_owner + "::" + script_native_name;
         } else if (explicit_self_script_call && script_method) {
             invocation = "this->" + script_native_name;
+        } else if (callee.kind == typed::ExpressionKind::member &&
+                   callee.resolution == typed::ResolutionKind::godot_method &&
+                   callee.operands.at(0)->type.kind == TypeKind::script_resource) {
+            const auto receiver = "_gdpp_call_receiver_" + suffix;
+            receiver_name = receiver;
+            receiver_setup = "auto " + receiver + " = " + emit_expression(*callee.operands.at(0)) +
+                             ".resource(); ";
+            invocation = receiver + "->" + script_native_name;
         } else if (callee.kind == typed::ExpressionKind::member &&
                    callee.resolution != typed::ResolutionKind::script_super &&
                    callee.operands.at(0)->resolution != typed::ResolutionKind::godot_type &&
@@ -4620,7 +4642,19 @@ std::string CodeGenerator::emit_expression(const typed::Expression& expression) 
         result += " { " + receiver_setup;
         if (!receiver_setup.empty() && expression_may_fail(*callee.operands.at(0)))
             result += expression_failure_return;
-        if (!receiver_name.empty() && callee.operands.at(0)->type.kind == TypeKind::object) {
+        if (!receiver_name.empty() &&
+            callee.operands.at(0)->type.kind == TypeKind::script_resource) {
+            const auto message =
+                godot_string("Cannot call method '" + callee.value + "' on a missing script.");
+            result += "if (" + receiver_name +
+                      ".is_null()) { gdpp::runtime::report_script_failure(" + message +
+                      ", _gdpp_source_path, " + std::to_string(callee.span.begin.line) + ", " +
+                      std::to_string(callee.span.begin.column) + "); " +
+                      (!expression.coroutine_call && expression.type.kind == TypeKind::void_type
+                           ? "return; "
+                           : "return {}; ") +
+                      "} ";
+        } else if (!receiver_name.empty() && callee.operands.at(0)->type.kind == TypeKind::object) {
             const auto message =
                 godot_string("Cannot call method '" + callee.value + "' on a null or freed value.");
             result += "if (!gdpp::runtime::is_instance_valid(gdpp::runtime::to_variant(" +
@@ -4699,6 +4733,12 @@ std::string CodeGenerator::emit_expression(const typed::Expression& expression) 
     case typed::ExpressionKind::member: {
         if (expression.resolution == typed::ResolutionKind::inner_type)
             return inner_cpp_type(expression.resolved_owner);
+        if (expression.resolution == typed::ResolutionKind::godot_method &&
+            !expression.operands.empty() &&
+            expression.operands.at(0)->type.kind == TypeKind::script_resource) {
+            return emit_expression(*expression.operands.at(0)) + ".resource()->" +
+                   sanitize_identifier(expression.value);
+        }
         if (expression.resolution == typed::ResolutionKind::enum_member &&
             !expression.resolved_owner.empty()) {
             return sanitize_qualified_identifier(expression.resolved_owner) +
@@ -4731,6 +4771,8 @@ std::string CodeGenerator::emit_expression(const typed::Expression& expression) 
                    "::" + sanitize_identifier(expression.value);
         if (expression.resolution == typed::ResolutionKind::script_signal) {
             auto object = emit_expression(*expression.operands.at(0));
+            if (expression.operands.at(0)->type.kind == TypeKind::script_resource)
+                object = "(" + object + ").resource().ptr()";
             const bool ref_counted = is_ref_counted_object(expression.operands.at(0)->type);
             if (ref_counted && object != self_object_expression())
                 object = "(" + object + ").ptr()";
@@ -4757,6 +4799,8 @@ std::string CodeGenerator::emit_expression(const typed::Expression& expression) 
         const auto object =
             expression.operands.at(0)->resolution == typed::ResolutionKind::script_type
                 ? expression.operands.at(0)->resolved_owner
+            : expression.operands.at(0)->type.kind == TypeKind::script_resource
+                ? "(" + emit_expression(*expression.operands.at(0)) + ").resource()"
                 : emit_expression(*expression.operands.at(0));
         if (expression.resolution == typed::ResolutionKind::dynamic_property) {
             if (expression.operands.at(0)->type.kind == TypeKind::dictionary) {
@@ -4807,8 +4851,9 @@ std::string CodeGenerator::emit_expression(const typed::Expression& expression) 
         }
         const auto& receiver = *expression.operands.at(0);
         const bool checked_object_access =
-            receiver.type.kind == TypeKind::object && object != "this" &&
-            receiver.resolution != typed::ResolutionKind::godot_type &&
+            (receiver.type.kind == TypeKind::object ||
+             receiver.type.kind == TypeKind::script_resource) &&
+            object != "this" && receiver.resolution != typed::ResolutionKind::godot_type &&
             receiver.resolution != typed::ResolutionKind::script_type &&
             receiver.resolution != typed::ResolutionKind::inner_type;
         const auto receiver_name = checked_object_access ? "_gdpp_property_receiver_" +
@@ -4837,7 +4882,8 @@ std::string CodeGenerator::emit_expression(const typed::Expression& expression) 
             : expression.operands.at(0)->resolution == typed::ResolutionKind::godot_type  ? "::"
             : expression.operands.at(0)->resolution == typed::ResolutionKind::script_type ? "::"
             : expression.operands.at(0)->resolution == typed::ResolutionKind::inner_type  ? "::"
-            : receiver_name == "this" || expression.operands.at(0)->type.kind == TypeKind::object
+            : receiver_name == "this" || expression.operands.at(0)->type.kind == TypeKind::object ||
+                    expression.operands.at(0)->type.kind == TypeKind::script_resource
                 ? "->"
                 : ".";
         if (expression.resolution == typed::ResolutionKind::godot_property &&
@@ -6410,11 +6456,19 @@ std::string CodeGenerator::emit_statement_body(const typed::Statement& statement
                 std::string connector;
                 if (root->kind == typed::ExpressionKind::member) {
                     const auto receiver_name = "_gdpp_property_receiver_" + suffix;
-                    result += nested_prefix + "auto &&" + receiver_name + " = " +
-                              emit_expression(*root->operands.at(0)) + ";\n";
+                    const auto root_receiver =
+                        root->operands.at(0)->type.kind == TypeKind::script_resource
+                            ? "(" + emit_expression(*root->operands.at(0)) + ").resource()"
+                            : emit_expression(*root->operands.at(0));
+                    result +=
+                        nested_prefix + "auto &&" + receiver_name + " = " + root_receiver + ";\n";
                     receiver = receiver_name;
-                    connector = root->operands.at(0)->type.kind == TypeKind::object ? "->" : ".";
-                    if (root->operands.at(0)->type.kind == TypeKind::object) {
+                    connector = root->operands.at(0)->type.kind == TypeKind::object ||
+                                        root->operands.at(0)->type.kind == TypeKind::script_resource
+                                    ? "->"
+                                    : ".";
+                    if (root->operands.at(0)->type.kind == TypeKind::object ||
+                        root->operands.at(0)->type.kind == TypeKind::script_resource) {
                         result +=
                             checked_assignment_guard(receiver_name, root->value, indentation + 1);
                     }
@@ -6654,15 +6708,20 @@ std::string CodeGenerator::emit_statement_body(const typed::Statement& statement
                     indentation);
             }
             if (target.kind == typed::ExpressionKind::member) {
-                const auto object = emit_expression(*target.operands.at(0));
+                const auto object =
+                    target.operands.at(0)->type.kind == TypeKind::script_resource
+                        ? "(" + emit_expression(*target.operands.at(0)) + ").resource()"
+                        : emit_expression(*target.operands.at(0));
                 const bool checked_object =
-                    target.operands.at(0)->type.kind == TypeKind::object &&
+                    (target.operands.at(0)->type.kind == TypeKind::object ||
+                     target.operands.at(0)->type.kind == TypeKind::script_resource) &&
                     target.operands.at(0)->resolution != typed::ResolutionKind::script_type;
                 const auto suffix = std::to_string(temporary_counter_++);
                 const auto receiver = checked_object ? "_gdpp_property_receiver_" + suffix : object;
                 const auto connector =
                     target.operands.at(0)->resolution == typed::ResolutionKind::script_type ? "::"
-                    : receiver == "this" || target.operands.at(0)->type.kind == TypeKind::object
+                    : receiver == "this" || target.operands.at(0)->type.kind == TypeKind::object ||
+                            target.operands.at(0)->type.kind == TypeKind::script_resource
                         ? "->"
                         : ".";
                 std::string raw_index;
@@ -8642,6 +8701,7 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
     // not directly spell a ref-counted type.
     header << "#include <godot_cpp/classes/ref.hpp>\n"
            << "#include <godot_cpp/classes/ref_counted.hpp>\n"
+           << "#include <godot_cpp/classes/script.hpp>\n"
            << "#include <godot_cpp/core/class_db.hpp>\n"
            << "#include <godot_cpp/core/error_macros.hpp>\n"
            << "#include <godot_cpp/core/math_defs.hpp>\n"
@@ -8688,7 +8748,10 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
                << "};\n";
     }
     header << "template <typename T> struct ScriptResource {\n"
-           << "    operator godot::Variant() const {\n"
+           << "private:\n"
+           << "    struct MissingTag {};\n"
+           << "    godot::Ref<godot::Script> _gdpp_resource;\n"
+           << "    static godot::Ref<godot::Script> materialize() {\n"
            << "        if constexpr (T::_gdpp_attached) {\n"
            << "            godot::String error;\n"
            << "            const auto script = gdpp::runtime::attached_script_resource("
@@ -8699,15 +8762,30 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
               "error);\n"
            << "                return {};\n"
            << "            }\n"
-           << "            return gdpp::runtime::to_variant("
-              "static_cast<const godot::Object *>(script.ptr()));\n"
+           << "            return script;\n"
            << "        }\n"
-           << "        return gdpp::runtime::to_variant("
-              "godot::StringName(T::get_class_static()));\n"
+           << "        return {};\n"
+           << "    }\n"
+           << "    explicit ScriptResource(MissingTag) {}\n"
+           << "public:\n"
+           << "    ScriptResource() : _gdpp_resource(materialize()) {}\n"
+           << "    static ScriptResource missing() { return ScriptResource(MissingTag{}); }\n"
+           << "    godot::Ref<godot::Script> resource() const { return _gdpp_resource; }\n"
+           << "    operator godot::Variant() const {\n"
+           << "        return gdpp::runtime::to_variant(resource());\n"
            << "    }\n"
            << "    template <typename... Args>\n"
-           << "    static auto instantiate(Args &&...args) {\n"
+           << "    auto instantiate(Args &&...args) const {\n"
            << "        if constexpr (T::_gdpp_attached) {\n"
+           << "            if (_gdpp_resource.is_null()) {\n"
+           << "                gdpp::runtime::report_script_failure("
+              "godot::String(\"Cannot instantiate a missing script resource.\"));\n"
+           << "                if constexpr (T::_gdpp_attached_ref_counted) {\n"
+           << "                    return godot::Ref<godot::RefCounted>();\n"
+           << "                } else {\n"
+           << "                    return static_cast<godot::Object *>(nullptr);\n"
+           << "                }\n"
+           << "            }\n"
            << "            godot::Array gdpp_arguments;\n"
            << "            (gdpp_arguments.push_back("
               "gdpp::runtime::to_variant(std::forward<Args>(args))), "

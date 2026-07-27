@@ -33,6 +33,7 @@ Nullability Type::nullability() const noexcept {
     case TypeKind::unknown:
     case TypeKind::variant:
     case TypeKind::object:
+    case TypeKind::script_resource:
         return Nullability::nullable;
     case TypeKind::nil:
         return Nullability::null_only;
@@ -46,7 +47,6 @@ Nullability Type::nullability() const noexcept {
     case TypeKind::array:
     case TypeKind::dictionary:
     case TypeKind::enumeration:
-    case TypeKind::script_resource:
     case TypeKind::builtin:
         return Nullability::non_nullable;
     }
