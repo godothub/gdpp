@@ -2,6 +2,7 @@ extends RefCounted
 
 var trace: Array[String] = []
 var retained_target: Node
+var retained_array_node: Node
 
 
 func run() -> String:
@@ -66,8 +67,18 @@ func run() -> String:
     ]
     for index in cases.size():
         cases[index].call()
+        _release_retained_objects()
         trace.append("caller:%d" % index)
     return JSON.stringify(trace)
+
+
+func _release_retained_objects() -> void:
+    # Faults abort the called function but deliberately return control to this oracle. Native
+    # Objects stored by that function therefore need an outer owner which survives the fault frame.
+    if retained_array_node != null and is_instance_valid(retained_array_node):
+        retained_array_node.free()
+    retained_array_node = null
+    retained_target = null
 
 
 func before(name: String) -> void:
@@ -385,7 +396,8 @@ func valid_typed_array_dynamic_write() -> void:
 
 func invalid_typed_object_array_write() -> void:
     before("invalid_typed_object_array_write")
-    var values: Array[Node] = [Node.new()]
+    retained_array_node = Node.new()
+    var values: Array[Node] = [retained_array_node]
     var source: Variant = RefCounted.new()
     values[0] = source
     after("invalid_typed_object_array_write")
