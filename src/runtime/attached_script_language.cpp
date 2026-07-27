@@ -89,13 +89,20 @@ struct ThreadDebugState {
     bool breaking{false};
 };
 
-thread_local ThreadDebugState thread_debug_state;
+ThreadDebugState& thread_debug_state() {
+    // Keep non-trivial Godot values out of the DLL's static TLS initialization table. In
+    // particular, MSVC may initialize namespace-scope thread_local objects while LoadLibrary is
+    // still running, before godot-cpp has received the GDExtension interface. Function-local TLS
+    // preserves per-thread debugger state while deferring construction until Godot calls us.
+    static thread_local ThreadDebugState value;
+    return value;
+}
 
 DebugFrameRecord* debug_frame_at(const std::int32_t level) {
-    if (level < 0 || static_cast<std::size_t>(level) >= thread_debug_state.frames.size())
+    auto& state = thread_debug_state();
+    if (level < 0 || static_cast<std::size_t>(level) >= state.frames.size())
         return nullptr;
-    return &thread_debug_state
-                .frames[thread_debug_state.frames.size() - static_cast<std::size_t>(level) - 1U];
+    return &state.frames[state.frames.size() - static_cast<std::size_t>(level) - 1U];
 }
 
 godot::Dictionary debug_values(const char* names_key, const godot::PackedStringArray& names,
@@ -117,7 +124,7 @@ ScriptDebugFrame::ScriptDebugFrame(const godot::String& source, const godot::Str
     auto* debugger = godot::EngineDebugger::get_singleton();
     if (!debugger || !debugger->is_active() || !AttachedCompiledLanguage::get_singleton())
         return;
-    auto& state = thread_debug_state;
+    auto& state = thread_debug_state();
     token_ = state.next_token++;
     if (token_ == 0)
         token_ = state.next_token++;
@@ -127,7 +134,7 @@ ScriptDebugFrame::ScriptDebugFrame(const godot::String& source, const godot::Str
 ScriptDebugFrame::~ScriptDebugFrame() {
     if (token_ == 0)
         return;
-    auto& frames = thread_debug_state.frames;
+    auto& frames = thread_debug_state().frames;
     const auto found = std::find_if(frames.rbegin(), frames.rend(),
                                     [&](const auto& frame) { return frame.token == token_; });
     if (found != frames.rend())
@@ -137,7 +144,7 @@ ScriptDebugFrame::~ScriptDebugFrame() {
 void ScriptDebugFrame::set_line(const std::int32_t line) {
     if (token_ == 0)
         return;
-    auto& frames = thread_debug_state.frames;
+    auto& frames = thread_debug_state().frames;
     const auto found = std::find_if(frames.rbegin(), frames.rend(),
                                     [&](const auto& frame) { return frame.token == token_; });
     if (found != frames.rend())
@@ -151,7 +158,7 @@ void debug_breakpoint(const godot::String& source, const godot::StringName& func
                       const godot::Array& member_values) {
     auto* debugger = godot::EngineDebugger::get_singleton();
     auto* language = AttachedCompiledLanguage::get_singleton();
-    auto& state = thread_debug_state;
+    auto& state = thread_debug_state();
     if (!debugger || !language || !debugger->is_active() || state.breaking)
         return;
 
@@ -306,10 +313,10 @@ void AttachedCompiledLanguage::_remove_named_global_constant(const godot::String
 void AttachedCompiledLanguage::_thread_enter() {}
 void AttachedCompiledLanguage::_thread_exit() {}
 godot::String AttachedCompiledLanguage::_debug_get_error() const {
-    return thread_debug_state.error;
+    return thread_debug_state().error;
 }
 std::int32_t AttachedCompiledLanguage::_debug_get_stack_level_count() const {
-    const auto size = thread_debug_state.frames.size();
+    const auto size = thread_debug_state().frames.size();
     return size > static_cast<std::size_t>(std::numeric_limits<std::int32_t>::max())
                ? std::numeric_limits<std::int32_t>::max()
                : static_cast<std::int32_t>(size);
@@ -365,7 +372,8 @@ godot::String AttachedCompiledLanguage::_debug_parse_stack_level_expression(
 }
 godot::TypedArray<godot::Dictionary> AttachedCompiledLanguage::_debug_get_current_stack_info() {
     godot::TypedArray<godot::Dictionary> result;
-    for (std::size_t level = 0; level < thread_debug_state.frames.size(); ++level) {
+    const auto size = thread_debug_state().frames.size();
+    for (std::size_t level = 0; level < size; ++level) {
         const auto* frame = debug_frame_at(static_cast<std::int32_t>(level));
         if (!frame)
             continue;
