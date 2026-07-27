@@ -53,9 +53,10 @@
 - 38 个非 `MAX` Variant 家族、PackedArray、强类型 Array/Dictionary、Callable、空值、失效
   Object/Ref、错误键、越界和整数故障均进入统一 source/AOT fault 差分；故障携带源码位置并
   只中止当前脚本函数。
-- 同步故障帧使用线程局部活动调用状态，协程故障状态由恢复互斥串行迁移；本地 Callable 将参数
-  数量写入 C++ 类型，并只在仍处于创建调用栈内时保留原生参数快照。逃逸/赋值、动态转换和失效
-  宿主仍进入完整 Godot Callable/Variant 校验，不以性能优化削弱错误边界。
+- 同步故障帧使用线程局部活动调用状态，协程故障状态由恢复互斥串行迁移；协程 lambda 和
+  continuation 只复制无捕获的 TLS 检查器，不持有同步栈帧引用。本地 Callable 将参数数量写入
+  C++ 类型，并只在仍处于创建调用栈内时保留原生参数快照。逃逸/赋值、动态转换和失效宿主仍进入
+  完整 Godot Callable/Variant 校验，不以性能优化削弱错误边界。
 - 真正挂起的实例/静态/lambda/内部类/属性访问器、await 默认参数和赋值目标都使用同一
   FunctionState 契约；项目 ABI 变化会传递失效所有消费者。
 - 真实 ENet 多 peer RPC 门禁覆盖 authority/any-peer、call-local/remote、transfer mode、
