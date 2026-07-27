@@ -47,6 +47,28 @@ TEST_CASE("compiler generates bindable GDExtension C++") {
             std::string::npos);
 }
 
+TEST_CASE("compiler accepts nested terminal branches after MIR CFG pruning") {
+    const auto result = gdpp::Compiler{}.compile(
+        "nested_terminal_branches.gd", "extends Node\n"
+                                       "func choose(empty: bool, active: int) -> Variant:\n"
+                                       "    if empty:\n"
+                                       "        if active < 10:\n"
+                                       "            var value: int = 1\n"
+                                       "            return value\n"
+                                       "        else:\n"
+                                       "            return null\n"
+                                       "    else:\n"
+                                       "        var value: int = 2\n"
+                                       "        if value > 0:\n"
+                                       "            value += 1\n"
+                                       "        return value\n");
+
+    REQUIRE(result.success);
+    REQUIRE(std::none_of(result.diagnostics.begin(), result.diagnostics.end(),
+                         [](const auto& diagnostic) { return diagnostic.code == "GDS5118"; }));
+    REQUIRE(result.unit.source.find("choose") != std::string::npos);
+}
+
 TEST_CASE("semantic analysis accepts Godot rest parameters and unbounded calls") {
     gdpp::CompileOptions options;
     options.target_version = gdpp::GodotVersion::v4_6;
