@@ -92,8 +92,8 @@
   未逃逸本地 Callable 进一步消除可证明的重复装箱/复制/全局对象查询；官方 4.7.1 行为 oracle
   与 10% 性能门禁同时通过。
 - 静态 `Dictionary.key` 与下标分别使用 named/keyed Variant ABI 的有效位，所有结果都保持一次
-  键查找；局部非强类型字面量槽位只有经符号身份、已知键和无逃逸证明才原地复合更新，source/AOT
-  fault 序列锁定缺键、强类型、只读及合法空值的函数中止边界。
+  键查找；局部非强类型字面量槽位只有经符号身份、已知键和无逃逸证明才借用读取或原地复合更新，
+  source/AOT fault 序列锁定缺键、强类型、只读及合法空值的函数中止边界。
 - `.gd`→C++/native 符号图、全部 native meta/enum/bitfield/real_t/precision ABI 和 API 范围
   进入自动审计。
 - 项目脚本 `Object.free()` 通过 Godot Variant 调度，保留 RefCounted 和锁定对象保护。

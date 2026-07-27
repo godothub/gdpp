@@ -64,8 +64,9 @@
   单次求值后，以编译器拥有的可移动快照提交。自赋值、共享容器及严格转换继续走原有合同。
 - `Dictionary.key` 与下标使用 named/keyed Variant ABI 的一次查找有效位：缺失/非法键中止当前
   函数，存在的 `null` 值正常返回；强类型点号键和结果类型在前端/typed IR 保留，直接/复合及
-  只读写入匹配官方边界。局部非强类型字面量槽位只有经符号身份、已知键和无逃逸证明才原地更新；
-  source/AOT 的 64 个 fault 调用者恢复序列与 39 项值哈希完全一致。
+  只读写入匹配官方边界。局部非强类型字面量槽位只有经符号身份、已知键和无逃逸证明才借用读取
+  或原地更新；证明失效时恢复完整受检 ABI。source/AOT 的 64 个 fault 调用者恢复序列与
+  39 项值哈希完全一致。
 - 真正挂起的实例/静态/lambda/内部类/属性访问器、await 默认参数和赋值目标都使用同一
   FunctionState 契约；项目 ABI 变化会传递失效所有消费者。
 - 真实 ENet 多 peer RPC 门禁覆盖 authority/any-peer、call-local/remote、transfer mode、
