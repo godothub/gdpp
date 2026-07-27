@@ -2926,10 +2926,12 @@ std::string CodeGenerator::emit_dictionary_member_assignment(const typed::Statem
         if (statement.expression->type.kind == TypeKind::integer ||
             statement.expression->type.kind == TypeKind::enumeration) {
             result += nested_prefix + "gdpp::runtime::compound_assign_integer(" + slot +
-                      ", godot::Variant::" + variant_operator(operation) + ", " + value + ");\n";
+                      ", godot::Variant::" + variant_operator(operation) + ", " + value + ", " +
+                      script_location(target.span) + ");\n";
         } else {
             result += nested_prefix + "gdpp::runtime::compound_assign(" + slot +
-                      ", godot::Variant::" + variant_operator(operation) + ", " + value + ");\n";
+                      ", godot::Variant::" + variant_operator(operation) + ", " + value + ", " +
+                      script_location(target.span) + ");\n";
         }
         result += emit_script_failure_return(indentation + 1, in_async_continuation_);
     } else if (statement.operation != "=") {
@@ -2946,10 +2948,12 @@ std::string CodeGenerator::emit_dictionary_member_assignment(const typed::Statem
         if (statement.expression->type.kind == TypeKind::integer ||
             statement.expression->type.kind == TypeKind::enumeration) {
             result += nested_prefix + "gdpp::runtime::compound_assign_integer(" + current +
-                      ", godot::Variant::" + variant_operator(operation) + ", " + value + ");\n";
+                      ", godot::Variant::" + variant_operator(operation) + ", " + value + ", " +
+                      script_location(target.span) + ");\n";
         } else {
             result += nested_prefix + "gdpp::runtime::compound_assign(" + current +
-                      ", godot::Variant::" + variant_operator(operation) + ", " + value + ");\n";
+                      ", godot::Variant::" + variant_operator(operation) + ", " + value + ", " +
+                      script_location(target.span) + ");\n";
         }
         result += emit_script_failure_return(indentation + 1, in_async_continuation_) +
                   nested_prefix + "gdpp::runtime::unchecked_dictionary_set_named(" + dictionary +
