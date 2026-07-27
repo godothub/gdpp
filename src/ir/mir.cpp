@@ -37,6 +37,15 @@ std::size_t MirSourceIndex::statement_count() const noexcept { return statements
 
 std::size_t MirSourceIndex::expression_count() const noexcept { return expressions_.size(); }
 
+void mir::canonicalize_operation_ids(ControlFlowFunction& function) noexcept {
+    OperationId next{0};
+    for (auto& block : function.blocks) {
+        for (auto& instruction : block.instructions)
+            instruction.id = next++;
+        block.terminator.id = next++;
+    }
+}
+
 void MirSourceIndex::index_statements(const std::vector<typed::Statement>& statements) {
     for (const auto& statement : statements)
         index_statement(statement);
@@ -116,6 +125,7 @@ class FunctionBuilder final {
             terminate(end, mir::TerminatorKind::stop, {}, nullptr, function_.span);
         prune_unreachable();
         rebuild_predecessors();
+        mir::canonicalize_operation_ids(function_);
         source_index_ = nullptr;
         return std::move(function_);
     }
@@ -141,7 +151,6 @@ class FunctionBuilder final {
                    const typed::Expression* condition, SourceSpan span,
                    mir::BranchRole branch_role = mir::BranchRole::none) {
         auto& terminator = function_.blocks[block].terminator;
-        terminator.id = next_operation_++;
         terminator.kind = kind;
         terminator.condition_value = register_expression(condition);
         terminator.targets = std::move(targets);
@@ -152,7 +161,6 @@ class FunctionBuilder final {
     void append(mir::BlockId block, mir::InstructionKind kind, mir::Effect effects,
                 const typed::Statement& statement) {
         mir::Instruction instruction;
-        instruction.id = next_operation_++;
         instruction.kind = kind;
         instruction.effects = effects;
         instruction.source_statement = source_index_->statement_id(statement);
@@ -447,7 +455,6 @@ class FunctionBuilder final {
     }
 
     mir::ControlFlowFunction function_;
-    mir::OperationId next_operation_{0};
     std::unordered_map<const typed::Expression*, mir::ValueId> value_ids_;
     const MirSourceIndex* source_index_{nullptr};
 };
@@ -610,7 +617,34 @@ bool MirVerifier::verify(const mir::Module& module) const {
                 }
             }
         }
-        std::vector<bool> operation_ids;
+        std::size_t operation_count = 0;
+        for (const auto& block : function.blocks)
+            operation_count += block.instructions.size() + 1U;
+        std::vector<bool> operation_ids(operation_count, false);
+        std::size_t expected_operation = 0;
+        bool operation_order_valid = true;
+        const auto record_operation = [&](const mir::OperationId operation, const SourceSpan span) {
+            if (operation == mir::invalid_operation) {
+                diagnostics_.error("GDS5115", "MIR operation has no stable identity", span);
+                valid = false;
+                operation_order_valid = false;
+                ++expected_operation;
+                return;
+            }
+            if (operation >= operation_ids.size()) {
+                operation_order_valid = false;
+                ++expected_operation;
+                return;
+            }
+            if (operation_ids[operation]) {
+                diagnostics_.error("GDS5116", "MIR operation identity is duplicated", span);
+                valid = false;
+            }
+            operation_ids[operation] = true;
+            if (operation != expected_operation)
+                operation_order_valid = false;
+            ++expected_operation;
+        };
         std::vector<bool> reachable(function.blocks.size(), false);
         std::vector<mir::BlockId> worklist{function.entry};
         while (!worklist.empty()) {
@@ -630,23 +664,6 @@ bool MirVerifier::verify(const mir::Module& module) const {
                 valid = false;
             }
             const auto target_count = block.terminator.targets.size();
-            const auto record_operation = [&](const mir::OperationId operation,
-                                              const SourceSpan span) {
-                if (operation == mir::invalid_operation) {
-                    diagnostics_.error("GDS5115", "MIR operation has no stable identity", span);
-                    valid = false;
-                    return;
-                }
-                if (operation >= operation_ids.size())
-                    operation_ids.resize(static_cast<std::size_t>(operation) + 1U, false);
-                if (operation_ids[operation]) {
-                    diagnostics_.error("GDS5116", "MIR operation identity is duplicated", span);
-                    valid = false;
-                    return;
-                }
-                operation_ids[operation] = true;
-            };
-            record_operation(block.terminator.id, block.terminator.span);
             const bool valid_target_count =
                 (block.terminator.kind == mir::TerminatorKind::jump && target_count == 1) ||
                 (block.terminator.kind == mir::TerminatorKind::branch && target_count == 2) ||
@@ -706,8 +723,10 @@ bool MirVerifier::verify(const mir::Module& module) const {
                     }
                 }
             }
+            record_operation(block.terminator.id, block.terminator.span);
         }
-        if (std::find(operation_ids.begin(), operation_ids.end(), false) != operation_ids.end()) {
+        if (!operation_order_valid ||
+            std::find(operation_ids.begin(), operation_ids.end(), false) != operation_ids.end()) {
             diagnostics_.error("GDS5118", "MIR operation IDs are not dense and deterministic",
                                function.span);
             valid = false;

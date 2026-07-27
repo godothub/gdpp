@@ -152,6 +152,11 @@ struct Module {
     std::vector<ControlFlowFunction> functions;
 };
 
+// Operation identities describe the finalized control-flow layout, not the transient order in
+// which a builder happened to discover blocks. Every CFG mutation must restore this canonical
+// block/instruction/terminator order before verification or serialization.
+void canonicalize_operation_ids(ControlFlowFunction& function) noexcept;
+
 } // namespace gdpp::mir
 
 namespace gdpp {

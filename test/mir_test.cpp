@@ -114,6 +114,39 @@ TEST_CASE("MIR builds explicit branches loops returns and suspension edges") {
                         }));
 }
 
+TEST_CASE("MIR canonicalizes operations after pruning nested terminal branches") {
+    gdpp::typed::Module hir;
+    gdpp::typed::Function function;
+    function.name = "choose";
+
+    gdpp::typed::Statement outer;
+    outer.kind = gdpp::typed::StatementKind::if_statement;
+    outer.condition = literal();
+
+    gdpp::typed::Statement inner;
+    inner.kind = gdpp::typed::StatementKind::if_statement;
+    inner.condition = literal();
+    inner.body.push_back(marker(gdpp::typed::StatementKind::return_statement));
+    inner.else_body.push_back(marker(gdpp::typed::StatementKind::return_statement));
+    outer.body.push_back(std::move(inner));
+    outer.else_body.push_back(marker(gdpp::typed::StatementKind::return_statement));
+    function.body.push_back(std::move(outer));
+    hir.functions.push_back(std::move(function));
+
+    const auto mir = gdpp::MirLowerer{}.lower(std::move(hir));
+    gdpp::DiagnosticBag diagnostics;
+    REQUIRE(gdpp::MirVerifier{diagnostics}.verify(mir));
+    REQUIRE(!diagnostics.has_errors());
+
+    gdpp::mir::OperationId expected{0};
+    for (const auto& block : mir.functions.front().blocks) {
+        for (const auto& instruction : block.instructions)
+            REQUIRE_EQ(instruction.id, expected++);
+        REQUIRE_EQ(block.terminator.id, expected++);
+    }
+    REQUIRE_EQ(mir.functions.front().blocks.size(), std::size_t{5});
+}
+
 TEST_CASE("MIR optimizer simplifies typed boolean branches and rebuilds dense CFG metadata") {
     gdpp::typed::Module hir;
     hir.class_name = "OptimizedControlFlow";
@@ -557,6 +590,36 @@ TEST_CASE("MIR verifier rejects corrupt stable identities and value ownership") 
     gdpp::DiagnosticBag diagnostics;
     REQUIRE(!gdpp::MirVerifier{diagnostics}.verify(mir));
     REQUIRE(diagnostics.has_errors());
+}
+
+TEST_CASE("MIR verifier rejects permuted and out-of-range operation identities") {
+    const auto make_program = [] {
+        gdpp::typed::Module hir;
+        gdpp::typed::Function function;
+        function.name = "operation_identity";
+        gdpp::typed::Statement statement;
+        statement.kind = gdpp::typed::StatementKind::expression;
+        statement.expression = literal("7");
+        function.body.push_back(std::move(statement));
+        hir.functions.push_back(std::move(function));
+        return gdpp::MirLowerer{}.lower(std::move(hir));
+    };
+
+    auto permuted = make_program();
+    auto& block = permuted.functions.front().blocks.front();
+    std::swap(block.instructions.front().id, block.terminator.id);
+    gdpp::DiagnosticBag permutation_diagnostics;
+    REQUIRE(!gdpp::MirVerifier{permutation_diagnostics}.verify(permuted));
+    REQUIRE(std::any_of(permutation_diagnostics.items().begin(),
+                        permutation_diagnostics.items().end(),
+                        [](const auto& diagnostic) { return diagnostic.code == "GDS5118"; }));
+
+    auto out_of_range = make_program();
+    out_of_range.functions.front().blocks.front().terminator.id = gdpp::mir::invalid_operation - 1U;
+    gdpp::DiagnosticBag range_diagnostics;
+    REQUIRE(!gdpp::MirVerifier{range_diagnostics}.verify(out_of_range));
+    REQUIRE(std::any_of(range_diagnostics.items().begin(), range_diagnostics.items().end(),
+                        [](const auto& diagnostic) { return diagnostic.code == "GDS5118"; }));
 }
 
 TEST_CASE("MIR verifier rejects source identities outside the owned typed program") {

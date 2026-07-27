@@ -71,15 +71,6 @@ void rebuild_predecessors(mir::ControlFlowFunction& function) {
     }
 }
 
-void rebuild_operation_ids(mir::ControlFlowFunction& function) {
-    mir::OperationId next{0};
-    for (auto& block : function.blocks) {
-        for (auto& instruction : block.instructions)
-            instruction.id = next++;
-        block.terminator.id = next++;
-    }
-}
-
 void prune_dead_values(mir::ControlFlowFunction& function, MirOptimizationStats& stats) {
     std::vector<bool> live(function.values.size(), false);
     std::vector<mir::ValueId> worklist;
@@ -168,7 +159,7 @@ void prune_unreachable(mir::ControlFlowFunction& function, MirOptimizationStats&
             return block.terminator.kind == mir::TerminatorKind::suspend;
         });
     rebuild_predecessors(function);
-    rebuild_operation_ids(function);
+    mir::canonicalize_operation_ids(function);
     prune_dead_values(function, stats);
 }
 
