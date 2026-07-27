@@ -25,6 +25,7 @@
 - macOS Universal Debug 导出可以复用经过验证、仅提供 Release 的第三方 provider fat binary；GDPP 只在导出包内的描述符字节中增加 Debug 别名，不修改客户源码目录中的描述符或动态库。
 - 生成的 breakpoint fixture 会与真实 godot-cpp 一同编译，并使用官方 Godot 4.6.2 对附着第三方 GDExtension 的 Debug、Release 项目执行导出和运行验证。
 - 前端新增有界多错误恢复、完整源码范围 AST 序列化 golden、coverage-guided fuzz 和 Godot 4.7.1 stable 语言漂移报告，覆盖官方 114 个合法及 76 个非法 parser fixture。
+- 未闭合分组及尾随空白之后缺失语法节点时，所有恢复 AST 范围仍保持单调，覆盖单行 lambda 内的 cast 等嵌套路径；coverage-guided 门禁失败时会先把精确复现样本保存为 CI artifact，再阻断发布。
 - 所有单文件与项目编译入口统一运行在 GDPP 自有的 16 MiB 工作线程栈上，拆分占用最大的调用/成员语义分析帧，并保留可重入编译，不再继承 Godot 最小约 512 KiB 的脚本工作线程栈；深层后缀调用链回归直接覆盖真实嵌入边界。
 - 前端 AST visitor 的穷举哨兵兼容 Clang 14 的 fuzzer-only 严格告警构建，同时继续在编译期拒绝任何未处理的节点类型。
 - deferred Signal 运行门禁改为有界等待可观察完成，不再假设固定的一帧阶段；Linux、macOS 与 Windows 发布验证由此保持确定性，同时仍会拒绝真正丢失的回调。
