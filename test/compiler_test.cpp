@@ -5281,7 +5281,9 @@ TEST_CASE("third-party GDExtension singletons resolve through Engine at runtime"
     const gdpp::Compiler compiler;
     const auto result = compiler.compile("steam.gd", "extends Node\n"
                                                      "func poll() -> void:\n"
-                                                     "    Steam.run_callbacks()\n");
+                                                     "    Steam.run_callbacks()\n"
+                                                     "func singleton() -> Variant:\n"
+                                                     "    return Steam\n");
 
     REQUIRE(result.success);
     REQUIRE(result.unit.source.find(
@@ -5291,6 +5293,14 @@ TEST_CASE("third-party GDExtension singletons resolve through Engine at runtime"
     REQUIRE(result.unit.source.find("gdpp::runtime::call_dynamic") != std::string::npos);
     REQUIRE(result.unit.source.find("static const godot::StringName _gdpp_dynamic_method_") !=
             std::string::npos);
+    const auto singleton = result.unit.source.find("::singleton(");
+    const auto lookup = result.unit.source.find("find_engine_singleton_at(", singleton);
+    const auto failure = result.unit.source.find("if (script_function_failed())", lookup);
+    const auto returned = result.unit.source.find("return _gdpp_return_value_", failure);
+    REQUIRE(singleton != std::string::npos);
+    REQUIRE(singleton < lookup);
+    REQUIRE(lookup < failure);
+    REQUIRE(failure < returned);
 }
 
 TEST_CASE("Godot builtin static methods lower to native scope calls") {
