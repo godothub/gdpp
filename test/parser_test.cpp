@@ -636,6 +636,27 @@ TEST_CASE("parser applies GDScript not and is-not precedence") {
     REQUIRE_EQ(conjunction.operand(1)->value(), std::string{"is not"});
 }
 
+TEST_CASE("parser recovery keeps missing lambda cast types inside source bounds") {
+    const std::string text{"var callback = (func(): return value as   "};
+    const gdpp::SourceFile source{"lambda_missing_cast_type.gd", text};
+    gdpp::DiagnosticBag diagnostics;
+    const auto tokens = gdpp::Lexer{source, diagnostics}.scan();
+    const auto script = gdpp::Parser{tokens, diagnostics}.parse_script();
+
+    REQUIRE(diagnostics.has_errors());
+    const auto* lambda = script.variables.front().initializer->lambda();
+    REQUIRE(lambda != nullptr);
+    const auto& cast = *lambda->body.front().expression();
+    REQUIRE_EQ(cast.value(), std::string{"as"});
+    const auto& recovered_type = *cast.operand(1);
+    REQUIRE(recovered_type.span.begin.offset <= recovered_type.span.end.offset);
+    REQUIRE(recovered_type.span.end.offset <= text.size());
+    REQUIRE(recovered_type.span.begin.line > 0);
+    REQUIRE(recovered_type.span.begin.column > 0);
+    REQUIRE(recovered_type.span.end.line > 0);
+    REQUIRE(recovered_type.span.end.column > 0);
+}
+
 TEST_CASE("parser preserves not-in membership and compact modulo") {
     const gdpp::SourceFile source{"membership.gd",
                                   "func check(value: Variant, items: Array) -> bool:\n"

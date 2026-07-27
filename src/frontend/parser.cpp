@@ -13,7 +13,11 @@ namespace gdpp {
 namespace {
 
 SourceSpan joined(const SourceSpan& first, const SourceSpan& last) {
-    return {first.begin, last.end};
+    // Recovery may synthesize a missing trailing node at EOF while `previous()` still identifies
+    // the last real token before trailing trivia.  Never let that earlier recovery endpoint turn
+    // a child AST span backwards; valid input already has `last` at or after `first`.
+    const auto end = last.end.offset < first.end.offset ? first.end : last.end;
+    return {first.begin, end};
 }
 
 ast::ExpressionPtr make_expression(ast::ExpressionKind kind, std::string value, SourceSpan span,
