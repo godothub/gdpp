@@ -39,6 +39,10 @@
 故障隔离、项目脚本 `Object.free()` 和生命周期语义；
 它不替代下述跨 runner 发布门禁。
 
+两个 AOT oracle 均在独立导出进程中通过 `OS.get_cmdline_user_args()` 选择。标准 Godot
+release 模板默认关闭 path overrides 并忽略 `--script`，因此发布门禁不把官方模板明确禁用的
+CLI 入口误当成 GDPP 语义；每个 oracle 仍独占进程、退出码、无诊断日志与精确成功标记。
+
 ## 正式发布门禁
 
 ### 编译器与宿主
@@ -69,6 +73,8 @@ preset 注册，Godot editor 服务只在 plugin preset 注册；这里的 CTest
 
 - 使用对应 minor 的 SDK 和 API 能力表；
 - 执行正式 Release AOT 导出、独立运行和无源码审计；
+- 以四个独立成品进程验证主场景、fault/value 差分、await 默认参数及协程访问器；预期故障矩阵
+  锁定差分结果，其余三个进程逐一审计全量诊断日志；
 - 执行优化 Debug 导出并保留脚本调试语义；
 - 导出 GDScript fallback 并运行固定行为/性能 oracle；
 - 执行独立 provider + Attached 项目；

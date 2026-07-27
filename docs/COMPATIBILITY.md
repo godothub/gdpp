@@ -17,6 +17,13 @@ ClassDB 方法仍会在生成 C++ 前报错。
 能被客户所用 Godot 编辑器正常加载。专用于高版本或增强语法的 `.gdpp` ScriptLanguage 尚未
 交付，不应依赖它绕过低版本编辑器。AOT 只在导出时接管编译与打包。
 
+官方标准 release 导出模板默认以 `disable_path_overrides=true` 构建，因此 Godot 会禁用
+`--script`、`--scene`、`--path` 等路径覆盖入口。这是引擎导出模板的安全边界，不是 GDPP
+Script loader 的能力缺失；GDPP 不改写客户模板，也不以开启路径覆盖作为运行前提。发布门禁的
+独立 AOT 进程通过 `OS.get_cmdline_user_args()` 选择 oracle，实际客户成品仍从原项目主场景
+启动。自定义 Godot 模板若显式启用路径覆盖，编译后的 `.gd` Script 仍可由 GDPP loader 按
+`res://` 路径加载。
+
 ## 状态定义
 
 | 状态 | 含义 |
