@@ -140,6 +140,14 @@ jobs:
               "$output/gdpp-attached-fault-aot.log" | tail -n 1)"
             test "$source_values" = "$aot_values"
           fi
+          if grep -E -q 'ObjectDB instances were leaked|resources still in use at exit|Resource still in use' \
+              "$output/gdpp-attached-runtime.log" \
+              "$output/gdpp-attached-fault-aot.log" \
+              "$output/gdpp-attached-await-default-aot.log" \
+              "$output/gdpp-attached-accessor-aot.log"; then
+            echo 'Attached GDExtension runtime retained engine objects during shutdown.'
+            exit 1
+          fi
           grep -q 'GDPP_AOT_SUMMARY scenes=' "$output/gdpp-attached-export.log"
 
           audit=build/attached-pck-audit

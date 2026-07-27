@@ -315,6 +315,11 @@ jobs:
           source_values="$(grep '^GDPP_VALUE_MATRIX=' "$root/fault-source.log" | tail -n 1)"
           aot_values="$(grep '^GDPP_VALUE_MATRIX=' "$root/fault-aot.log" | tail -n 1)"
           test "$source_values" = "$aot_values"
+          if grep -E -q 'ObjectDB instances were leaked|resources still in use at exit|Resource still in use' \
+              "$root/runtime.log" "$root/fault-aot.log"; then
+            echo 'Attached GDExtension runtime retained engine objects during shutdown.'
+            exit 1
+          fi
           grep -q 'GDPP_AOT_SUMMARY scenes=' "$root/export.log"
           if grep -E -q '(^| )ERROR:|SCRIPT ERROR:|Parse Error:|WARNING:|Unable to open' \
               "$root/import.log" "$root/export.log" "$root/runtime.log"; then
