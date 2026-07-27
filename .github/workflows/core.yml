@@ -125,7 +125,6 @@ jobs:
             -timeout=5 \
             -rss_limit_mb=0 \
             -max_total_time=90 \
-            -seed=3081776668 \
             -artifact_prefix=build/ci-frontend-fuzz/fuzz-artifacts/
       - name: Preserve frontend fuzz failure
         if: failure()
