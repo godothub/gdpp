@@ -10,6 +10,8 @@
 - 引入脚本 fault frame：致命 GDScript 操作只终止当前生成函数，调用方可继续执行；同时保留源码求值顺序、惰性分支、专用调用参数顺序、Callable 默认返回，以及 Variant、容器、对象和第三方扩展边界的精确 `.gd` 路径、行列诊断。
 - 同步 fault frame 改为调用局部、线程局部状态，协程持久 fault 状态由 FunctionState 恢复互斥锁串行拥有；活动帧检查在生成调用点内联，失败标记不会跨线程、协程、嵌套调用或 GDExtension ABI 泄漏。
 - 协程、协程 lambda 和恢复 continuation 的 fault 检查器统一保持无捕获，并从当前活动线程已安装的状态解析；逃逸异步闭包不会再保留同步 `ScriptFunctionScope&`，GCC Release 导出运行时由此与 Clang、MSVC 使用同一生命周期契约。
+- 对每个类型化表达式、转换和赋值判定其是否可能设置活动脚本故障，只在可证明可能失败的边界生成轮询。字面量、局部值流、安全整数运算、精确存储、String 值方法和三元分支不再堆叠冗余分支；动态调用/运算、严格 Variant 存储、越界、除法/取模、Object 访问、Callable/Signal 重入及协程边界仍保留有序检查。
+- 不放宽任何阈值即把 fault-safe 后端恢复到商业 10% 性能合同：重建后的官方 Godot 4.7.1 Universal 2 差分通过行为、启动、固定帧和全部 13 个 family；效应感知轮询生效后，本地候选的 Dictionary 与 String 分别比 GDScript 快 17.72% 和 8.50%。
 - 将本地 lambda 的参数数量和变参身份编码进生成 C++ 类型，并仅在具体 Callable 仍处于创建调用栈内时保留原生参数 tuple；精确参数不再往返 Variant，赋值/逃逸、失效宿主、缺省参数、结构化容器和动态路径仍执行完整 Godot Callable 与严格 Variant 校验。
 - 精确本地 Callable 的原生参数分支与严格 Variant 回退改为结构互斥，在保留快速路径的同时通过 MSVC 的 warning-as-error 不可达代码分析，并继续兼容 Clang 与 GCC。
 - 精确同类型的显式 Variant 转换先于 Godot 通用转换矩阵执行快速路径；官方 Godot 4.7.1 候选矩阵的全部行为 oracle 和 10% 门禁均通过，本地 Callable family 实测比 GDScript 快 33.33%，Variant 运算慢 2.17%。
