@@ -43,9 +43,10 @@
 
 ### M1：前端
 
-- 可恢复 parser 会在同一文件中给出独立有界诊断，失败事务不会产生半合法 AST。
+- 可恢复 parser 会在同一文件中给出独立有界诊断；缺失节点、未闭合分组和尾随空白也只能生成
+  单调且位于源码内的范围，失败事务不会产生半合法 AST。
 - 每类 AST 节点和 `SourceSpan` 进入确定性完整序列化 golden。
-- coverage-guided fuzz、非法 UTF-8/NUL、递归/链长/诊断预算及最小语料进入 CI。
+- coverage-guided fuzz、失败样本归档、非法 UTF-8/NUL、递归/链长/诊断预算及最小语料进入 CI。
 - Godot 4.7.1 的 114 个合法和 76 个非法 parser fixture、Unicode 与 warning/annotation
   注册表具有固定快照和 stable drift 报告。
 - `Compiler` 与 `ProjectCompiler` 拥有固定 16 MiB 工作线程栈，最大调用/成员分析帧已经拆分；

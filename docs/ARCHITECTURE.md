@@ -56,7 +56,8 @@ compiler + project -----------------------------------------------------> cli
 ## 前端与语义
 
 AST 的表达式、语句和 match pattern 使用有名结构的 `std::variant`，而不是通用
-`kind + value + children` 存储。每个节点保留 `SourceSpan`。语义层统一完成：
+`kind + value + children` 存储。每个节点保留 `SourceSpan`；恢复解析合并范围时始终保留首节点
+的完整范围，并且不会让缺失尾部节点把结束位置倒退到尾随空白之前。语义层统一完成：
 
 - GDScript 类型、可空性、值/共享容器/Object/Ref 所有权分类；
 - 字段、函数、Signal、enum、属性访问器、注解和内部类验证；
