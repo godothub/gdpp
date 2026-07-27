@@ -1141,6 +1141,12 @@ std::string property_info(const typed::Field& field, const GodotApi& api,
     } else if (!field.property) {
         usage = "godot::PROPERTY_USAGE_SCRIPT_VARIABLE";
     }
+    if (field.property_type.kind == TypeKind::variant) {
+        if (usage.empty())
+            usage = "godot::PROPERTY_USAGE_DEFAULT";
+        usage = "(static_cast<uint32_t>(" + usage +
+                ") | static_cast<uint32_t>(godot::PROPERTY_USAGE_NIL_IS_VARIANT))";
+    }
     // PropertyInfo's hint and usage occupy one fixed argument tuple. Building them in separate
     // annotation branches used to duplicate the hint pair for combinations such as
     // `@export_storage` plus an enum/resource type.

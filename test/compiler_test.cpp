@@ -1331,15 +1331,24 @@ TEST_CASE("compiler flattens nested internal classes with inherited members") {
             std::string::npos);
 }
 
-TEST_CASE("compiler rejects invalid and unsupported export annotations") {
+TEST_CASE("compiler preserves explicit Variant exports and rejects untyped exports") {
     const gdpp::Compiler compiler;
     const auto wrong_type =
         compiler.compile("wrong.gd", "@export_range(0, 10) var label: String = \"bad\"\n");
     const auto dynamic = compiler.compile("dynamic.gd", "@export var value: Variant\n");
+    const auto inferred =
+        compiler.compile("inferred.gd", "@export var value: Variant = 12\n");
+    const auto untyped = compiler.compile("untyped.gd", "@export var value\n");
     const auto unsupported = compiler.compile("rpc.gd", "@rpc var value: int = 1\n");
 
     REQUIRE(!wrong_type.success);
-    REQUIRE(!dynamic.success);
+    REQUIRE(dynamic.success);
+    REQUIRE(dynamic.unit.source.find("godot::Variant::NIL, \"value\"") != std::string::npos);
+    REQUIRE(dynamic.unit.source.find("godot::PROPERTY_USAGE_NIL_IS_VARIANT") !=
+            std::string::npos);
+    REQUIRE(inferred.success);
+    REQUIRE(inferred.unit.source.find("godot::Variant::INT, \"value\"") != std::string::npos);
+    REQUIRE(!untyped.success);
     REQUIRE(!unsupported.success);
     REQUIRE(wrong_type.unit.source.empty());
 }

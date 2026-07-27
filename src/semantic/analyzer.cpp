@@ -151,7 +151,8 @@ Type export_property_type(const ast::VariableDeclaration& variable, const Type& 
     }
     if (declared_type.kind == TypeKind::variant && variable.initializer) {
         if (const auto* annotation = property_annotation_of(variable);
-            annotation && annotation->name == "export_enum") {
+            annotation && annotation->name != "export_storage" &&
+            annotation->name != "export_custom") {
             return initializer_type;
         }
     }
@@ -5912,8 +5913,12 @@ void SemanticAnalyzer::validate_annotations(const ast::VariableDeclaration& vari
     }
     const bool unchecked_export =
         name == "export_storage" || name == "export_custom" || name == "export_enum";
+    const bool explicit_variant_export =
+        name == "export" && type.kind == TypeKind::variant &&
+        (variable.type.has_value() || variable.initializer != nullptr);
     if (!unchecked_export &&
-        (type.is_dynamic() || type.kind == TypeKind::nil || type.kind == TypeKind::void_type)) {
+        ((type.is_dynamic() && !explicit_variant_export) || type.kind == TypeKind::nil ||
+         type.kind == TypeKind::void_type)) {
         diagnostics_.error("GDS4025", "exported fields require a concrete serializable type",
                            variable.span);
     }
