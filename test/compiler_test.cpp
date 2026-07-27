@@ -3993,12 +3993,17 @@ TEST_CASE("compiler only updates proven local Dictionary slots in place") {
                                                      "    return values.score\n");
     REQUIRE(local.success);
     REQUIRE(local.unit.source.find("godot::Variant &_gdpp_dictionary_slot_") != std::string::npos);
+    REQUIRE(local.unit.source.find("const godot::Variant "
+                                   "_gdpp_proven_dictionary_read_key_") != std::string::npos);
+    REQUIRE(local.unit.source.find("checked_dictionary_get_named(") == std::string::npos);
     REQUIRE(local.unit.source.find("unchecked_dictionary_set_named(") == std::string::npos);
 
     const auto require_checked = [&](const std::string& path, const std::string& source) {
         const auto result = compiler.compile(path, source);
         REQUIRE(result.success);
         REQUIRE(result.unit.source.find("godot::Variant &_gdpp_dictionary_slot_") ==
+                std::string::npos);
+        REQUIRE(result.unit.source.find("_gdpp_proven_dictionary_read_key_") ==
                 std::string::npos);
         REQUIRE(result.unit.source.find("checked_dictionary_get_named(") != std::string::npos);
         REQUIRE(result.unit.source.find("unchecked_dictionary_set_named(") != std::string::npos);
