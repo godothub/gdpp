@@ -182,7 +182,26 @@ struct IsSharedPackedArray<SharedPackedArray<PackedArray>> : std::true_type {};
 // that gives PackedArrays their GDScript shared-reference identity.
 [[nodiscard]] inline godot::Variant to_variant(std::nullptr_t) { return {}; }
 
-template <typename Value>
+// A Variant already is the boundary representation. Borrow lvalues and forward an owned rvalue
+// instead of constructing an identical temporary Variant before every checked operation.
+[[nodiscard]] inline godot::Variant& to_variant(godot::Variant& value) noexcept { return value; }
+[[nodiscard]] inline const godot::Variant& to_variant(const godot::Variant& value) noexcept {
+    return value;
+}
+[[nodiscard]] inline godot::Variant&& to_variant(godot::Variant&& value) noexcept {
+    return std::move(value);
+}
+static_assert(std::is_same_v<decltype(to_variant(std::declval<godot::Variant&>())),
+                             godot::Variant&>);
+static_assert(std::is_same_v<decltype(to_variant(std::declval<const godot::Variant&>())),
+                             const godot::Variant&>);
+static_assert(std::is_same_v<decltype(to_variant(std::declval<godot::Variant&&>())),
+                             godot::Variant&&>);
+
+template <typename Value,
+          std::enable_if_t<!std::is_same_v<
+                               std::remove_cv_t<std::remove_reference_t<Value>>, godot::Variant>,
+                           int> = 0>
 [[nodiscard]] godot::Variant to_variant(Value&& value) {
     using Stored = std::remove_cv_t<std::remove_reference_t<Value>>;
     if constexpr (IsSharedPackedArray<Stored>::value)
