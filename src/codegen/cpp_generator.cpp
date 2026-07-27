@@ -3020,7 +3020,7 @@ bool CodeGenerator::expression_may_fail(const typed::Expression& expression) con
         if (expression.resolution == typed::ResolutionKind::dynamic_property &&
             !expression.operands.empty() &&
             expression.operands.front()->type.kind == TypeKind::dictionary)
-            return false;
+            return true;
         if (expression.resolution == typed::ResolutionKind::godot_method ||
             expression.resolution == typed::ResolutionKind::script_callable ||
             expression.resolution == typed::ResolutionKind::script_signal ||
@@ -4573,12 +4573,20 @@ std::string CodeGenerator::emit_expression(const typed::Expression& expression) 
                 : emit_expression(*expression.operands.at(0));
         if (expression.resolution == typed::ResolutionKind::dynamic_property) {
             if (expression.operands.at(0)->type.kind == TypeKind::dictionary) {
-                const auto key =
-                    "_gdpp_dictionary_read_key_" + std::to_string(temporary_counter_++);
-                return "(" + object +
-                       ").get(([]() -> const godot::Variant& { static const godot::Variant " + key +
-                       " = " + godot_string_name(expression.value) + "; return " + key +
-                       "; }()), godot::Variant())";
+                const auto suffix = std::to_string(temporary_counter_++);
+                const auto key = "_gdpp_dictionary_read_key_" + suffix;
+                const auto lookup = [&](const std::string& receiver) {
+                    return "gdpp::runtime::checked_dictionary_get(" + receiver +
+                           ", ([]() -> const godot::Variant& { static const godot::Variant " + key +
+                           " = " + godot_string_name(expression.value) + "; return " + key +
+                           "; }()), " + script_location(expression.span) + ")";
+                };
+                if (!expression_may_fail(*expression.operands.at(0)))
+                    return lookup(object);
+                const auto receiver = "_gdpp_dictionary_read_receiver_" + suffix;
+                return "([&]() -> godot::Variant { auto &&" + receiver + " = " + object +
+                       "; if (script_function_failed()) return {}; return " + lookup(receiver) +
+                       "; }())";
             }
             auto value = "gdpp::runtime::get_named(" + object + ", " +
                          godot_string_name(expression.value) + ", " +

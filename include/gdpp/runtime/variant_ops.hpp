@@ -779,16 +779,19 @@ inline void checked_array_set(godot::Array& target, std::int64_t index, const go
 [[nodiscard]] inline godot::Variant
 checked_dictionary_get(const godot::Dictionary& target, const godot::Variant& key,
                        const ScriptSourceLocation location = {}) {
-    if (script_function_failed())
-        return {};
-    if (!target.has(key)) {
+    // `get()` performs the authoritative typed-key validation and one lookup. Its default Nil is
+    // ambiguous only when the result is Nil, so `has()` is reserved for that cold path to
+    // distinguish a stored null from a missing/invalid key. Non-Nil hot paths stay at one lookup.
+    // Generated code sequences and checks receiver/key evaluation before entering this helper.
+    const auto value = target.get(key, godot::Variant{});
+    if (value.get_type() == godot::Variant::NIL && !target.has(key)) {
         report_script_failure(godot::String{"Invalid access to property or key "} +
                                   key.stringify() + " on " +
                                   describe_variant_type(godot::Variant(target)) + ".",
                               location);
         return {};
     }
-    return target[key];
+    return value;
 }
 
 inline void checked_dictionary_set(godot::Dictionary& target, const godot::Variant& key,
