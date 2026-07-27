@@ -3850,6 +3850,26 @@ TEST_CASE("compiler rejects invalid enum declarations and members") {
     REQUIRE(duplicate.unit.header.empty());
 }
 
+TEST_CASE("compiler accepts multiline enums and contextual keyword iterators") {
+    const gdpp::Compiler compiler;
+    const auto result =
+        compiler.compile("contextual-layout.gd",
+                         "enum DialogState\n"
+                         "{\n"
+                         "    OFF = 0,\n"
+                         "    PLAYING = 1\n"
+                         "}\n"
+                         "func collect(values: Array) -> Array:\n"
+                         "    var result: Array = []\n"
+                         "    for match in values:\n"
+                         "        result.append(match)\n"
+                         "    return result\n");
+
+    REQUIRE(result.success);
+    REQUIRE(result.unit.header.find("_gdpp_enum_PLAYING = 1") != std::string::npos);
+    REQUIRE(result.unit.source.find("godot::Variant match =") != std::string::npos);
+}
+
 TEST_CASE("compiler generates single-evaluation match control flow") {
     const gdpp::Compiler compiler;
     const auto result =

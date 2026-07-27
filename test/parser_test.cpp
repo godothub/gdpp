@@ -461,6 +461,45 @@ TEST_CASE("parser builds named and anonymous enum declarations") {
     REQUIRE(!script.enums.back().name.has_value());
 }
 
+TEST_CASE("parser accepts brace-separated enums and contextual keyword iterators") {
+    const gdpp::SourceFile source{
+        "contextual-layout.gd",
+        "enum State\n"
+        "{\n"
+        "    IDLE,\n"
+        "    PLAYING = 2\n"
+        "}\n"
+        "enum\n"
+        "{\n"
+        "    DEFAULT_STATE = State.IDLE\n"
+        "}\n"
+        "func collect(values: Array) -> Array:\n"
+        "    var result: Array = []\n"
+        "    for match in values:\n"
+        "        result.append(match)\n"
+        "    for when in values:\n"
+        "        result.append(when)\n"
+        "    return result\n"};
+    gdpp::DiagnosticBag diagnostics;
+    const auto tokens = gdpp::Lexer{source, diagnostics}.scan();
+    const auto script = gdpp::Parser{tokens, diagnostics}.parse_script();
+
+    REQUIRE(!diagnostics.has_errors());
+    REQUIRE_EQ(script.enums.size(), std::size_t{2});
+    REQUIRE_EQ(*script.enums.front().name, std::string{"State"});
+    REQUIRE(!script.enums.back().name.has_value());
+    REQUIRE_EQ(script.functions.size(), std::size_t{1});
+    REQUIRE_EQ(script.functions.front().body.size(), std::size_t{4});
+    const auto* first_loop =
+        std::get_if<gdpp::ast::ForStatement>(&script.functions.front().body[1].node);
+    const auto* second_loop =
+        std::get_if<gdpp::ast::ForStatement>(&script.functions.front().body[2].node);
+    REQUIRE(first_loop != nullptr);
+    REQUIRE(second_loop != nullptr);
+    REQUIRE_EQ(first_loop->iterator, std::string{"match"});
+    REQUIRE_EQ(second_loop->iterator, std::string{"when"});
+}
+
 TEST_CASE("parser preserves qualified and nested type names in every annotation position") {
     const gdpp::SourceFile source{"qualified-types.gd",
                                   "var mode: Shared.State\n"

@@ -656,6 +656,10 @@ ast::EnumDeclaration Parser::parse_enum(std::vector<ast::Annotation> annotations
     declaration.annotations = std::move(annotations);
     if (check(TokenKind::identifier))
         declaration.name = advance().lexeme;
+    // GDScript treats the braces as the enum declaration delimiters, so a physical newline
+    // between `enum Name` (or an anonymous `enum`) and `{` is insignificant. The lexer cannot
+    // suppress that newline because the opening grouping token has not been seen yet.
+    skip_newlines();
     consume(TokenKind::left_brace, "expected '{' after enum name");
     while (!check(TokenKind::right_brace) && !at_end()) {
         const auto entry_begin = current().span;
@@ -1001,7 +1005,7 @@ ast::Statement Parser::parse_match_statement() {
 ast::Statement Parser::parse_for_statement() {
     const auto begin = previous().span;
     ast::ForStatement loop;
-    const auto& iterator = consume(TokenKind::identifier, "expected an iterator variable");
+    const auto& iterator = consume_soft_identifier("expected an iterator variable");
     loop.iterator = iterator.lexeme;
     loop.iterator_span = iterator.span;
     SourceSpan type_begin{};
