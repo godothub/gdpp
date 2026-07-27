@@ -5,7 +5,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
+import stat
 import subprocess
 from pathlib import Path
 
@@ -99,9 +101,25 @@ def validate_checkout(destination: Path, manifest: dict, expected_commit: str) -
             raise RuntimeError(f"Godot project is missing project.godot: {project['path']}")
 
 
+def remove_checkout(destination: Path) -> None:
+    if not destination.exists():
+        return
+
+    def make_writable_and_retry(function, path, error_info) -> None:
+        error = error_info[1]
+        if not isinstance(error, PermissionError):
+            raise error
+        os.chmod(path, stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR)
+        function(path)
+
+    # Git for Windows marks partial-clone pack indexes read-only. A checkout with
+    # a changed remote or damaged metadata must still be replaceable without
+    # depending on shell-specific deletion commands.
+    shutil.rmtree(destination, onerror=make_writable_and_retry)
+
+
 def initialize_checkout(destination: Path, repository: dict, paths: list[str]) -> None:
-    if destination.exists():
-        shutil.rmtree(destination)
+    remove_checkout(destination)
     destination.parent.mkdir(parents=True, exist_ok=True)
 
     run(["git", "init", "--quiet", str(destination)])
@@ -113,7 +131,7 @@ def initialize_checkout(destination: Path, repository: dict, paths: list[str]) -
     run(["git", "sparse-checkout", "set", "--"] + paths, destination)
 
 
-def checkout_is_reusable(destination: Path, repository: dict) -> bool:
+def checkout_matches_repository(destination: Path, repository: dict) -> bool:
     if current_commit(destination) is None:
         return False
     remote = subprocess.run(
@@ -124,17 +142,25 @@ def checkout_is_reusable(destination: Path, repository: dict) -> bool:
         stderr=subprocess.DEVNULL,
         check=False,
     )
-    if remote.returncode != 0 or remote.stdout.strip() != repository["url"]:
-        return False
-    dirty = subprocess.run(
-        ["git", "status", "--porcelain", "--untracked-files=no"],
-        cwd=destination,
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL,
-        check=False,
-    )
-    return dirty.returncode == 0 and not dirty.stdout.strip()
+    return remote.returncode == 0 and remote.stdout.strip() == repository["url"]
+
+
+def prepare_checkout(destination: Path, repository: dict, paths: list[str]) -> None:
+    if not checkout_matches_repository(destination, repository):
+        initialize_checkout(destination, repository, paths)
+        return
+
+    try:
+        # Compatibility corpora are disposable build inputs. Restore tracked,
+        # untracked and ignored content so a prior interrupted compiler run can
+        # never influence the next gate while preserving the partial-clone cache.
+        run(["git", "reset", "--hard", "--quiet"], destination)
+        run(["git", "clean", "-ffdx", "--quiet"], destination)
+        run(["git", "sparse-checkout", "set", "--"] + paths, destination)
+    except subprocess.CalledProcessError:
+        # A repository can retain a readable HEAD while its index or sparse
+        # metadata is damaged. Rebuild that controlled checkout deterministically.
+        initialize_checkout(destination, repository, paths)
 
 
 def main() -> int:
@@ -151,23 +177,15 @@ def main() -> int:
     revision_kind, revision = repository_revision(repository)
     checkout_paths = sparse_paths(manifest)
 
+    prepare_checkout(destination, repository, checkout_paths)
+
     if (
         revision_kind == "commit"
         and current_commit(destination) == revision
-        and checkout_is_reusable(destination, repository)
     ):
-        # A manifest may add new sparse paths while keeping the same authoritative commit.
-        # Reconcile the checkout before validation so persistent developer and CI caches do not
-        # require manual deletion merely because coverage expanded.
-        run(["git", "sparse-checkout", "set", "--"] + checkout_paths, destination)
         validate_checkout(destination, manifest, revision)
         print(f"pinned compatibility corpus already present at {destination}")
         return 0
-
-    if not checkout_is_reusable(destination, repository):
-        initialize_checkout(destination, repository, checkout_paths)
-    else:
-        run(["git", "sparse-checkout", "set", "--"] + checkout_paths, destination)
 
     run(
         [

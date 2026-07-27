@@ -4,7 +4,9 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
+import stat
 import subprocess
 import sys
 from pathlib import Path
@@ -82,6 +84,17 @@ def assert_checkout(destination: Path, commit_id: str, value: str) -> None:
         raise AssertionError(f"expected corpus value {value!r}, got {actual_value!r}")
 
 
+def remove_tree(path: Path) -> None:
+    def make_writable_and_retry(function, entry, error_info) -> None:
+        error = error_info[1]
+        if not isinstance(error, PermissionError):
+            raise error
+        os.chmod(entry, stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR)
+        function(entry)
+
+    shutil.rmtree(path, onerror=make_writable_and_retry)
+
+
 def main() -> int:
     if len(sys.argv) != 3:
         raise SystemExit("usage: compatibility_fetch_test.py <source-root> <test-root>")
@@ -89,7 +102,7 @@ def main() -> int:
     source_root = Path(sys.argv[1]).resolve()
     test_root = Path(sys.argv[2]).resolve()
     if test_root.exists():
-        shutil.rmtree(test_root)
+        remove_tree(test_root)
     test_root.mkdir(parents=True)
 
     upstream = test_root / "upstream"
@@ -120,7 +133,19 @@ def main() -> int:
     (branch_checkout / "project/version.txt").write_text(
         "dirty checkout\n", encoding="utf-8"
     )
+    (branch_checkout / "untracked.txt").write_text(
+        "stale compiler output\n", encoding="utf-8"
+    )
     third_commit = commit(upstream, "three\n")
+    fetch(fetch_script, branch_manifest, branch_checkout, test_root)
+    assert_checkout(branch_checkout, third_commit, "three\n")
+    if (branch_checkout / "untracked.txt").exists():
+        raise AssertionError("untracked compatibility output was not removed")
+
+    run(
+        ["git", "remote", "set-url", "origin", (test_root / "wrong-remote").as_uri()],
+        branch_checkout,
+    )
     fetch(fetch_script, branch_manifest, branch_checkout, test_root)
     assert_checkout(branch_checkout, third_commit, "three\n")
 
