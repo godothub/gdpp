@@ -4709,12 +4709,18 @@ std::string CodeGenerator::emit_script_function_scope(const std::size_t indentat
                   ";\n";
     // A synchronous invocation owns its fault state for the entire native call. Read that state
     // directly so Release hot loops do not perform a TLS lookup after every fault boundary.
-    // Coroutine continuations can outlive this C++ scope and therefore keep using the thread-local
-    // accessor backed by their shared CoroutineState.
+    // Coroutine continuations can outlive this C++ scope. Give them a capture-free local accessor
+    // that resolves through the thread-local state installed for each initial call/resumption.
+    // The explicit declaration also shadows any stack-capturing accessor in the enclosing
+    // synchronous function when that function creates a coroutine lambda.
     if (!current_coroutine_abi_) {
         result += indent(indentation) + "[[maybe_unused]] const auto script_function_failed = "
                                         "[&_gdpp_script_function_scope]() noexcept { "
                                         "return _gdpp_script_function_scope.failed(); };\n";
+    } else {
+        result += indent(indentation) + "[[maybe_unused]] const auto script_function_failed = "
+                                        "[]() noexcept { return "
+                                        "gdpp::runtime::script_function_failed(); };\n";
     }
     return result;
 }

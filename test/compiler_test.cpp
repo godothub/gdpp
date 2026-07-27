@@ -2315,9 +2315,20 @@ TEST_CASE("compiler preserves typed results and independent state in coroutine l
         result.unit.source.find("gdpp::integer::add(_gdpp_integer_left_", lambda_state);
     const auto completion = result.unit.source.find(
         "gdpp::runtime::complete_coroutine(_gdpp_lambda_coroutine_state_", lambda_state);
+    const auto safe_fault_accessor =
+        result.unit.source.find("const auto script_function_failed = []() noexcept { return "
+                                "gdpp::runtime::script_function_failed(); };",
+                                lambda_state);
+    const auto lambda_end = result.unit.source.find("\n});", lambda_state);
     REQUIRE(lambda_state != std::string::npos);
     REQUIRE(typed_sum != std::string::npos);
     REQUIRE(completion != std::string::npos);
+    REQUIRE(safe_fault_accessor != std::string::npos);
+    REQUIRE(lambda_end != std::string::npos);
+    REQUIRE(safe_fault_accessor < lambda_end);
+    const auto coroutine_lambda_source =
+        result.unit.source.substr(lambda_state, lambda_end - lambda_state);
+    REQUIRE(coroutine_lambda_source.find("[&_gdpp_script_function_scope]") == std::string::npos);
 }
 
 TEST_CASE("compiler preserves dynamic coroutine return values through the native ABI") {
