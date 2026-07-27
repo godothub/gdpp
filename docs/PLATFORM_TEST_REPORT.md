@@ -23,7 +23,7 @@
 | 编译器单元 | 545 / 545 |
 | godot-cpp SDK | macOS 上完整重建 4.4、4.5、4.6、4.7 `template_release` |
 | 官方 Godot 4.7.1 直接构建 | 当前 compiler 生成、顺序编译并链接真实客户项目库成功 |
-| 官方 Godot 4.7.1 AOT runtime | FunctionState、异步虚函数、await 默认参数、协程访问器、Callable/Signal、全 Variant fault 和项目脚本生命周期成功 |
+| 官方 Godot 4.7.1 AOT runtime | 重新生成 Universal 2 成品后，arm64 与 Rosetta x86_64 的 FunctionState、异步虚函数、协程 lambda、await 默认参数、协程访问器、Callable/Signal、全 Variant fault 和项目脚本生命周期成功 |
 | 官方 Godot 4.7.1 fault 差分 | source/AOT 的 57 个调用者恢复序列、39 项值矩阵哈希、await 默认参数及协程访问器结果完全一致 |
 | 官方 Godot 4.7.1 性能 | 13/13 family、启动和固定帧全部通过 10% 门禁；Callable AOT -33.33%，Variant AOT +2.17% |
 | 官方 Godot 4.5.2 AOT runtime | Universal 2 Release 导出后连续独立运行 10 次；动态 Script、Attached provider 与真实多 peer RPC 全部干净退出 |
@@ -49,7 +49,9 @@ CLI 入口误当成 GDPP 语义；每个 oracle 仍独占进程、退出码、�
 成品。两端的 `GDPP_FAULT_MATRIX` 与 `GDPP_VALUE_MATRIX` 逐字一致；AOT 另在独立进程输出
 `GDPP_AWAIT_DEFAULT_AOT_RUNTIME_OK` 和 `GDPP_COROUTINE_ACCESSOR_AOT_RUNTIME_OK`。性能矩阵
 使用同一引擎/模板、3 轮 AB/BA、每轮 5 个样本、每个 family 10,000 次迭代，行为 oracle 先于
-性能判定通过。
+性能判定通过。协程 fault 检查器生命周期修复后又从当前源码重建项目库与成品，普通运行在
+arm64、Rosetta x86_64 均输出 `GDPP_DYNAMIC_SCRIPT_RUNTIME_OK`、`GDPP_RPC_RUNTIME_OK` 和
+`GDPP_ATTACHED_EXPORT_RUNTIME_OK`，随后三个独立 AOT oracle 再次通过。
 
 ## 正式发布门禁
 
