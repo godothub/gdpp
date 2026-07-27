@@ -123,8 +123,7 @@ bool commit_xcframework(const std::filesystem::path& pending,
                         const std::filesystem::path& destination, std::string& diagnostic) {
     const auto filename = destination.filename().string();
     if (!is_xcframework(pending) || pending.filename() != destination.filename() ||
-        filename.rfind("libgdpp.", 0) != 0 ||
-        destination.parent_path().filename() != "binary" ||
+        filename.rfind("libgdpp.", 0) != 0 || destination.parent_path().filename() != "binary" ||
         !has_path_component(pending, "native-direct") ||
         !has_path_component(pending, "xcframework-staging")) {
         diagnostic = "refusing to commit an invalid or unsafe iOS XCFramework artifact";
@@ -299,8 +298,8 @@ godot::PropertyInfo script_property_info(const Type& type, const godot::StringNa
         return info;
     }
     const auto variant_type = variant_type_of(type);
-    info.type = variant_type ? static_cast<godot::Variant::Type>(*variant_type)
-                             : godot::Variant::NIL;
+    info.type =
+        variant_type ? static_cast<godot::Variant::Type>(*variant_type) : godot::Variant::NIL;
     if (type.kind == TypeKind::variant || type.kind == TypeKind::unknown) {
         info.type = godot::Variant::NIL;
         info.usage |= godot::PROPERTY_USAGE_NIL_IS_VARIANT;
@@ -311,7 +310,7 @@ godot::PropertyInfo script_property_info(const Type& type, const godot::StringNa
 }
 
 godot::Dictionary editor_script_descriptor(const CompiledProjectScript& script,
-                                            const godot::String& source_path) {
+                                           const godot::String& source_path) {
     godot::Dictionary descriptor;
     descriptor["source_path"] = source_path;
     descriptor["global_name"] = godot::StringName{script.global_name.c_str()};
@@ -344,27 +343,24 @@ godot::Dictionary editor_script_descriptor(const CompiledProjectScript& script,
             properties.push_back(property);
             continue;
         }
-        if (member.kind != ScriptMemberKind::function &&
-            member.kind != ScriptMemberKind::signal) {
+        if (member.kind != ScriptMemberKind::function && member.kind != ScriptMemberKind::signal) {
             continue;
         }
         if (member.kind == ScriptMemberKind::function && member.name == "_static_init")
             continue;
-        godot::MethodInfo method{
-            script_property_info(member.kind == ScriptMemberKind::signal
-                                     ? Type{TypeKind::void_type, "void"}
-                                     : member.type,
-                                 godot::StringName{}, godot::PROPERTY_USAGE_DEFAULT),
-            godot::StringName{member.name.c_str()}};
+        godot::MethodInfo method{script_property_info(member.kind == ScriptMemberKind::signal
+                                                          ? Type{TypeKind::void_type, "void"}
+                                                          : member.type,
+                                                      godot::StringName{},
+                                                      godot::PROPERTY_USAGE_DEFAULT),
+                                 godot::StringName{member.name.c_str()}};
         for (std::size_t index = 0; index < member.parameters.size(); ++index) {
-            const auto argument_name =
-                index < member.parameter_names.size()
-                    ? member.parameter_names[index]
-                    : "argument_" + std::to_string(index);
-            method.arguments.push_back(
-                script_property_info(member.parameters[index],
-                                     godot::StringName{argument_name.c_str()},
-                                     godot::PROPERTY_USAGE_DEFAULT));
+            const auto argument_name = index < member.parameter_names.size()
+                                           ? member.parameter_names[index]
+                                           : "argument_" + std::to_string(index);
+            method.arguments.push_back(script_property_info(
+                member.parameters[index], godot::StringName{argument_name.c_str()},
+                godot::PROPERTY_USAGE_DEFAULT));
             if (index < member.default_parameters.size() && member.default_parameters[index])
                 method.default_arguments.push_back(godot::Variant{});
         }
@@ -717,8 +713,8 @@ struct WindowsProcessOptions {
     bool utf16_output{false};
 };
 
-NativeProcessResult execute_hidden_windows_process(
-    const std::vector<std::wstring>& arguments, const WindowsProcessOptions& options = {});
+NativeProcessResult execute_hidden_windows_process(const std::vector<std::wstring>& arguments,
+                                                   const WindowsProcessOptions& options = {});
 
 std::wstring utf8_to_wide(const std::string& value) {
     if (value.empty() || value.size() > static_cast<std::size_t>(std::numeric_limits<int>::max()))
@@ -798,8 +794,8 @@ std::optional<std::filesystem::path> find_vcvars_batch(const std::filesystem::pa
             continue;
         for (std::size_t begin = 0; begin <= discovery.output.size();) {
             const auto end = discovery.output.find('\n', begin);
-            auto line = discovery.output.substr(
-                begin, end == std::string::npos ? std::string::npos : end - begin);
+            auto line = discovery.output.substr(begin, end == std::string::npos ? std::string::npos
+                                                                                : end - begin);
             while (!line.empty() &&
                    (line.back() == '\r' || std::isspace(static_cast<unsigned char>(line.back()))))
                 line.pop_back();
@@ -1274,8 +1270,9 @@ ResolvedMsvcCompiler resolve_msvc_compiler_for_plan(const std::string& configure
         return {{}, environment->diagnostic};
     const auto resolved = resolve_msvc_executable(requested_wide, *environment);
     if (!resolved)
-        return {{}, "cannot resolve '" + requested_utf8 +
-                        "' from the initialized Visual Studio environment"};
+        return {{},
+                "cannot resolve '" + requested_utf8 +
+                    "' from the initialized Visual Studio environment"};
     const auto executable = windows_wide_text_to_utf8(*resolved);
     return executable.empty()
                ? ResolvedMsvcCompiler{{}, "resolved MSVC compiler path is not valid UTF-8"}
@@ -1447,8 +1444,8 @@ void GDPPCompiler::_bind_methods() {
                         "compiler_executable", "target_version", "build_profile", "target_platform",
                         "target_architecture", "target_variant", "target_precision",
                         "progress_callback"),
-        &GDPPCompiler::compile_project, DEFVAL("4.4"), DEFVAL("release"), DEFVAL(""),
-        DEFVAL(""), DEFVAL(""), DEFVAL(GDPP_GODOT_PRECISION), DEFVAL(godot::Callable{}));
+        &GDPPCompiler::compile_project, DEFVAL("4.4"), DEFVAL("release"), DEFVAL(""), DEFVAL(""),
+        DEFVAL(""), DEFVAL(GDPP_GODOT_PRECISION), DEFVAL(godot::Callable{}));
     godot::ClassDB::bind_method(godot::D_METHOD("get_default_sdk_root"),
                                 &GDPPCompiler::get_default_sdk_root);
     godot::ClassDB::bind_method(godot::D_METHOD("get_default_compiler_executable"),
@@ -1466,9 +1463,8 @@ void GDPPCompiler::_bind_methods() {
         &GDPPCompiler::execute_project_build, DEFVAL(godot::Callable{}));
     godot::ClassDB::bind_method(godot::D_METHOD("prepare_project_build"),
                                 &GDPPCompiler::prepare_project_build);
-    godot::ClassDB::bind_method(
-        godot::D_METHOD("install_editor_script_descriptors", "descriptors"),
-        &GDPPCompiler::install_editor_script_descriptors);
+    godot::ClassDB::bind_method(godot::D_METHOD("install_editor_script_descriptors", "descriptors"),
+                                &GDPPCompiler::install_editor_script_descriptors);
     godot::ClassDB::bind_method(
         godot::D_METHOD("set_editor_script_storage_state", "object", "stored_properties"),
         &GDPPCompiler::set_editor_script_storage_state);
@@ -1652,16 +1648,15 @@ GDPPCompiler::install_editor_script_descriptors(const godot::Array& descriptors)
         for (std::int64_t property_index = 0; property_index < properties.size();
              ++property_index) {
             if (properties[property_index].get_type() != godot::Variant::DICTIONARY) {
-                diagnostics.push_back(
-                    "property metadata at index " + godot::String::num_int64(property_index) +
-                    " for '" + descriptor.source_path + "' is not a Dictionary");
+                diagnostics.push_back("property metadata at index " +
+                                      godot::String::num_int64(property_index) + " for '" +
+                                      descriptor.source_path + "' is not a Dictionary");
                 gdpp::runtime::unregister_all_attached_scripts();
                 output["diagnostics"] = diagnostics;
                 return output;
             }
             const godot::Dictionary property_input = properties[property_index];
-            const godot::Dictionary property_info =
-                property_input.get("info", godot::Dictionary{});
+            const godot::Dictionary property_info = property_input.get("info", godot::Dictionary{});
             gdpp::runtime::AttachedScriptProperty property;
             property.info = godot::PropertyInfo::from_dict(property_info);
             property.has_default = property_input.get("has_default", false);
@@ -1676,10 +1671,9 @@ GDPPCompiler::install_editor_script_descriptors(const godot::Array& descriptors)
             destination.reserve(static_cast<std::size_t>(methods.size()));
             for (std::int64_t method_index = 0; method_index < methods.size(); ++method_index) {
                 if (methods[method_index].get_type() != godot::Variant::DICTIONARY) {
-                    diagnostics.push_back(
-                        godot::String{key} + " metadata at index " +
-                        godot::String::num_int64(method_index) + " for '" +
-                        descriptor.source_path + "' is not a Dictionary");
+                    diagnostics.push_back(godot::String{key} + " metadata at index " +
+                                          godot::String::num_int64(method_index) + " for '" +
+                                          descriptor.source_path + "' is not a Dictionary");
                     return false;
                 }
                 destination.push_back(
@@ -1877,7 +1871,7 @@ godot::Dictionary GDPPCompiler::compile_project(
         };
     }
     const ProjectCompiler compiler;
-    const auto result = compiler.compile_direct(options);
+    const auto result = compiler.compile(options);
 
     godot::Dictionary output;
     output["success"] = result.success;

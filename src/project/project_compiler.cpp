@@ -1,5 +1,6 @@
 #include "gdpp/project/project_compiler.hpp"
 
+#include "gdpp/core/compiler_stack.hpp"
 #include "gdpp/core/source.hpp"
 #include "gdpp/frontend/constant_evaluator.hpp"
 #include "gdpp/frontend/lexer.hpp"
@@ -660,19 +661,17 @@ bool function_contains_await(const ast::FunctionDeclaration& function) {
     return statements_contain_await(function.body);
 }
 
-bool accessor_contains_await(
-    const std::optional<ast::PropertyAccessor>& accessor,
-    const std::vector<ast::FunctionDeclaration>& functions) {
+bool accessor_contains_await(const std::optional<ast::PropertyAccessor>& accessor,
+                             const std::vector<ast::FunctionDeclaration>& functions) {
     if (!accessor)
         return false;
     if (accessor->method.empty())
         return statements_contain_await(accessor->body);
-    const auto method = std::find_if(functions.begin(), functions.end(),
-                                     [&](const auto& function) {
-                                         return function.name == accessor->method;
-                                     });
-    return method != functions.end() && method->name != "_init" &&
-           method->name != "_static_init" && function_contains_await(*method);
+    const auto method = std::find_if(functions.begin(), functions.end(), [&](const auto& function) {
+        return function.name == accessor->method;
+    });
+    return method != functions.end() && method->name != "_init" && method->name != "_static_init" &&
+           function_contains_await(*method);
 }
 
 ScriptInnerClassSymbol inner_class_symbol(const ast::ClassDeclaration& declaration,
@@ -1061,11 +1060,9 @@ void report_project_progress(const ProjectCompileOptions& options, const Project
 } // namespace
 
 ProjectCompileResult ProjectCompiler::compile(const ProjectCompileOptions& options) const {
-    return compile_impl(options);
-}
-
-ProjectCompileResult ProjectCompiler::compile_direct(const ProjectCompileOptions& options) const {
-    return compile_impl(options);
+    ProjectCompileResult result;
+    run_on_compiler_stack([&]() { result = compile_impl(options); });
+    return result;
 }
 
 ProjectCompileResult ProjectCompiler::compile_impl(const ProjectCompileOptions& options) const {
@@ -1399,10 +1396,8 @@ ProjectCompileResult ProjectCompiler::compile_impl(const ProjectCompileOptions& 
                 target_api);
             member.is_static = variable.is_constant || variable.is_static;
             member.has_accessor = variable.getter.has_value() || variable.setter.has_value();
-            member.getter_is_coroutine =
-                accessor_contains_await(variable.getter, script.functions);
-            member.setter_is_coroutine =
-                accessor_contains_await(variable.setter, script.functions);
+            member.getter_is_coroutine = accessor_contains_await(variable.getter, script.functions);
+            member.setter_is_coroutine = accessor_contains_await(variable.setter, script.functions);
             for (const auto& annotation : variable.annotations) {
                 if (annotation.name == "export_storage") {
                     member.property_storage = true;
@@ -2457,8 +2452,8 @@ ProjectCompileResult ProjectCompiler::compile_impl(const ProjectCompileOptions& 
                 [&](auto& members, const std::vector<ast::VariableDeclaration>& variables,
                     const std::string& inner_name) {
                     for (const auto& variable : variables) {
-                        const auto member =
-                            std::find_if(members.begin(), members.end(), [&](const auto& candidate) {
+                        const auto member = std::find_if(
+                            members.begin(), members.end(), [&](const auto& candidate) {
                                 return candidate.kind == ScriptMemberKind::field &&
                                        candidate.name == variable.name;
                             });
@@ -2474,9 +2469,9 @@ ProjectCompileResult ProjectCompiler::compile_impl(const ProjectCompileOptions& 
                             member->setter_is_coroutine = setter_coroutine;
                             changed = true;
                         }
-                        script_symbols.set_accessor_coroutines(
-                            input.relative, inner_name, variable.name, getter_coroutine,
-                            setter_coroutine);
+                        script_symbols.set_accessor_coroutines(input.relative, inner_name,
+                                                               variable.name, getter_coroutine,
+                                                               setter_coroutine);
                     }
                 };
             refine_members(input.members, input.script.functions, "");

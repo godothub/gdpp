@@ -87,7 +87,6 @@ struct ProjectCompileResult {
 class ProjectCompiler final {
   public:
     [[nodiscard]] ProjectCompileResult compile(const ProjectCompileOptions& options) const;
-    [[nodiscard]] ProjectCompileResult compile_direct(const ProjectCompileOptions& options) const;
 
   private:
     [[nodiscard]] ProjectCompileResult compile_impl(const ProjectCompileOptions& options) const;
