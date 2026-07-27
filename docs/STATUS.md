@@ -60,6 +60,8 @@
 - 类型化表达式、转换和赋值具有保守故障效应；生成代码只在可能设置 fault state 的动态运算、
   严格存储、越界、整数除法/取模、对象及 Callable/Signal 重入边界轮询。静态安全路径的冗余
   检查已删除，官方 4.7.1 行为矩阵与 10% 性能合同同时通过，不以降低正确性或放宽预算换性能。
+- `Dictionary.key` 与下标使用同一受检键语义：缺失/非法键中止当前函数，存在的 `null` 值正常
+  返回；可失败接收者先于查找固定和轮询。source/AOT fault 差分覆盖普通、强类型及复合键路径。
 - 真正挂起的实例/静态/lambda/内部类/属性访问器、await 默认参数和赋值目标都使用同一
   FunctionState 契约；项目 ABI 变化会传递失效所有消费者。
 - 真实 ENet 多 peer RPC 门禁覆盖 authority/any-peer、call-local/remote、transfer mode、

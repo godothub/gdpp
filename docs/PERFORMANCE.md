@@ -61,20 +61,21 @@ CI 在 Godot 4.4.1、4.5.2、4.6.3、4.7.1 的兼容作业中执行该矩阵。�
 
 ## 当前端到端结果
 
-发布候选在 macOS、官方 Godot 4.7.1、相同 Universal 2 Release 模板、3 轮 AB/BA、每轮
+发布候选在 macOS、官方 Godot 4.7.1、相同 Universal 2 Release 模板、5 轮 AB/BA、每轮
 5 个样本和每个 case 10,000 次迭代下通过完整行为与性能门禁：
 
 ```text
-Dictionary mean: GDS 199.76 ns / AOT 164.36 ns（AOT -17.72%）
-String mean:     GDS 138.48 ns / AOT 126.71 ns（AOT -8.50%）
-Variant mean:    GDS 23.43 ns / AOT 22.79 ns（AOT -2.70%）
+Dictionary mean: GDS 195.82 ns / AOT 181.33 ns（AOT -7.40%）
+String mean:     GDS 140.18 ns / AOT 123.98 ns（AOT -11.56%）
+Variant mean:    GDS 22.85 ns / AOT 23.22 ns（AOT +1.61%）
 13/13 benchmark families、启动、固定帧：全部 <= 10%
 行为 oracle：PASS
 ```
 
 该结果来自 fault frame 最终效应分析版本，用于证明完整错误传播没有依靠热点轮询换取正确性，
-也没有通过放宽阈值掩盖回归。数值会随机器和 Godot patch 变化，正式发布仍要求四个目标版本
-各自在 Linux runner 独立通过同一门禁。
+也没有通过放宽阈值掩盖回归。字典结果已包含 `Dictionary.key` 的缺失键/存储 `null` 区分和
+强类型键验证；非 `Nil` 热路径只执行一次键查找，只有 `Nil` 才以 `has()` 消除歧义。数值会随
+机器和 Godot patch 变化，正式发布仍要求四个目标版本各自在 Linux runner 独立通过同一门禁。
 
 最近一次 Windows 联机事件补充审计在同一机器、相同输入和三轮 warm 运行下得到：
 

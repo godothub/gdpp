@@ -24,8 +24,8 @@
 | godot-cpp SDK | macOS 上完整重建 4.4、4.5、4.6、4.7 `template_release` |
 | 官方 Godot 4.7.1 直接构建 | 当前 compiler 生成、顺序编译并链接真实客户项目库成功 |
 | 官方 Godot 4.7.1 AOT runtime | 重新生成 Universal 2 成品后，arm64 与 Rosetta x86_64 的 FunctionState、异步虚函数、协程 lambda、await 默认参数、协程访问器、Callable/Signal、全 Variant fault 和项目脚本生命周期成功 |
-| 官方 Godot 4.7.1 fault 差分 | source/AOT 的 57 个调用者恢复序列、39 项值矩阵哈希、await 默认参数及协程访问器结果完全一致 |
-| 官方 Godot 4.7.1 性能 | 13/13 family、启动和固定帧全部通过 10% 门禁；最终效应分析候选中 Dictionary AOT -17.72%、String AOT -8.50%、Variant AOT -2.70% |
+| 官方 Godot 4.7.1 fault 差分 | source/AOT 的 59 个调用者恢复序列、39 项值矩阵哈希、await 默认参数及协程访问器结果完全一致；覆盖缺失 `Dictionary.key` 与存在 `null` 的消歧 |
+| 官方 Godot 4.7.1 性能 | 13/13 family、启动和固定帧全部通过 10% 门禁；最终 5 轮候选中 Dictionary AOT -7.40%、String AOT -11.56%、Variant AOT +1.61% |
 | 官方 Godot 4.5.2 AOT runtime | Universal 2 Release 导出后连续独立运行 10 次；动态 Script、Attached provider 与真实多 peer RPC 全部干净退出 |
 | custom/double add-on | 4.7 double 从精确 API 干净构建；compiler、SDK、descriptor、静态库和 manifest 审计成功 |
 | 官方 Godot 4.6.2 Release | Universal 2 Attached provider 导出、独立运行成功 |
@@ -48,16 +48,16 @@ CLI 入口误当成 GDPP 语义；每个 oracle 仍独占进程、退出码、�
 本轮候选还在同一官方 4.7.1 引擎下分别运行源码 `runtime_fault_oracle.gd` 和导出的 Universal 2
 成品。两端的 `GDPP_FAULT_MATRIX` 与 `GDPP_VALUE_MATRIX` 逐字一致；AOT 另在独立进程输出
 `GDPP_AWAIT_DEFAULT_AOT_RUNTIME_OK` 和 `GDPP_COROUTINE_ACCESSOR_AOT_RUNTIME_OK`。性能矩阵
-使用同一引擎/模板、3 轮 AB/BA、每轮 5 个样本、每个 family 10,000 次迭代，行为 oracle 先于
+使用同一引擎/模板、5 轮 AB/BA、每轮 5 个样本、每个 family 10,000 次迭代，行为 oracle 先于
 性能判定通过。协程 fault 检查器生命周期修复后又从当前源码重建项目库与成品，普通运行在
 arm64、Rosetta x86_64 均输出 `GDPP_DYNAMIC_SCRIPT_RUNTIME_OK`、`GDPP_RPC_RUNTIME_OK` 和
 `GDPP_ATTACHED_EXPORT_RUNTIME_OK`，随后三个独立 AOT oracle 再次通过。
 
-最终 fault polling 版本又使用官方 4.7.1 Universal 2 Release 模板重建 AOT 与 GDScript
-对照成品，并执行 3 轮 AB/BA、每轮 5 个样本、每个 family 10,000 次迭代。行为 oracle 先通过，
-随后 13/13 family、启动与固定帧门禁全部通过；Dictionary、String、Variant 的 AOT mean 相对
-GDScript 分别为 -17.72%、-8.50%、-2.70%。独立成品另输出 `GDPP_RUNTIME_FAILURE_OK` 与
-`GDPP_ASYNC_VIRTUAL_OK`，证明轮询删减没有越过运行时故障或协程边界。
+最终 fault polling 与字典 keyed lookup 版本又使用官方 4.7.1 Universal 2 Release 模板重建
+AOT 与 GDScript 对照成品，并执行 5 轮 AB/BA、每轮 5 个样本、每个 family 10,000 次迭代。
+行为 oracle 先通过，随后 13/13 family、启动与固定帧门禁全部通过；Dictionary、String、Variant
+的 AOT mean 相对 GDScript 分别为 -7.40%、-11.56%、+1.61%。独立 provider 成品的 source/AOT
+fault 序列还验证缺失点号键会中止、存在 `null` 会继续，以及非法强类型复合键不会继续执行。
 
 ## 正式发布门禁
 
