@@ -8,7 +8,7 @@
 - 审计版本：GDPP 1.8.0。
 - 功能审计范围：1.8.0 发布分支当前提交；正式发布门禁由同一提交的 release workflow 执行。
 - 最近正式发布门禁：1.7.10 / GitHub Actions `30170732292`，46 个作业全部成功。
-- 本地编译器单元测试：545 / 545。
+- 本地编译器单元测试：546 / 546。
 - Godot 目标：4.4、4.5、4.6、4.7；CI 使用 4.4.1、4.5.2、4.6.3、4.7.1。
 - SDK schema：12；生成项目 runtime ABI：18。
 
@@ -46,8 +46,8 @@
 
 1.8.0 已关闭当前声明兼容面的 M1～M4 P0 阻断项：
 
-- 前端具有可恢复多错误解析、完整 AST/`SourceSpan` 序列化 golden、coverage-guided fuzz、
-  资源预算以及 Godot 4.7.1 官方合法/非法语料漂移门禁。
+- 前端具有可恢复多错误解析、始终单调且位于源码内的 AST `SourceSpan`、完整序列化 golden、
+  coverage-guided fuzz、失败样本归档、资源预算以及 Godot 4.7.1 官方合法/非法语料漂移门禁。
 - 单文件与全项目入口都切换到 GDPP 自有 16 MiB 编译线程栈，调用/成员分析的大型 C++ 栈帧已
   分离；宿主的约 512 KiB 脚本线程栈不再决定合法深层后缀表达式能否编译。
 - 38 个非 `MAX` Variant 家族、PackedArray、强类型 Array/Dictionary、Callable、空值、失效
