@@ -225,8 +225,8 @@ GDPP 的编译器前端不是调用目标 Godot 的 GDScript parser，因此 AOT
 当前产品不拦截编辑器 parser，也不在平时替换 ScriptLanguage，因此：
 
 - 使用目标 Godot 已接受的 `.gd` 是正式支持路径；
-- CI 中少数已知低版本 parser 诊断只有在 AOT 导出、运行和精确 allowlist 全部通过时才可视为
-  非权威提示；
+- CI 中少数已知低版本 parser 诊断（例如 4.4 的 typed variadic 与新版嵌套块遮蔽规则）只有
+  在 AOT 导出、运行和精确到文件/行号/诊断的 allowlist 全部通过时才可视为非权威提示；
 - 未来高版本/增强语法应使用独立 `.gdpp` 后缀和 ScriptLanguage，当前版本未交付该机制；
 - 无源码 AOT 成品不会包含原始 `.gd`，低版本运行时不会再次解析这些脚本。
 
