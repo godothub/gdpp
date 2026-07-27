@@ -31,6 +31,7 @@
 - 真实 ENet 重连与退出统一遵循确定的节点/缓存、peer、SceneTree 根所有权顺序：复制节点先离树，再替换或关闭 peer，清空 API 的 peer 引用，最后注销并释放自定义 multiplayer 根；成功与中止清理均可重复执行，消除 Godot 4.4～4.7 的重复 `tree_exited` 缓存诊断。
 - 对全部非 MAX Variant 值家族和完整 fault 矩阵执行原生 GDScript/AOT 对照，覆盖普通/强类型容器、全部 PackedArray、错误键、越界、整数故障、Callable、空/失效 Object、Ref 和第三方调用。
 - fault 矩阵中的原生 Object 在函数故障中止后由显式外层 owner 统一释放，消除进程退出时的 ObjectDB 泄漏；Godot 4.4 对 typed variadic 和当前 stable 嵌套块遮蔽规则的非权威 parser 诊断，只有在 AOT 导出/运行成功且文件、行号、消息精确匹配时才允许通过。
+- await 默认参数与协程访问器 AOT oracle 改为由用户命令行参数选择的独立导出进程，并拒绝这些日志中的所有意外诊断；这既保留进程级运行覆盖，也符合官方 release 模板默认 `disable_path_overrides=true`、明确关闭 Godot `--script` 路径覆盖的安全合同。
 - await 赋值先以 A-normal form 固定接收者与下标，再求右值；局部、字段、属性和动态下标在挂起前后保持单次求值、写回所有权、惰性分支和生命周期。
 - 缺失的默认参数在有序调用 prologue 内求值，并允许默认表达式真正挂起；接收者、此前显式/默认参数、vararg 和逐次调用状态均跨恢复保留。
 - 内联及方法绑定属性 getter/setter 在实例、静态、内部类、跨脚本、继承和并发调用中统一保留协程 ABI，并对项目缓存执行传递式依赖失效。
