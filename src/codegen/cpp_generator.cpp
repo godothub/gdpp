@@ -6101,7 +6101,10 @@ std::string CodeGenerator::emit_statement_body(const typed::Statement& statement
                 }
                 exact_expression_overrides_[receiver] = receiver_name;
             }
-            result += nested_prefix + "const auto " + value_name + " = " +
+            // The right-hand side is an owned, single-use snapshot. Keep it mutable so the
+            // guarded commit below can transfer reference-backed Godot values without adding
+            // reference-counted copies. Receiver-before-RHS evaluation order remains unchanged.
+            result += nested_prefix + "auto " + value_name + " = " +
                       emit_expression(*statement.expression) + ";\n";
             if (expression_may_fail(*statement.expression)) {
                 result += emit_script_failure_return(indentation + 1, in_async_continuation_);
@@ -6289,12 +6292,21 @@ std::string CodeGenerator::emit_statement_body(const typed::Statement& statement
             const auto assigned = "_gdpp_assignment_result_" + suffix;
             const auto outer = indent(write_indentation);
             const auto inner = indent(write_indentation + 1);
-            return outer + "{\n" + inner + "const auto " + assigned + " = " + std::move(value) +
-                   ";\n" +
+            constexpr std::string_view snapshot_prefix{"_gdpp_assignment_value_"};
+            const bool owned_snapshot =
+                value.rfind(snapshot_prefix, 0) == 0 &&
+                value.size() > snapshot_prefix.size() &&
+                std::all_of(value.begin() + static_cast<std::ptrdiff_t>(snapshot_prefix.size()),
+                            value.end(), [](const char character) {
+                                return std::isdigit(static_cast<unsigned char>(character)) != 0;
+                            });
+            const auto initialized =
+                owned_snapshot ? "std::move(" + std::move(value) + ")" : std::move(value);
+            return outer + "{\n" + inner + "auto " + assigned + " = " + initialized + ";\n" +
                    (assignment_may_fail(statement)
                         ? emit_script_failure_return(write_indentation + 1, in_async_continuation_)
                         : std::string{}) +
-                   inner + write(assigned) + ";\n" + outer + "}\n";
+                   inner + write("std::move(" + assigned + ")") + ";\n" + outer + "}\n";
         };
         if (target.resolution == typed::ResolutionKind::script_runtime_static_field) {
             const auto* owner = script_symbols_

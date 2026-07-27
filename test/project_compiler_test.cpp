@@ -1131,7 +1131,8 @@ TEST_CASE("project compiler exposes preloaded scripts as typed namespaces") {
             std::string::npos);
     REQUIRE(source.find(library->class_name + "::answer(") != std::string::npos);
     REQUIRE(source.find(library->class_name + "::_gdpp_get_TAG()") != std::string::npos);
-    REQUIRE(source.find(library->class_name + "::_gdpp_set_TAG(_gdpp_assignment_result_") !=
+    REQUIRE(source.find(library->class_name +
+                        "::_gdpp_set_TAG(std::move(_gdpp_assignment_result_") !=
             std::string::npos);
     REQUIRE(source.find("cast_attached_script(gdpp::runtime::to_variant(value), "
                         "godot::String(\"res://library.gd\"))") != std::string::npos);

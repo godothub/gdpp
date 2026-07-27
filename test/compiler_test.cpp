@@ -25,9 +25,12 @@ TEST_CASE("compiler generates bindable GDExtension C++") {
     REQUIRE(result.unit.header.find("GDCLASS(GDPPNative_Counter, godot::Node)") !=
             std::string::npos);
     REQUIRE(result.unit.source.find("ClassDB::bind_method") != std::string::npos);
-    REQUIRE(result.unit.source.find("const auto _gdpp_assignment_value_") != std::string::npos);
-    REQUIRE(result.unit.source.find("const auto _gdpp_assignment_result_") != std::string::npos);
-    REQUIRE(result.unit.source.find("value = _gdpp_assignment_result_") != std::string::npos);
+    REQUIRE(result.unit.source.find("auto _gdpp_assignment_value_") != std::string::npos);
+    REQUIRE(result.unit.source.find("auto _gdpp_assignment_result_") != std::string::npos);
+    REQUIRE(result.unit.source.find(" = std::move(") !=
+            std::string::npos);
+    REQUIRE(result.unit.source.find("value = std::move(_gdpp_assignment_result_") !=
+            std::string::npos);
     REQUIRE(result.unit.source.find("const auto _gdpp_property_right_") != std::string::npos);
     REQUIRE(result.unit.source.find("gdpp::integer::add(") != std::string::npos);
     REQUIRE(result.unit.source.find("ADD_SIGNAL") != std::string::npos);
@@ -1608,7 +1611,8 @@ TEST_CASE("compiler safely assigns every reference-backed Godot storage family")
     for (const auto* storage :
          {"state", "typed_state", "labels", "bytes", "title", "key", "path", "callback"}) {
         REQUIRE(result.unit.source.find("gdpp::runtime::assign_native_storage(" +
-                                        std::string{storage} + ", _gdpp_assignment_result_") !=
+                                        std::string{storage} +
+                                        ", std::move(_gdpp_assignment_result_") !=
                 std::string::npos);
     }
 }
@@ -2084,8 +2088,9 @@ TEST_CASE("compiler lifts entry parameters through suspended loop recovery") {
     REQUIRE(function.unit.source.find("_gdpp_utility_argument_") != std::string::npos);
     REQUIRE(function.unit.source.find(" = (*_gdpp_async_cell_") != std::string::npos);
     REQUIRE(setter.unit.source.find("std::make_shared<int64_t>(value)") != std::string::npos);
-    REQUIRE(setter.unit.source.find("const auto _gdpp_assignment_value_") != std::string::npos);
-    REQUIRE(setter.unit.source.find("score = _gdpp_assignment_result_") != std::string::npos);
+    REQUIRE(setter.unit.source.find("auto _gdpp_assignment_value_") != std::string::npos);
+    REQUIRE(setter.unit.source.find("score = std::move(_gdpp_assignment_result_") !=
+            std::string::npos);
     const auto nested_parameter = nested.unit.source.find("std::make_shared<int64_t>(count)");
     REQUIRE(nested_parameter != std::string::npos);
     REQUIRE(nested.unit.source.find("std::make_shared<int64_t>(count)", nested_parameter + 1) !=
@@ -3237,7 +3242,8 @@ TEST_CASE("compiler assigns shader resources through the property accessor base 
     REQUIRE(result.unit.source.find("godot::Ref<godot::Material>(godot::Object::cast_to<"
                                     "godot::Material>((_gdpp_assignment_value_") !=
             std::string::npos);
-    REQUIRE(result.unit.source.find("set_material(_gdpp_assignment_result_") != std::string::npos);
+    REQUIRE(result.unit.source.find("set_material(std::move(_gdpp_assignment_result_") !=
+            std::string::npos);
     REQUIRE(result.unit.source.find("cast_to<godot::CanvasItemMaterial>") == std::string::npos);
     REQUIRE(result.unit.source.find("godot::Ref<godot::Material>") != std::string::npos);
 }
@@ -4271,6 +4277,34 @@ TEST_CASE("compiler preserves native scalar paths across dynamic boundaries") {
             std::string::npos);
 }
 
+TEST_CASE("compiler transfers consumed assignment snapshots without reference-backed copies") {
+    const gdpp::Compiler compiler;
+    const auto result = compiler.compile(
+        "consumed_assignment.gd",
+        "func update(iterations: int) -> int:\n"
+        "    var dynamic: Variant = 1\n"
+        "    var text := \"gdpp\"\n"
+        "    var total := 0\n"
+        "    for index in range(iterations):\n"
+        "        dynamic = int(dynamic) + index\n"
+        "        text = text.to_upper() if (index & 1) == 0 else text.to_lower()\n"
+        "        total += int(dynamic) + text.length()\n"
+        "    return total\n");
+
+    REQUIRE(result.success);
+    REQUIRE(result.unit.source.find("auto _gdpp_assignment_value_") != std::string::npos);
+    REQUIRE(result.unit.source.find("const auto _gdpp_assignment_value_") == std::string::npos);
+    REQUIRE(result.unit.source.find("auto _gdpp_assignment_result_") != std::string::npos);
+    REQUIRE(result.unit.source.find("= std::move(_gdpp_assignment_value_") !=
+            std::string::npos);
+    REQUIRE(result.unit.source.find("gdpp::runtime::assign_native_storage("
+                                    "text, std::move(_gdpp_assignment_result_") !=
+            std::string::npos);
+    REQUIRE(result.unit.source.find("explicit_variant_cast<int64_t>("
+                                    "gdpp::runtime::to_variant(dynamic)") !=
+            std::string::npos);
+}
+
 TEST_CASE("compiler rejects direct Callable and unknown expression invocation") {
     const gdpp::Compiler compiler;
     const auto direct =
@@ -4318,8 +4352,9 @@ TEST_CASE("compiler generates nonrecursive Godot 4 property accessors") {
     REQUIRE(result.unit.header.find("int64_t _gdpp_get_health()") != std::string::npos);
     REQUIRE(result.unit.source.find("int64_t GDPPNative_Health::_gdpp_get_health()") !=
             std::string::npos);
-    REQUIRE(result.unit.source.find("health = _gdpp_assignment_result_") != std::string::npos);
-    REQUIRE(result.unit.source.find("_gdpp_set_health(_gdpp_assignment_result_") !=
+    REQUIRE(result.unit.source.find("health = std::move(_gdpp_assignment_result_") !=
+            std::string::npos);
+    REQUIRE(result.unit.source.find("_gdpp_set_health(std::move(_gdpp_assignment_result_") !=
             std::string::npos);
     REQUIRE(result.unit.source.find(" = _gdpp_get_health();") != std::string::npos);
     REQUIRE(result.unit.source.find("return health;\n    return health;") == std::string::npos);
@@ -4344,9 +4379,10 @@ TEST_CASE("compiler generates validated method-bound property accessors") {
     REQUIRE(result.success);
     REQUIRE(result.unit.source.find("return is_active();") != std::string::npos);
     REQUIRE(result.unit.source.find("set_active(value);") != std::string::npos);
-    REQUIRE(result.unit.source.find("active = _gdpp_assignment_result_") != std::string::npos);
+    REQUIRE(result.unit.source.find("active = std::move(_gdpp_assignment_result_") !=
+            std::string::npos);
     REQUIRE(result.unit.source.find(" = false;") != std::string::npos);
-    REQUIRE(result.unit.source.find("_gdpp_set_active(_gdpp_assignment_result_") !=
+    REQUIRE(result.unit.source.find("_gdpp_set_active(std::move(_gdpp_assignment_result_") !=
             std::string::npos);
     REQUIRE(result.unit.source.find(" = _gdpp_get_active();") != std::string::npos);
 }
@@ -5153,7 +5189,8 @@ TEST_CASE("Godot API inheritance resolves native methods properties and builtin 
     REQUIRE(result.unit.header.find("#include <godot_cpp/variant/vector2.hpp>") !=
             std::string::npos);
     REQUIRE(result.unit.header.find("godot::Vector2 delta") != std::string::npos);
-    REQUIRE(result.unit.source.find("set_position(_gdpp_assignment_result_") != std::string::npos);
+    REQUIRE(result.unit.source.find("set_position(std::move(_gdpp_assignment_result_") !=
+            std::string::npos);
     REQUIRE(result.unit.source.find("= get_position(); const auto _gdpp_property_right_") !=
             std::string::npos);
     REQUIRE(result.unit.source.find("queue_redraw()") != std::string::npos);
