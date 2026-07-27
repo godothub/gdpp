@@ -33,6 +33,11 @@ func run() -> String:
         missing_dictionary_key,
         missing_dictionary_named_key,
         present_null_dictionary_named_key,
+        missing_dictionary_named_compound,
+        read_only_dictionary_named_set,
+        read_only_dictionary_named_compound,
+        invalid_typed_dictionary_named_value_set,
+        invalid_typed_dictionary_named_compound_value,
         missing_method,
         missing_property_read,
         missing_property_write,
@@ -260,6 +265,45 @@ func present_null_dictionary_named_key() -> void:
     var values: Dictionary[String, Variant] = {"present": null}
     var value: Variant = values.present
     after("present_null_dictionary_named_key:" + str(value))
+
+
+func missing_dictionary_named_compound() -> void:
+    before("missing_dictionary_named_compound")
+    var values := {"present": 1}
+    values.missing += 1
+    after("missing_dictionary_named_compound:" + str(values))
+
+
+func read_only_dictionary_named_set() -> void:
+    before("read_only_dictionary_named_set")
+    var values := {"present": 1}
+    values.make_read_only()
+    values.present = 2
+    after("read_only_dictionary_named_set:" + str(values))
+
+
+func read_only_dictionary_named_compound() -> void:
+    before("read_only_dictionary_named_compound")
+    var values := {"present": 1}
+    values.make_read_only()
+    values.present += 1
+    after("read_only_dictionary_named_compound:" + str(values))
+
+
+func invalid_typed_dictionary_named_value_set() -> void:
+    before("invalid_typed_dictionary_named_value_set")
+    var values: Dictionary[String, int] = {}
+    var source: Variant = "bad"
+    values.value = source
+    after("invalid_typed_dictionary_named_value_set:" + str(values))
+
+
+func invalid_typed_dictionary_named_compound_value() -> void:
+    before("invalid_typed_dictionary_named_compound_value")
+    var values: Dictionary[String, int] = {"value": 1}
+    var source: Variant = 0.5
+    values.value += source
+    after("invalid_typed_dictionary_named_compound_value:" + str(values))
 
 
 func missing_method() -> void:
