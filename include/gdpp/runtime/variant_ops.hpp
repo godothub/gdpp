@@ -779,14 +779,32 @@ inline void checked_array_set(godot::Array& target, std::int64_t index, const go
 [[nodiscard]] inline godot::Variant
 checked_dictionary_get(const godot::Dictionary& target, const godot::Variant& key,
                        const ScriptSourceLocation location = {}) {
-    // `get()` performs the authoritative typed-key validation and one lookup. Its default Nil is
-    // ambiguous only when the result is Nil, so `has()` is reserved for that cold path to
-    // distinguish a stored null from a missing/invalid key. Non-Nil hot paths stay at one lookup.
-    // Generated code sequences and checks receiver/key evaluation before entering this helper.
-    const auto value = target.get(key, godot::Variant{});
-    if (value.get_type() == godot::Variant::NIL && !target.has(key)) {
+    // Variant's keyed ABI exposes the authoritative Dictionary lookup validity bit. It therefore
+    // distinguishes a stored Nil from a missing or typed-invalid key in one lookup, without the
+    // built-in-method dispatch overhead of Dictionary::get() or a second has() probe.
+    bool valid = false;
+    const auto value = godot::Variant(target).get_keyed(key, valid);
+    if (!valid) {
         report_script_failure(godot::String{"Invalid access to property or key "} +
                                   key.stringify() + " on " +
+                                  describe_variant_type(godot::Variant(target)) + ".",
+                              location);
+        return {};
+    }
+    return value;
+}
+
+[[nodiscard]] inline godot::Variant
+checked_dictionary_get_named(const godot::Dictionary& target, const godot::StringName& key,
+                             const ScriptSourceLocation location = {}) {
+    // Named Dictionary access has a dedicated ABI path which accepts StringName directly and
+    // reports lookup validity. Keep this separate from the general keyed path so `record.name`
+    // neither allocates a temporary key Variant nor passes through Dictionary's method binder.
+    bool valid = false;
+    const auto value = godot::Variant(target).get_named(key, valid);
+    if (!valid) {
+        report_script_failure(godot::String{"Invalid access to property or key "} +
+                                  godot::String(key) + " on " +
                                   describe_variant_type(godot::Variant(target)) + ".",
                               location);
         return {};
@@ -807,10 +825,44 @@ inline void checked_dictionary_set(godot::Dictionary& target, const godot::Varia
     }
 }
 
+inline void checked_dictionary_set_named(godot::Dictionary& target, const godot::StringName& key,
+                                         const godot::Variant& value,
+                                         const ScriptSourceLocation location = {}) {
+    bool valid = false;
+    auto target_variant = godot::Variant(target);
+    target_variant.set_named(key, value, valid);
+    if (!valid) {
+        report_script_failure(godot::String{"Invalid assignment of property or key "} +
+                                  godot::String(key) + " with " + describe_variant_type(value) +
+                                  " on " + describe_variant_type(target_variant) + ".",
+                              location);
+    }
+}
+
 inline void unchecked_dictionary_set(godot::Dictionary& target, const godot::Variant& key,
-                                     const godot::Variant& value) {
-    if (!script_function_failed())
-        (void)target.set(key, value);
+                                     const godot::Variant& value,
+                                     const ScriptSourceLocation location = {}) {
+    if (script_function_failed())
+        return;
+    if (!target.set(key, value) && target.is_read_only()) {
+        report_script_failure("Invalid assignment on read-only Dictionary.", location);
+    }
+}
+
+inline void unchecked_dictionary_set_named(godot::Dictionary& target, const godot::StringName& key,
+                                           const godot::Variant& value,
+                                           const ScriptSourceLocation location = {}) {
+    if (script_function_failed())
+        return;
+    bool valid = false;
+    auto target_variant = godot::Variant(target);
+    target_variant.set_named(key, value, valid);
+    // GDScript deliberately continues after a typed compound value fails validation, but a
+    // read-only Dictionary is a fatal assignment boundary. Query read-only state only on the
+    // failed cold path so valid compound writes retain one getter and one setter lookup.
+    if (!valid && target.is_read_only()) {
+        report_script_failure("Invalid assignment on read-only Dictionary.", location);
+    }
 }
 
 template <typename PackedArray>
