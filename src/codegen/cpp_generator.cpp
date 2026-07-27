@@ -4476,7 +4476,9 @@ std::string CodeGenerator::emit_expression(const typed::Expression& expression) 
             const auto suffix = std::to_string(identity);
             const auto target_name = "_gdpp_dynamic_target_" + suffix;
             const auto method_name = "_gdpp_dynamic_method_" + suffix;
-            std::string result = "([&]() -> godot::Variant { godot::Variant " + target_name +
+            const auto capture = in_function_body_ ? "[&]" : "[]";
+            std::string result = "(" + std::string{capture} +
+                                 "() -> godot::Variant { godot::Variant " + target_name +
                                  " = gdpp::runtime::to_variant(" +
                                  (attached_behavior_dynamic_call ? "this"
                                   : callee.kind == typed::ExpressionKind::identifier
@@ -4506,85 +4508,17 @@ std::string CodeGenerator::emit_expression(const typed::Expression& expression) 
                        : emit_conversion(expression.type, {TypeKind::variant, "Variant"},
                                          invocation);
         }
-        if (!in_function_body_) {
-            std::string direct =
-                callee.resolution == typed::ResolutionKind::script_constructor
-                    ? emit_expression(*callee.operands.at(0)) + ".instantiate"
-                : callee.resolution == typed::ResolutionKind::inner_constructor
-                    ? detail_namespace_ + "::InternalClassResource<" +
-                          inner_cpp_type(callee.resolved_owner) + ">{}.instantiate"
-                : callee.resolution == typed::ResolutionKind::script_super
-                    ? native_super_owner(callee.resolved_owner) + "::" + script_native_name
-                : callee.resolution == typed::ResolutionKind::script_static_callable &&
-                        !callee.resolved_owner.empty()
-                    ? callee.resolved_owner + "::" + script_native_name
-                    : emit_expression(callee);
-            if (callee.resolution == typed::ResolutionKind::godot_method &&
-                callee.value == "get_node") {
-                direct += "<godot::Node>";
-            }
-            if (direct_vararg) {
-                const auto suffix = std::to_string(temporary_counter_++);
-                const auto provided = expression.operands.size() - 1;
-                const auto rest_count = provided > vararg_positional_count
-                                            ? provided - vararg_positional_count
-                                            : std::size_t{0};
-                std::string result = "([]()";
-                if (expression.coroutine_call || expression.type.kind != TypeKind::void_type) {
-                    result += " -> " + (expression.coroutine_call ? std::string{"godot::Variant"}
-                                                                  : cpp_type(expression.type));
-                }
-                result += " { ";
-                for (std::size_t index = 1; index < expression.operands.size(); ++index) {
-                    result += "const auto _gdpp_call_argument_" + suffix + "_" +
-                              std::to_string(index - 1) + " = " +
-                              emit_expression(*expression.operands[index]) + "; ";
-                }
-                const auto rest = "_gdpp_call_rest_" + suffix;
-                result += "godot::Array " + rest + "; " + rest + ".resize(" +
-                          std::to_string(rest_count) + "); ";
-                for (std::size_t index = 0; index < rest_count; ++index) {
-                    result += rest + "[" + std::to_string(index) +
-                              "] = gdpp::runtime::to_variant("
-                              "_gdpp_call_argument_" +
-                              suffix + "_" + std::to_string(vararg_positional_count + index) +
-                              "); ";
-                }
-                std::string call = direct + "(";
-                for (std::size_t index = 0; index < vararg_positional_count; ++index) {
-                    if (index != 0)
-                        call += ", ";
-                    call += index < provided
-                                ? emit_call_argument(index + 1, "_gdpp_call_argument_" + suffix +
-                                                                    "_" + std::to_string(index))
-                                : "gdpp::runtime::default_argument()";
-                }
-                if (vararg_positional_count != 0)
-                    call += ", ";
-                call += rest + ")";
-                result += expression.coroutine_call || expression.type.kind != TypeKind::void_type
-                              ? "return " + call
-                              : call;
-                return result + "; }())";
-            }
-            direct += '(';
-            for (std::size_t index = 1; index < expression.operands.size(); ++index) {
-                if (index > 1)
-                    direct += ", ";
-                direct += emit_call_argument(index, emit_expression(*expression.operands[index]));
-            }
-            append_required_variant_defaults(direct, expression.operands.size() - 1);
-            const auto call = direct + ')';
-            return godot_method ? emit_api_return(expression.type, call) : call;
-        }
         std::string invocation;
         std::string receiver_setup;
         std::string receiver_name;
         const auto suffix = std::to_string(temporary_counter_++);
         if (callee.resolution == typed::ResolutionKind::script_constructor) {
             const auto receiver = "_gdpp_script_resource_" + suffix;
-            receiver_setup =
-                "auto " + receiver + " = " + emit_expression(*callee.operands.at(0)) + "; ";
+            const auto resource =
+                callee.operands.at(0)->type.kind == TypeKind::script_resource
+                    ? emit_expression(*callee.operands.at(0))
+                    : detail_namespace_ + "::ScriptResource<" + callee.resolved_owner + ">{}";
+            receiver_setup = "auto " + receiver + " = " + resource + "; ";
             invocation = receiver + ".instantiate";
         } else if (callee.resolution == typed::ResolutionKind::inner_constructor) {
             invocation = detail_namespace_ + "::InternalClassResource<" +
@@ -4635,7 +4569,8 @@ std::string CodeGenerator::emit_expression(const typed::Expression& expression) 
             const auto call = invocation + "()";
             return godot_method ? emit_api_return(expression.type, call) : call;
         }
-        std::string result = "([&]()";
+        const auto capture = in_function_body_ ? "[&]" : "[]";
+        std::string result = "(" + std::string{capture} + "()";
         if (expression.coroutine_call || expression.type.kind != TypeKind::void_type)
             result += " -> " + (expression.coroutine_call ? std::string{"godot::Variant"}
                                                           : cpp_type(expression.type));

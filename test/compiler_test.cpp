@@ -3324,6 +3324,24 @@ TEST_CASE("compiler applies Material ABI across every shader-capable property fa
             std::string::npos);
 }
 
+TEST_CASE("compiler routes hidden Godot property accessors through Object properties") {
+    const gdpp::Compiler compiler;
+    const auto result = compiler.compile(
+        "hidden_property_accessors.gd",
+        "extends Node\n"
+        "func configure(option: OptionButton, control: Control) -> void:\n"
+        "    option.selected = 2\n"
+        "    control.anchors_preset = 1\n");
+
+    REQUIRE(result.success);
+    REQUIRE(result.unit.source.find("gdpp::runtime::set_named(") != std::string::npos);
+    REQUIRE(result.unit.source.find("godot::StringName(\"selected\")") != std::string::npos);
+    REQUIRE(result.unit.source.find("godot::StringName(\"anchors_preset\")") !=
+            std::string::npos);
+    REQUIRE(result.unit.source.find("->_select_int(") == std::string::npos);
+    REQUIRE(result.unit.source.find("->_set_anchors_layout_preset(") == std::string::npos);
+}
+
 TEST_CASE("compiler applies Godot-compatible numeric and builtin conversions") {
     const gdpp::Compiler compiler;
     const auto result = compiler.compile("commercial_conversions.gd",
@@ -5059,6 +5077,19 @@ TEST_CASE("Godot ClassDB maps to the collision-safe godot-cpp singleton") {
             std::string::npos);
     REQUIRE(result.unit.source.find("godot::ClassDBSingleton::get_singleton()") !=
             std::string::npos);
+}
+
+TEST_CASE("Godot calls in static initializers retain ordered native invocation") {
+    const gdpp::Compiler compiler;
+    const auto result = compiler.compile(
+        "static_native_call.gd",
+        "extends Node\n"
+        "static var enum_names := ClassDB.class_get_enum_constants(\"Node\", \"ProcessMode\")\n");
+
+    REQUIRE(result.success);
+    REQUIRE(result.unit.source.find("[]()") != std::string::npos);
+    REQUIRE(result.unit.source.find("->class_get_enum_constants(") != std::string::npos);
+    REQUIRE(result.unit.source.find("->class_get_enum_constants;") == std::string::npos);
 }
 
 TEST_CASE("Godot properties include concrete native getter result classes") {

@@ -1554,7 +1554,15 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
     Type result = unknown_type;
     const auto property_resolution = [this](const ApiResolutionKind kind,
                                             const GodotPropertyRecord& property) -> ApiResolution {
-        ApiResolution resolution{kind,
+        const auto native_accessor = [this, &property](const char* accessor) {
+            return accessor[0] == '\0' || api_.find_method(property.owner, accessor) != nullptr;
+        };
+        const auto resolved_kind =
+            kind == ApiResolutionKind::property && !property.direct &&
+                    (!native_accessor(property.getter) || !native_accessor(property.setter))
+                ? ApiResolutionKind::dynamic_property
+                : kind;
+        ApiResolution resolution{resolved_kind,
                                  property.owner,
                                  property.getter,
                                  property.setter,
