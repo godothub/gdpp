@@ -168,13 +168,13 @@ N 个生成/运行时翻译单元
 - 静态调用与动态桥接数量；
 - 平台动态库格式和压缩方式。
 
-1.8.0 插件发布资产大小门禁当前使用最近的 1.7.10 正式资产作为比较基线：
+1.8.1 插件发布资产大小门禁使用最近的 1.8.0 正式资产作为比较基线：
 
 | 资产 | 字节 |
 |---|---:|
-| `gdpp-linux.zip` | 168,875,363 |
-| `gdpp-mac.zip` | 286,198,939 |
-| `gdpp-win.zip` | 208,505,385 |
+| `gdpp-linux.zip` | 169,144,488 |
+| `gdpp-mac.zip` | 286,613,715 |
+| `gdpp-win.zip` | 208,711,578 |
 
 mac 包较大是因为同时包含 Universal 2 桌面 SDK、iOS device/Universal Simulator、Android 和
 Web；三个包都含四套 Godot SDK。每个平台/模式只保留一份 `template_release`，已删除
@@ -195,7 +195,7 @@ template_debug/editor 静态绑定。
 Windows 补充审计：
 
 ```text
-PCK_AUDIT_FILES=397
+PCK_AUDIT_FILES=391
 PCK_AUDIT_RESOURCES_LOADED=42
 PCK_AUDIT_PROJECT_LIBRARIES=1
 PCK_AUDIT_VIOLATIONS=0

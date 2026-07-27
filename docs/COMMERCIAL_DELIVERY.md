@@ -149,8 +149,8 @@ editor-only 物理文件不变，在导出回调中跳过它，并在成品同�
 
 ## 发布门禁
 
-最近完成的 1.7.10 正式发布运行包含 46 个成功作业；1.8.0 在相同发布拓扑上进一步增加
-P0 语言/runtime、custom precision 和 ABI 18 回归：
+最近完成的 1.8.0 正式发布运行包含 48 个成功作业；1.8.1 沿用同一发布拓扑，并增加最终 CFG
+operation identity 规范化、嵌套终止分支及 Windows 客户流程回归：
 
 - macOS/Linux/Windows 编译器核心和 plugin 集成；
 - Windows compiler 在进入 GDExtension ABI 前的 `LoadLibraryExW`、入口导出与卸载安全；
