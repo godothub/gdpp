@@ -28,6 +28,7 @@
 - 通过 `ScriptLanguageExtension` 向调试器报告生成代码的原始 `.gd` 路径、函数、当前源码行、精确处理遮蔽关系的词法局部变量，以及当前脚本与继承脚本成员；调试表达式使用 Attached 脚本相同的帧宿主求值。
 - 普通方法、访问器、静态函数、lambda、附着到第三方 GDExtension 基类的脚本和协程恢复点统一保留调试行为；Release 产物完全移除断点插桩，没有连接 Godot 调试器时也不创建无效调试帧。
 - Attached 原生实例返回 Godot 公开的规范 `ScriptInstance` 句柄，使调试器、引擎回调、属性访问和生命周期追踪始终指向同一个引擎对象，不再泄漏内部实现指针。
+- 非平凡的线程调试状态改为首次进入 Godot 回调时按需构造，不再把 Godot 值放入 Windows DLL 的静态 TLS 初始化表。新增 Windows 专用装载门禁，在调用 GDExtension 入口前通过 `LoadLibraryExW` 打开 compiler、验证 `gdpp_library_init` 并卸载；同机差分可在未修复产物上复现 1114，而修正后的 MSVC 产物可干净装载。
 - 在 Clang、GCC 和 MSVC 严格 warning-as-error 构建下保留 GDScript 合法的词法遮蔽，同时不关闭其他原生编译诊断。
 - macOS Universal Debug 导出可以复用经过验证、仅提供 Release 的第三方 provider fat binary；GDPP 只在导出包内的描述符字节中增加 Debug 别名，不修改客户源码目录中的描述符或动态库。
 - 生成的 breakpoint fixture 会与真实 godot-cpp 一同编译，并使用官方 Godot 4.6.2 对附着第三方 GDExtension 的 Debug、Release 项目执行导出和运行验证。
