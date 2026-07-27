@@ -3927,7 +3927,18 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                     model_.api_resolutions_.emplace(&expression, std::move(resolution));
                 } else if (object_type.kind == TypeKind::dictionary) {
                     // GDScript supports dictionary.key as syntax sugar for dictionary["key"].
-                    member_result = variant_type;
+                    // A typed Dictionary accepts that sugar only when StringName can enter its
+                    // declared key storage, and the read retains the declared value type.
+                    if (const auto descriptor = describe_container_type(object_type)) {
+                        const auto key_type =
+                            type_from_name(descriptor->arguments.at(0), expression.span);
+                        require_assignable(key_type, {TypeKind::string_name, "StringName"},
+                                           expression.span, "dictionary named key");
+                        member_result =
+                            type_from_name(descriptor->arguments.at(1), expression.span);
+                    } else {
+                        member_result = variant_type;
+                    }
                     model_.api_resolutions_.emplace(
                         &expression, ApiResolution{ApiResolutionKind::dynamic_property, "", "", "",
                                                    member_result, 0, 0, false, false});

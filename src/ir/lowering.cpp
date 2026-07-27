@@ -1103,17 +1103,20 @@ bool IrVerifier::verify_expression(const ir::Expression& expression) {
     if (expression.kind == ir::ExpressionKind::member &&
         (expression.resolution == ir::ResolutionKind::dynamic_method ||
          expression.resolution == ir::ResolutionKind::dynamic_property)) {
+        const bool dictionary_property =
+            expression.resolution == ir::ResolutionKind::dynamic_property &&
+            expression.operands.size() == 1 &&
+            expression.operands.front()->type.kind == TypeKind::dictionary;
         const bool valid_receiver =
             expression.operands.size() == 1 &&
             (expression.operands.front()->type.is_dynamic() ||
-             expression.operands.front()->type.kind == TypeKind::object ||
-             (expression.resolution == ir::ResolutionKind::dynamic_property &&
-              expression.operands.front()->type.kind == TypeKind::dictionary));
+             expression.operands.front()->type.kind == TypeKind::object || dictionary_property);
         const bool contract_typed = !expression.resolved_owner.empty();
-        if (!valid_receiver || (!expression.type.is_dynamic() && !contract_typed)) {
+        if (!valid_receiver ||
+            (!expression.type.is_dynamic() && !contract_typed && !dictionary_property)) {
             diagnostics_.error("GDS5024",
                                "dynamic member IR requires an object-compatible receiver and "
-                               "a Variant or bridge-contract result",
+                               "a Variant, typed Dictionary value, or bridge-contract result",
                                expression.span);
             valid = false;
         }
