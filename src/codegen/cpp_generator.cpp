@@ -2697,6 +2697,13 @@ std::string CodeGenerator::emit_storage_assignment(const Type& target_type, std:
     return std::move(target) + " = " + std::move(value);
 }
 
+std::string CodeGenerator::managed_storage_empty_value(const Type& type,
+                                                       const std::string_view storage) const {
+    const auto native_type = "std::remove_reference_t<decltype(" + std::string(storage) + ")>";
+    return type.kind == TypeKind::script_resource ? native_type + "::missing()"
+                                                  : native_type + "{}";
+}
+
 std::string CodeGenerator::emit_direct_builtin_member(std::string_view owner, std::string object,
                                                       std::string_view member) const {
     const auto component_index = [](std::string_view name) -> int {
@@ -7642,8 +7649,7 @@ void CodeGenerator::emit_inner_class_definition(const typed::Class& declaration,
                        << "_mutex());\n"
                        << "                "
                        << emit_storage_assignment(field.type, storage,
-                                                  "std::remove_reference_t<decltype(" + storage +
-                                                      ")>{}")
+                                                  managed_storage_empty_value(field.type, storage))
                        << ";\n"
                        << "                _gdpp_constant_" << name << "_ready() = false;\n"
                        << "            }\n";
@@ -7667,7 +7673,10 @@ void CodeGenerator::emit_inner_class_definition(const typed::Class& declaration,
         const auto type = cpp_type(field.type);
         const auto storage = "_gdpp_constant_" + name + "_storage()";
         source << type << "& " << native_name << "::_gdpp_constant_" << name
-               << "_storage() {\n    static " << type << " value{};\n    return value;\n}\n\n"
+               << "_storage() {\n    static " << type << " value"
+               << (field.type.kind == TypeKind::script_resource ? " = " + type + "::missing()"
+                                                                : "{}")
+               << ";\n    return value;\n}\n\n"
                << "bool& " << native_name << "::_gdpp_constant_" << name
                << "_ready() {\n    static bool value = false;\n    return value;\n}\n\n"
                << "std::mutex& " << native_name << "::_gdpp_constant_" << name
@@ -7906,8 +7915,7 @@ void CodeGenerator::emit_inner_class_definition(const typed::Class& declaration,
                        << "_mutex());\n"
                        << "            "
                        << emit_storage_assignment(field.type, storage,
-                                                  "std::remove_reference_t<decltype(" + storage +
-                                                      ")>{}")
+                                                  managed_storage_empty_value(field.type, storage))
                        << ";\n"
                        << "            _gdpp_constant_" << name << "_ready() = false;\n"
                        << "        }\n";
@@ -7928,8 +7936,7 @@ void CodeGenerator::emit_inner_class_definition(const typed::Class& declaration,
                    << "_mutex());\n"
                    << "        "
                    << emit_storage_assignment(field.type, storage,
-                                              "std::remove_reference_t<decltype(" + storage +
-                                                  ")>{}")
+                                              managed_storage_empty_value(field.type, storage))
                    << ";\n"
                    << "        _gdpp_constant_" << name << "_ready() = false;\n"
                    << "    }\n";
@@ -8698,8 +8705,9 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
            << "                return {};\n"
            << "            }\n"
            << "            return script;\n"
+           << "        } else {\n"
+           << "            return {};\n"
            << "        }\n"
-           << "        return {};\n"
            << "    }\n"
            << "    explicit ScriptResource(MissingTag) {}\n"
            << "public:\n"
@@ -9086,9 +9094,9 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
                        << "                std::lock_guard<std::mutex> lock(_gdpp_constant_" << name
                        << "_mutex());\n"
                        << "                "
-                       << emit_storage_assignment(variable.type, storage,
-                                                  "std::remove_reference_t<decltype(" + storage +
-                                                      ")>{}")
+                       << emit_storage_assignment(
+                              variable.type, storage,
+                              managed_storage_empty_value(variable.type, storage))
                        << ";\n"
                        << "                _gdpp_constant_" << name << "_ready() = false;\n"
                        << "            }\n";
@@ -9120,7 +9128,10 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
         const auto type = cpp_type(variable.type);
         const auto storage = "_gdpp_constant_" + name + "_storage()";
         source << type << "& " << unit.class_name << "::_gdpp_constant_" << name
-               << "_storage() {\n    static " << type << " value{};\n    return value;\n}\n\n"
+               << "_storage() {\n    static " << type << " value"
+               << (variable.type.kind == TypeKind::script_resource ? " = " + type + "::missing()"
+                                                                   : "{}")
+               << ";\n    return value;\n}\n\n"
                << "bool& " << unit.class_name << "::_gdpp_constant_" << name
                << "_ready() {\n    static bool value = false;\n    return value;\n}\n\n"
                << "std::mutex& " << unit.class_name << "::_gdpp_constant_" << name
@@ -9486,9 +9497,9 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
                        << "            std::lock_guard<std::mutex> lock(_gdpp_constant_" << name
                        << "_mutex());\n"
                        << "            "
-                       << emit_storage_assignment(variable.type, storage,
-                                                  "std::remove_reference_t<decltype(" + storage +
-                                                      ")>{}")
+                       << emit_storage_assignment(
+                              variable.type, storage,
+                              managed_storage_empty_value(variable.type, storage))
                        << ";\n"
                        << "            _gdpp_constant_" << name << "_ready() = false;\n"
                        << "        }\n";
@@ -9509,8 +9520,7 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
                    << "_mutex());\n"
                    << "        "
                    << emit_storage_assignment(variable.type, storage,
-                                              "std::remove_reference_t<decltype(" + storage +
-                                                  ")>{}")
+                                              managed_storage_empty_value(variable.type, storage))
                    << ";\n"
                    << "        _gdpp_constant_" << name << "_ready() = false;\n"
                    << "    }\n";

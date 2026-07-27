@@ -3005,6 +3005,12 @@ TEST_CASE("project compiler lowers cross-script constants enums and resource fac
         root / "consumer.gd",
         "extends Node\nclass_name SharedConsumer\n"
         "const Factory = preload(\"base.gd\")\n"
+        "static var initialization_marker: int = 1\n"
+        "class Holder:\n"
+        "    const InnerFactory = preload(\"base.gd\")\n"
+        "class TransactionalHolder:\n"
+        "    const TransactionalFactory = preload(\"base.gd\")\n"
+        "    static var marker: int = 1\n"
         "@export var state: SharedValues.State = SharedValues.State.BOOST\n"
         "func answer() -> int:\n"
         "    match state:\n"
@@ -3039,6 +3045,8 @@ TEST_CASE("project compiler lowers cross-script constants enums and resource fac
             std::string::npos);
     REQUIRE(consumer_header.find("return gdpp::runtime::to_variant(resource())") !=
             std::string::npos);
+    REQUIRE(consumer_header.find("return script;\n        } else {\n"
+                                 "            return {};\n        }") != std::string::npos);
     const auto consumer_source =
         read_text(options.output_directory / "generated/shared_consumer.gd.cpp");
     REQUIRE(consumer_source.find("SharedValues_") != std::string::npos);
@@ -3051,6 +3059,26 @@ TEST_CASE("project compiler lowers cross-script constants enums and resource fac
     REQUIRE(consumer_source.find("godot::StringName(\"" + base_class + "\")") != std::string::npos);
     REQUIRE(consumer_source.find("_gdpp_call_argument_") != std::string::npos);
     REQUIRE(consumer_source.find("IDLE:0,ACTIVE:4,BOOST:8") != std::string::npos);
+    REQUIRE(consumer_source.find("_gdpp_constant_Factory_storage())>::missing()") !=
+            std::string::npos);
+    REQUIRE(consumer_source.find("value = " + std::string{"shared_consumer_gdpp_detail::"} +
+                                 "ScriptResource<") != std::string::npos);
+    REQUIRE(consumer_source.find(">::missing();\n    return value;") != std::string::npos);
+    const auto count_occurrences = [](const std::string_view text, const std::string_view needle) {
+        std::size_t count = 0;
+        for (auto position = text.find(needle); position != std::string_view::npos;
+             position = text.find(needle, position + needle.size()))
+            ++count;
+        return count;
+    };
+    REQUIRE_EQ(count_occurrences(consumer_source, "_gdpp_constant_Factory_storage())>::missing()"),
+               std::size_t{2});
+    REQUIRE_EQ(
+        count_occurrences(consumer_source, "_gdpp_constant_InnerFactory_storage())>::missing()"),
+        std::size_t{1});
+    REQUIRE_EQ(count_occurrences(consumer_source,
+                                 "_gdpp_constant_TransactionalFactory_storage())>::missing()"),
+               std::size_t{2});
 }
 
 TEST_CASE("project compiler resolves globally named script inner types") {
