@@ -24,8 +24,8 @@
 | godot-cpp SDK | macOS 上完整重建 4.4、4.5、4.6、4.7 `template_release` |
 | 官方 Godot 4.7.1 直接构建 | 当前 compiler 生成、顺序编译并链接真实客户项目库成功 |
 | 官方 Godot 4.7.1 AOT runtime | 重新生成 Universal 2 成品后，arm64 与 Rosetta x86_64 的 FunctionState、异步虚函数、协程 lambda、await 默认参数、协程访问器、Callable/Signal、全 Variant fault 和项目脚本生命周期成功 |
-| 官方 Godot 4.7.1 fault 差分 | 清缓存 source/AOT 的 64 个调用者恢复序列、39 项值矩阵哈希、await 默认参数及协程访问器结果完全一致；覆盖 Dictionary 缺键、`null`、强类型直接/复合写入和只读写入 |
-| 官方 Godot 4.7.1 性能 | 13/13 family、启动和固定帧全部通过 10% 门禁；最终 5 轮候选中 Dictionary AOT -30.77%、String AOT -16.13%、Variant AOT -27.43% |
+| 官方 Godot 4.7.1 fault 差分 | 清缓存 source/AOT 的 65 个调用者恢复序列、39 项值矩阵哈希、await 默认参数及协程访问器结果完全一致；覆盖 Dictionary 缺键、`null`、强类型直接/复合写入、只读写入及已证明整数槽位除零 |
+| 官方 Godot 4.7.1 性能 | 13/13 family、启动和固定帧全部通过 10% 门禁；最终 5 轮候选中 Dictionary AOT -38.57%、String AOT -6.87%、Variant AOT -28.74% |
 | 官方 Godot 4.5.2 AOT runtime | Universal 2 Release 导出后连续独立运行 10 次；动态 Script、Attached provider 与真实多 peer RPC 全部干净退出 |
 | custom/double add-on | 4.7 double 从精确 API 干净构建；compiler、SDK、descriptor、静态库和 manifest 审计成功 |
 | 官方 Godot 4.6.2 Release | Universal 2 Attached provider 导出、独立运行成功 |
@@ -53,13 +53,13 @@ CLI 入口误当成 GDPP 语义；每个 oracle 仍独占进程、退出码、�
 arm64、Rosetta x86_64 均输出 `GDPP_DYNAMIC_SCRIPT_RUNTIME_OK`、`GDPP_RPC_RUNTIME_OK` 和
 `GDPP_ATTACHED_EXPORT_RUNTIME_OK`，随后三个独立 AOT oracle 再次通过。
 
-最终 fault polling、Dictionary named/keyed ABI、已证明槽位借用、Variant 边界借用和单次 RHS
-快照移动版本又清理生成物、对象和项目库，使用官方 4.7.1 Universal 2 Release 模板重建 AOT 与
-GDScript 对照成品，并执行 5 轮 AB/BA、每轮 5 个样本、每个 family 10,000 次迭代。行为 oracle
-先通过，随后 13/13 family、启动与固定帧门禁全部通过；Dictionary、String、Variant 的 AOT mean
-相对 GDScript 分别为 -30.77%、-16.13%、-27.43%。独立 provider 成品的 64 组 source/AOT fault
-序列逐字一致，覆盖缺失点号键、合法 `null`、只读直接/复合写入、非法强类型直接值，以及官方会
-保持原值并继续的非法强类型复合值。
+最终 fault polling、Dictionary named/keyed ABI、已证明槽位借用、精确整数槽位原地运算、
+Variant 边界借用和单次 RHS 快照移动版本又清理生成物、对象和项目库，使用官方 4.7.1 Universal
+2 Release 模板重建 AOT 与 GDScript 对照成品，并执行 5 轮 AB/BA、每轮 5 个样本、每个 family
+10,000 次迭代。行为 oracle 先通过，随后 13/13 family、启动与固定帧门禁全部通过；Dictionary、
+String、Variant 的 AOT mean 相对 GDScript 分别为 -38.57%、-6.87%、-28.74%。独立 provider
+成品的 65 组 source/AOT fault 序列逐字一致，覆盖缺失点号键、合法 `null`、只读直接/复合写入、
+非法强类型直接值、已证明整数槽位除零，以及官方会保持原值并继续的非法强类型复合值。
 
 ## 正式发布门禁
 
