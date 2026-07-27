@@ -53,7 +53,8 @@
   在注解、构造、成员访问与类型判断中共享项目符号身份。
 - 命名脚本 enum 维持只读 Dictionary 运行合同，导出的裸 `Variant` 保留 Inspector/存储元数据；
   编译 Script 资源保存规范 `Ref<Script>`，并在 load/preload、可空性、Script API、属性、
-  Signal、对象传递、类型判断和构造中保留同一状态。
+  Signal、对象传递、类型判断和构造中保留同一状态。生成常量缓存使用不物化的缺失态完成事务
+  回滚和扩展终止清理，不会在释放过程中重新加载 Script 或把对象保留到类注销之后。
 - 没有公开 godot-cpp getter/setter 的 ClassDB 属性走 Object 属性 ABI；字段和静态初始化器中的
   调用按接收者、参数源码顺序物化并立即派发，不生成内部访问器调用或悬空方法值。
 - 单文件与全项目入口都切换到 GDPP 自有 16 MiB 编译线程栈，调用/成员分析的大型 C++ 栈帧已

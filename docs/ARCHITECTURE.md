@@ -131,6 +131,11 @@ GDExtension 创建，生成行为通过下列层附着：
 因此 load/preload、资源缓存、可空性、Object/Resource/Script 参数、Script 属性与 Signal、
 类型判断和实例化共享同一运行时身份；只有全局类名这种纯类型引用才由 `T` 选择构造目标。
 
+生成常量存储的冷态、事务回滚态和终止态使用不执行物化的 missing sentinel。只有常量 getter
+在持有对应互斥锁时才把它替换为规范 Script 资源；回滚和终止清理只释放现有引用，不调用会重新
+加载资源的默认构造。项目库先完成这些清理，再注销 Attached Script 描述和 GDExtension 类，
+因此常量 preload 不会把 Godot 对象保留到 ClassDB/语言终止阶段之后。
+
 ### 调试器桥接
 
 Debug 生成代码在函数入口登记轻量原生帧，并在语句边界更新原始 `.gd` 行号。只有 Godot

@@ -5,6 +5,8 @@
 - Preserve named script enums as read-only Dictionary values with their declared identity and standard Dictionary behavior.
 - Preserve exported `Variant` properties with the correct Inspector, storage, and runtime metadata.
 - Preserve compiled Script resources as canonical stateful objects across `load`/`preload`, nullability, Script APIs, properties, signals, object passing, type tests, and construction.
+- Release every generated compiled-Script constant cache into a non-materializing missing state during transactional rollback and extension shutdown, preventing preload cleanup from reacquiring Script resources or retaining Godot objects past class unregistration.
+- Emit structurally exclusive attached and non-attached Script materialization branches, keeping strict MSVC warning-as-error builds free of unreachable fallthrough while preserving the same Clang and GCC behavior.
 - Route Godot properties without public godot-cpp accessors through the Object property ABI, and preserve receiver/argument evaluation order for calls in field and static initializers.
 
 ## 1.8.1
