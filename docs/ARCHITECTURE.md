@@ -218,6 +218,12 @@ frame。复合写入按“受检读取→右值→运算→写回”执行；官
 能以 `FlowSymbolId` 证明目标来自局部非强类型字面量、键初始存在、且没有重赋值、别名、逃逸、
 下标、方法访问或闭包捕获时，才把复合写入降为原地槽位更新；任何不确定路径保留完整受检 ABI。
 
+native-to-Variant 适配按值类别保留所有权：现有 Variant lvalue 直接借用，Variant rvalue 转移，
+其他原生值才构造新的 Variant。普通赋值仍先固定接收者、再只求值一次 RHS；该 RHS 是编译器拥有
+且提交后不再观察的快照，因此 String、Variant、容器等引用支持值可以移动进入受检转换和最终
+存储。动态失败边界先完成转换并轮询 fault 再提交；Dictionary 自赋值和 godot-cpp 不安全的移动
+赋值继续由 `assign_native_storage` 强制走受保护复制 ABI。
+
 本地 lambda 的必选参数数、位置参数数和变参属性编码在生成的 `LocalCallable` 类型中。仍处于
 创建调用栈内的具体适配器保存原生参数 tuple，类型完全一致时直接传给 lambda；类型不一致、缺省
 参数、结构化容器和动态值仍走严格 Variant 转换。复制/移动赋值到另一个 Callable 状态会清除
