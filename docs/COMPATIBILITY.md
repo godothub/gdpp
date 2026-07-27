@@ -41,7 +41,7 @@ Script loader 的能力缺失；GDPP 不改写客户模板，也不以开启路�
 |---|---|
 | Godot 4.7 官方合法 parser 语料 | 114 / 114 未被 lexer/parser 拒绝 |
 | Godot 4.7 官方非法 parser 语料 | 76 / 76 最终拒绝；接受、超时、崩溃均阻断 CI |
-| 固定编译器单元测试 | 544 / 544 |
+| 固定编译器单元测试 | 545 / 545 |
 | 恶意输入 | 非法 UTF-8、NUL、超深递归、超长链、诊断风暴和资源上限均失败关闭 |
 | Unicode | Unicode 17.0 XID、关键字 confusable 防护、稳定 ASCII C++ 标识符 |
 | 字面量 | 整数基数/边界、浮点非有限值、raw/三引号字符串和 Unicode 转义 |
@@ -136,6 +136,12 @@ Array、Dictionary 与 Object 仍保持共享身份。因此递归通过捕获�
 而“先捕获未赋值 Callable、再把 lambda 赋给它”不会被 GDPP 特判成非 GDScript 的隐式自引用。
 真实 Godot 运行矩阵还覆盖两个线程同时调用同一个生成 Callable、延迟 one-shot 信号以及发射期间
 断开旧回调并连接新回调。
+
+未逃逸的本地 lambda 保留生成调用点的原生参数类型，必选/位置/变参数量成为 C++ 模板合同；完全
+匹配的参数不做 Variant 往返。Callable 一旦赋值为其他值、转换为普通 `Callable`、返回或跨越
+动态边界，就自动使用 Godot 的完整有效性、参数数量和 Variant 转换路径。实例 lambda 的直达
+路径只存在于创建它的当前生成调用栈内，此时宿主是正在执行且被引擎调用锁保护的对象；静态
+lambda 无宿主。该优化不改变逃逸 Callable 或已释放宿主的失败行为。
 
 ## 注解
 
