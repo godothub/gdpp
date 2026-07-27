@@ -56,8 +56,8 @@
 
 - Variant 全家族、强类型/普通容器、PackedArray、Callable、除零、越界、错误键、空值和失效
   Object/Ref 使用统一 fault frame，并比较官方源码与 AOT 的失败位置和函数中止边界。
-- 字典点号/下标读取共享受检键合同，区分缺失/非法键与合法 `null`，并保持接收者先于键读取的
-  单次求值和故障传播。
+- 字典点号/下标读取共享受检有效性合同，以 named/keyed Variant ABI 的一次查找区分缺失/非法
+  键与合法 `null`；强类型点号键/值、直接/复合写入和只读故障均匹配官方函数中止边界。
 - 真正挂起的实例、静态、lambda、内部类、属性访问器、await 默认参数及赋值目标共享
   FunctionState、捕获和跨脚本 ABI。
 - Signal/Callable 覆盖 bind/unbind、one-shot/deferred/reference-counted、发射期变更、宿主销毁、
@@ -90,8 +90,9 @@
 - 同步 fault 检查在生成调用点内联；类型化表达式/转换/赋值的保守故障效应只保留真正可能设置
   fault state 的轮询，精确同类型 Variant 转换和未逃逸本地 Callable 进一步消除可证明的重复
   装箱/全局对象查询；官方 4.7.1 行为 oracle 与 10% 性能门禁同时通过。
-- 静态 `Dictionary.key` 使用与下标相同的 checked runtime；非 `Nil` 结果保持单次键查找，
-  `Nil` 冷路径再区分合法空值和缺失键，source/AOT fault 序列锁定当前函数中止边界。
+- 静态 `Dictionary.key` 与下标分别使用 named/keyed Variant ABI 的有效位，所有结果都保持一次
+  键查找；局部非强类型字面量槽位只有经符号身份、已知键和无逃逸证明才原地复合更新，source/AOT
+  fault 序列锁定缺键、强类型、只读及合法空值的函数中止边界。
 - `.gd`→C++/native 符号图、全部 native meta/enum/bitfield/real_t/precision ABI 和 API 范围
   进入自动审计。
 - 项目脚本 `Object.free()` 通过 Godot Variant 调度，保留 RefCounted 和锁定对象保护。
