@@ -2035,1484 +2035,1866 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
         }
         break;
     }
-    case ast::ExpressionKind::call: {
-        const auto& callee = *expression.operand(0);
-        const auto mark_coroutine_call = [&](const bool coroutine) {
-            if (!coroutine)
-                return;
-            model_.coroutine_calls_.insert(&expression);
-            if (await_operand_depth_ == 0 && discarded_expression_ != &expression) {
-                diagnostics_.error("GDS4132",
-                                   "coroutine results must be awaited or explicitly discarded",
-                                   expression.span);
-            }
-        };
-        std::vector<Type> argument_types;
-        argument_types.reserve(expression.operand_count() - 1);
-        for (std::size_t index = 1; index < expression.operand_count(); ++index)
-            argument_types.push_back(analyze_expression(*expression.operand(index)));
-        const auto argument_count = expression.operand_count() - 1;
-        const auto* language_intrinsic = callee.kind() == ast::ExpressionKind::identifier
-                                             ? IntrinsicRegistry::latest().find(callee.value())
-                                             : nullptr;
-        const auto resolve_method = [&](const GodotMethodRecord* method) {
-            if (!method)
-                return false;
-            bool exposes_native_pointer = godot_api_type_is_native_pointer(method->return_type);
-            for (std::size_t index = 0; index < method->maximum_arguments; ++index) {
-                if (const auto* argument = api_.argument(*method, index)) {
-                    exposes_native_pointer =
-                        exposes_native_pointer || godot_api_type_is_native_pointer(argument->type);
-                }
-            }
-            if (exposes_native_pointer) {
-                diagnostics_.error(
-                    "GDS4118",
-                    "Godot method '" + std::string{method->name} +
-                        "' exposes an internal native pointer ABI that GDScript cannot represent",
-                    expression.span);
-            }
-            if (argument_count < method->required_arguments ||
-                (!method->is_vararg && argument_count > method->maximum_arguments)) {
-                diagnostics_.error("GDS4011",
-                                   "method '" + std::string{method->name} + "' expects " +
-                                       std::to_string(method->required_arguments) +
-                                       (method->is_vararg ? " or more argument(s)"
-                                        : method->required_arguments == method->maximum_arguments
-                                            ? " argument(s)"
-                                            : " to " + std::to_string(method->maximum_arguments) +
-                                                  " argument(s)") +
-                                       ", got " + std::to_string(argument_count),
-                                   expression.span);
-            }
-            const auto checked_arguments =
-                std::min(argument_count, static_cast<std::size_t>(method->maximum_arguments));
-            for (std::size_t index = 0; index < checked_arguments; ++index) {
-                if (const auto* argument = api_.argument(*method, index)) {
-                    require_assignable(type_from_godot_api(argument->type), argument_types[index],
-                                       expression.operand(index + 1)->span,
-                                       "argument " + std::to_string(index + 1) + " of '" +
-                                           method->name + "'");
-                }
-            }
-            result = type_from_godot_api(method->return_type);
-            model_.api_resolutions_.emplace(
-                &callee, ApiResolution{ApiResolutionKind::method, method->owner, "", "", result,
-                                       method->required_arguments, method->maximum_arguments,
-                                       method->is_vararg, false});
-            return true;
-        };
-        const auto resolve_constructor = [&](const std::string& name) {
-            const auto* type_record = api_.find_class(name);
-            if (!type_record || !type_record->builtin)
-                return false;
-            bool has_arity = false;
-            for (std::size_t occurrence = 0;; ++occurrence) {
-                const auto* constructor = api_.find_constructor(name, argument_count, occurrence);
-                if (!constructor)
-                    break;
-                has_arity = true;
-                bool compatible = true;
-                for (std::size_t index = 0; index < argument_count; ++index) {
-                    const auto* argument = api_.argument(*constructor, index);
-                    if (!argument) {
-                        compatible = false;
-                        break;
-                    }
-                    const auto target = type_from_godot_api(argument->type);
-                    const auto& source = argument_types[index];
-                    const bool inherited = target.kind == TypeKind::object &&
-                                           source.kind == TypeKind::object &&
-                                           api_.inherits(source.name, target.name);
-                    const bool packed_color = target.kind == TypeKind::builtin &&
-                                              target.name == "Color" &&
-                                              source.kind == TypeKind::integer;
-                    const bool object_rid =
-                        target.kind == TypeKind::builtin && target.name == "RID" &&
-                        source.kind == TypeKind::object && api_.find_method(source.name, "get_rid");
-                    if (!is_assignable(target, source) && !inherited && !packed_color &&
-                        !object_rid) {
-                        compatible = false;
-                        break;
-                    }
-                }
-                if (!compatible)
-                    continue;
-                result = type_from_annotation(name);
-                model_.expression_types_[&callee] = result;
-                model_.api_resolutions_.emplace(
-                    &callee, ApiResolution{ApiResolutionKind::constructor, name, "", "", result,
-                                           static_cast<std::uint16_t>(argument_count),
-                                           static_cast<std::uint16_t>(argument_count), false, true,
-                                           static_cast<std::int64_t>(occurrence)});
-                return true;
-            }
-            diagnostics_.error(has_arity ? "GDS4013" : "GDS4014",
-                               has_arity ? "no matching constructor for '" + name + "'"
-                                         : "constructor for '" + name + "' does not accept " +
-                                               std::to_string(argument_count) + " argument(s)",
-                               expression.span);
-            return true;
-        };
-        const auto resolve_utility = [&](const GodotUtilityFunctionRecord* function) {
-            if (!function)
-                return false;
-            if (argument_count < function->required_arguments ||
-                (!function->is_vararg && argument_count > function->maximum_arguments)) {
-                diagnostics_.error(
-                    "GDS4073",
-                    "utility function '" + std::string{function->name} + "' expects " +
-                        std::to_string(function->required_arguments) +
-                        (function->is_vararg ? " or more argument(s)"
-                         : function->required_arguments == function->maximum_arguments
-                             ? " argument(s)"
-                             : " to " + std::to_string(function->maximum_arguments) +
-                                   " argument(s)") +
-                        ", got " + std::to_string(argument_count),
-                    expression.span);
-            }
-            const auto checked =
-                std::min(argument_count, static_cast<std::size_t>(function->maximum_arguments));
-            for (std::size_t index = 0; index < checked; ++index) {
-                if (const auto* argument = api_.argument(*function, index)) {
-                    require_assignable(type_from_godot_api(argument->type), argument_types[index],
-                                       expression.operand(index + 1)->span,
-                                       "argument " + std::to_string(index + 1) + " of '" +
-                                           function->name + "'");
-                }
-            }
-            result = type_from_godot_api(function->return_type);
-            model_.api_resolutions_.emplace(
-                &callee, ApiResolution{ApiResolutionKind::utility_function, function->name, "", "",
-                                       result, function->required_arguments,
-                                       function->maximum_arguments, function->is_vararg, true});
-            return true;
-        };
-        const auto resolve_intrinsic = [&](const IntrinsicFeature& feature) {
-            if (argument_count < feature.minimum_arguments ||
-                argument_count > feature.maximum_arguments) {
-                diagnostics_.error(feature.kind == IntrinsicKind::length ? "GDS4076" : "GDS4075",
-                                   std::string{feature.name} + " expects " +
-                                       (feature.minimum_arguments == feature.maximum_arguments
-                                            ? "exactly " + std::to_string(feature.minimum_arguments)
-                                            : std::to_string(feature.minimum_arguments) + " to " +
-                                                  std::to_string(feature.maximum_arguments)) +
-                                       " argument(s), got " + std::to_string(argument_count),
-                                   expression.span);
-            }
-            const auto checked =
-                std::min(argument_count, static_cast<std::size_t>(feature.maximum_arguments));
-            for (std::size_t index = 0; index < checked; ++index) {
-                const auto rule = feature.argument_rules[index];
-                const auto context = "argument " + std::to_string(index + 1) + " of '" +
-                                     std::string{feature.name} + "'";
-                switch (rule) {
-                case IntrinsicArgumentRule::any:
-                case IntrinsicArgumentRule::resource_path:
-                    break;
-                case IntrinsicArgumentRule::integer:
-                    require_assignable({TypeKind::integer, "int"}, argument_types[index],
-                                       expression.operand(index + 1)->span, context);
-                    break;
-                case IntrinsicArgumentRule::string:
-                    require_assignable({TypeKind::string, "String"}, argument_types[index],
-                                       expression.operand(index + 1)->span, context);
-                    break;
-                case IntrinsicArgumentRule::string_name:
-                    require_assignable({TypeKind::string_name, "StringName"}, argument_types[index],
-                                       expression.operand(index + 1)->span, context);
-                    break;
-                case IntrinsicArgumentRule::type_descriptor: {
-                    const auto& argument = *expression.operand(index + 1);
-                    const auto* resolution = model_.api_resolution_of(argument);
-                    const bool type_reference =
-                        resolution &&
-                        (resolution->kind == ApiResolutionKind::type_reference ||
-                         resolution->kind == ApiResolutionKind::external_type_reference ||
-                         resolution->kind == ApiResolutionKind::script_type_reference ||
-                         resolution->kind == ApiResolutionKind::inner_type_reference);
-                    if (!argument_types[index].is_dynamic() &&
-                        argument_types[index].kind != TypeKind::integer && !type_reference &&
-                        argument_types[index].kind != TypeKind::script_resource) {
+    case ast::ExpressionKind::call:
+        result = [this, &expression]() -> Type {
+            Type result = unknown_type;
+            do {
+                const auto& callee = *expression.operand(0);
+                const auto mark_coroutine_call = [&](const bool coroutine) {
+                    if (!coroutine)
+                        return;
+                    model_.coroutine_calls_.insert(&expression);
+                    if (await_operand_depth_ == 0 && discarded_expression_ != &expression) {
                         diagnostics_.error(
-                            "GDS4144",
-                            context + " must be a TYPE_* constant, engine class, or script type",
-                            argument.span);
+                            "GDS4132", "coroutine results must be awaited or explicitly discarded",
+                            expression.span);
                     }
-                    break;
-                }
-                }
-            }
-            switch (feature.result_rule) {
-            case IntrinsicResultRule::dynamic:
-                result = variant_type;
-                break;
-            case IntrinsicResultRule::boolean:
-                result = {TypeKind::boolean, "bool"};
-                break;
-            case IntrinsicResultRule::integer:
-                result = {TypeKind::integer, "int"};
-                break;
-            case IntrinsicResultRule::string:
-                result = {TypeKind::string, "String"};
-                break;
-            case IntrinsicResultRule::color:
-                result = {TypeKind::builtin, "Color"};
-                break;
-            case IntrinsicResultRule::array:
-                result = {TypeKind::array, "Array"};
-                break;
-            case IntrinsicResultRule::integer_array:
-                result = {TypeKind::array, "Array[int]"};
-                break;
-            case IntrinsicResultRule::resource:
-                result = variant_type;
-                break;
-            }
-            ApiResolution resolution{
-                ApiResolutionKind::intrinsic, std::string{feature.name}, "",    "",  result,
-                feature.minimum_arguments,    feature.maximum_arguments, false, true};
-            resolution.intrinsic = feature.kind;
-            model_.api_resolutions_.insert_or_assign(&callee, std::move(resolution));
-        };
-        if (language_intrinsic && (language_intrinsic->kind == IntrinsicKind::preload ||
-                                   language_intrinsic->kind == IntrinsicKind::load)) {
-            const bool is_preload = language_intrinsic->kind == IntrinsicKind::preload;
-            const auto constant_path = argument_count == 1
-                                           ? constant_string_expression(*expression.operand(1))
-                                           : std::optional<std::string>{};
-            if (argument_count != 1 || (is_preload && !constant_path)) {
-                diagnostics_.error("GDS4060",
-                                   callee.value() +
-                                       (is_preload
-                                            ? " requires exactly one constant project resource path"
-                                            : " requires exactly one resource path"),
-                                   expression.span);
-                break;
-            }
-            if (!constant_path) {
-                require_assignable({TypeKind::string, "String"}, argument_types.front(),
-                                   expression.operand(1)->span, "load resource path");
-                result = variant_type;
-                ApiResolution resolution{
-                    ApiResolutionKind::intrinsic, "load", "", "", result, 1, 1, false, true};
-                resolution.intrinsic = IntrinsicKind::load;
-                model_.api_resolutions_.emplace(&callee, std::move(resolution));
-                break;
-            }
-            ApiResolution intrinsic_resolution{ApiResolutionKind::intrinsic,
-                                               std::string{language_intrinsic->name},
-                                               "",
-                                               "",
-                                               variant_type,
-                                               1,
-                                               1,
-                                               false,
-                                               true};
-            intrinsic_resolution.intrinsic = language_intrinsic->kind;
-            model_.api_resolutions_.insert_or_assign(&callee, std::move(intrinsic_resolution));
-            const auto& resource_path = *constant_path;
-            const auto resolved_resource_path =
-                script_symbols_
-                    ? script_symbols_->resolve_resource_path(current_script_path_, resource_path)
-                    : std::optional<std::string>{};
-            const auto& effective_resource_path =
-                resolved_resource_path ? *resolved_resource_path : resource_path;
-            const auto* target =
-                script_symbols_ ? script_symbols_->resolve_path(current_script_path_, resource_path)
-                                : nullptr;
-            if (target) {
-                record_script_dependency(target);
-                result = {TypeKind::script_resource, target->path};
-                model_.api_resolutions_.emplace(&expression,
-                                                ApiResolution{ApiResolutionKind::script_resource,
-                                                              target->native_class_name, "", "",
-                                                              result, 1, 1, false, true});
-            } else if ((effective_resource_path.size() >= 5 &&
-                        effective_resource_path.compare(effective_resource_path.size() - 5, 5,
-                                                        ".tscn") == 0) ||
-                       (effective_resource_path.size() >= 4 &&
-                        effective_resource_path.compare(effective_resource_path.size() - 4, 4,
-                                                        ".scn") == 0)) {
-                result = {TypeKind::object, "PackedScene"};
-                auto& resolution = model_.api_resolutions_.at(&callee);
-                resolution.type = result;
-            } else if (effective_resource_path.size() >= 3 &&
-                       effective_resource_path.compare(effective_resource_path.size() - 3, 3,
-                                                       ".gd") == 0) {
-                diagnostics_.error("GDS4061",
-                                   "project script '" + resource_path + "' was not found for " +
-                                       callee.value(),
-                                   expression.span);
-            } else if (resolved_resource_path ||
-                       (resource_path.rfind("res://", 0) == 0 && resource_path.size() > 6)) {
-                result = variant_type;
-                model_.api_resolutions_.at(&callee).type = result;
-            } else {
-                diagnostics_.error("GDS4061",
-                                   "invalid project resource path '" + resource_path + "' for " +
-                                       callee.value(),
-                                   expression.span);
-            }
-            break;
-        }
-        if (callee.kind() == ast::ExpressionKind::identifier) {
-            if (callee.value() == "super") {
-                const auto* base_inner = current_inner_base_;
-                const auto* base_script = !base_inner && current_inner_class_
-                                              ? inner_script_base_of(*current_inner_class_)
-                                          : !base_inner && script_symbols_ && current_script_
-                                              ? script_symbols_->base_of(*current_script_)
-                                              : nullptr;
-                const auto* external_base =
-                    !base_inner && !base_script && script_symbols_
-                        ? current_inner_class_
-                              ? script_symbols_->external_base_of(*current_inner_class_)
-                          : current_script_ && current_script_->attached
-                              ? script_symbols_->external_base_of(*current_script_)
-                              : nullptr
+                };
+                std::vector<Type> argument_types;
+                argument_types.reserve(expression.operand_count() - 1);
+                for (std::size_t index = 1; index < expression.operand_count(); ++index)
+                    argument_types.push_back(analyze_expression(*expression.operand(index)));
+                const auto argument_count = expression.operand_count() - 1;
+                const auto* language_intrinsic =
+                    callee.kind() == ast::ExpressionKind::identifier
+                        ? IntrinsicRegistry::latest().find(callee.value())
                         : nullptr;
-                const auto* external_member =
-                    external_base ? script_symbols_->find_external_member(*external_base,
-                                                                          current_function_name_)
-                                  : nullptr;
-                if (external_member && external_member->kind == ScriptMemberKind::function) {
-                    if (!external_member->has_method_hash) {
-                        diagnostics_.error("GDS4160",
-                                           "external super method '" + external_base->name + "." +
-                                               current_function_name_ +
-                                               "' has no reflected MethodBind compatibility hash",
-                                           expression.span);
-                        result = unknown_type;
-                        break;
+                const auto resolve_method = [&](const GodotMethodRecord* method) {
+                    if (!method)
+                        return false;
+                    bool exposes_native_pointer =
+                        godot_api_type_is_native_pointer(method->return_type);
+                    for (std::size_t index = 0; index < method->maximum_arguments; ++index) {
+                        if (const auto* argument = api_.argument(*method, index)) {
+                            exposes_native_pointer =
+                                exposes_native_pointer ||
+                                godot_api_type_is_native_pointer(argument->type);
+                        }
                     }
-                    validate_script_call(*external_member, argument_types, expression,
-                                         expression.span);
-                    result = external_member->type;
-                    model_.referenced_extension_abis_.insert(external_base->provider_abi);
-                    model_.api_resolutions_[&callee] = ApiResolution{
-                        ApiResolutionKind::external_super_method,
-                        external_base->name,
-                        "",
-                        current_function_name_,
-                        result,
-                        static_cast<std::uint16_t>(external_member->required_arguments),
-                        static_cast<std::uint16_t>(external_member->parameters.size()),
-                        external_member->is_vararg,
-                        true,
-                        static_cast<std::int64_t>(external_member->method_hash)};
-                    break;
-                }
-                const auto* member =
-                    base_inner ? find_inner_member(*base_inner, current_function_name_)
-                    : base_script
-                        ? script_symbols_->find_member(*base_script, current_function_name_)
-                        : nullptr;
-                const auto* method =
-                    member ? nullptr : api_.find_method(base_type_, current_function_name_);
-                if (member && member->kind == ScriptMemberKind::function) {
-                    if (member->is_abstract) {
-                        diagnostics_.error("GDS4150",
-                                           "cannot call abstract parent method '" +
-                                               current_function_name_ +
-                                               "' because it has no implementation",
+                    if (exposes_native_pointer) {
+                        diagnostics_.error("GDS4118",
+                                           "Godot method '" + std::string{method->name} +
+                                               "' exposes an internal native pointer ABI that "
+                                               "GDScript cannot represent",
                                            expression.span);
                     }
-                    if (!instance_context_available_ && !member->is_static)
-                        diagnose_static_instance_access("method", current_function_name_,
-                                                        expression.span);
-                    validate_script_call(*member, argument_types, expression, expression.span);
-                    result = member->type;
-                    mark_coroutine_call(member->is_coroutine);
-                } else if (method) {
-                    if (!instance_context_available_ && !method->is_static)
-                        diagnose_static_instance_access("method", current_function_name_,
-                                                        expression.span);
-                    (void)resolve_method(method);
-                } else {
-                    diagnostics_.error("GDS4122",
-                                       "super call has no base implementation for '" +
-                                           current_function_name_ + "'",
-                                       expression.span);
-                    result = unknown_type;
-                }
-                model_.api_resolutions_[&callee] =
-                    ApiResolution{ApiResolutionKind::script_super,
-                                  base_inner    ? base_inner->name
-                                  : base_script ? base_script->native_class_name
-                                                : "godot::" + base_type_,
-                                  method ? method->owner : "",
-                                  current_function_name_,
-                                  result,
-                                  member   ? static_cast<std::uint16_t>(member->required_arguments)
-                                  : method ? method->required_arguments
-                                           : std::uint16_t{0},
-                                  member   ? static_cast<std::uint16_t>(member->parameters.size())
-                                  : method ? method->maximum_arguments
-                                           : std::uint16_t{0},
-                                  member ? member->is_vararg : method && method->is_vararg,
-                                  true};
-            } else if (language_intrinsic) {
-                resolve_intrinsic(*language_intrinsic);
-            } else if (resolve_utility(api_.find_utility_function(callee.value()))) {
-            } else if (const auto* symbol = resolve(callee.value())) {
-                result = symbol->type;
-                model_.referenced_symbols_.emplace(&callee, *symbol);
-                if (symbol->kind == SymbolKind::function) {
-                    if (!script_function_is_static(callee.value()))
-                        diagnose_static_instance_access("method", callee.value(), expression.span);
-                    const auto local = functions_.find(callee.value());
-                    const auto* member =
-                        current_inner_class_
-                            ? find_inner_member(*current_inner_class_, callee.value())
-                        : script_symbols_ && current_script_
-                            ? script_symbols_->find_member(*current_script_, callee.value())
-                            : nullptr;
-                    mark_coroutine_call(member ? member->is_coroutine
-                                               : local != functions_.end() &&
-                                                     contains_await_syntax(*local->second));
-                }
-                if (symbol->kind == SymbolKind::function && script_symbols_ && current_script_) {
-                    const auto* member =
-                        current_inner_class_
-                            ? find_inner_member(*current_inner_class_, callee.value())
-                            : script_symbols_->find_member(*current_script_, callee.value());
-                    if (member) {
-                        validate_script_call(*member, argument_types, expression, expression.span);
-                        result = member->type;
-                        if (current_inner_class_) {
-                            if (script_symbols_->member_is_external(*current_inner_class_,
-                                                                    callee.value())) {
-                                if (const auto* external =
-                                        script_symbols_->external_base_of(*current_inner_class_)) {
-                                    model_.referenced_extension_abis_.insert(
-                                        external->provider_abi);
-                                    model_.api_resolutions_.insert_or_assign(
-                                        &callee,
-                                        ApiResolution{
-                                            ApiResolutionKind::dynamic_method, external->name, "",
-                                            "", result,
-                                            static_cast<std::uint16_t>(member->required_arguments),
-                                            static_cast<std::uint16_t>(member->parameters.size()),
-                                            member->is_vararg, false});
-                                }
+                    if (argument_count < method->required_arguments ||
+                        (!method->is_vararg && argument_count > method->maximum_arguments)) {
+                        diagnostics_.error(
+                            "GDS4011",
+                            "method '" + std::string{method->name} + "' expects " +
+                                std::to_string(method->required_arguments) +
+                                (method->is_vararg ? " or more argument(s)"
+                                 : method->required_arguments == method->maximum_arguments
+                                     ? " argument(s)"
+                                     : " to " + std::to_string(method->maximum_arguments) +
+                                           " argument(s)") +
+                                ", got " + std::to_string(argument_count),
+                            expression.span);
+                    }
+                    const auto checked_arguments = std::min(
+                        argument_count, static_cast<std::size_t>(method->maximum_arguments));
+                    for (std::size_t index = 0; index < checked_arguments; ++index) {
+                        if (const auto* argument = api_.argument(*method, index)) {
+                            require_assignable(type_from_godot_api(argument->type),
+                                               argument_types[index],
+                                               expression.operand(index + 1)->span,
+                                               "argument " + std::to_string(index + 1) + " of '" +
+                                                   method->name + "'");
+                        }
+                    }
+                    result = type_from_godot_api(method->return_type);
+                    model_.api_resolutions_.emplace(
+                        &callee,
+                        ApiResolution{ApiResolutionKind::method, method->owner, "", "", result,
+                                      method->required_arguments, method->maximum_arguments,
+                                      method->is_vararg, false});
+                    return true;
+                };
+                const auto resolve_constructor = [&](const std::string& name) {
+                    const auto* type_record = api_.find_class(name);
+                    if (!type_record || !type_record->builtin)
+                        return false;
+                    bool has_arity = false;
+                    for (std::size_t occurrence = 0;; ++occurrence) {
+                        const auto* constructor =
+                            api_.find_constructor(name, argument_count, occurrence);
+                        if (!constructor)
+                            break;
+                        has_arity = true;
+                        bool compatible = true;
+                        for (std::size_t index = 0; index < argument_count; ++index) {
+                            const auto* argument = api_.argument(*constructor, index);
+                            if (!argument) {
+                                compatible = false;
                                 break;
                             }
-                            const bool dynamic_dispatch =
-                                !member->is_static && script_symbols_->requires_dynamic_dispatch(
-                                                          *current_inner_class_, callee.value());
-                            if (dynamic_dispatch) {
-                                mark_coroutine_call(script_symbols_->may_dispatch_coroutine(
-                                    *current_inner_class_, callee.value()));
-                                model_.api_resolutions_.insert_or_assign(
-                                    &callee, ApiResolution{ApiResolutionKind::dynamic_method, "",
-                                                           "", "", result, 0, 0, true, false});
+                            const auto target = type_from_godot_api(argument->type);
+                            const auto& source = argument_types[index];
+                            const bool inherited = target.kind == TypeKind::object &&
+                                                   source.kind == TypeKind::object &&
+                                                   api_.inherits(source.name, target.name);
+                            const bool packed_color = target.kind == TypeKind::builtin &&
+                                                      target.name == "Color" &&
+                                                      source.kind == TypeKind::integer;
+                            const bool object_rid = target.kind == TypeKind::builtin &&
+                                                    target.name == "RID" &&
+                                                    source.kind == TypeKind::object &&
+                                                    api_.find_method(source.name, "get_rid");
+                            if (!is_assignable(target, source) && !inherited && !packed_color &&
+                                !object_rid) {
+                                compatible = false;
+                                break;
+                            }
+                        }
+                        if (!compatible)
+                            continue;
+                        result = type_from_annotation(name);
+                        model_.expression_types_[&callee] = result;
+                        model_.api_resolutions_.emplace(
+                            &callee,
+                            ApiResolution{ApiResolutionKind::constructor, name, "", "", result,
+                                          static_cast<std::uint16_t>(argument_count),
+                                          static_cast<std::uint16_t>(argument_count), false, true,
+                                          static_cast<std::int64_t>(occurrence)});
+                        return true;
+                    }
+                    diagnostics_.error(has_arity ? "GDS4013" : "GDS4014",
+                                       has_arity
+                                           ? "no matching constructor for '" + name + "'"
+                                           : "constructor for '" + name + "' does not accept " +
+                                                 std::to_string(argument_count) + " argument(s)",
+                                       expression.span);
+                    return true;
+                };
+                const auto resolve_utility = [&](const GodotUtilityFunctionRecord* function) {
+                    if (!function)
+                        return false;
+                    if (argument_count < function->required_arguments ||
+                        (!function->is_vararg && argument_count > function->maximum_arguments)) {
+                        diagnostics_.error(
+                            "GDS4073",
+                            "utility function '" + std::string{function->name} + "' expects " +
+                                std::to_string(function->required_arguments) +
+                                (function->is_vararg ? " or more argument(s)"
+                                 : function->required_arguments == function->maximum_arguments
+                                     ? " argument(s)"
+                                     : " to " + std::to_string(function->maximum_arguments) +
+                                           " argument(s)") +
+                                ", got " + std::to_string(argument_count),
+                            expression.span);
+                    }
+                    const auto checked = std::min(
+                        argument_count, static_cast<std::size_t>(function->maximum_arguments));
+                    for (std::size_t index = 0; index < checked; ++index) {
+                        if (const auto* argument = api_.argument(*function, index)) {
+                            require_assignable(type_from_godot_api(argument->type),
+                                               argument_types[index],
+                                               expression.operand(index + 1)->span,
+                                               "argument " + std::to_string(index + 1) + " of '" +
+                                                   function->name + "'");
+                        }
+                    }
+                    result = type_from_godot_api(function->return_type);
+                    model_.api_resolutions_.emplace(
+                        &callee,
+                        ApiResolution{ApiResolutionKind::utility_function, function->name, "", "",
+                                      result, function->required_arguments,
+                                      function->maximum_arguments, function->is_vararg, true});
+                    return true;
+                };
+                const auto resolve_intrinsic = [&](const IntrinsicFeature& feature) {
+                    if (argument_count < feature.minimum_arguments ||
+                        argument_count > feature.maximum_arguments) {
+                        diagnostics_.error(
+                            feature.kind == IntrinsicKind::length ? "GDS4076" : "GDS4075",
+                            std::string{feature.name} + " expects " +
+                                (feature.minimum_arguments == feature.maximum_arguments
+                                     ? "exactly " + std::to_string(feature.minimum_arguments)
+                                     : std::to_string(feature.minimum_arguments) + " to " +
+                                           std::to_string(feature.maximum_arguments)) +
+                                " argument(s), got " + std::to_string(argument_count),
+                            expression.span);
+                    }
+                    const auto checked = std::min(
+                        argument_count, static_cast<std::size_t>(feature.maximum_arguments));
+                    for (std::size_t index = 0; index < checked; ++index) {
+                        const auto rule = feature.argument_rules[index];
+                        const auto context = "argument " + std::to_string(index + 1) + " of '" +
+                                             std::string{feature.name} + "'";
+                        switch (rule) {
+                        case IntrinsicArgumentRule::any:
+                        case IntrinsicArgumentRule::resource_path:
+                            break;
+                        case IntrinsicArgumentRule::integer:
+                            require_assignable({TypeKind::integer, "int"}, argument_types[index],
+                                               expression.operand(index + 1)->span, context);
+                            break;
+                        case IntrinsicArgumentRule::string:
+                            require_assignable({TypeKind::string, "String"}, argument_types[index],
+                                               expression.operand(index + 1)->span, context);
+                            break;
+                        case IntrinsicArgumentRule::string_name:
+                            require_assignable({TypeKind::string_name, "StringName"},
+                                               argument_types[index],
+                                               expression.operand(index + 1)->span, context);
+                            break;
+                        case IntrinsicArgumentRule::type_descriptor: {
+                            const auto& argument = *expression.operand(index + 1);
+                            const auto* resolution = model_.api_resolution_of(argument);
+                            const bool type_reference =
+                                resolution &&
+                                (resolution->kind == ApiResolutionKind::type_reference ||
+                                 resolution->kind == ApiResolutionKind::external_type_reference ||
+                                 resolution->kind == ApiResolutionKind::script_type_reference ||
+                                 resolution->kind == ApiResolutionKind::inner_type_reference);
+                            if (!argument_types[index].is_dynamic() &&
+                                argument_types[index].kind != TypeKind::integer &&
+                                !type_reference &&
+                                argument_types[index].kind != TypeKind::script_resource) {
+                                diagnostics_.error(
+                                    "GDS4144",
+                                    context +
+                                        " must be a TYPE_* constant, engine class, or script type",
+                                    argument.span);
                             }
                             break;
                         }
-                        const bool external_member =
-                            script_symbols_->member_is_external(*current_script_, callee.value());
-                        if (external_member) {
-                            if (const auto* external =
-                                    script_symbols_->external_base_of(*current_script_)) {
-                                model_.referenced_extension_abis_.insert(external->provider_abi);
-                                model_.api_resolutions_.insert_or_assign(
-                                    &callee,
-                                    ApiResolution{
-                                        ApiResolutionKind::dynamic_method, external->name, "", "",
-                                        result,
-                                        static_cast<std::uint16_t>(member->required_arguments),
-                                        static_cast<std::uint16_t>(member->parameters.size()),
-                                        member->is_vararg, false});
+                        }
+                    }
+                    switch (feature.result_rule) {
+                    case IntrinsicResultRule::dynamic:
+                        result = variant_type;
+                        break;
+                    case IntrinsicResultRule::boolean:
+                        result = {TypeKind::boolean, "bool"};
+                        break;
+                    case IntrinsicResultRule::integer:
+                        result = {TypeKind::integer, "int"};
+                        break;
+                    case IntrinsicResultRule::string:
+                        result = {TypeKind::string, "String"};
+                        break;
+                    case IntrinsicResultRule::color:
+                        result = {TypeKind::builtin, "Color"};
+                        break;
+                    case IntrinsicResultRule::array:
+                        result = {TypeKind::array, "Array"};
+                        break;
+                    case IntrinsicResultRule::integer_array:
+                        result = {TypeKind::array, "Array[int]"};
+                        break;
+                    case IntrinsicResultRule::resource:
+                        result = variant_type;
+                        break;
+                    }
+                    ApiResolution resolution{
+                        ApiResolutionKind::intrinsic, std::string{feature.name}, "",    "",  result,
+                        feature.minimum_arguments,    feature.maximum_arguments, false, true};
+                    resolution.intrinsic = feature.kind;
+                    model_.api_resolutions_.insert_or_assign(&callee, std::move(resolution));
+                };
+                if (language_intrinsic && (language_intrinsic->kind == IntrinsicKind::preload ||
+                                           language_intrinsic->kind == IntrinsicKind::load)) {
+                    const bool is_preload = language_intrinsic->kind == IntrinsicKind::preload;
+                    const auto constant_path =
+                        argument_count == 1 ? constant_string_expression(*expression.operand(1))
+                                            : std::optional<std::string>{};
+                    if (argument_count != 1 || (is_preload && !constant_path)) {
+                        diagnostics_.error(
+                            "GDS4060",
+                            callee.value() +
+                                (is_preload ? " requires exactly one constant project resource path"
+                                            : " requires exactly one resource path"),
+                            expression.span);
+                        break;
+                    }
+                    if (!constant_path) {
+                        require_assignable({TypeKind::string, "String"}, argument_types.front(),
+                                           expression.operand(1)->span, "load resource path");
+                        result = variant_type;
+                        ApiResolution resolution{ApiResolutionKind::intrinsic,
+                                                 "load",
+                                                 "",
+                                                 "",
+                                                 result,
+                                                 1,
+                                                 1,
+                                                 false,
+                                                 true};
+                        resolution.intrinsic = IntrinsicKind::load;
+                        model_.api_resolutions_.emplace(&callee, std::move(resolution));
+                        break;
+                    }
+                    ApiResolution intrinsic_resolution{ApiResolutionKind::intrinsic,
+                                                       std::string{language_intrinsic->name},
+                                                       "",
+                                                       "",
+                                                       variant_type,
+                                                       1,
+                                                       1,
+                                                       false,
+                                                       true};
+                    intrinsic_resolution.intrinsic = language_intrinsic->kind;
+                    model_.api_resolutions_.insert_or_assign(&callee,
+                                                             std::move(intrinsic_resolution));
+                    const auto& resource_path = *constant_path;
+                    const auto resolved_resource_path =
+                        script_symbols_ ? script_symbols_->resolve_resource_path(
+                                              current_script_path_, resource_path)
+                                        : std::optional<std::string>{};
+                    const auto& effective_resource_path =
+                        resolved_resource_path ? *resolved_resource_path : resource_path;
+                    const auto* target =
+                        script_symbols_
+                            ? script_symbols_->resolve_path(current_script_path_, resource_path)
+                            : nullptr;
+                    if (target) {
+                        record_script_dependency(target);
+                        result = {TypeKind::script_resource, target->path};
+                        model_.api_resolutions_.emplace(
+                            &expression, ApiResolution{ApiResolutionKind::script_resource,
+                                                       target->native_class_name, "", "", result, 1,
+                                                       1, false, true});
+                    } else if ((effective_resource_path.size() >= 5 &&
+                                effective_resource_path.compare(effective_resource_path.size() - 5,
+                                                                5, ".tscn") == 0) ||
+                               (effective_resource_path.size() >= 4 &&
+                                effective_resource_path.compare(effective_resource_path.size() - 4,
+                                                                4, ".scn") == 0)) {
+                        result = {TypeKind::object, "PackedScene"};
+                        auto& resolution = model_.api_resolutions_.at(&callee);
+                        resolution.type = result;
+                    } else if (effective_resource_path.size() >= 3 &&
+                               effective_resource_path.compare(effective_resource_path.size() - 3,
+                                                               3, ".gd") == 0) {
+                        diagnostics_.error("GDS4061",
+                                           "project script '" + resource_path +
+                                               "' was not found for " + callee.value(),
+                                           expression.span);
+                    } else if (resolved_resource_path || (resource_path.rfind("res://", 0) == 0 &&
+                                                          resource_path.size() > 6)) {
+                        result = variant_type;
+                        model_.api_resolutions_.at(&callee).type = result;
+                    } else {
+                        diagnostics_.error("GDS4061",
+                                           "invalid project resource path '" + resource_path +
+                                               "' for " + callee.value(),
+                                           expression.span);
+                    }
+                    break;
+                }
+                if (callee.kind() == ast::ExpressionKind::identifier) {
+                    if (callee.value() == "super") {
+                        const auto* base_inner = current_inner_base_;
+                        const auto* base_script =
+                            !base_inner && current_inner_class_
+                                ? inner_script_base_of(*current_inner_class_)
+                            : !base_inner && script_symbols_ && current_script_
+                                ? script_symbols_->base_of(*current_script_)
+                                : nullptr;
+                        const auto* external_base =
+                            !base_inner && !base_script && script_symbols_
+                                ? current_inner_class_
+                                      ? script_symbols_->external_base_of(*current_inner_class_)
+                                  : current_script_ && current_script_->attached
+                                      ? script_symbols_->external_base_of(*current_script_)
+                                      : nullptr
+                                : nullptr;
+                        const auto* external_member =
+                            external_base ? script_symbols_->find_external_member(
+                                                *external_base, current_function_name_)
+                                          : nullptr;
+                        if (external_member &&
+                            external_member->kind == ScriptMemberKind::function) {
+                            if (!external_member->has_method_hash) {
+                                diagnostics_.error(
+                                    "GDS4160",
+                                    "external super method '" + external_base->name + "." +
+                                        current_function_name_ +
+                                        "' has no reflected MethodBind compatibility hash",
+                                    expression.span);
+                                result = unknown_type;
+                                break;
                             }
-                        } else if (!member->is_static && script_symbols_->requires_dynamic_dispatch(
-                                                             *current_script_, callee.value())) {
-                            mark_coroutine_call(script_symbols_->may_dispatch_coroutine(
-                                *current_script_, callee.value()));
+                            validate_script_call(*external_member, argument_types, expression,
+                                                 expression.span);
+                            result = external_member->type;
+                            model_.referenced_extension_abis_.insert(external_base->provider_abi);
+                            model_.api_resolutions_[&callee] = ApiResolution{
+                                ApiResolutionKind::external_super_method,
+                                external_base->name,
+                                "",
+                                current_function_name_,
+                                result,
+                                static_cast<std::uint16_t>(external_member->required_arguments),
+                                static_cast<std::uint16_t>(external_member->parameters.size()),
+                                external_member->is_vararg,
+                                true,
+                                static_cast<std::int64_t>(external_member->method_hash)};
+                            break;
+                        }
+                        const auto* member =
+                            base_inner ? find_inner_member(*base_inner, current_function_name_)
+                            : base_script
+                                ? script_symbols_->find_member(*base_script, current_function_name_)
+                                : nullptr;
+                        const auto* method =
+                            member ? nullptr : api_.find_method(base_type_, current_function_name_);
+                        if (member && member->kind == ScriptMemberKind::function) {
+                            if (member->is_abstract) {
+                                diagnostics_.error("GDS4150",
+                                                   "cannot call abstract parent method '" +
+                                                       current_function_name_ +
+                                                       "' because it has no implementation",
+                                                   expression.span);
+                            }
+                            if (!instance_context_available_ && !member->is_static)
+                                diagnose_static_instance_access("method", current_function_name_,
+                                                                expression.span);
+                            validate_script_call(*member, argument_types, expression,
+                                                 expression.span);
+                            result = member->type;
+                            mark_coroutine_call(member->is_coroutine);
+                        } else if (method) {
+                            if (!instance_context_available_ && !method->is_static)
+                                diagnose_static_instance_access("method", current_function_name_,
+                                                                expression.span);
+                            (void)resolve_method(method);
+                        } else {
+                            diagnostics_.error("GDS4122",
+                                               "super call has no base implementation for '" +
+                                                   current_function_name_ + "'",
+                                               expression.span);
+                            result = unknown_type;
+                        }
+                        model_.api_resolutions_[&callee] = ApiResolution{
+                            ApiResolutionKind::script_super,
+                            base_inner    ? base_inner->name
+                            : base_script ? base_script->native_class_name
+                                          : "godot::" + base_type_,
+                            method ? method->owner : "",
+                            current_function_name_,
+                            result,
+                            member   ? static_cast<std::uint16_t>(member->required_arguments)
+                            : method ? method->required_arguments
+                                     : std::uint16_t{0},
+                            member   ? static_cast<std::uint16_t>(member->parameters.size())
+                            : method ? method->maximum_arguments
+                                     : std::uint16_t{0},
+                            member ? member->is_vararg : method && method->is_vararg,
+                            true};
+                    } else if (language_intrinsic) {
+                        resolve_intrinsic(*language_intrinsic);
+                    } else if (resolve_utility(api_.find_utility_function(callee.value()))) {
+                    } else if (const auto* symbol = resolve(callee.value())) {
+                        result = symbol->type;
+                        model_.referenced_symbols_.emplace(&callee, *symbol);
+                        if (symbol->kind == SymbolKind::function) {
+                            if (!script_function_is_static(callee.value()))
+                                diagnose_static_instance_access("method", callee.value(),
+                                                                expression.span);
+                            const auto local = functions_.find(callee.value());
+                            const auto* member =
+                                current_inner_class_
+                                    ? find_inner_member(*current_inner_class_, callee.value())
+                                : script_symbols_ && current_script_
+                                    ? script_symbols_->find_member(*current_script_, callee.value())
+                                    : nullptr;
+                            mark_coroutine_call(member ? member->is_coroutine
+                                                       : local != functions_.end() &&
+                                                             contains_await_syntax(*local->second));
+                        }
+                        if (symbol->kind == SymbolKind::function && script_symbols_ &&
+                            current_script_) {
+                            const auto* member =
+                                current_inner_class_
+                                    ? find_inner_member(*current_inner_class_, callee.value())
+                                    : script_symbols_->find_member(*current_script_,
+                                                                   callee.value());
+                            if (member) {
+                                validate_script_call(*member, argument_types, expression,
+                                                     expression.span);
+                                result = member->type;
+                                if (current_inner_class_) {
+                                    if (script_symbols_->member_is_external(*current_inner_class_,
+                                                                            callee.value())) {
+                                        if (const auto* external =
+                                                script_symbols_->external_base_of(
+                                                    *current_inner_class_)) {
+                                            model_.referenced_extension_abis_.insert(
+                                                external->provider_abi);
+                                            model_.api_resolutions_.insert_or_assign(
+                                                &callee,
+                                                ApiResolution{ApiResolutionKind::dynamic_method,
+                                                              external->name, "", "", result,
+                                                              static_cast<std::uint16_t>(
+                                                                  member->required_arguments),
+                                                              static_cast<std::uint16_t>(
+                                                                  member->parameters.size()),
+                                                              member->is_vararg, false});
+                                        }
+                                        break;
+                                    }
+                                    const bool dynamic_dispatch =
+                                        !member->is_static &&
+                                        script_symbols_->requires_dynamic_dispatch(
+                                            *current_inner_class_, callee.value());
+                                    if (dynamic_dispatch) {
+                                        mark_coroutine_call(script_symbols_->may_dispatch_coroutine(
+                                            *current_inner_class_, callee.value()));
+                                        model_.api_resolutions_.insert_or_assign(
+                                            &callee,
+                                            ApiResolution{ApiResolutionKind::dynamic_method, "", "",
+                                                          "", result, 0, 0, true, false});
+                                    }
+                                    break;
+                                }
+                                const bool external_member = script_symbols_->member_is_external(
+                                    *current_script_, callee.value());
+                                if (external_member) {
+                                    if (const auto* external =
+                                            script_symbols_->external_base_of(*current_script_)) {
+                                        model_.referenced_extension_abis_.insert(
+                                            external->provider_abi);
+                                        model_.api_resolutions_.insert_or_assign(
+                                            &callee,
+                                            ApiResolution{ApiResolutionKind::dynamic_method,
+                                                          external->name, "", "", result,
+                                                          static_cast<std::uint16_t>(
+                                                              member->required_arguments),
+                                                          static_cast<std::uint16_t>(
+                                                              member->parameters.size()),
+                                                          member->is_vararg, false});
+                                    }
+                                } else if (!member->is_static &&
+                                           script_symbols_->requires_dynamic_dispatch(
+                                               *current_script_, callee.value())) {
+                                    mark_coroutine_call(script_symbols_->may_dispatch_coroutine(
+                                        *current_script_, callee.value()));
+                                    model_.api_resolutions_.emplace(
+                                        &callee,
+                                        ApiResolution{ApiResolutionKind::dynamic_method, "", "", "",
+                                                      result, 0, 0, true, false});
+                                }
+                            }
+                        } else if (symbol->kind == SymbolKind::function) {
+                            if (const auto local = functions_.find(callee.value());
+                                local != functions_.end()) {
+                                validate_local_call(*local->second, argument_types, expression,
+                                                    expression.span);
+                            }
+                        } else if (symbol->kind != SymbolKind::function) {
+                            diagnostics_.error("GDS4070",
+                                               "value '" + callee.value() +
+                                                   "' is not directly callable; Callable values "
+                                                   "must use .call(...)",
+                                               expression.span);
+                            result = unknown_type;
+                        }
+                    } else if (const auto* method = api_.find_method(base_type_, callee.value())) {
+                        if (!method->is_static)
+                            diagnose_static_instance_access("method", callee.value(),
+                                                            expression.span);
+                        (void)resolve_method(method);
+                    } else {
+                        if (!resolve_constructor(callee.value())) {
+                            result = analyze_expression(callee);
+                            if (result.kind == TypeKind::unknown) {
+                                diagnostics_.error("GDS4071",
+                                                   "unknown function or callable '" +
+                                                       callee.value() + "'",
+                                                   expression.span);
+                            }
+                        }
+                    }
+                } else if (callee.kind() == ast::ExpressionKind::member) {
+                    const auto object_type = analyze_expression(*callee.operand(0));
+                    const auto* object_resolution = model_.api_resolution_of(*callee.operand(0));
+                    if (callee.value() == "emit" && object_resolution &&
+                        object_resolution->kind == ApiResolutionKind::script_signal) {
+                        if (const auto* signal = api_.find_signal(object_resolution->owner,
+                                                                  callee.operand(0)->value())) {
+                            if (argument_count != signal->argument_count) {
+                                diagnostics_.error(
+                                    "GDS4164",
+                                    "signal '" + std::string{signal->name} + "' expects " +
+                                        std::to_string(signal->argument_count) +
+                                        " argument(s), got " + std::to_string(argument_count),
+                                    expression.span);
+                            }
+                            const auto checked = std::min(
+                                argument_count, static_cast<std::size_t>(signal->argument_count));
+                            for (std::size_t index = 0; index < checked; ++index) {
+                                if (const auto* argument = api_.argument(*signal, index)) {
+                                    require_assignable(type_from_godot_api(argument->type),
+                                                       argument_types[index],
+                                                       expression.operand(index + 1)->span,
+                                                       "argument " + std::to_string(index + 1) +
+                                                           " of signal '" + signal->name + "'");
+                                }
+                            }
+                        }
+                    }
+                    const bool called_on_super =
+                        object_resolution &&
+                        object_resolution->kind == ApiResolutionKind::script_super;
+                    const auto* project_super =
+                        called_on_super && script_symbols_ && current_script_
+                            ? script_symbols_->base_of(*current_script_)
+                            : nullptr;
+                    const auto* external_super =
+                        called_on_super && !project_super && script_symbols_
+                            ? current_inner_class_
+                                  ? script_symbols_->external_base_of(*current_inner_class_)
+                              : current_script_ && current_script_->attached
+                                  ? script_symbols_->external_base_of(*current_script_)
+                                  : nullptr
+                            : nullptr;
+                    if (external_super) {
+                        const auto* member =
+                            script_symbols_->find_external_member(*external_super, callee.value());
+                        if (member && member->kind == ScriptMemberKind::function) {
+                            if (!member->has_method_hash) {
+                                diagnostics_.error(
+                                    "GDS4160",
+                                    "external super method '" + external_super->name + "." +
+                                        callee.value() +
+                                        "' has no reflected MethodBind compatibility hash",
+                                    expression.span);
+                                result = unknown_type;
+                                break;
+                            }
+                            validate_script_call(*member, argument_types, expression,
+                                                 expression.span);
+                            result = member->type;
+                            model_.referenced_extension_abis_.insert(external_super->provider_abi);
+                            model_.api_resolutions_.emplace(
+                                &callee, ApiResolution{
+                                             ApiResolutionKind::external_super_method,
+                                             external_super->name, "", callee.value(), result,
+                                             static_cast<std::uint16_t>(member->required_arguments),
+                                             static_cast<std::uint16_t>(member->parameters.size()),
+                                             member->is_vararg, true,
+                                             static_cast<std::int64_t>(member->method_hash)});
+                            break;
+                        }
+                    }
+                    if (object_resolution &&
+                        object_resolution->kind == ApiResolutionKind::external_type_reference) {
+                        if (callee.value() == "new") {
+                            if (argument_count != 0) {
+                                diagnostics_.error("GDS4063",
+                                                   "runtime GDExtension new() does not accept "
+                                                   "constructor arguments",
+                                                   expression.span);
+                            }
+                            result = object_type;
+                            model_.api_resolutions_.emplace(
+                                &callee, ApiResolution{ApiResolutionKind::external_constructor,
+                                                       object_resolution->owner, "", "", result, 0,
+                                                       0, false, true});
+                            break;
+                        }
+                        const auto* external_owner =
+                            script_symbols_
+                                ? script_symbols_->find_external(object_resolution->owner)
+                                : nullptr;
+                        const auto* member = external_owner ? script_symbols_->find_external_member(
+                                                                  *external_owner, callee.value())
+                                                            : nullptr;
+                        if (!member || member->kind != ScriptMemberKind::function ||
+                            !member->is_static) {
+                            diagnostics_.error("GDS4056",
+                                               "external type '" + object_resolution->owner +
+                                                   "' has no declared static method '" +
+                                                   callee.value() + "'",
+                                               expression.span);
+                            result = unknown_type;
+                            break;
+                        }
+                        validate_script_call(*member, argument_types, expression, expression.span);
+                        result = member->type;
+                        model_.api_resolutions_.emplace(
+                            &callee,
+                            ApiResolution{ApiResolutionKind::external_static_method,
+                                          object_resolution->owner, "", "", result,
+                                          static_cast<std::uint16_t>(member->required_arguments),
+                                          static_cast<std::uint16_t>(member->parameters.size()),
+                                          member->is_vararg, true});
+                        break;
+                    }
+                    if (object_type.kind == TypeKind::script_resource) {
+                        const auto* target = script_symbols_
+                                                 ? script_symbols_->find_path(object_type.name)
+                                                 : nullptr;
+                        if (!target) {
+                            diagnostics_.error("GDS4062", "script resource metadata is unavailable",
+                                               expression.span);
+                            break;
+                        }
+                        record_script_dependency(target);
+                        if (callee.value() != "new") {
+                            const auto* member =
+                                script_symbols_->find_member(*target, callee.value());
+                            if (!member || member->kind != ScriptMemberKind::function) {
+                                diagnostics_.error("GDS4055",
+                                                   "script resource '" + target->script_name +
+                                                       "' has no method '" + callee.value() + "'",
+                                                   expression.span);
+                                result = unknown_type;
+                                break;
+                            }
+                            if (!member->is_static) {
+                                diagnostics_.error("GDS4056",
+                                                   "instance method '" + callee.value() +
+                                                       "' cannot be called on a script resource",
+                                                   expression.span);
+                                result = unknown_type;
+                                break;
+                            }
+                            validate_script_call(*member, argument_types, expression,
+                                                 expression.span);
+                            result = member->type;
+                            mark_coroutine_call(member->is_coroutine);
+                            model_.api_resolutions_.emplace(
+                                &callee, ApiResolution{
+                                             ApiResolutionKind::script_static_callable,
+                                             target->native_class_name, "", "", result,
+                                             static_cast<std::uint16_t>(member->required_arguments),
+                                             static_cast<std::uint16_t>(member->parameters.size()),
+                                             member->is_vararg, true});
+                            break;
+                        }
+                        if (target->is_abstract) {
+                            diagnostics_.error("GDS4111",
+                                               "cannot instantiate abstract script class '" +
+                                                   target->script_name + "'",
+                                               expression.span);
+                        }
+                        if (const auto* initializer =
+                                script_symbols_->find_member(*target, "_init")) {
+                            validate_script_call(*initializer, argument_types, expression,
+                                                 expression.span);
+                        } else if (argument_count != 0) {
+                            diagnostics_.error(
+                                "GDS4063",
+                                "script new() received arguments but target has no _init",
+                                expression.span);
+                        }
+                        result = {TypeKind::object, target->script_name};
+                        model_.api_resolutions_.emplace(
+                            &callee, ApiResolution{ApiResolutionKind::script_constructor,
+                                                   target->native_class_name, "", "", result, 0, 0,
+                                                   false, true});
+                        break;
+                    }
+                    if (const auto* inner = object_type.kind == TypeKind::object
+                                                ? find_inner_class(object_type.name)
+                                                : nullptr) {
+                        const bool called_on_type =
+                            object_resolution &&
+                            object_resolution->kind == ApiResolutionKind::inner_type_reference;
+                        if (called_on_type && callee.value() == "new") {
+                            if (inner->is_abstract) {
+                                diagnostics_.error("GDS4111",
+                                                   "cannot instantiate abstract internal class '" +
+                                                       inner->name + "'",
+                                                   expression.span);
+                            }
+                            const auto initializer =
+                                std::find_if(inner->members.begin(), inner->members.end(),
+                                             [](const auto& member) {
+                                                 return member.kind == ScriptMemberKind::function &&
+                                                        member.name == "_init";
+                                             });
+                            if (initializer != inner->members.end()) {
+                                validate_script_call(*initializer, argument_types, expression,
+                                                     expression.span);
+                            } else if (argument_count != 0) {
+                                diagnostics_.error("GDS4063",
+                                                   "internal class new() received arguments but "
+                                                   "target has no _init",
+                                                   expression.span);
+                            }
+                            const auto& inner_identity = inner->native_class_name.empty()
+                                                             ? inner->name
+                                                             : inner->native_class_name;
+                            result = {TypeKind::object, inner_identity};
+                            model_.api_resolutions_.emplace(
+                                &callee,
+                                ApiResolution{ApiResolutionKind::inner_constructor, inner_identity,
+                                              "", "", result, 0, 0, false, true});
+                            break;
+                        }
+                        const auto* member = find_inner_member(*inner, callee.value());
+                        if (!member && !called_on_type) {
+                            result = variant_type;
+                            model_.api_resolutions_.emplace(
+                                &callee, ApiResolution{ApiResolutionKind::dynamic_method, "", "",
+                                                       "", result, 0, 0, true, false});
+                            break;
+                        }
+                        if (!member || member->kind != ScriptMemberKind::function) {
+                            diagnostics_.error("GDS4055",
+                                               "internal class '" + inner->name +
+                                                   "' has no method '" + callee.value() + "'",
+                                               expression.span);
+                            result = unknown_type;
+                            break;
+                        }
+                        if (called_on_type && !member->is_static) {
+                            diagnostics_.error("GDS4056",
+                                               "instance method '" + callee.value() +
+                                                   "' cannot be called on an internal class type",
+                                               expression.span);
+                        } else if (!called_on_type && !called_on_super && member->is_static &&
+                                   !warning_is_ignored(active_warning_ignores_,
+                                                       "static_called_on_instance")) {
+                            diagnostics_.warning("GDS4130",
+                                                 "static internal class method '" + callee.value() +
+                                                     "' is called on an instance",
+                                                 expression.span);
+                        }
+                        if (called_on_super && !member->is_static)
+                            diagnose_static_instance_access("method", callee.value(),
+                                                            expression.span);
+                        if (called_on_super && member->is_abstract) {
+                            diagnostics_.error("GDS4150",
+                                               "cannot call abstract parent method '" +
+                                                   callee.value() +
+                                                   "' because it has no implementation",
+                                               expression.span);
+                        }
+                        validate_script_call(*member, argument_types, expression, expression.span);
+                        result = member->type;
+                        const bool dynamic_dispatch =
+                            !called_on_type && !called_on_super && !member->is_static &&
+                            script_symbols_ &&
+                            script_symbols_->requires_dynamic_dispatch(*inner, callee.value());
+                        mark_coroutine_call(
+                            member->is_coroutine ||
+                            (dynamic_dispatch &&
+                             script_symbols_->may_dispatch_coroutine(*inner, callee.value())));
+                        if (called_on_super) {
+                            model_.api_resolutions_.insert_or_assign(
+                                &callee, ApiResolution{
+                                             ApiResolutionKind::script_super,
+                                             object_resolution->owner, "", callee.value(), result,
+                                             static_cast<std::uint16_t>(member->required_arguments),
+                                             static_cast<std::uint16_t>(member->parameters.size()),
+                                             member->is_vararg, true});
+                        } else if (dynamic_dispatch) {
+                            model_.api_resolutions_.insert_or_assign(
+                                &callee, ApiResolution{ApiResolutionKind::dynamic_method, "", "",
+                                                       "", result, 0, 0, true, false});
+                        }
+                        break;
+                    }
+                    const ScriptClassSymbol* script_owner = nullptr;
+                    if (script_symbols_ && object_type.kind == TypeKind::object) {
+                        script_owner =
+                            called_on_super && current_script_
+                                ? script_symbols_->base_of(*current_script_)
+                            : object_resolution && (object_resolution->kind ==
+                                                        ApiResolutionKind::script_autoload ||
+                                                    object_resolution->kind ==
+                                                        ApiResolutionKind::script_type_reference)
+                                ? script_symbols_->find_native_class(object_resolution->owner)
+                                : find_script_class(object_type.name);
+                        if (!script_owner &&
+                            callee.operand(0)->kind() == ast::ExpressionKind::identifier &&
+                            callee.operand(0)->value() == "self") {
+                            script_owner = current_script_;
+                        }
+                    }
+                    if (script_owner) {
+                        record_script_dependency(script_owner);
+                        const bool called_on_type =
+                            object_resolution &&
+                            object_resolution->kind == ApiResolutionKind::script_type_reference;
+                        if (called_on_type && callee.value() == "new") {
+                            if (script_owner->is_abstract) {
+                                diagnostics_.error("GDS4111",
+                                                   "cannot instantiate abstract script class '" +
+                                                       script_owner->script_name + "'",
+                                                   expression.span);
+                            }
+                            if (const auto* initializer =
+                                    script_symbols_->find_member(*script_owner, "_init")) {
+                                validate_script_call(*initializer, argument_types, expression,
+                                                     expression.span);
+                            } else if (argument_count != 0) {
+                                diagnostics_.error(
+                                    "GDS4063",
+                                    "script new() received arguments but target has no _init",
+                                    expression.span);
+                            }
+                            result = {TypeKind::object, script_owner->script_name};
+                            model_.api_resolutions_.emplace(
+                                &callee, ApiResolution{ApiResolutionKind::script_constructor,
+                                                       script_owner->native_class_name, "", "",
+                                                       result, 0, 0, false, true});
+                            break;
+                        }
+                        if (!called_on_type && callee.value() == "free") {
+                            if (argument_count != 0)
+                                diagnostics_.error("GDS4064", "free() does not accept arguments",
+                                                   expression.span);
+                            result = void_type;
+                            model_.api_resolutions_.emplace(
+                                &callee, ApiResolution{ApiResolutionKind::script_free, "", "", "",
+                                                       result, 0, 0, false, true});
+                            break;
+                        }
+                        const auto* member =
+                            script_symbols_->find_member(*script_owner, callee.value());
+                        if (!member) {
+                            if (!called_on_type) {
+                                const auto* method =
+                                    api_.find_method(script_owner->godot_base_type, callee.value());
+                                if (resolve_method(method)) {
+                                    if (script_owner->attached && !called_on_super) {
+                                        model_.api_resolutions_.insert_or_assign(
+                                            &callee,
+                                            ApiResolution{ApiResolutionKind::dynamic_method,
+                                                          script_owner->godot_base_type, "", "",
+                                                          result,
+                                                          method ? method->required_arguments
+                                                                 : std::uint16_t{0},
+                                                          method ? method->maximum_arguments
+                                                                 : std::uint16_t{0},
+                                                          method && method->is_vararg, false});
+                                    }
+                                    if (called_on_super && method && !method->is_static)
+                                        diagnose_static_instance_access("method", callee.value(),
+                                                                        expression.span);
+                                    if (called_on_super) {
+                                        model_.api_resolutions_[&callee] = ApiResolution{
+                                            ApiResolutionKind::script_super,
+                                            object_resolution->owner,
+                                            method ? method->owner : "",
+                                            "",
+                                            result,
+                                            method ? method->required_arguments : std::uint16_t{0},
+                                            method ? method->maximum_arguments : std::uint16_t{0},
+                                            method && method->is_vararg,
+                                            true};
+                                    }
+                                    break;
+                                }
+                                if (GodotApi::for_version(latest_godot_version)
+                                        .find_method(script_owner->godot_base_type,
+                                                     callee.value())) {
+                                    diagnostics_.error("GDS4016",
+                                                       "method '" + callee.value() +
+                                                           "' is not available on Godot type '" +
+                                                           script_owner->godot_base_type +
+                                                           "' for the selected target version",
+                                                       expression.span);
+                                    break;
+                                }
+                            }
+                            if (!called_on_type && !called_on_super) {
+                                result = variant_type;
+                                model_.api_resolutions_.emplace(
+                                    &callee, ApiResolution{ApiResolutionKind::dynamic_method, "",
+                                                           "", "", result, 0, 0, true, false});
+                                break;
+                            }
+                            diagnostics_.error("GDS4055",
+                                               "script type '" + script_owner->script_name +
+                                                   "' has no member '" + callee.value() + "'",
+                                               expression.span);
+                            break;
+                        }
+                        if (called_on_type && !member->is_static) {
+                            diagnostics_.error("GDS4056",
+                                               "instance member '" + callee.value() +
+                                                   "' cannot be called on a script type",
+                                               expression.span);
+                        } else if (!called_on_type && !called_on_super && member->is_static &&
+                                   !warning_is_ignored(active_warning_ignores_,
+                                                       "static_called_on_instance")) {
+                            diagnostics_.warning("GDS4130",
+                                                 "static method '" + callee.value() +
+                                                     "' is called on a script instance",
+                                                 expression.span);
+                        }
+                        if (called_on_super && !member->is_static)
+                            diagnose_static_instance_access("method", callee.value(),
+                                                            expression.span);
+                        if (called_on_super && member->is_abstract) {
+                            diagnostics_.error("GDS4150",
+                                               "cannot call abstract parent method '" +
+                                                   callee.value() +
+                                                   "' because it has no implementation",
+                                               expression.span);
+                        }
+                        validate_script_call(*member, argument_types, expression, expression.span);
+                        result = member->type;
+                        const bool explicit_self_receiver =
+                            callee.operand(0)->kind() == ast::ExpressionKind::identifier &&
+                            callee.operand(0)->value() == "self";
+                        const bool dynamic_dispatch =
+                            !called_on_type && !called_on_super &&
+                            ((script_owner->attached && !explicit_self_receiver) ||
+                             script_symbols_->requires_dynamic_dispatch(*script_owner,
+                                                                        callee.value()));
+                        mark_coroutine_call(
+                            member->is_coroutine ||
+                            (dynamic_dispatch && script_symbols_->may_dispatch_coroutine(
+                                                     *script_owner, callee.value())));
+                        if (called_on_super) {
+                            model_.api_resolutions_.emplace(
+                                &callee, ApiResolution{
+                                             ApiResolutionKind::script_super,
+                                             object_resolution->owner, "", "", result,
+                                             static_cast<std::uint16_t>(member->required_arguments),
+                                             static_cast<std::uint16_t>(member->parameters.size()),
+                                             member->is_vararg, true});
+                        } else if (dynamic_dispatch) {
                             model_.api_resolutions_.emplace(
                                 &callee, ApiResolution{ApiResolutionKind::dynamic_method, "", "",
                                                        "", result, 0, 0, true, false});
                         }
-                    }
-                } else if (symbol->kind == SymbolKind::function) {
-                    if (const auto local = functions_.find(callee.value());
-                        local != functions_.end()) {
-                        validate_local_call(*local->second, argument_types, expression,
-                                            expression.span);
-                    }
-                } else if (symbol->kind != SymbolKind::function) {
-                    diagnostics_.error(
-                        "GDS4070",
-                        "value '" + callee.value() +
-                            "' is not directly callable; Callable values must use .call(...)",
-                        expression.span);
-                    result = unknown_type;
-                }
-            } else if (const auto* method = api_.find_method(base_type_, callee.value())) {
-                if (!method->is_static)
-                    diagnose_static_instance_access("method", callee.value(), expression.span);
-                (void)resolve_method(method);
-            } else {
-                if (!resolve_constructor(callee.value())) {
-                    result = analyze_expression(callee);
-                    if (result.kind == TypeKind::unknown) {
-                        diagnostics_.error("GDS4071",
-                                           "unknown function or callable '" + callee.value() + "'",
-                                           expression.span);
-                    }
-                }
-            }
-        } else if (callee.kind() == ast::ExpressionKind::member) {
-            const auto object_type = analyze_expression(*callee.operand(0));
-            const auto* object_resolution = model_.api_resolution_of(*callee.operand(0));
-            if (callee.value() == "emit" && object_resolution &&
-                object_resolution->kind == ApiResolutionKind::script_signal) {
-                if (const auto* signal =
-                        api_.find_signal(object_resolution->owner, callee.operand(0)->value())) {
-                    if (argument_count != signal->argument_count) {
-                        diagnostics_.error("GDS4164",
-                                           "signal '" + std::string{signal->name} + "' expects " +
-                                               std::to_string(signal->argument_count) +
-                                               " argument(s), got " +
-                                               std::to_string(argument_count),
-                                           expression.span);
-                    }
-                    const auto checked =
-                        std::min(argument_count, static_cast<std::size_t>(signal->argument_count));
-                    for (std::size_t index = 0; index < checked; ++index) {
-                        if (const auto* argument = api_.argument(*signal, index)) {
-                            require_assignable(type_from_godot_api(argument->type),
-                                               argument_types[index],
-                                               expression.operand(index + 1)->span,
-                                               "argument " + std::to_string(index + 1) +
-                                                   " of signal '" + signal->name + "'");
-                        }
-                    }
-                }
-            }
-            const bool called_on_super =
-                object_resolution && object_resolution->kind == ApiResolutionKind::script_super;
-            const auto* project_super = called_on_super && script_symbols_ && current_script_
-                                            ? script_symbols_->base_of(*current_script_)
-                                            : nullptr;
-            const auto* external_super =
-                called_on_super && !project_super && script_symbols_
-                    ? current_inner_class_
-                          ? script_symbols_->external_base_of(*current_inner_class_)
-                      : current_script_ && current_script_->attached
-                          ? script_symbols_->external_base_of(*current_script_)
-                          : nullptr
-                    : nullptr;
-            if (external_super) {
-                const auto* member =
-                    script_symbols_->find_external_member(*external_super, callee.value());
-                if (member && member->kind == ScriptMemberKind::function) {
-                    if (!member->has_method_hash) {
-                        diagnostics_.error("GDS4160",
-                                           "external super method '" + external_super->name + "." +
-                                               callee.value() +
-                                               "' has no reflected MethodBind compatibility hash",
-                                           expression.span);
-                        result = unknown_type;
                         break;
                     }
-                    validate_script_call(*member, argument_types, expression, expression.span);
-                    result = member->type;
-                    model_.referenced_extension_abis_.insert(external_super->provider_abi);
-                    model_.api_resolutions_.emplace(
-                        &callee,
-                        ApiResolution{ApiResolutionKind::external_super_method,
-                                      external_super->name, "", callee.value(), result,
-                                      static_cast<std::uint16_t>(member->required_arguments),
-                                      static_cast<std::uint16_t>(member->parameters.size()),
-                                      member->is_vararg, true,
-                                      static_cast<std::int64_t>(member->method_hash)});
-                    break;
-                }
-            }
-            if (object_resolution &&
-                object_resolution->kind == ApiResolutionKind::external_type_reference) {
-                if (callee.value() == "new") {
-                    if (argument_count != 0) {
-                        diagnostics_.error(
-                            "GDS4063",
-                            "runtime GDExtension new() does not accept constructor arguments",
-                            expression.span);
-                    }
-                    result = object_type;
-                    model_.api_resolutions_.emplace(
-                        &callee,
-                        ApiResolution{ApiResolutionKind::external_constructor,
-                                      object_resolution->owner, "", "", result, 0, 0, false, true});
-                    break;
-                }
-                const auto* external_owner =
-                    script_symbols_ ? script_symbols_->find_external(object_resolution->owner)
-                                    : nullptr;
-                const auto* member =
-                    external_owner
-                        ? script_symbols_->find_external_member(*external_owner, callee.value())
-                        : nullptr;
-                if (!member || member->kind != ScriptMemberKind::function || !member->is_static) {
-                    diagnostics_.error("GDS4056",
-                                       "external type '" + object_resolution->owner +
-                                           "' has no declared static method '" + callee.value() +
-                                           "'",
-                                       expression.span);
-                    result = unknown_type;
-                    break;
-                }
-                validate_script_call(*member, argument_types, expression, expression.span);
-                result = member->type;
-                model_.api_resolutions_.emplace(
-                    &callee, ApiResolution{ApiResolutionKind::external_static_method,
-                                           object_resolution->owner, "", "", result,
-                                           static_cast<std::uint16_t>(member->required_arguments),
-                                           static_cast<std::uint16_t>(member->parameters.size()),
-                                           member->is_vararg, true});
-                break;
-            }
-            if (object_type.kind == TypeKind::script_resource) {
-                const auto* target =
-                    script_symbols_ ? script_symbols_->find_path(object_type.name) : nullptr;
-                if (!target) {
-                    diagnostics_.error("GDS4062", "script resource metadata is unavailable",
-                                       expression.span);
-                    break;
-                }
-                record_script_dependency(target);
-                if (callee.value() != "new") {
-                    const auto* member = script_symbols_->find_member(*target, callee.value());
-                    if (!member || member->kind != ScriptMemberKind::function) {
-                        diagnostics_.error("GDS4055",
-                                           "script resource '" + target->script_name +
-                                               "' has no method '" + callee.value() + "'",
-                                           expression.span);
-                        result = unknown_type;
-                        break;
-                    }
-                    if (!member->is_static) {
-                        diagnostics_.error("GDS4056",
-                                           "instance method '" + callee.value() +
-                                               "' cannot be called on a script resource",
-                                           expression.span);
-                        result = unknown_type;
-                        break;
-                    }
-                    validate_script_call(*member, argument_types, expression, expression.span);
-                    result = member->type;
-                    mark_coroutine_call(member->is_coroutine);
-                    model_.api_resolutions_.emplace(
-                        &callee,
-                        ApiResolution{ApiResolutionKind::script_static_callable,
-                                      target->native_class_name, "", "", result,
-                                      static_cast<std::uint16_t>(member->required_arguments),
-                                      static_cast<std::uint16_t>(member->parameters.size()),
-                                      member->is_vararg, true});
-                    break;
-                }
-                if (target->is_abstract) {
-                    diagnostics_.error("GDS4111",
-                                       "cannot instantiate abstract script class '" +
-                                           target->script_name + "'",
-                                       expression.span);
-                }
-                if (const auto* initializer = script_symbols_->find_member(*target, "_init")) {
-                    validate_script_call(*initializer, argument_types, expression, expression.span);
-                } else if (argument_count != 0) {
-                    diagnostics_.error("GDS4063",
-                                       "script new() received arguments but target has no _init",
-                                       expression.span);
-                }
-                result = {TypeKind::object, target->script_name};
-                model_.api_resolutions_.emplace(&callee,
-                                                ApiResolution{ApiResolutionKind::script_constructor,
-                                                              target->native_class_name, "", "",
-                                                              result, 0, 0, false, true});
-                break;
-            }
-            if (const auto* inner = object_type.kind == TypeKind::object
-                                        ? find_inner_class(object_type.name)
-                                        : nullptr) {
-                const bool called_on_type =
-                    object_resolution &&
-                    object_resolution->kind == ApiResolutionKind::inner_type_reference;
-                if (called_on_type && callee.value() == "new") {
-                    if (inner->is_abstract) {
-                        diagnostics_.error("GDS4111",
-                                           "cannot instantiate abstract internal class '" +
-                                               inner->name + "'",
-                                           expression.span);
-                    }
-                    const auto initializer = std::find_if(
-                        inner->members.begin(), inner->members.end(), [](const auto& member) {
-                            return member.kind == ScriptMemberKind::function &&
-                                   member.name == "_init";
-                        });
-                    if (initializer != inner->members.end()) {
-                        validate_script_call(*initializer, argument_types, expression,
-                                             expression.span);
-                    } else if (argument_count != 0) {
-                        diagnostics_.error(
-                            "GDS4063",
-                            "internal class new() received arguments but target has no _init",
-                            expression.span);
-                    }
-                    const auto& inner_identity =
-                        inner->native_class_name.empty() ? inner->name : inner->native_class_name;
-                    result = {TypeKind::object, inner_identity};
-                    model_.api_resolutions_.emplace(
-                        &callee, ApiResolution{ApiResolutionKind::inner_constructor, inner_identity,
-                                               "", "", result, 0, 0, false, true});
-                    break;
-                }
-                const auto* member = find_inner_member(*inner, callee.value());
-                if (!member && !called_on_type) {
-                    result = variant_type;
-                    model_.api_resolutions_.emplace(
-                        &callee, ApiResolution{ApiResolutionKind::dynamic_method, "", "", "",
-                                               result, 0, 0, true, false});
-                    break;
-                }
-                if (!member || member->kind != ScriptMemberKind::function) {
-                    diagnostics_.error("GDS4055",
-                                       "internal class '" + inner->name + "' has no method '" +
-                                           callee.value() + "'",
-                                       expression.span);
-                    result = unknown_type;
-                    break;
-                }
-                if (called_on_type && !member->is_static) {
-                    diagnostics_.error("GDS4056",
-                                       "instance method '" + callee.value() +
-                                           "' cannot be called on an internal class type",
-                                       expression.span);
-                } else if (!called_on_type && !called_on_super && member->is_static &&
-                           !warning_is_ignored(active_warning_ignores_,
-                                               "static_called_on_instance")) {
-                    diagnostics_.warning("GDS4130",
-                                         "static internal class method '" + callee.value() +
-                                             "' is called on an instance",
-                                         expression.span);
-                }
-                if (called_on_super && !member->is_static)
-                    diagnose_static_instance_access("method", callee.value(), expression.span);
-                if (called_on_super && member->is_abstract) {
-                    diagnostics_.error("GDS4150",
-                                       "cannot call abstract parent method '" + callee.value() +
-                                           "' because it has no implementation",
-                                       expression.span);
-                }
-                validate_script_call(*member, argument_types, expression, expression.span);
-                result = member->type;
-                const bool dynamic_dispatch =
-                    !called_on_type && !called_on_super && !member->is_static && script_symbols_ &&
-                    script_symbols_->requires_dynamic_dispatch(*inner, callee.value());
-                mark_coroutine_call(member->is_coroutine ||
-                                    (dynamic_dispatch && script_symbols_->may_dispatch_coroutine(
-                                                             *inner, callee.value())));
-                if (called_on_super) {
-                    model_.api_resolutions_.insert_or_assign(
-                        &callee,
-                        ApiResolution{ApiResolutionKind::script_super, object_resolution->owner, "",
-                                      callee.value(), result,
-                                      static_cast<std::uint16_t>(member->required_arguments),
-                                      static_cast<std::uint16_t>(member->parameters.size()),
-                                      member->is_vararg, true});
-                } else if (dynamic_dispatch) {
-                    model_.api_resolutions_.insert_or_assign(
-                        &callee, ApiResolution{ApiResolutionKind::dynamic_method, "", "", "",
-                                               result, 0, 0, true, false});
-                }
-                break;
-            }
-            const ScriptClassSymbol* script_owner = nullptr;
-            if (script_symbols_ && object_type.kind == TypeKind::object) {
-                script_owner =
-                    called_on_super && current_script_ ? script_symbols_->base_of(*current_script_)
-                    : object_resolution &&
-                            (object_resolution->kind == ApiResolutionKind::script_autoload ||
-                             object_resolution->kind == ApiResolutionKind::script_type_reference)
-                        ? script_symbols_->find_native_class(object_resolution->owner)
-                        : find_script_class(object_type.name);
-                if (!script_owner && callee.operand(0)->kind() == ast::ExpressionKind::identifier &&
-                    callee.operand(0)->value() == "self") {
-                    script_owner = current_script_;
-                }
-            }
-            if (script_owner) {
-                record_script_dependency(script_owner);
-                const bool called_on_type =
-                    object_resolution &&
-                    object_resolution->kind == ApiResolutionKind::script_type_reference;
-                if (called_on_type && callee.value() == "new") {
-                    if (script_owner->is_abstract) {
-                        diagnostics_.error("GDS4111",
-                                           "cannot instantiate abstract script class '" +
-                                               script_owner->script_name + "'",
-                                           expression.span);
-                    }
-                    if (const auto* initializer =
-                            script_symbols_->find_member(*script_owner, "_init")) {
-                        validate_script_call(*initializer, argument_types, expression,
-                                             expression.span);
-                    } else if (argument_count != 0) {
-                        diagnostics_.error(
-                            "GDS4063", "script new() received arguments but target has no _init",
-                            expression.span);
-                    }
-                    result = {TypeKind::object, script_owner->script_name};
-                    model_.api_resolutions_.emplace(
-                        &callee, ApiResolution{ApiResolutionKind::script_constructor,
-                                               script_owner->native_class_name, "", "", result, 0,
-                                               0, false, true});
-                    break;
-                }
-                if (!called_on_type && callee.value() == "free") {
-                    if (argument_count != 0)
-                        diagnostics_.error("GDS4064", "free() does not accept arguments",
-                                           expression.span);
-                    result = void_type;
-                    model_.api_resolutions_.emplace(
-                        &callee, ApiResolution{ApiResolutionKind::script_free, "", "", "", result,
-                                               0, 0, false, true});
-                    break;
-                }
-                const auto* member = script_symbols_->find_member(*script_owner, callee.value());
-                if (!member) {
-                    if (!called_on_type) {
-                        const auto* method =
-                            api_.find_method(script_owner->godot_base_type, callee.value());
-                        if (resolve_method(method)) {
-                            if (script_owner->attached && !called_on_super) {
-                                model_.api_resolutions_.insert_or_assign(
+                    const auto* external_owner =
+                        object_type.kind == TypeKind::object && script_symbols_
+                            ? script_symbols_->find_external(object_type.name)
+                            : nullptr;
+                    if (external_owner) {
+                        if (const auto* member = script_symbols_->find_external_member(
+                                *external_owner, callee.value())) {
+                            if (member->kind != ScriptMemberKind::function) {
+                                diagnostics_.error("GDS4070",
+                                                   "external member '" + callee.value() +
+                                                       "' is not callable",
+                                                   expression.span);
+                                result = unknown_type;
+                            } else if (member->is_static) {
+                                diagnostics_.error("GDS4057",
+                                                   "static external method '" + callee.value() +
+                                                       "' must be called on its type",
+                                                   expression.span);
+                                result = unknown_type;
+                            } else {
+                                validate_script_call(*member, argument_types, expression,
+                                                     expression.span);
+                                result = member->type;
+                                model_.api_resolutions_.emplace(
                                     &callee,
                                     ApiResolution{
-                                        ApiResolutionKind::dynamic_method,
-                                        script_owner->godot_base_type, "", "", result,
-                                        method ? method->required_arguments : std::uint16_t{0},
-                                        method ? method->maximum_arguments : std::uint16_t{0},
-                                        method && method->is_vararg, false});
-                            }
-                            if (called_on_super && method && !method->is_static)
-                                diagnose_static_instance_access("method", callee.value(),
-                                                                expression.span);
-                            if (called_on_super) {
-                                model_.api_resolutions_[&callee] = ApiResolution{
-                                    ApiResolutionKind::script_super,
-                                    object_resolution->owner,
-                                    method ? method->owner : "",
-                                    "",
-                                    result,
-                                    method ? method->required_arguments : std::uint16_t{0},
-                                    method ? method->maximum_arguments : std::uint16_t{0},
-                                    method && method->is_vararg,
-                                    true};
+                                        ApiResolutionKind::dynamic_method, external_owner->name, "",
+                                        "", result,
+                                        static_cast<std::uint16_t>(member->required_arguments),
+                                        static_cast<std::uint16_t>(member->parameters.size()),
+                                        member->is_vararg, false});
                             }
                             break;
                         }
-                        if (GodotApi::for_version(latest_godot_version)
-                                .find_method(script_owner->godot_base_type, callee.value())) {
-                            diagnostics_.error("GDS4016",
-                                               "method '" + callee.value() +
-                                                   "' is not available on Godot type '" +
-                                                   script_owner->godot_base_type +
-                                                   "' for the selected target version",
+                        if (external_owner->members_complete) {
+                            diagnostics_.error("GDS4112",
+                                               "external type '" + external_owner->name +
+                                                   "' has no declared method '" + callee.value() +
+                                                   "'",
                                                expression.span);
+                            result = unknown_type;
                             break;
                         }
                     }
-                    if (!called_on_type && !called_on_super) {
+                    if (object_type.is_dynamic()) {
                         result = variant_type;
                         model_.api_resolutions_.emplace(
                             &callee, ApiResolution{ApiResolutionKind::dynamic_method, "", "", "",
                                                    result, 0, 0, true, false});
                         break;
                     }
-                    diagnostics_.error("GDS4055",
-                                       "script type '" + script_owner->script_name +
-                                           "' has no member '" + callee.value() + "'",
-                                       expression.span);
-                    break;
+                    std::string owner;
+                    if (object_type.kind == TypeKind::array)
+                        owner = "Array";
+                    else if (object_type.kind == TypeKind::dictionary)
+                        owner = "Dictionary";
+                    else if (object_type.kind == TypeKind::string)
+                        owner = "String";
+                    else if (object_type.kind == TypeKind::string_name)
+                        owner = "StringName";
+                    else if (object_type.kind == TypeKind::builtin ||
+                             object_type.kind == TypeKind::object)
+                        owner = object_type.name;
+                    const auto* method = api_.find_method(owner, callee.value());
+                    const auto* latest_method = GodotApi::for_version(latest_godot_version)
+                                                    .find_method(owner, callee.value());
+                    const bool called_on_type =
+                        object_resolution &&
+                        object_resolution->kind == ApiResolutionKind::type_reference;
+                    if (called_on_type && object_type.kind == TypeKind::object &&
+                        callee.value() == "new") {
+                        if (argument_count != 0) {
+                            diagnostics_.error("GDS4077",
+                                               "Godot object new() does not accept arguments",
+                                               expression.span);
+                        }
+                        result = object_type;
+                        model_.api_resolutions_.emplace(
+                            &callee, ApiResolution{ApiResolutionKind::constructor, owner, "", "",
+                                                   result, 0, 0, false, true});
+                        break;
+                    }
+                    const bool dynamically_typed_object =
+                        object_type.kind == TypeKind::object &&
+                        (api_.find_class(object_type.name) ||
+                         (script_symbols_ && script_symbols_->find_external(object_type.name)));
+                    if (!method && !latest_method && dynamically_typed_object && !called_on_type) {
+                        result = variant_type;
+                        model_.api_resolutions_.emplace(
+                            &callee, ApiResolution{ApiResolutionKind::dynamic_method, "", "", "",
+                                                   result, 0, 0, true, false});
+                        break;
+                    }
+                    if (!method && !owner.empty() && !object_type.is_dynamic()) {
+                        diagnostics_.error("GDS4016",
+                                           "method '" + callee.value() +
+                                               "' is not available on Godot type '" + owner +
+                                               "' for the selected target version",
+                                           expression.span);
+                    }
+                    if (method && called_on_type && !method->is_static) {
+                        diagnostics_.error("GDS4015",
+                                           "instance method '" + callee.value() +
+                                               "' cannot be called on a Godot type",
+                                           expression.span);
+                    }
+                    if (method && !called_on_type && !called_on_super && method->is_static &&
+                        !warning_is_ignored(active_warning_ignores_, "static_called_on_instance")) {
+                        diagnostics_.warning("GDS4130",
+                                             "static method '" + callee.value() +
+                                                 "' is called on a Godot value instance",
+                                             expression.span);
+                    }
+                    if (method && called_on_super && !method->is_static)
+                        diagnose_static_instance_access("method", callee.value(), expression.span);
+                    if (method && !called_on_type)
+                        validate_container_method_call(object_type, callee.value(), argument_types,
+                                                       expression);
+                    if (resolve_method(method)) {
+                        if (called_on_super) {
+                            model_.api_resolutions_[&callee] = ApiResolution{
+                                ApiResolutionKind::script_super,
+                                object_resolution->owner,
+                                method ? method->owner : "",
+                                "",
+                                result,
+                                method ? method->required_arguments : std::uint16_t{0},
+                                method ? method->maximum_arguments : std::uint16_t{0},
+                                method && method->is_vararg,
+                                true};
+                        }
+                    } else {
+                        result = analyze_expression(callee);
+                    }
+                } else {
+                    result = analyze_expression(callee);
+                    diagnostics_.error(
+                        "GDS4072",
+                        "expression is not directly callable; invoke a Callable through .call(...)",
+                        expression.span);
+                    result = unknown_type;
                 }
-                if (called_on_type && !member->is_static) {
-                    diagnostics_.error("GDS4056",
-                                       "instance member '" + callee.value() +
-                                           "' cannot be called on a script type",
-                                       expression.span);
-                } else if (!called_on_type && !called_on_super && member->is_static &&
-                           !warning_is_ignored(active_warning_ignores_,
-                                               "static_called_on_instance")) {
-                    diagnostics_.warning("GDS4130",
-                                         "static method '" + callee.value() +
-                                             "' is called on a script instance",
-                                         expression.span);
-                }
-                if (called_on_super && !member->is_static)
-                    diagnose_static_instance_access("method", callee.value(), expression.span);
-                if (called_on_super && member->is_abstract) {
-                    diagnostics_.error("GDS4150",
-                                       "cannot call abstract parent method '" + callee.value() +
-                                           "' because it has no implementation",
-                                       expression.span);
-                }
-                validate_script_call(*member, argument_types, expression, expression.span);
-                result = member->type;
-                const bool explicit_self_receiver =
-                    callee.operand(0)->kind() == ast::ExpressionKind::identifier &&
-                    callee.operand(0)->value() == "self";
-                const bool dynamic_dispatch =
-                    !called_on_type && !called_on_super &&
-                    ((script_owner->attached && !explicit_self_receiver) ||
-                     script_symbols_->requires_dynamic_dispatch(*script_owner, callee.value()));
-                mark_coroutine_call(member->is_coroutine ||
-                                    (dynamic_dispatch && script_symbols_->may_dispatch_coroutine(
-                                                             *script_owner, callee.value())));
-                if (called_on_super) {
-                    model_.api_resolutions_.emplace(
-                        &callee,
-                        ApiResolution{ApiResolutionKind::script_super, object_resolution->owner, "",
-                                      "", result,
-                                      static_cast<std::uint16_t>(member->required_arguments),
-                                      static_cast<std::uint16_t>(member->parameters.size()),
-                                      member->is_vararg, true});
-                } else if (dynamic_dispatch) {
-                    model_.api_resolutions_.emplace(
-                        &callee, ApiResolution{ApiResolutionKind::dynamic_method, "", "", "",
-                                               result, 0, 0, true, false});
-                }
-                break;
-            }
-            const auto* external_owner = object_type.kind == TypeKind::object && script_symbols_
-                                             ? script_symbols_->find_external(object_type.name)
-                                             : nullptr;
-            if (external_owner) {
-                if (const auto* member =
-                        script_symbols_->find_external_member(*external_owner, callee.value())) {
-                    if (member->kind != ScriptMemberKind::function) {
-                        diagnostics_.error(
-                            "GDS4070", "external member '" + callee.value() + "' is not callable",
-                            expression.span);
-                        result = unknown_type;
-                    } else if (member->is_static) {
-                        diagnostics_.error("GDS4057",
-                                           "static external method '" + callee.value() +
-                                               "' must be called on its type",
+            } while (false);
+            return result;
+        }();
+        break;
+    case ast::ExpressionKind::member:
+        result = [this, &expression, &property_resolution]() -> Type {
+            Type result = unknown_type;
+            do {
+                const auto object_type = analyze_expression(*expression.operand(0));
+                if (object_type.kind == TypeKind::enumeration) {
+                    if (const auto* global =
+                            api_.find_global_enum_value(object_type.name, expression.value())) {
+                        result = object_type;
+                        model_.api_resolutions_.emplace(
+                            &expression, ApiResolution{ApiResolutionKind::global_enum_value,
+                                                       std::to_string(global->value), "", "",
+                                                       result, 0, 0, false, true});
+                        break;
+                    }
+                    if (const auto separator = object_type.name.rfind('.');
+                        separator != std::string::npos) {
+                        const auto owner = object_type.name.substr(0, separator);
+                        const auto enum_name = object_type.name.substr(separator + 1);
+                        if (const auto* class_value =
+                                api_.find_class_enum_value(owner, enum_name, expression.value())) {
+                            result = object_type;
+                            model_.api_resolutions_.emplace(
+                                &expression, ApiResolution{ApiResolutionKind::global_enum_value,
+                                                           std::to_string(class_value->value), "",
+                                                           "", result, 0, 0, false, true});
+                            break;
+                        }
+                    }
+                    const auto enumeration = enum_members_.find(object_type.name);
+                    const auto project_enum = find_project_enum(script_symbols_, object_type.name);
+                    const auto inner_enum = find_inner_enum(object_type.name);
+                    const auto external_enum =
+                        find_external_enum(script_symbols_, object_type.name);
+                    if (external_enum.enumeration) {
+                        const auto found = std::find_if(
+                            external_enum.enumeration->entries.begin(),
+                            external_enum.enumeration->entries.end(),
+                            [&](const auto& entry) { return entry.name == expression.value(); });
+                        if (found == external_enum.enumeration->entries.end()) {
+                            diagnostics_.error("GDS4041",
+                                               "enum '" + object_type.name + "' has no member '" +
+                                                   expression.value() + "'",
+                                               expression.span);
+                            result = unknown_type;
+                        } else {
+                            result = object_type;
+                            model_.referenced_extension_abis_.insert(
+                                external_enum.owner->provider_abi);
+                            model_.api_resolutions_.emplace(
+                                &expression, ApiResolution{ApiResolutionKind::global_enum_value,
+                                                           std::to_string(found->value), "", "",
+                                                           result, 0, 0, false, true});
+                        }
+                    } else if (inner_enum.enumeration) {
+                        const auto found = std::find_if(
+                            inner_enum.enumeration->entries.begin(),
+                            inner_enum.enumeration->entries.end(),
+                            [&](const auto& entry) { return entry.name == expression.value(); });
+                        if (found == inner_enum.enumeration->entries.end()) {
+                            diagnostics_.error("GDS4041",
+                                               "enum '" + object_type.name + "' has no member '" +
+                                                   expression.value() + "'",
+                                               expression.span);
+                            result = unknown_type;
+                        } else {
+                            auto native_owner = inner_enum.owner->native_class_name;
+                            if (native_owner.empty() && script_symbols_ && current_script_) {
+                                if (const auto* published = script_symbols_->find_inner(
+                                        *current_script_, inner_enum.owner->name)) {
+                                    native_owner = published->native_class_name;
+                                }
+                            }
+                            result = object_type;
+                            model_.api_resolutions_.emplace(
+                                &expression,
+                                ApiResolution{ApiResolutionKind::enum_member,
+                                              native_owner.empty()
+                                                  ? inner_enum.owner->name +
+                                                        "::" + inner_enum.enumeration->name
+                                                  : native_owner +
+                                                        "::" + inner_enum.enumeration->name,
+                                              "", "", result, 0, 0, false, true});
+                        }
+                    } else if (enumeration == enum_members_.end() && !project_enum.enumeration) {
+                        diagnostics_.error("GDS4041",
+                                           "enum '" + object_type.name + "' has no member '" +
+                                               expression.value() + "'",
                                            expression.span);
                         result = unknown_type;
+                    } else if (enumeration != enum_members_.end()) {
+                        const auto member = enumeration->second.find(expression.value());
+                        if (member == enumeration->second.end()) {
+                            diagnostics_.error("GDS4041",
+                                               "enum '" + object_type.name + "' has no member '" +
+                                                   expression.value() + "'",
+                                               expression.span);
+                            result = unknown_type;
+                        } else {
+                            result = object_type;
+                            model_.api_resolutions_.emplace(
+                                &expression,
+                                ApiResolution{ApiResolutionKind::enum_member, object_type.name, "",
+                                              "", result, 0, 0, false, true});
+                        }
                     } else {
-                        validate_script_call(*member, argument_types, expression, expression.span);
-                        result = member->type;
-                        model_.api_resolutions_.emplace(
-                            &callee,
-                            ApiResolution{ApiResolutionKind::dynamic_method, external_owner->name,
-                                          "", "", result,
-                                          static_cast<std::uint16_t>(member->required_arguments),
-                                          static_cast<std::uint16_t>(member->parameters.size()),
-                                          member->is_vararg, false});
-                    }
-                    break;
-                }
-                if (external_owner->members_complete) {
-                    diagnostics_.error("GDS4112",
-                                       "external type '" + external_owner->name +
-                                           "' has no declared method '" + callee.value() + "'",
-                                       expression.span);
-                    result = unknown_type;
-                    break;
-                }
-            }
-            if (object_type.is_dynamic()) {
-                result = variant_type;
-                model_.api_resolutions_.emplace(&callee,
-                                                ApiResolution{ApiResolutionKind::dynamic_method, "",
-                                                              "", "", result, 0, 0, true, false});
-                break;
-            }
-            std::string owner;
-            if (object_type.kind == TypeKind::array)
-                owner = "Array";
-            else if (object_type.kind == TypeKind::dictionary)
-                owner = "Dictionary";
-            else if (object_type.kind == TypeKind::string)
-                owner = "String";
-            else if (object_type.kind == TypeKind::string_name)
-                owner = "StringName";
-            else if (object_type.kind == TypeKind::builtin || object_type.kind == TypeKind::object)
-                owner = object_type.name;
-            const auto* method = api_.find_method(owner, callee.value());
-            const auto* latest_method =
-                GodotApi::for_version(latest_godot_version).find_method(owner, callee.value());
-            const bool called_on_type =
-                object_resolution && object_resolution->kind == ApiResolutionKind::type_reference;
-            if (called_on_type && object_type.kind == TypeKind::object && callee.value() == "new") {
-                if (argument_count != 0) {
-                    diagnostics_.error("GDS4077", "Godot object new() does not accept arguments",
-                                       expression.span);
-                }
-                result = object_type;
-                model_.api_resolutions_.emplace(&callee,
-                                                ApiResolution{ApiResolutionKind::constructor, owner,
-                                                              "", "", result, 0, 0, false, true});
-                break;
-            }
-            const bool dynamically_typed_object =
-                object_type.kind == TypeKind::object &&
-                (api_.find_class(object_type.name) ||
-                 (script_symbols_ && script_symbols_->find_external(object_type.name)));
-            if (!method && !latest_method && dynamically_typed_object && !called_on_type) {
-                result = variant_type;
-                model_.api_resolutions_.emplace(&callee,
-                                                ApiResolution{ApiResolutionKind::dynamic_method, "",
-                                                              "", "", result, 0, 0, true, false});
-                break;
-            }
-            if (!method && !owner.empty() && !object_type.is_dynamic()) {
-                diagnostics_.error("GDS4016",
-                                   "method '" + callee.value() +
-                                       "' is not available on Godot type '" + owner +
-                                       "' for the selected target version",
-                                   expression.span);
-            }
-            if (method && called_on_type && !method->is_static) {
-                diagnostics_.error("GDS4015",
-                                   "instance method '" + callee.value() +
-                                       "' cannot be called on a Godot type",
-                                   expression.span);
-            }
-            if (method && !called_on_type && !called_on_super && method->is_static &&
-                !warning_is_ignored(active_warning_ignores_, "static_called_on_instance")) {
-                diagnostics_.warning("GDS4130",
-                                     "static method '" + callee.value() +
-                                         "' is called on a Godot value instance",
-                                     expression.span);
-            }
-            if (method && called_on_super && !method->is_static)
-                diagnose_static_instance_access("method", callee.value(), expression.span);
-            if (method && !called_on_type)
-                validate_container_method_call(object_type, callee.value(), argument_types,
-                                               expression);
-            if (resolve_method(method)) {
-                if (called_on_super) {
-                    model_.api_resolutions_[&callee] =
-                        ApiResolution{ApiResolutionKind::script_super,
-                                      object_resolution->owner,
-                                      method ? method->owner : "",
-                                      "",
-                                      result,
-                                      method ? method->required_arguments : std::uint16_t{0},
-                                      method ? method->maximum_arguments : std::uint16_t{0},
-                                      method && method->is_vararg,
-                                      true};
-                }
-            } else {
-                result = analyze_expression(callee);
-            }
-        } else {
-            result = analyze_expression(callee);
-            diagnostics_.error(
-                "GDS4072",
-                "expression is not directly callable; invoke a Callable through .call(...)",
-                expression.span);
-            result = unknown_type;
-        }
-        break;
-    }
-    case ast::ExpressionKind::member: {
-        const auto object_type = analyze_expression(*expression.operand(0));
-        if (object_type.kind == TypeKind::enumeration) {
-            if (const auto* global =
-                    api_.find_global_enum_value(object_type.name, expression.value())) {
-                result = object_type;
-                model_.api_resolutions_.emplace(&expression,
-                                                ApiResolution{ApiResolutionKind::global_enum_value,
-                                                              std::to_string(global->value), "", "",
-                                                              result, 0, 0, false, true});
-                break;
-            }
-            if (const auto separator = object_type.name.rfind('.');
-                separator != std::string::npos) {
-                const auto owner = object_type.name.substr(0, separator);
-                const auto enum_name = object_type.name.substr(separator + 1);
-                if (const auto* class_value =
-                        api_.find_class_enum_value(owner, enum_name, expression.value())) {
-                    result = object_type;
-                    model_.api_resolutions_.emplace(
-                        &expression, ApiResolution{ApiResolutionKind::global_enum_value,
-                                                   std::to_string(class_value->value), "", "",
-                                                   result, 0, 0, false, true});
-                    break;
-                }
-            }
-            const auto enumeration = enum_members_.find(object_type.name);
-            const auto project_enum = find_project_enum(script_symbols_, object_type.name);
-            const auto inner_enum = find_inner_enum(object_type.name);
-            const auto external_enum = find_external_enum(script_symbols_, object_type.name);
-            if (external_enum.enumeration) {
-                const auto found =
-                    std::find_if(external_enum.enumeration->entries.begin(),
-                                 external_enum.enumeration->entries.end(), [&](const auto& entry) {
-                                     return entry.name == expression.value();
-                                 });
-                if (found == external_enum.enumeration->entries.end()) {
-                    diagnostics_.error("GDS4041",
-                                       "enum '" + object_type.name + "' has no member '" +
-                                           expression.value() + "'",
-                                       expression.span);
-                    result = unknown_type;
-                } else {
-                    result = object_type;
-                    model_.referenced_extension_abis_.insert(external_enum.owner->provider_abi);
-                    model_.api_resolutions_.emplace(
-                        &expression, ApiResolution{ApiResolutionKind::global_enum_value,
-                                                   std::to_string(found->value), "", "", result, 0,
-                                                   0, false, true});
-                }
-            } else if (inner_enum.enumeration) {
-                const auto found = std::find_if(
-                    inner_enum.enumeration->entries.begin(), inner_enum.enumeration->entries.end(),
-                    [&](const auto& entry) { return entry.name == expression.value(); });
-                if (found == inner_enum.enumeration->entries.end()) {
-                    diagnostics_.error("GDS4041",
-                                       "enum '" + object_type.name + "' has no member '" +
-                                           expression.value() + "'",
-                                       expression.span);
-                    result = unknown_type;
-                } else {
-                    auto native_owner = inner_enum.owner->native_class_name;
-                    if (native_owner.empty() && script_symbols_ && current_script_) {
-                        if (const auto* published = script_symbols_->find_inner(
-                                *current_script_, inner_enum.owner->name)) {
-                            native_owner = published->native_class_name;
+                        const auto found = std::find_if(
+                            project_enum.enumeration->entries.begin(),
+                            project_enum.enumeration->entries.end(),
+                            [&](const auto& entry) { return entry.name == expression.value(); });
+                        if (found == project_enum.enumeration->entries.end()) {
+                            diagnostics_.error("GDS4041",
+                                               "enum '" + object_type.name + "' has no member '" +
+                                                   expression.value() + "'",
+                                               expression.span);
+                            result = unknown_type;
+                        } else {
+                            result = object_type;
+                            model_.api_resolutions_.emplace(
+                                &expression, ApiResolution{ApiResolutionKind::enum_member,
+                                                           project_enum.native_owner + "::" +
+                                                               project_enum.enumeration->name,
+                                                           "", "", result, 0, 0, false, true});
                         }
                     }
-                    result = object_type;
-                    model_.api_resolutions_.emplace(
-                        &expression,
-                        ApiResolution{ApiResolutionKind::enum_member,
-                                      native_owner.empty()
-                                          ? inner_enum.owner->name +
-                                                "::" + inner_enum.enumeration->name
-                                          : native_owner + "::" + inner_enum.enumeration->name,
-                                      "", "", result, 0, 0, false, true});
-                }
-            } else if (enumeration == enum_members_.end() && !project_enum.enumeration) {
-                diagnostics_.error("GDS4041",
-                                   "enum '" + object_type.name + "' has no member '" +
-                                       expression.value() + "'",
-                                   expression.span);
-                result = unknown_type;
-            } else if (enumeration != enum_members_.end()) {
-                const auto member = enumeration->second.find(expression.value());
-                if (member == enumeration->second.end()) {
-                    diagnostics_.error("GDS4041",
-                                       "enum '" + object_type.name + "' has no member '" +
-                                           expression.value() + "'",
-                                       expression.span);
-                    result = unknown_type;
-                } else {
-                    result = object_type;
-                    model_.api_resolutions_.emplace(
-                        &expression, ApiResolution{ApiResolutionKind::enum_member, object_type.name,
-                                                   "", "", result, 0, 0, false, true});
-                }
-            } else {
-                const auto found =
-                    std::find_if(project_enum.enumeration->entries.begin(),
-                                 project_enum.enumeration->entries.end(), [&](const auto& entry) {
-                                     return entry.name == expression.value();
-                                 });
-                if (found == project_enum.enumeration->entries.end()) {
-                    diagnostics_.error("GDS4041",
-                                       "enum '" + object_type.name + "' has no member '" +
-                                           expression.value() + "'",
-                                       expression.span);
-                    result = unknown_type;
-                } else {
-                    result = object_type;
-                    model_.api_resolutions_.emplace(
-                        &expression, ApiResolution{ApiResolutionKind::enum_member,
-                                                   project_enum.native_owner +
-                                                       "::" + project_enum.enumeration->name,
-                                                   "", "", result, 0, 0, false, true});
-                }
-            }
-            record_script_dependency(project_enum.owner);
-            break;
-        }
-        const auto* object_resolution = model_.api_resolution_of(*expression.operand(0));
-        if (object_resolution && object_resolution->kind == ApiResolutionKind::script_super) {
-            diagnostics_.error("GDS4089", "super members can only be used as method calls",
-                               expression.span);
-            result = unknown_type;
-            break;
-        }
-        if (object_type.is_dynamic()) {
-            result = variant_type;
-            model_.api_resolutions_.emplace(&expression,
-                                            ApiResolution{ApiResolutionKind::dynamic_property, "",
-                                                          "", "", result, 0, 0, false, false});
-            break;
-        }
-        if (object_type.kind == TypeKind::script_resource) {
-            const auto* target =
-                script_symbols_ ? script_symbols_->find_path(object_type.name) : nullptr;
-            if (!target) {
-                diagnostics_.error("GDS4062", "script resource metadata is unavailable",
-                                   expression.span);
-                result = unknown_type;
-                break;
-            }
-            record_script_dependency(target);
-            if (const auto* inner = script_symbols_->find_inner(*target, expression.value())) {
-                result = {TypeKind::object, inner->native_class_name};
-                model_.api_resolutions_.emplace(
-                    &expression,
-                    ApiResolution{ApiResolutionKind::inner_type_reference, inner->native_class_name,
-                                  "", "", result, 0, 0, false, true});
-                break;
-            }
-            if (const auto* enumeration = script_symbols_->find_enum(*target, expression.value())) {
-                result = {TypeKind::enumeration,
-                          target->native_class_name + "::" + enumeration->name};
-                model_.api_resolutions_.emplace(
-                    &expression, ApiResolution{ApiResolutionKind::script_enum_type, result.name, "",
-                                               "", result, 0, 0, false, true});
-                break;
-            }
-            const auto* member = script_symbols_->find_member(*target, expression.value());
-            if (!member) {
-                diagnostics_.error("GDS4055",
-                                   "script resource '" + target->script_name + "' has no member '" +
-                                       expression.value() + "'",
-                                   expression.span);
-                result = unknown_type;
-                break;
-            }
-            if (member->kind == ScriptMemberKind::constant) {
-                result = member->type;
-                model_.api_resolutions_.emplace(&expression,
-                                                ApiResolution{ApiResolutionKind::script_constant,
-                                                              target->native_class_name, "", "",
-                                                              result, 0, 0, false, true});
-                break;
-            }
-            if (member->kind == ScriptMemberKind::enum_value) {
-                result = member->type;
-                model_.api_resolutions_.emplace(&expression,
-                                                ApiResolution{ApiResolutionKind::enum_member,
-                                                              target->native_class_name, "", "",
-                                                              result, 0, 0, false, true});
-                break;
-            }
-            if (member->kind == ScriptMemberKind::field && member->is_static) {
-                const bool runtime_static_field =
-                    current_script_ && current_script_->is_tool && !target->is_tool;
-                result = runtime_static_field || member->getter_is_coroutine ? variant_type
-                                                                             : member->type;
-                auto resolution = ApiResolution{runtime_static_field
-                                                    ? ApiResolutionKind::script_runtime_static_field
-                                                    : ApiResolutionKind::script_property,
-                                                target->native_class_name,
-                                                "_gdpp_get_" + expression.value(),
-                                                "_gdpp_set_" + expression.value(),
-                                                result,
-                                                0,
-                                                0,
-                                                false,
-                                                true};
-                resolution.assignment_type = member->type;
-                model_.api_resolutions_.emplace(&expression, std::move(resolution));
-                break;
-            }
-            if (member->kind == ScriptMemberKind::function && member->is_static) {
-                diagnostics_.error("GDS4096",
-                                   "static script methods cannot be used as Callable values",
-                                   expression.span);
-            } else {
-                diagnostics_.error("GDS4058",
-                                   "instance member '" + expression.value() +
-                                       "' cannot be accessed on a script resource",
-                                   expression.span);
-            }
-            result = unknown_type;
-            break;
-        }
-        if (const auto* inner = object_type.kind == TypeKind::object
-                                    ? find_inner_class(object_type.name)
-                                    : nullptr) {
-            const bool accessed_on_type =
-                object_resolution &&
-                object_resolution->kind == ApiResolutionKind::inner_type_reference;
-            const bool accessed_on_self =
-                expression.operand(0)->kind() == ast::ExpressionKind::identifier &&
-                expression.operand(0)->value() == "self";
-            if (accessed_on_type || accessed_on_self) {
-                if (const auto* nested = find_nested_inner_class(*inner, expression.value())) {
-                    const auto& nested_identity = nested->native_class_name.empty()
-                                                      ? nested->name
-                                                      : nested->native_class_name;
-                    result = {TypeKind::object, nested_identity};
-                    model_.api_resolutions_.emplace(
-                        &expression,
-                        ApiResolution{ApiResolutionKind::inner_type_reference, nested_identity, "",
-                                      "", result, 0, 0, false, true});
+                    record_script_dependency(project_enum.owner);
                     break;
                 }
-                if (const auto enumeration = find_inner_enum((inner->native_class_name.empty()
-                                                                  ? inner->name
-                                                                  : inner->native_class_name) +
-                                                             "." + expression.value());
-                    enumeration.enumeration) {
-                    auto native_owner = enumeration.owner->native_class_name;
-                    if (native_owner.empty() && script_symbols_ && current_script_) {
-                        if (const auto* published = script_symbols_->find_inner(
-                                *current_script_, enumeration.owner->name)) {
-                            native_owner = published->native_class_name;
-                        }
-                    }
-                    result = {TypeKind::enumeration,
-                              native_owner.empty()
-                                  ? enumeration.owner->name + "." + enumeration.enumeration->name
-                                  : native_owner + "::" + enumeration.enumeration->name};
-                    model_.api_resolutions_.emplace(
-                        &expression,
-                        ApiResolution{ApiResolutionKind::script_enum_type,
-                                      native_owner.empty()
-                                          ? enumeration.owner->name +
-                                                "::" + enumeration.enumeration->name
-                                          : native_owner + "::" + enumeration.enumeration->name,
-                                      "", "", result, 0, 0, false, true});
-                    break;
-                }
-            }
-            const auto* found = find_inner_member(*inner, expression.value());
-            if (!found) {
-                if (accessed_on_type) {
-                    diagnostics_.error("GDS4055",
-                                       "internal class '" + inner->name + "' has no member '" +
-                                           expression.value() + "'",
+                const auto* object_resolution = model_.api_resolution_of(*expression.operand(0));
+                if (object_resolution &&
+                    object_resolution->kind == ApiResolutionKind::script_super) {
+                    diagnostics_.error("GDS4089", "super members can only be used as method calls",
                                        expression.span);
                     result = unknown_type;
-                } else {
+                    break;
+                }
+                if (object_type.is_dynamic()) {
                     result = variant_type;
                     model_.api_resolutions_.emplace(
                         &expression, ApiResolution{ApiResolutionKind::dynamic_property, "", "", "",
                                                    result, 0, 0, false, false});
-                }
-                break;
-            }
-            if (found->kind == ScriptMemberKind::function) {
-                if (accessed_on_type || found->is_static) {
-                    diagnostics_.error("GDS4096",
-                                       "only instance internal methods can be Callable values",
-                                       expression.span);
-                    result = unknown_type;
-                } else {
-                    result = {TypeKind::builtin, "Callable"};
-                    model_.api_resolutions_.emplace(
-                        &expression, ApiResolution{ApiResolutionKind::script_callable, inner->name,
-                                                   "", "", result, 0, 0, false, false});
-                }
-                break;
-            }
-            if (found->kind == ScriptMemberKind::enum_value) {
-                result = found->type;
-                model_.api_resolutions_.emplace(&expression,
-                                                ApiResolution{ApiResolutionKind::enum_member,
-                                                              inner->native_class_name, "", "",
-                                                              result, 0, 0, false, true});
-                break;
-            }
-            if (found->kind == ScriptMemberKind::constant) {
-                result = found->type;
-                model_.api_resolutions_.emplace(&expression,
-                                                ApiResolution{ApiResolutionKind::script_constant,
-                                                              inner->native_class_name.empty()
-                                                                  ? inner->name
-                                                                  : inner->native_class_name,
-                                                              "", "", result, 0, 0, false, true});
-                break;
-            }
-            if (found->kind == ScriptMemberKind::signal && !accessed_on_type) {
-                result = found->type;
-                model_.api_resolutions_.emplace(
-                    &expression, ApiResolution{ApiResolutionKind::script_signal, inner->name, "",
-                                               "", result, 0, 0, false, false});
-                break;
-            }
-            if (found->kind != ScriptMemberKind::field) {
-                diagnostics_.error("GDS4058", "invalid internal class member access",
-                                   expression.span);
-                result = unknown_type;
-                break;
-            }
-            if (accessed_on_type && !found->is_static) {
-                diagnostics_.error("GDS4058",
-                                   "instance field '" + expression.value() +
-                                       "' cannot be accessed on an internal class type",
-                                   expression.span);
-                result = unknown_type;
-                break;
-            }
-            result = found->getter_is_coroutine ? variant_type : found->type;
-            auto resolution = ApiResolution{ApiResolutionKind::script_property,
-                                            inner->name,
-                                            "_gdpp_get_" + expression.value(),
-                                            "_gdpp_set_" + expression.value(),
-                                            result,
-                                            0,
-                                            0,
-                                            false,
-                                            false};
-            resolution.assignment_type = found->type;
-            model_.api_resolutions_.emplace(&expression, std::move(resolution));
-            break;
-        }
-        const ScriptClassSymbol* script_owner = nullptr;
-        if (script_symbols_ && object_type.kind == TypeKind::object) {
-            script_owner =
-                object_resolution &&
-                        (object_resolution->kind == ApiResolutionKind::script_autoload ||
-                         object_resolution->kind == ApiResolutionKind::script_type_reference)
-                    ? script_symbols_->find_native_class(object_resolution->owner)
-                    : find_script_class(object_type.name);
-            if (!script_owner && expression.operand(0)->kind() == ast::ExpressionKind::identifier &&
-                expression.operand(0)->value() == "self") {
-                script_owner = current_script_;
-            }
-        }
-        if (script_owner) {
-            record_script_dependency(script_owner);
-            const bool accessed_on_type =
-                object_resolution &&
-                object_resolution->kind == ApiResolutionKind::script_type_reference;
-            if (const auto* enumeration =
-                    script_symbols_->find_enum(*script_owner, expression.value())) {
-                result = {TypeKind::enumeration,
-                          script_owner->native_class_name + "::" + enumeration->name};
-                model_.api_resolutions_.emplace(
-                    &expression,
-                    ApiResolution{ApiResolutionKind::script_enum_type,
-                                  script_owner->native_class_name + "::" + enumeration->name, "",
-                                  "", result, 0, 0, false, true});
-                break;
-            }
-            const auto* member = script_symbols_->find_member(*script_owner, expression.value());
-            if (!member) {
-                if (accessed_on_type &&
-                    api_.has_class_enum(script_owner->godot_base_type, expression.value())) {
-                    result = {TypeKind::enumeration,
-                              script_owner->godot_base_type + "." + expression.value()};
-                    model_.api_resolutions_.emplace(
-                        &expression, ApiResolution{ApiResolutionKind::global_enum_type,
-                                                   "godot::" + script_owner->godot_base_type +
-                                                       "::" + expression.value(),
-                                                   "", "", result, 0, 0, false, true});
                     break;
                 }
-                if (const auto* constant = api_.find_class_constant(script_owner->godot_base_type,
+                if (object_type.kind == TypeKind::script_resource) {
+                    const auto* target =
+                        script_symbols_ ? script_symbols_->find_path(object_type.name) : nullptr;
+                    if (!target) {
+                        diagnostics_.error("GDS4062", "script resource metadata is unavailable",
+                                           expression.span);
+                        result = unknown_type;
+                        break;
+                    }
+                    record_script_dependency(target);
+                    if (const auto* inner =
+                            script_symbols_->find_inner(*target, expression.value())) {
+                        result = {TypeKind::object, inner->native_class_name};
+                        model_.api_resolutions_.emplace(
+                            &expression, ApiResolution{ApiResolutionKind::inner_type_reference,
+                                                       inner->native_class_name, "", "", result, 0,
+                                                       0, false, true});
+                        break;
+                    }
+                    if (const auto* enumeration =
+                            script_symbols_->find_enum(*target, expression.value())) {
+                        result = {TypeKind::enumeration,
+                                  target->native_class_name + "::" + enumeration->name};
+                        model_.api_resolutions_.emplace(
+                            &expression,
+                            ApiResolution{ApiResolutionKind::script_enum_type, result.name, "", "",
+                                          result, 0, 0, false, true});
+                        break;
+                    }
+                    const auto* member = script_symbols_->find_member(*target, expression.value());
+                    if (!member) {
+                        diagnostics_.error("GDS4055",
+                                           "script resource '" + target->script_name +
+                                               "' has no member '" + expression.value() + "'",
+                                           expression.span);
+                        result = unknown_type;
+                        break;
+                    }
+                    if (member->kind == ScriptMemberKind::constant) {
+                        result = member->type;
+                        model_.api_resolutions_.emplace(
+                            &expression, ApiResolution{ApiResolutionKind::script_constant,
+                                                       target->native_class_name, "", "", result, 0,
+                                                       0, false, true});
+                        break;
+                    }
+                    if (member->kind == ScriptMemberKind::enum_value) {
+                        result = member->type;
+                        model_.api_resolutions_.emplace(
+                            &expression,
+                            ApiResolution{ApiResolutionKind::enum_member, target->native_class_name,
+                                          "", "", result, 0, 0, false, true});
+                        break;
+                    }
+                    if (member->kind == ScriptMemberKind::field && member->is_static) {
+                        const bool runtime_static_field =
+                            current_script_ && current_script_->is_tool && !target->is_tool;
+                        result = runtime_static_field || member->getter_is_coroutine ? variant_type
+                                                                                     : member->type;
+                        auto resolution = ApiResolution{
+                            runtime_static_field ? ApiResolutionKind::script_runtime_static_field
+                                                 : ApiResolutionKind::script_property,
+                            target->native_class_name,
+                            "_gdpp_get_" + expression.value(),
+                            "_gdpp_set_" + expression.value(),
+                            result,
+                            0,
+                            0,
+                            false,
+                            true};
+                        resolution.assignment_type = member->type;
+                        model_.api_resolutions_.emplace(&expression, std::move(resolution));
+                        break;
+                    }
+                    if (member->kind == ScriptMemberKind::function && member->is_static) {
+                        diagnostics_.error(
+                            "GDS4096", "static script methods cannot be used as Callable values",
+                            expression.span);
+                    } else {
+                        diagnostics_.error("GDS4058",
+                                           "instance member '" + expression.value() +
+                                               "' cannot be accessed on a script resource",
+                                           expression.span);
+                    }
+                    result = unknown_type;
+                    break;
+                }
+                if (const auto* inner = object_type.kind == TypeKind::object
+                                            ? find_inner_class(object_type.name)
+                                            : nullptr) {
+                    const bool accessed_on_type =
+                        object_resolution &&
+                        object_resolution->kind == ApiResolutionKind::inner_type_reference;
+                    const bool accessed_on_self =
+                        expression.operand(0)->kind() == ast::ExpressionKind::identifier &&
+                        expression.operand(0)->value() == "self";
+                    if (accessed_on_type || accessed_on_self) {
+                        if (const auto* nested =
+                                find_nested_inner_class(*inner, expression.value())) {
+                            const auto& nested_identity = nested->native_class_name.empty()
+                                                              ? nested->name
+                                                              : nested->native_class_name;
+                            result = {TypeKind::object, nested_identity};
+                            model_.api_resolutions_.emplace(
+                                &expression,
+                                ApiResolution{ApiResolutionKind::inner_type_reference,
+                                              nested_identity, "", "", result, 0, 0, false, true});
+                            break;
+                        }
+                        if (const auto enumeration = find_inner_enum(
+                                (inner->native_class_name.empty() ? inner->name
+                                                                  : inner->native_class_name) +
+                                "." + expression.value());
+                            enumeration.enumeration) {
+                            auto native_owner = enumeration.owner->native_class_name;
+                            if (native_owner.empty() && script_symbols_ && current_script_) {
+                                if (const auto* published = script_symbols_->find_inner(
+                                        *current_script_, enumeration.owner->name)) {
+                                    native_owner = published->native_class_name;
+                                }
+                            }
+                            result = {TypeKind::enumeration,
+                                      native_owner.empty()
+                                          ? enumeration.owner->name + "." +
+                                                enumeration.enumeration->name
+                                          : native_owner + "::" + enumeration.enumeration->name};
+                            model_.api_resolutions_.emplace(
+                                &expression,
+                                ApiResolution{ApiResolutionKind::script_enum_type,
+                                              native_owner.empty()
+                                                  ? enumeration.owner->name +
+                                                        "::" + enumeration.enumeration->name
+                                                  : native_owner +
+                                                        "::" + enumeration.enumeration->name,
+                                              "", "", result, 0, 0, false, true});
+                            break;
+                        }
+                    }
+                    const auto* found = find_inner_member(*inner, expression.value());
+                    if (!found) {
+                        if (accessed_on_type) {
+                            diagnostics_.error("GDS4055",
+                                               "internal class '" + inner->name +
+                                                   "' has no member '" + expression.value() + "'",
+                                               expression.span);
+                            result = unknown_type;
+                        } else {
+                            result = variant_type;
+                            model_.api_resolutions_.emplace(
+                                &expression, ApiResolution{ApiResolutionKind::dynamic_property, "",
+                                                           "", "", result, 0, 0, false, false});
+                        }
+                        break;
+                    }
+                    if (found->kind == ScriptMemberKind::function) {
+                        if (accessed_on_type || found->is_static) {
+                            diagnostics_.error(
+                                "GDS4096", "only instance internal methods can be Callable values",
+                                expression.span);
+                            result = unknown_type;
+                        } else {
+                            result = {TypeKind::builtin, "Callable"};
+                            model_.api_resolutions_.emplace(
+                                &expression,
+                                ApiResolution{ApiResolutionKind::script_callable, inner->name, "",
+                                              "", result, 0, 0, false, false});
+                        }
+                        break;
+                    }
+                    if (found->kind == ScriptMemberKind::enum_value) {
+                        result = found->type;
+                        model_.api_resolutions_.emplace(
+                            &expression,
+                            ApiResolution{ApiResolutionKind::enum_member, inner->native_class_name,
+                                          "", "", result, 0, 0, false, true});
+                        break;
+                    }
+                    if (found->kind == ScriptMemberKind::constant) {
+                        result = found->type;
+                        model_.api_resolutions_.emplace(
+                            &expression, ApiResolution{ApiResolutionKind::script_constant,
+                                                       inner->native_class_name.empty()
+                                                           ? inner->name
+                                                           : inner->native_class_name,
+                                                       "", "", result, 0, 0, false, true});
+                        break;
+                    }
+                    if (found->kind == ScriptMemberKind::signal && !accessed_on_type) {
+                        result = found->type;
+                        model_.api_resolutions_.emplace(
+                            &expression,
+                            ApiResolution{ApiResolutionKind::script_signal, inner->name, "", "",
+                                          result, 0, 0, false, false});
+                        break;
+                    }
+                    if (found->kind != ScriptMemberKind::field) {
+                        diagnostics_.error("GDS4058", "invalid internal class member access",
+                                           expression.span);
+                        result = unknown_type;
+                        break;
+                    }
+                    if (accessed_on_type && !found->is_static) {
+                        diagnostics_.error("GDS4058",
+                                           "instance field '" + expression.value() +
+                                               "' cannot be accessed on an internal class type",
+                                           expression.span);
+                        result = unknown_type;
+                        break;
+                    }
+                    result = found->getter_is_coroutine ? variant_type : found->type;
+                    auto resolution = ApiResolution{ApiResolutionKind::script_property,
+                                                    inner->name,
+                                                    "_gdpp_get_" + expression.value(),
+                                                    "_gdpp_set_" + expression.value(),
+                                                    result,
+                                                    0,
+                                                    0,
+                                                    false,
+                                                    false};
+                    resolution.assignment_type = found->type;
+                    model_.api_resolutions_.emplace(&expression, std::move(resolution));
+                    break;
+                }
+                const ScriptClassSymbol* script_owner = nullptr;
+                if (script_symbols_ && object_type.kind == TypeKind::object) {
+                    script_owner =
+                        object_resolution &&
+                                (object_resolution->kind == ApiResolutionKind::script_autoload ||
+                                 object_resolution->kind ==
+                                     ApiResolutionKind::script_type_reference)
+                            ? script_symbols_->find_native_class(object_resolution->owner)
+                            : find_script_class(object_type.name);
+                    if (!script_owner &&
+                        expression.operand(0)->kind() == ast::ExpressionKind::identifier &&
+                        expression.operand(0)->value() == "self") {
+                        script_owner = current_script_;
+                    }
+                }
+                if (script_owner) {
+                    record_script_dependency(script_owner);
+                    const bool accessed_on_type =
+                        object_resolution &&
+                        object_resolution->kind == ApiResolutionKind::script_type_reference;
+                    if (const auto* enumeration =
+                            script_symbols_->find_enum(*script_owner, expression.value())) {
+                        result = {TypeKind::enumeration,
+                                  script_owner->native_class_name + "::" + enumeration->name};
+                        model_.api_resolutions_.emplace(
+                            &expression, ApiResolution{ApiResolutionKind::script_enum_type,
+                                                       script_owner->native_class_name +
+                                                           "::" + enumeration->name,
+                                                       "", "", result, 0, 0, false, true});
+                        break;
+                    }
+                    const auto* member =
+                        script_symbols_->find_member(*script_owner, expression.value());
+                    if (!member) {
+                        if (accessed_on_type && api_.has_class_enum(script_owner->godot_base_type,
                                                                     expression.value())) {
+                            result = {TypeKind::enumeration,
+                                      script_owner->godot_base_type + "." + expression.value()};
+                            model_.api_resolutions_.emplace(
+                                &expression,
+                                ApiResolution{ApiResolutionKind::global_enum_type,
+                                              "godot::" + script_owner->godot_base_type +
+                                                  "::" + expression.value(),
+                                              "", "", result, 0, 0, false, true});
+                            break;
+                        }
+                        if (const auto* constant = api_.find_class_constant(
+                                script_owner->godot_base_type, expression.value())) {
+                            result = {TypeKind::integer, "int"};
+                            model_.api_resolutions_.emplace(
+                                &expression, ApiResolution{ApiResolutionKind::global_constant,
+                                                           std::to_string(constant->value), "", "",
+                                                           result, 0, 0, false, true});
+                            break;
+                        }
+                        if (!accessed_on_type) {
+                            if (api_.find_signal(script_owner->godot_base_type,
+                                                 expression.value())) {
+                                result = {TypeKind::builtin, "Signal"};
+                                model_.api_resolutions_.emplace(
+                                    &expression, ApiResolution{ApiResolutionKind::script_signal,
+                                                               script_owner->godot_base_type, "",
+                                                               "", result, 0, 0, false, false});
+                                break;
+                            }
+                            if (const auto* property = api_.find_property(
+                                    script_owner->godot_base_type, expression.value())) {
+                                auto resolution = property_resolution(
+                                    script_owner->attached ? ApiResolutionKind::dynamic_property
+                                                           : ApiResolutionKind::property,
+                                    *property);
+                                result = resolution.type;
+                                model_.api_resolutions_.emplace(&expression, std::move(resolution));
+                                break;
+                            }
+                        }
+                        if (!accessed_on_type) {
+                            result = variant_type;
+                            model_.api_resolutions_.emplace(
+                                &expression, ApiResolution{ApiResolutionKind::dynamic_property, "",
+                                                           "", "", result, 0, 0, false, false});
+                            break;
+                        }
+                        diagnostics_.error("GDS4055",
+                                           "script type '" + script_owner->script_name +
+                                               "' has no member '" + expression.value() + "'",
+                                           expression.span);
+                        result = unknown_type;
+                        break;
+                    }
+                    if (accessed_on_type && member->kind == ScriptMemberKind::constant) {
+                        result = member->type;
+                        model_.api_resolutions_.emplace(
+                            &expression, ApiResolution{ApiResolutionKind::script_constant,
+                                                       script_owner->native_class_name, "", "",
+                                                       result, 0, 0, false, true});
+                        break;
+                    }
+                    if (member->kind == ScriptMemberKind::enum_value) {
+                        result = member->type;
+                        model_.api_resolutions_.emplace(
+                            &expression, ApiResolution{ApiResolutionKind::enum_member,
+                                                       script_owner->native_class_name, "", "",
+                                                       result, 0, 0, false, true});
+                        break;
+                    }
+                    if (member->kind == ScriptMemberKind::constant) {
+                        // Godot permits class constants through script instances and Autoload
+                        // names. Lower them to the native class scope so no singleton lookup is
+                        // required.
+                        result = member->type;
+                        model_.api_resolutions_.emplace(
+                            &expression, ApiResolution{ApiResolutionKind::script_constant,
+                                                       script_owner->native_class_name, "", "",
+                                                       result, 0, 0, false, true});
+                        break;
+                    }
+                    if (accessed_on_type && member->kind == ScriptMemberKind::field &&
+                        !member->is_static) {
+                        diagnostics_.error("GDS4058",
+                                           "instance field '" + expression.value() +
+                                               "' cannot be accessed on a script type",
+                                           expression.span);
+                        result = unknown_type;
+                        break;
+                    }
+                    if (member->kind == ScriptMemberKind::signal) {
+                        if (accessed_on_type) {
+                            diagnostics_.error("GDS4094",
+                                               "signals cannot be accessed on a script type",
+                                               expression.span);
+                            result = unknown_type;
+                        } else {
+                            result = {TypeKind::builtin, "Signal"};
+                            model_.api_resolutions_.emplace(
+                                &expression, ApiResolution{ApiResolutionKind::script_signal,
+                                                           script_owner->native_class_name, "", "",
+                                                           result, 0, 0, false, false});
+                        }
+                        break;
+                    }
+                    if (member->kind == ScriptMemberKind::function) {
+                        if (accessed_on_type || member->is_static) {
+                            diagnostics_.error(
+                                "GDS4096",
+                                "only instance script methods can be used as Callable values",
+                                expression.span);
+                            result = unknown_type;
+                        } else {
+                            result = {TypeKind::builtin, "Callable"};
+                            model_.api_resolutions_.emplace(
+                                &expression, ApiResolution{ApiResolutionKind::script_callable,
+                                                           script_owner->native_class_name, "", "",
+                                                           result, 0, 0, false, false});
+                        }
+                        break;
+                    }
+                    if (member->kind != ScriptMemberKind::field) {
+                        diagnostics_.error("GDS4058",
+                                           "script member '" + expression.value() +
+                                               "' is not an instance field",
+                                           expression.span);
+                        result = unknown_type;
+                        break;
+                    }
+                    const bool runtime_static_field = current_script_ && current_script_->is_tool &&
+                                                      !script_owner->is_tool && accessed_on_type &&
+                                                      member->is_static;
+                    const bool attached_instance_field =
+                        script_owner->attached && !accessed_on_type && !member->is_static;
+                    result = runtime_static_field || member->getter_is_coroutine ? variant_type
+                                                                                 : member->type;
+                    auto resolution = ApiResolution{
+                        runtime_static_field      ? ApiResolutionKind::script_runtime_static_field
+                        : attached_instance_field ? ApiResolutionKind::dynamic_property
+                                                  : ApiResolutionKind::script_property,
+                        script_owner->native_class_name,
+                        "_gdpp_get_" + expression.value(),
+                        "_gdpp_set_" + expression.value(),
+                        result,
+                        0,
+                        0,
+                        false,
+                        false};
+                    resolution.assignment_type = member->type;
+                    model_.api_resolutions_.emplace(&expression, std::move(resolution));
+                    break;
+                }
+                if (const auto* external_owner =
+                        object_type.kind == TypeKind::object && script_symbols_
+                            ? script_symbols_->find_external(object_type.name)
+                            : nullptr) {
+                    const bool accessed_on_type =
+                        object_resolution &&
+                        object_resolution->kind == ApiResolutionKind::external_type_reference;
+                    if (accessed_on_type) {
+                        if (const auto* enumeration = script_symbols_->find_external_enum(
+                                *external_owner, expression.value())) {
+                            result = {TypeKind::enumeration,
+                                      external_owner->name + "." + enumeration->name};
+                            model_.referenced_extension_abis_.insert(external_owner->provider_abi);
+                            model_.api_resolutions_.emplace(
+                                &expression, ApiResolution{ApiResolutionKind::global_enum_type, "0",
+                                                           "", "", result, 0, 0, false, true});
+                            break;
+                        }
+                        for (const auto& enumeration : external_owner->enums) {
+                            const auto found =
+                                std::find_if(enumeration.entries.begin(), enumeration.entries.end(),
+                                             [&](const auto& entry) {
+                                                 return entry.name == expression.value();
+                                             });
+                            if (found == enumeration.entries.end())
+                                continue;
+                            result = {TypeKind::enumeration,
+                                      external_owner->name + "." + enumeration.name};
+                            model_.referenced_extension_abis_.insert(external_owner->provider_abi);
+                            model_.api_resolutions_.emplace(
+                                &expression, ApiResolution{ApiResolutionKind::global_enum_value,
+                                                           std::to_string(found->value), "", "",
+                                                           result, 0, 0, false, true});
+                            break;
+                        }
+                        if (result.kind == TypeKind::enumeration)
+                            break;
+                    }
+                    if (const auto* member = script_symbols_->find_external_member(
+                            *external_owner, expression.value())) {
+                        if (member->kind == ScriptMemberKind::constant) {
+                            if (!accessed_on_type) {
+                                diagnostics_.error("GDS4058",
+                                                   "external constant '" + expression.value() +
+                                                       "' must be accessed on its type",
+                                                   expression.span);
+                                result = unknown_type;
+                            } else {
+                                result = member->type;
+                                model_.api_resolutions_.emplace(
+                                    &expression,
+                                    ApiResolution{ApiResolutionKind::global_constant,
+                                                  std::to_string(member->constant_value), "", "",
+                                                  result, 0, 0, false, true});
+                            }
+                        } else if (accessed_on_type) {
+                            diagnostics_.error("GDS4058",
+                                               "external instance member '" + expression.value() +
+                                                   "' cannot be accessed on its type",
+                                               expression.span);
+                            result = unknown_type;
+                        } else if (member->kind == ScriptMemberKind::function) {
+                            result = {TypeKind::builtin, "Callable"};
+                            model_.api_resolutions_.emplace(
+                                &expression, ApiResolution{ApiResolutionKind::external_callable,
+                                                           external_owner->name, "", "", result, 0,
+                                                           0, false, false});
+                        } else if (member->kind == ScriptMemberKind::signal) {
+                            result = {TypeKind::builtin, "Signal"};
+                            model_.api_resolutions_.emplace(
+                                &expression, ApiResolution{ApiResolutionKind::external_signal,
+                                                           external_owner->name, "", "", result, 0,
+                                                           0, false, false});
+                        } else {
+                            result = member->type;
+                            ApiResolution resolution{ApiResolutionKind::dynamic_property,
+                                                     external_owner->name,
+                                                     "",
+                                                     "",
+                                                     result,
+                                                     0,
+                                                     0,
+                                                     false,
+                                                     false};
+                            resolution.read_only = member->read_only;
+                            model_.api_resolutions_.emplace(&expression, std::move(resolution));
+                        }
+                        break;
+                    }
+                    if (external_owner->members_complete) {
+                        diagnostics_.error("GDS4112",
+                                           "external type '" + external_owner->name +
+                                               "' has no declared member '" + expression.value() +
+                                               "'",
+                                           expression.span);
+                        result = unknown_type;
+                        break;
+                    }
+                }
+                std::string owner;
+                if (object_type.kind == TypeKind::array)
+                    owner = "Array";
+                else if (object_type.kind == TypeKind::dictionary)
+                    owner = "Dictionary";
+                else if (object_type.kind == TypeKind::string)
+                    owner = "String";
+                else if (object_type.kind == TypeKind::string_name)
+                    owner = "StringName";
+                else if (object_type.kind == TypeKind::builtin ||
+                         object_type.kind == TypeKind::object)
+                    owner = object_type.name;
+                const bool accessed_on_type =
+                    object_resolution &&
+                    object_resolution->kind == ApiResolutionKind::type_reference;
+                if (accessed_on_type) {
+                    if (api_.has_class_enum(owner, expression.value())) {
+                        result = {TypeKind::enumeration, owner + "." + expression.value()};
+                        model_.api_resolutions_.emplace(
+                            &expression,
+                            ApiResolution{ApiResolutionKind::global_enum_type,
+                                          "godot::" + owner + "::" + expression.value(), "", "",
+                                          result, 0, 0, false, true});
+                        break;
+                    }
+                    if (const auto* constant =
+                            api_.find_builtin_constant(owner, expression.value())) {
+                        result = type_from_godot_api(constant->type);
+                        model_.api_resolutions_.emplace(
+                            &expression,
+                            ApiResolution{ApiResolutionKind::builtin_constant, constant->value, "",
+                                          "", result, 0, 0, false, true});
+                        break;
+                    }
+                }
+                if (const auto* constant = api_.find_class_constant(owner, expression.value())) {
                     result = {TypeKind::integer, "int"};
                     model_.api_resolutions_.emplace(
                         &expression, ApiResolution{ApiResolutionKind::global_constant,
@@ -3520,296 +3902,39 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                                                    0, 0, false, true});
                     break;
                 }
-                if (!accessed_on_type) {
-                    if (api_.find_signal(script_owner->godot_base_type, expression.value())) {
-                        result = {TypeKind::builtin, "Signal"};
-                        model_.api_resolutions_.emplace(
-                            &expression, ApiResolution{ApiResolutionKind::script_signal,
-                                                       script_owner->godot_base_type, "", "",
-                                                       result, 0, 0, false, false});
-                        break;
-                    }
-                    if (const auto* property =
-                            api_.find_property(script_owner->godot_base_type, expression.value())) {
-                        auto resolution = property_resolution(
-                            script_owner->attached ? ApiResolutionKind::dynamic_property
-                                                   : ApiResolutionKind::property,
-                            *property);
-                        result = resolution.type;
-                        model_.api_resolutions_.emplace(&expression, std::move(resolution));
-                        break;
-                    }
-                }
-                if (!accessed_on_type) {
+                if (!accessed_on_type && api_.find_signal(owner, expression.value())) {
+                    result = {TypeKind::builtin, "Signal"};
+                    model_.api_resolutions_.emplace(
+                        &expression, ApiResolution{ApiResolutionKind::script_signal, owner, "", "",
+                                                   result, 0, 0, false, false});
+                } else if (const auto* property = api_.find_property(owner, expression.value())) {
+                    auto resolution = property_resolution(ApiResolutionKind::property, *property);
+                    result = resolution.type;
+                    model_.api_resolutions_.emplace(&expression, std::move(resolution));
+                } else if (object_type.kind == TypeKind::dictionary) {
+                    // GDScript supports dictionary.key as syntax sugar for dictionary["key"].
                     result = variant_type;
                     model_.api_resolutions_.emplace(
                         &expression, ApiResolution{ApiResolutionKind::dynamic_property, "", "", "",
                                                    result, 0, 0, false, false});
-                    break;
-                }
-                diagnostics_.error("GDS4055",
-                                   "script type '" + script_owner->script_name +
-                                       "' has no member '" + expression.value() + "'",
-                                   expression.span);
-                result = unknown_type;
-                break;
-            }
-            if (accessed_on_type && member->kind == ScriptMemberKind::constant) {
-                result = member->type;
-                model_.api_resolutions_.emplace(&expression,
-                                                ApiResolution{ApiResolutionKind::script_constant,
-                                                              script_owner->native_class_name, "",
-                                                              "", result, 0, 0, false, true});
-                break;
-            }
-            if (member->kind == ScriptMemberKind::enum_value) {
-                result = member->type;
-                model_.api_resolutions_.emplace(&expression,
-                                                ApiResolution{ApiResolutionKind::enum_member,
-                                                              script_owner->native_class_name, "",
-                                                              "", result, 0, 0, false, true});
-                break;
-            }
-            if (member->kind == ScriptMemberKind::constant) {
-                // Godot permits class constants through script instances and Autoload names.
-                // Lower them to the native class scope so no singleton lookup is required.
-                result = member->type;
-                model_.api_resolutions_.emplace(&expression,
-                                                ApiResolution{ApiResolutionKind::script_constant,
-                                                              script_owner->native_class_name, "",
-                                                              "", result, 0, 0, false, true});
-                break;
-            }
-            if (accessed_on_type && member->kind == ScriptMemberKind::field && !member->is_static) {
-                diagnostics_.error("GDS4058",
-                                   "instance field '" + expression.value() +
-                                       "' cannot be accessed on a script type",
-                                   expression.span);
-                result = unknown_type;
-                break;
-            }
-            if (member->kind == ScriptMemberKind::signal) {
-                if (accessed_on_type) {
-                    diagnostics_.error("GDS4094", "signals cannot be accessed on a script type",
-                                       expression.span);
-                    result = unknown_type;
                 } else {
-                    result = {TypeKind::builtin, "Signal"};
-                    model_.api_resolutions_.emplace(
-                        &expression, ApiResolution{ApiResolutionKind::script_signal,
-                                                   script_owner->native_class_name, "", "", result,
-                                                   0, 0, false, false});
-                }
-                break;
-            }
-            if (member->kind == ScriptMemberKind::function) {
-                if (accessed_on_type || member->is_static) {
-                    diagnostics_.error(
-                        "GDS4096", "only instance script methods can be used as Callable values",
-                        expression.span);
-                    result = unknown_type;
-                } else {
-                    result = {TypeKind::builtin, "Callable"};
-                    model_.api_resolutions_.emplace(
-                        &expression, ApiResolution{ApiResolutionKind::script_callable,
-                                                   script_owner->native_class_name, "", "", result,
-                                                   0, 0, false, false});
-                }
-                break;
-            }
-            if (member->kind != ScriptMemberKind::field) {
-                diagnostics_.error("GDS4058",
-                                   "script member '" + expression.value() +
-                                       "' is not an instance field",
-                                   expression.span);
-                result = unknown_type;
-                break;
-            }
-            const bool runtime_static_field = current_script_ && current_script_->is_tool &&
-                                              !script_owner->is_tool && accessed_on_type &&
-                                              member->is_static;
-            const bool attached_instance_field =
-                script_owner->attached && !accessed_on_type && !member->is_static;
-            result =
-                runtime_static_field || member->getter_is_coroutine ? variant_type : member->type;
-            auto resolution =
-                ApiResolution{runtime_static_field ? ApiResolutionKind::script_runtime_static_field
-                              : attached_instance_field ? ApiResolutionKind::dynamic_property
-                                                        : ApiResolutionKind::script_property,
-                              script_owner->native_class_name,
-                              "_gdpp_get_" + expression.value(),
-                              "_gdpp_set_" + expression.value(),
-                              result,
-                              0,
-                              0,
-                              false,
-                              false};
-            resolution.assignment_type = member->type;
-            model_.api_resolutions_.emplace(&expression, std::move(resolution));
-            break;
-        }
-        if (const auto* external_owner = object_type.kind == TypeKind::object && script_symbols_
-                                             ? script_symbols_->find_external(object_type.name)
-                                             : nullptr) {
-            const bool accessed_on_type =
-                object_resolution &&
-                object_resolution->kind == ApiResolutionKind::external_type_reference;
-            if (accessed_on_type) {
-                if (const auto* enumeration =
-                        script_symbols_->find_external_enum(*external_owner, expression.value())) {
-                    result = {TypeKind::enumeration,
-                              external_owner->name + "." + enumeration->name};
-                    model_.referenced_extension_abis_.insert(external_owner->provider_abi);
-                    model_.api_resolutions_.emplace(
-                        &expression, ApiResolution{ApiResolutionKind::global_enum_type, "0", "", "",
-                                                   result, 0, 0, false, true});
-                    break;
-                }
-                for (const auto& enumeration : external_owner->enums) {
-                    const auto found = std::find_if(
-                        enumeration.entries.begin(), enumeration.entries.end(),
-                        [&](const auto& entry) { return entry.name == expression.value(); });
-                    if (found == enumeration.entries.end())
-                        continue;
-                    result = {TypeKind::enumeration, external_owner->name + "." + enumeration.name};
-                    model_.referenced_extension_abis_.insert(external_owner->provider_abi);
-                    model_.api_resolutions_.emplace(
-                        &expression, ApiResolution{ApiResolutionKind::global_enum_value,
-                                                   std::to_string(found->value), "", "", result, 0,
-                                                   0, false, true});
-                    break;
-                }
-                if (result.kind == TypeKind::enumeration)
-                    break;
-            }
-            if (const auto* member =
-                    script_symbols_->find_external_member(*external_owner, expression.value())) {
-                if (member->kind == ScriptMemberKind::constant) {
-                    if (!accessed_on_type) {
-                        diagnostics_.error("GDS4058",
-                                           "external constant '" + expression.value() +
-                                               "' must be accessed on its type",
-                                           expression.span);
-                        result = unknown_type;
-                    } else {
-                        result = member->type;
+                    const bool dynamically_typed_object =
+                        object_type.kind == TypeKind::object &&
+                        (api_.find_class(object_type.name) ||
+                         (script_symbols_ && script_symbols_->find_external(object_type.name)));
+                    if (dynamically_typed_object && !accessed_on_type) {
+                        result = variant_type;
                         model_.api_resolutions_.emplace(
-                            &expression, ApiResolution{ApiResolutionKind::global_constant,
-                                                       std::to_string(member->constant_value), "",
-                                                       "", result, 0, 0, false, true});
+                            &expression, ApiResolution{ApiResolutionKind::dynamic_property, "", "",
+                                                       "", result, 0, 0, false, false});
+                    } else {
+                        result = unknown_type;
                     }
-                } else if (accessed_on_type) {
-                    diagnostics_.error("GDS4058",
-                                       "external instance member '" + expression.value() +
-                                           "' cannot be accessed on its type",
-                                       expression.span);
-                    result = unknown_type;
-                } else if (member->kind == ScriptMemberKind::function) {
-                    result = {TypeKind::builtin, "Callable"};
-                    model_.api_resolutions_.emplace(
-                        &expression,
-                        ApiResolution{ApiResolutionKind::external_callable, external_owner->name,
-                                      "", "", result, 0, 0, false, false});
-                } else if (member->kind == ScriptMemberKind::signal) {
-                    result = {TypeKind::builtin, "Signal"};
-                    model_.api_resolutions_.emplace(
-                        &expression,
-                        ApiResolution{ApiResolutionKind::external_signal, external_owner->name, "",
-                                      "", result, 0, 0, false, false});
-                } else {
-                    result = member->type;
-                    ApiResolution resolution{ApiResolutionKind::dynamic_property,
-                                             external_owner->name,
-                                             "",
-                                             "",
-                                             result,
-                                             0,
-                                             0,
-                                             false,
-                                             false};
-                    resolution.read_only = member->read_only;
-                    model_.api_resolutions_.emplace(&expression, std::move(resolution));
                 }
-                break;
-            }
-            if (external_owner->members_complete) {
-                diagnostics_.error("GDS4112",
-                                   "external type '" + external_owner->name +
-                                       "' has no declared member '" + expression.value() + "'",
-                                   expression.span);
-                result = unknown_type;
-                break;
-            }
-        }
-        std::string owner;
-        if (object_type.kind == TypeKind::array)
-            owner = "Array";
-        else if (object_type.kind == TypeKind::dictionary)
-            owner = "Dictionary";
-        else if (object_type.kind == TypeKind::string)
-            owner = "String";
-        else if (object_type.kind == TypeKind::string_name)
-            owner = "StringName";
-        else if (object_type.kind == TypeKind::builtin || object_type.kind == TypeKind::object)
-            owner = object_type.name;
-        const bool accessed_on_type =
-            object_resolution && object_resolution->kind == ApiResolutionKind::type_reference;
-        if (accessed_on_type) {
-            if (api_.has_class_enum(owner, expression.value())) {
-                result = {TypeKind::enumeration, owner + "." + expression.value()};
-                model_.api_resolutions_.emplace(
-                    &expression, ApiResolution{ApiResolutionKind::global_enum_type,
-                                               "godot::" + owner + "::" + expression.value(), "",
-                                               "", result, 0, 0, false, true});
-                break;
-            }
-            if (const auto* constant = api_.find_builtin_constant(owner, expression.value())) {
-                result = type_from_godot_api(constant->type);
-                model_.api_resolutions_.emplace(
-                    &expression, ApiResolution{ApiResolutionKind::builtin_constant, constant->value,
-                                               "", "", result, 0, 0, false, true});
-                break;
-            }
-        }
-        if (const auto* constant = api_.find_class_constant(owner, expression.value())) {
-            result = {TypeKind::integer, "int"};
-            model_.api_resolutions_.emplace(&expression,
-                                            ApiResolution{ApiResolutionKind::global_constant,
-                                                          std::to_string(constant->value), "", "",
-                                                          result, 0, 0, false, true});
-            break;
-        }
-        if (!accessed_on_type && api_.find_signal(owner, expression.value())) {
-            result = {TypeKind::builtin, "Signal"};
-            model_.api_resolutions_.emplace(&expression,
-                                            ApiResolution{ApiResolutionKind::script_signal, owner,
-                                                          "", "", result, 0, 0, false, false});
-        } else if (const auto* property = api_.find_property(owner, expression.value())) {
-            auto resolution = property_resolution(ApiResolutionKind::property, *property);
-            result = resolution.type;
-            model_.api_resolutions_.emplace(&expression, std::move(resolution));
-        } else if (object_type.kind == TypeKind::dictionary) {
-            // GDScript supports dictionary.key as syntax sugar for dictionary["key"].
-            result = variant_type;
-            model_.api_resolutions_.emplace(&expression,
-                                            ApiResolution{ApiResolutionKind::dynamic_property, "",
-                                                          "", "", result, 0, 0, false, false});
-        } else {
-            const bool dynamically_typed_object =
-                object_type.kind == TypeKind::object &&
-                (api_.find_class(object_type.name) ||
-                 (script_symbols_ && script_symbols_->find_external(object_type.name)));
-            if (dynamically_typed_object && !accessed_on_type) {
-                result = variant_type;
-                model_.api_resolutions_.emplace(
-                    &expression, ApiResolution{ApiResolutionKind::dynamic_property, "", "", "",
-                                               result, 0, 0, false, false});
-            } else {
-                result = unknown_type;
-            }
-        }
+            } while (false);
+            return result;
+        }();
         break;
-    }
     case ast::ExpressionKind::subscript: {
         const auto container = analyze_expression(*expression.operand(0));
         const auto index = analyze_expression(*expression.operand(1));
