@@ -3997,6 +3997,12 @@ TEST_CASE("compiler only updates proven local Dictionary slots in place") {
                                    "_gdpp_proven_dictionary_read_key_") != std::string::npos);
     REQUIRE(local.unit.source.find("checked_dictionary_get_named(") == std::string::npos);
     REQUIRE(local.unit.source.find("unchecked_dictionary_set_named(") == std::string::npos);
+    const auto compound =
+        local.unit.source.find("gdpp::runtime::compound_assign_integer(");
+    REQUIRE(compound != std::string::npos);
+    REQUIRE(local.unit.source.find(
+                "gdpp::runtime::ScriptSourceLocation{_gdpp_source_path, 4, ", compound) !=
+            std::string::npos);
 
     const auto require_checked = [&](const std::string& path, const std::string& source) {
         const auto result = compiler.compile(path, source);
