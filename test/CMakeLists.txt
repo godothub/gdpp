@@ -114,6 +114,17 @@ if(GDPP_BUILD_EXTENSION)
                 "-DGDPP_TEST_CONFIG=$<CONFIG>"
                 -P "${CMAKE_CURRENT_SOURCE_DIR}/sdk_profile_contract_test.cmake"
     )
+
+    if(WIN32)
+        add_executable(gdpp_windows_dll_load_test windows_dll_load_test.cpp)
+        add_dependencies(gdpp_windows_dll_load_test gdpp_godot_plugin)
+        target_compile_features(gdpp_windows_dll_load_test PRIVATE cxx_std_17)
+        gdpp_set_project_warnings(gdpp_windows_dll_load_test)
+        add_test(
+            NAME gdpp.windows.compiler_dll_load
+            COMMAND gdpp_windows_dll_load_test "$<TARGET_FILE:gdpp_godot_plugin>"
+        )
+    endif()
 endif()
 
 if(GDPP_BUILD_CLI)
