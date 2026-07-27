@@ -65,14 +65,16 @@ CI 在 Godot 4.4.1、4.5.2、4.6.3、4.7.1 的兼容作业中执行该矩阵。�
 5 个样本和每个 case 10,000 次迭代下通过完整行为与性能门禁：
 
 ```text
-Callable median: GDS 42.1 ns / AOT 27.8 ns（AOT -33.33%）
-Variant median:  GDS 22.6 ns / AOT 23.6 ns（AOT +2.17%）
+Dictionary mean: GDS 199.76 ns / AOT 164.36 ns（AOT -17.72%）
+String mean:     GDS 138.48 ns / AOT 126.71 ns（AOT -8.50%）
+Variant mean:    GDS 23.43 ns / AOT 22.79 ns（AOT -2.70%）
 13/13 benchmark families、启动、固定帧：全部 <= 10%
 行为 oracle：PASS
 ```
 
-该结果用于证明 fault frame、Callable 和动态转换的 1.8.0 改动没有引入受测热路径回归。数值会
-随机器和 Godot patch 变化，正式发布仍要求四个目标版本各自在 Linux runner 独立通过同一门禁。
+该结果来自 fault frame 最终效应分析版本，用于证明完整错误传播没有依靠热点轮询换取正确性，
+也没有通过放宽阈值掩盖回归。数值会随机器和 Godot patch 变化，正式发布仍要求四个目标版本
+各自在 Linux runner 独立通过同一门禁。
 
 最近一次 Windows 联机事件补充审计在同一机器、相同输入和三轮 warm 运行下得到：
 
@@ -106,6 +108,9 @@ Shader/UI 更新。结果表明这一端到端场景未发生性能回归，AOT 
 - 本地/`self` Signal 直接进入 `emit_signal`，外部接收者保留通用错误语义。
 - 同步脚本 fault frame 在调用点内联并使用线程局部活动状态；协程通过无捕获检查器读取恢复
   线程已安装的持久状态，既不捕获调用者栈，也不为每个表达式支付原子读写。
+- 后端对类型化表达式、转换和赋值执行保守故障效应判定；只在动态运算、严格存储、越界、整数
+  除法/取模、对象/Callable/Signal 重入等可能设置 fault state 的边界轮询。字面量、局部变量、
+  精确存储、安全整数运算、String 值方法和已证明安全的三元分支不生成伪故障分支。
 - 本地 Callable 把参数数量写入 C++ 类型，并保留未逃逸调用的原生参数 tuple；完全匹配时省略
   参数 Variant 往返，逃逸/赋值和动态调用仍执行完整有效性、数量和严格转换检查。
 - 显式 Variant 转换先处理精确同类型，再进入 Godot 通用转换矩阵；不改变非精确转换的接受集合。
