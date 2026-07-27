@@ -220,6 +220,12 @@ frame。复合写入按“受检读取→右值→运算→写回”执行；官
 `Variant&` 更新；任何不确定路径保留完整受检 ABI。证明只选择等价后端路径，不会跳过 typed
 Dictionary 键/值合同、接收者求值或可能失败的动态边界。
 
+当复合更新的现有槽位和右值都精确为 `Variant::INT` 时，runtime 使用 godot-cpp 的
+`VariantInternal` 取得同一 int64 存储，并以公共 `integer` 合同原地执行加减乘除、取模、移位
+及位运算。运算结果不会经过临时 Variant；除零/模零在写入前设置带源码位置的 fault，幂、非整数
+或未知运算继续调用 Godot 的通用 Variant ABI。该路径不会改变槽位类型，也不会绕过证明或
+Dictionary 有效性检查。
+
 native-to-Variant 适配按值类别保留所有权：现有 Variant lvalue 直接借用，Variant rvalue 转移，
 其他原生值才构造新的 Variant。普通赋值仍先固定接收者、再只求值一次 RHS；该 RHS 是编译器拥有
 且提交后不再观察的快照，因此 String、Variant、容器等引用支持值可以移动进入受检转换和最终
