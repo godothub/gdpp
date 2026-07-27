@@ -62,13 +62,17 @@ AST 的表达式、语句和 match pattern 使用有名结构的 `std::variant`�
 - GDScript 类型、可空性、值/共享容器/Object/Ref 所有权分类；
 - 字段、函数、Signal、enum、属性访问器、注解和内部类验证；
 - Godot 4.4～4.7 版本化 API 重载、属性、虚函数和 ABI meta 选择；
-- 项目脚本、Autoload、脚本 Resource、第三方 ClassDB 契约和依赖记录；
+- 项目脚本、全局脚本内部类型、Autoload、脚本 Resource、第三方 ClassDB 契约和依赖记录；
 - `is`/`null`/真值控制流收窄；
 - `Array[T]`、`Dictionary[K,V]` 和 PackedArray 的唯一容器规则；
 - `range`、load/preload、语言 utility 和动态分派 intrinsic；
 - RPC、协程身份和跨脚本公开 ABI。
 
 后端不得重新解释注解字符串、拆分类型文本或猜测 iterable。语义不完整时在 IR/代码生成前失败。
+
+全局类、内部类和嵌套枚举在项目符号图中使用声明身份，不通过裸名字重新查找。命名枚举的静态
+类型保留其声明身份，运行值则遵守 Godot 的只读 Dictionary 合同。导出的裸 `Variant` 属性使用
+Godot 的 NIL_IS_VARIANT 元数据，而不是因为没有更窄类型就省略 Inspector/存储登记。
 
 ## HIR 与 MIR
 
@@ -122,6 +126,10 @@ GDExtension 创建，生成行为通过下列层附着：
 - 动态 Signal/Callable、FunctionState await 和跨脚本调用经统一 runtime ABI。
 
 该设计避免 Godot 尚不支持的跨 GDExtension C++ 继承，也不需要供应商头文件或链接库。
+
+编译脚本本身也是有状态的 `Script` 资源。生成 `ScriptResource<T>` 保存规范 `Ref<Script>`，
+因此 load/preload、资源缓存、可空性、Object/Resource/Script 参数、Script 属性与 Signal、
+类型判断和实例化共享同一运行时身份；只有全局类名这种纯类型引用才由 `T` 选择构造目标。
 
 ### 调试器桥接
 
@@ -192,6 +200,10 @@ ABI 18 后，直接生成系统工具链命令：
 
 项目库文件使用 `gdpp.<debug|release>.<platform>.<arch>` 前缀；唯一公开 C 入口固定为
 `gdpp_library_init`。文件名与入口符号是分别校验的两个契约。
+
+字段和静态初始化器中的调用先固定接收者，再按源码顺序固定参数，随后立即执行原生或动态调用；
+生成器不会先保存一个方法值再以不同顺序调用。ClassDB 暴露但 godot-cpp 没有公开 C++ getter/
+setter 的属性统一走 Object named-property ABI，避免调用绑定生成器刻意隐藏的内部访问器。
 
 动态语言失败使用线程局部 script fault frame。越界、除零、失效对象、Callable 参数、严格强类型
 存储和第三方扩展调用会记录原始 `.gd` 路径/行列并终止当前生成函数的后续求值，不让 C++ 异常或

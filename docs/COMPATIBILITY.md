@@ -1,6 +1,6 @@
 # GDScript 兼容性
 
-本页描述 GDPP 1.8.1 能接受、生成、运行和交付的语言边界。总体状态和优先级见
+本页描述 GDPP 1.8.2 能接受、生成、运行和交付的语言边界。总体状态和优先级见
 [当前状态与功能缺口](STATUS.md)，平台证据见[平台验证报告](PLATFORM_TEST_REPORT.md)。
 
 ## 兼容模型
@@ -41,7 +41,7 @@ Script loader 的能力缺失；GDPP 不改写客户模板，也不以开启路�
 |---|---|
 | Godot 4.7 官方合法 parser 语料 | 114 / 114 未被 lexer/parser 拒绝 |
 | Godot 4.7 官方非法 parser 语料 | 76 / 76 最终拒绝；接受、超时、崩溃均阻断 CI |
-| 固定编译器单元测试 | 553 / 553 |
+| 固定编译器单元测试 | 560 / 560 |
 | 恶意输入 | 非法 UTF-8、NUL、超深递归、超长链、诊断风暴和资源上限均失败关闭 |
 | Unicode | Unicode 17.0 XID、关键字 confusable 防护、稳定 ASCII C++ 标识符 |
 | 字面量 | 整数基数/边界、浮点非有限值、raw/三引号字符串和 Unicode 转义 |
@@ -50,6 +50,10 @@ lexer/parser 已有持续 coverage-guided fuzz、同文件多错误恢复、每�
 golden 和资源预算。缺失尾部节点、未闭合分组和尾随空白的组合也必须产生单调且位于源码内的
 恢复范围；失败输入会作为 CI artifact 保留。模糊测试是持续门禁而不是一次性“完成率”；新
 stable 仍需刷新官方语料和漂移快照。
+
+lexer 只在语法确实要求关键字的位置赋予关键字含义；`for match in values` 等迭代变量可以使用
+上下文关键字而不会被错误拒绝。enum parser 同时接受声明同行 `{` 和换行后 `{`，错误恢复仍从
+实际枚举体开始，不会把首个成员误当作声明后的多余 token。
 
 单文件与项目编译 API 会把完整流水线调度到 GDPP 自有的 16 MiB 工作线程栈，并在重入时复用
 当前编译线程。语义分析中占用最大的调用和成员分支具有独立帧，因此 Godot 脚本工作线程、客户
@@ -62,9 +66,9 @@ stable 仍需刷新官方语料和漂移快照。
 | `extends`、`class_name`、内部类 | 完成 | 项目路径继承需要 ProjectCompiler 上下文；单文件 CLI 无法独立解析外部脚本图 |
 | 字段、常量、静态字段 | 完成 | `_static_init` 惰性执行；扩展卸载释放静态资源 |
 | 函数、默认参数、rest 参数 | 完成 | 默认值按调用时/常量时语义分类；typed rest 遵循目标 Godot 规则 |
-| 属性 getter/setter | 完成 | 内联和绑定访问器、背字段直接访问及 Inspector 元数据 |
+| 属性 getter/setter | 完成 | 内联和绑定访问器、背字段直接访问及 Inspector 元数据；无公开 godot-cpp 访问器的 ClassDB 属性使用 Object 属性 ABI |
 | Signal 声明与调用 | 完成 | 声明、emit、await、发射期连接变更、一次性/延迟/引用计数连接和宿主销毁 |
-| enum/bitfield | 完成 | 命名/匿名、常量表达式、导出提示和第三方 ClassDB 枚举 |
+| enum/bitfield | 完成 | 命名/匿名、常量表达式、只读 Dictionary 值、导出提示和第三方 ClassDB 枚举 |
 | `@abstract` | 完成 | 脚本/内部类/方法、跨脚本义务和动态分派 |
 | `@tool` | 完成 | 工具脚本与 runtime 脚本执行域隔离；编辑器专用脚本不能进入 runtime 图 |
 | `@icon` | 完成 | `res://`/`uid://`、路径逃逸拒绝和 ClassDB 图标描述 |
@@ -83,6 +87,10 @@ stable 仍需刷新官方语料和漂移快照。
 PackedArray、Object/Ref 与所有 Variant 值家族已进入官方源码/AOT fault 差分；错误包含源码
 位置并终止当前函数。Godot 自己跨 patch 会调整诊断措辞，因此兼容合同锁定错误类别、位置、
 求值顺序和中止边界，不承诺不同引擎 patch 的日志逐字节恒定。
+
+全局 `class_name` 脚本的内部类和嵌套枚举由项目符号身份解析，而不是退化为同名字符串或
+ClassDB 猜测。命名脚本枚举保持声明身份，同时以只读 `Dictionary` 提供键、值、大小、查询、
+迭代和标准 Dictionary 方法；写入只读枚举值按 Godot 规则失败。
 
 ## 表达式与控制流
 
@@ -173,6 +181,10 @@ lambda 无宿主。该优化不改变逃逸 Callable 或已释放宿主的失败
 4.4～4.7 目标跟随 Godot 已记录的“脚本不因引用归零卸载”行为，并在扩展终止时清理。若未来
 目标 Godot 改变该行为，版本能力表和运行差分必须一起更新。
 
+没有更窄静态类型的 `@export var value` 保持 `Variant` 存储，并登记与 Godot 一致的
+`PROPERTY_TYPE_NIL`/`PROPERTY_USAGE_NIL_IS_VARIANT` 元数据。它不会因为 C++ 存储类型是
+`Variant` 而从 Inspector、场景存储或 Attached 属性表中消失。
+
 ## 标准库与 Godot API
 
 4.7 能力表索引全部非空 Variant 内建类型、构造器、方法、成员、常量、运算符、全局工具函数、
@@ -215,6 +227,11 @@ API 规则：
 每个已编译脚本还登记唯一规范 `Script` 资源身份。`load()`、`ResourceLoader`、相对路径、
 `uid://`、线程加载、缓存、`exists()`、`get_script()` 和 `.new()` 即使路径在运行时拼接也使用
 同一二进制清单；不存在的路径返回确定错误，成品无需保留 `.gd`。
+
+生成代码中的 Script 值保存实际 `Ref<Script>`，而不是只保存编译期 C++ 类型标签。因此
+`load`/`preload` 返回值、可空赋值和真值、`is Script`、Script/Resource/Object 参数、继承的
+Script 方法、属性、Signal 与 `.new()` 都操作同一规范资源状态；空 Script 构造会确定失败。
+全局类名作为类型引用时才选择对应生成类，不会与运行时 Script 变量混为一条构造路径。
 
 ## 第三方 GDExtension
 

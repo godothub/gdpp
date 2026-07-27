@@ -39,7 +39,7 @@
 ## 已关闭：M1～M4 P0 功能闭环
 
 1.8.0 以“实现、官方源/AOT 差分、生成 C++17、真实 Godot 运行和发行审计”同时成立作为关闭
-条件，而不是以单个样例成功作为完成证据。
+条件；1.8.2 继续用真实跨脚本工程补强已关闭范围，而不是以单个样例成功作为完成证据。
 
 ### M1：前端
 
@@ -49,6 +49,7 @@
 - coverage-guided fuzz、失败样本归档、非法 UTF-8/NUL、递归/链长/诊断预算及最小语料进入 CI。
 - Godot 4.7.1 的 114 个合法和 76 个非法 parser fixture、Unicode 与 warning/annotation
   注册表具有固定快照和 stable drift 报告。
+- 上下文关键字可以作为迭代变量；enum 声明同行或换行后的左花括号进入同一 AST 和恢复路径。
 - `Compiler` 与 `ProjectCompiler` 拥有固定 16 MiB 工作线程栈，最大调用/成员分析帧已经拆分；
   可重入调用不重复建线程，宿主嵌入线程的栈大小不能再改变合法输入的编译结果。
 
@@ -69,6 +70,10 @@
   拒绝、同一脚本节点跨 peer 重连，以及节点/缓存、peer、SceneTree 根的确定退出。
 - 全项目编译清单提供动态拼接 `.gd` 路径、相对路径、UID、同步/线程 ResourceLoader、缓存、
   `exists()` 和 Script `.new()` 的无源码身份；清单外路径确定失败。
+- 全局命名脚本的内部类/嵌套 enum 使用项目符号身份；命名 enum 保留只读 Dictionary 运行合同，
+  裸 `Variant` 导出属性保留 Inspector/存储元数据。
+- `load`/`preload` 的编译 Script 保存实际规范资源状态，可空性、Script API、属性、Signal、
+  Object/Resource 参数、类型判断和构造不再依赖编译期类型占位。
 - custom/double SDK 由精确 API SHA-256、precision、版本、godot-cpp 和 ABI 生产并审计。
 
 `@static_unload` 在 4.4～4.7 保留完整注解身份并匹配当前 Godot“脚本保持到语言关闭”的可观察
@@ -97,6 +102,8 @@
   已证明槽位除零的函数中止边界和源码位置。
 - `.gd`→C++/native 符号图、全部 native meta/enum/bitfield/real_t/precision ABI 和 API 范围
   进入自动审计。
+- ClassDB 属性在 godot-cpp 没有公开访问器时走 Object 属性 ABI；字段/静态初始化器中的原生调用
+  固定接收者和参数的源码求值顺序，不生成不可调用的方法值。
 - 项目脚本 `Object.free()` 通过 Godot Variant 调度，保留 RefCounted 和锁定对象保护。
 - 生成库只导出 `gdpp_library_init`；桌面、移动、Wasm 的入口、依赖、路径、切片和无源码内容
   均由发布门禁校验。
