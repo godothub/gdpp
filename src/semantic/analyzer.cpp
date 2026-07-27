@@ -2037,7 +2037,7 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
     }
     case ast::ExpressionKind::call:
         result = [this, &expression]() -> Type {
-            Type result = unknown_type;
+            Type call_result = unknown_type;
             do {
                 const auto& callee = *expression.operand(0);
                 const auto mark_coroutine_call = [&](const bool coroutine) {
@@ -2103,10 +2103,10 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                                                    method->name + "'");
                         }
                     }
-                    result = type_from_godot_api(method->return_type);
+                    call_result = type_from_godot_api(method->return_type);
                     model_.api_resolutions_.emplace(
                         &callee,
-                        ApiResolution{ApiResolutionKind::method, method->owner, "", "", result,
+                        ApiResolution{ApiResolutionKind::method, method->owner, "", "", call_result,
                                       method->required_arguments, method->maximum_arguments,
                                       method->is_vararg, false});
                     return true;
@@ -2149,11 +2149,11 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                         }
                         if (!compatible)
                             continue;
-                        result = type_from_annotation(name);
-                        model_.expression_types_[&callee] = result;
+                        call_result = type_from_annotation(name);
+                        model_.expression_types_[&callee] = call_result;
                         model_.api_resolutions_.emplace(
                             &callee,
-                            ApiResolution{ApiResolutionKind::constructor, name, "", "", result,
+                            ApiResolution{ApiResolutionKind::constructor, name, "", "", call_result,
                                           static_cast<std::uint16_t>(argument_count),
                                           static_cast<std::uint16_t>(argument_count), false, true,
                                           static_cast<std::int64_t>(occurrence)});
@@ -2195,11 +2195,11 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                                                    function->name + "'");
                         }
                     }
-                    result = type_from_godot_api(function->return_type);
+                    call_result = type_from_godot_api(function->return_type);
                     model_.api_resolutions_.emplace(
                         &callee,
                         ApiResolution{ApiResolutionKind::utility_function, function->name, "", "",
-                                      result, function->required_arguments,
+                                      call_result, function->required_arguments,
                                       function->maximum_arguments, function->is_vararg, true});
                     return true;
                 };
@@ -2264,33 +2264,39 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                     }
                     switch (feature.result_rule) {
                     case IntrinsicResultRule::dynamic:
-                        result = variant_type;
+                        call_result = variant_type;
                         break;
                     case IntrinsicResultRule::boolean:
-                        result = {TypeKind::boolean, "bool"};
+                        call_result = {TypeKind::boolean, "bool"};
                         break;
                     case IntrinsicResultRule::integer:
-                        result = {TypeKind::integer, "int"};
+                        call_result = {TypeKind::integer, "int"};
                         break;
                     case IntrinsicResultRule::string:
-                        result = {TypeKind::string, "String"};
+                        call_result = {TypeKind::string, "String"};
                         break;
                     case IntrinsicResultRule::color:
-                        result = {TypeKind::builtin, "Color"};
+                        call_result = {TypeKind::builtin, "Color"};
                         break;
                     case IntrinsicResultRule::array:
-                        result = {TypeKind::array, "Array"};
+                        call_result = {TypeKind::array, "Array"};
                         break;
                     case IntrinsicResultRule::integer_array:
-                        result = {TypeKind::array, "Array[int]"};
+                        call_result = {TypeKind::array, "Array[int]"};
                         break;
                     case IntrinsicResultRule::resource:
-                        result = variant_type;
+                        call_result = variant_type;
                         break;
                     }
-                    ApiResolution resolution{
-                        ApiResolutionKind::intrinsic, std::string{feature.name}, "",    "",  result,
-                        feature.minimum_arguments,    feature.maximum_arguments, false, true};
+                    ApiResolution resolution{ApiResolutionKind::intrinsic,
+                                             std::string{feature.name},
+                                             "",
+                                             "",
+                                             call_result,
+                                             feature.minimum_arguments,
+                                             feature.maximum_arguments,
+                                             false,
+                                             true};
                     resolution.intrinsic = feature.kind;
                     model_.api_resolutions_.insert_or_assign(&callee, std::move(resolution));
                 };
@@ -2312,12 +2318,12 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                     if (!constant_path) {
                         require_assignable({TypeKind::string, "String"}, argument_types.front(),
                                            expression.operand(1)->span, "load resource path");
-                        result = variant_type;
+                        call_result = variant_type;
                         ApiResolution resolution{ApiResolutionKind::intrinsic,
                                                  "load",
                                                  "",
                                                  "",
-                                                 result,
+                                                 call_result,
                                                  1,
                                                  1,
                                                  false,
@@ -2351,20 +2357,20 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                             : nullptr;
                     if (target) {
                         record_script_dependency(target);
-                        result = {TypeKind::script_resource, target->path};
+                        call_result = {TypeKind::script_resource, target->path};
                         model_.api_resolutions_.emplace(
                             &expression, ApiResolution{ApiResolutionKind::script_resource,
-                                                       target->native_class_name, "", "", result, 1,
-                                                       1, false, true});
+                                                       target->native_class_name, "", "",
+                                                       call_result, 1, 1, false, true});
                     } else if ((effective_resource_path.size() >= 5 &&
                                 effective_resource_path.compare(effective_resource_path.size() - 5,
                                                                 5, ".tscn") == 0) ||
                                (effective_resource_path.size() >= 4 &&
                                 effective_resource_path.compare(effective_resource_path.size() - 4,
                                                                 4, ".scn") == 0)) {
-                        result = {TypeKind::object, "PackedScene"};
+                        call_result = {TypeKind::object, "PackedScene"};
                         auto& resolution = model_.api_resolutions_.at(&callee);
-                        resolution.type = result;
+                        resolution.type = call_result;
                     } else if (effective_resource_path.size() >= 3 &&
                                effective_resource_path.compare(effective_resource_path.size() - 3,
                                                                3, ".gd") == 0) {
@@ -2374,8 +2380,8 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                                            expression.span);
                     } else if (resolved_resource_path || (resource_path.rfind("res://", 0) == 0 &&
                                                           resource_path.size() > 6)) {
-                        result = variant_type;
-                        model_.api_resolutions_.at(&callee).type = result;
+                        call_result = variant_type;
+                        model_.api_resolutions_.at(&callee).type = call_result;
                     } else {
                         diagnostics_.error("GDS4061",
                                            "invalid project resource path '" + resource_path +
@@ -2414,19 +2420,19 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                                         current_function_name_ +
                                         "' has no reflected MethodBind compatibility hash",
                                     expression.span);
-                                result = unknown_type;
+                                call_result = unknown_type;
                                 break;
                             }
                             validate_script_call(*external_member, argument_types, expression,
                                                  expression.span);
-                            result = external_member->type;
+                            call_result = external_member->type;
                             model_.referenced_extension_abis_.insert(external_base->provider_abi);
                             model_.api_resolutions_[&callee] = ApiResolution{
                                 ApiResolutionKind::external_super_method,
                                 external_base->name,
                                 "",
                                 current_function_name_,
-                                result,
+                                call_result,
                                 static_cast<std::uint16_t>(external_member->required_arguments),
                                 static_cast<std::uint16_t>(external_member->parameters.size()),
                                 external_member->is_vararg,
@@ -2454,7 +2460,7 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                                                                 expression.span);
                             validate_script_call(*member, argument_types, expression,
                                                  expression.span);
-                            result = member->type;
+                            call_result = member->type;
                             mark_coroutine_call(member->is_coroutine);
                         } else if (method) {
                             if (!instance_context_available_ && !method->is_static)
@@ -2466,7 +2472,7 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                                                "super call has no base implementation for '" +
                                                    current_function_name_ + "'",
                                                expression.span);
-                            result = unknown_type;
+                            call_result = unknown_type;
                         }
                         model_.api_resolutions_[&callee] = ApiResolution{
                             ApiResolutionKind::script_super,
@@ -2475,7 +2481,7 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                                           : "godot::" + base_type_,
                             method ? method->owner : "",
                             current_function_name_,
-                            result,
+                            call_result,
                             member   ? static_cast<std::uint16_t>(member->required_arguments)
                             : method ? method->required_arguments
                                      : std::uint16_t{0},
@@ -2488,7 +2494,7 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                         resolve_intrinsic(*language_intrinsic);
                     } else if (resolve_utility(api_.find_utility_function(callee.value()))) {
                     } else if (const auto* symbol = resolve(callee.value())) {
-                        result = symbol->type;
+                        call_result = symbol->type;
                         model_.referenced_symbols_.emplace(&callee, *symbol);
                         if (symbol->kind == SymbolKind::function) {
                             if (!script_function_is_static(callee.value()))
@@ -2515,7 +2521,7 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                             if (member) {
                                 validate_script_call(*member, argument_types, expression,
                                                      expression.span);
-                                result = member->type;
+                                call_result = member->type;
                                 if (current_inner_class_) {
                                     if (script_symbols_->member_is_external(*current_inner_class_,
                                                                             callee.value())) {
@@ -2527,7 +2533,7 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                                             model_.api_resolutions_.insert_or_assign(
                                                 &callee,
                                                 ApiResolution{ApiResolutionKind::dynamic_method,
-                                                              external->name, "", "", result,
+                                                              external->name, "", "", call_result,
                                                               static_cast<std::uint16_t>(
                                                                   member->required_arguments),
                                                               static_cast<std::uint16_t>(
@@ -2546,7 +2552,7 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                                         model_.api_resolutions_.insert_or_assign(
                                             &callee,
                                             ApiResolution{ApiResolutionKind::dynamic_method, "", "",
-                                                          "", result, 0, 0, true, false});
+                                                          "", call_result, 0, 0, true, false});
                                     }
                                     break;
                                 }
@@ -2560,7 +2566,7 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                                         model_.api_resolutions_.insert_or_assign(
                                             &callee,
                                             ApiResolution{ApiResolutionKind::dynamic_method,
-                                                          external->name, "", "", result,
+                                                          external->name, "", "", call_result,
                                                           static_cast<std::uint16_t>(
                                                               member->required_arguments),
                                                           static_cast<std::uint16_t>(
@@ -2575,7 +2581,7 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                                     model_.api_resolutions_.emplace(
                                         &callee,
                                         ApiResolution{ApiResolutionKind::dynamic_method, "", "", "",
-                                                      result, 0, 0, true, false});
+                                                      call_result, 0, 0, true, false});
                                 }
                             }
                         } else if (symbol->kind == SymbolKind::function) {
@@ -2590,7 +2596,7 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                                                    "' is not directly callable; Callable values "
                                                    "must use .call(...)",
                                                expression.span);
-                            result = unknown_type;
+                            call_result = unknown_type;
                         }
                     } else if (const auto* method = api_.find_method(base_type_, callee.value())) {
                         if (!method->is_static)
@@ -2599,8 +2605,8 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                         (void)resolve_method(method);
                     } else {
                         if (!resolve_constructor(callee.value())) {
-                            result = analyze_expression(callee);
-                            if (result.kind == TypeKind::unknown) {
+                            call_result = analyze_expression(callee);
+                            if (call_result.kind == TypeKind::unknown) {
                                 diagnostics_.error("GDS4071",
                                                    "unknown function or callable '" +
                                                        callee.value() + "'",
@@ -2662,17 +2668,17 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                                         callee.value() +
                                         "' has no reflected MethodBind compatibility hash",
                                     expression.span);
-                                result = unknown_type;
+                                call_result = unknown_type;
                                 break;
                             }
                             validate_script_call(*member, argument_types, expression,
                                                  expression.span);
-                            result = member->type;
+                            call_result = member->type;
                             model_.referenced_extension_abis_.insert(external_super->provider_abi);
                             model_.api_resolutions_.emplace(
                                 &callee, ApiResolution{
                                              ApiResolutionKind::external_super_method,
-                                             external_super->name, "", callee.value(), result,
+                                             external_super->name, "", callee.value(), call_result,
                                              static_cast<std::uint16_t>(member->required_arguments),
                                              static_cast<std::uint16_t>(member->parameters.size()),
                                              member->is_vararg, true,
@@ -2689,11 +2695,11 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                                                    "constructor arguments",
                                                    expression.span);
                             }
-                            result = object_type;
+                            call_result = object_type;
                             model_.api_resolutions_.emplace(
                                 &callee, ApiResolution{ApiResolutionKind::external_constructor,
-                                                       object_resolution->owner, "", "", result, 0,
-                                                       0, false, true});
+                                                       object_resolution->owner, "", "",
+                                                       call_result, 0, 0, false, true});
                             break;
                         }
                         const auto* external_owner =
@@ -2710,15 +2716,15 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                                                    "' has no declared static method '" +
                                                    callee.value() + "'",
                                                expression.span);
-                            result = unknown_type;
+                            call_result = unknown_type;
                             break;
                         }
                         validate_script_call(*member, argument_types, expression, expression.span);
-                        result = member->type;
+                        call_result = member->type;
                         model_.api_resolutions_.emplace(
                             &callee,
                             ApiResolution{ApiResolutionKind::external_static_method,
-                                          object_resolution->owner, "", "", result,
+                                          object_resolution->owner, "", "", call_result,
                                           static_cast<std::uint16_t>(member->required_arguments),
                                           static_cast<std::uint16_t>(member->parameters.size()),
                                           member->is_vararg, true});
@@ -2742,7 +2748,7 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                                                    "script resource '" + target->script_name +
                                                        "' has no method '" + callee.value() + "'",
                                                    expression.span);
-                                result = unknown_type;
+                                call_result = unknown_type;
                                 break;
                             }
                             if (!member->is_static) {
@@ -2750,17 +2756,17 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                                                    "instance method '" + callee.value() +
                                                        "' cannot be called on a script resource",
                                                    expression.span);
-                                result = unknown_type;
+                                call_result = unknown_type;
                                 break;
                             }
                             validate_script_call(*member, argument_types, expression,
                                                  expression.span);
-                            result = member->type;
+                            call_result = member->type;
                             mark_coroutine_call(member->is_coroutine);
                             model_.api_resolutions_.emplace(
                                 &callee, ApiResolution{
                                              ApiResolutionKind::script_static_callable,
-                                             target->native_class_name, "", "", result,
+                                             target->native_class_name, "", "", call_result,
                                              static_cast<std::uint16_t>(member->required_arguments),
                                              static_cast<std::uint16_t>(member->parameters.size()),
                                              member->is_vararg, true});
@@ -2782,11 +2788,11 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                                 "script new() received arguments but target has no _init",
                                 expression.span);
                         }
-                        result = {TypeKind::object, target->script_name};
+                        call_result = {TypeKind::object, target->script_name};
                         model_.api_resolutions_.emplace(
                             &callee, ApiResolution{ApiResolutionKind::script_constructor,
-                                                   target->native_class_name, "", "", result, 0, 0,
-                                                   false, true});
+                                                   target->native_class_name, "", "", call_result,
+                                                   0, 0, false, true});
                         break;
                     }
                     if (const auto* inner = object_type.kind == TypeKind::object
@@ -2820,19 +2826,19 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                             const auto& inner_identity = inner->native_class_name.empty()
                                                              ? inner->name
                                                              : inner->native_class_name;
-                            result = {TypeKind::object, inner_identity};
+                            call_result = {TypeKind::object, inner_identity};
                             model_.api_resolutions_.emplace(
                                 &callee,
                                 ApiResolution{ApiResolutionKind::inner_constructor, inner_identity,
-                                              "", "", result, 0, 0, false, true});
+                                              "", "", call_result, 0, 0, false, true});
                             break;
                         }
                         const auto* member = find_inner_member(*inner, callee.value());
                         if (!member && !called_on_type) {
-                            result = variant_type;
+                            call_result = variant_type;
                             model_.api_resolutions_.emplace(
                                 &callee, ApiResolution{ApiResolutionKind::dynamic_method, "", "",
-                                                       "", result, 0, 0, true, false});
+                                                       "", call_result, 0, 0, true, false});
                             break;
                         }
                         if (!member || member->kind != ScriptMemberKind::function) {
@@ -2840,7 +2846,7 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                                                "internal class '" + inner->name +
                                                    "' has no method '" + callee.value() + "'",
                                                expression.span);
-                            result = unknown_type;
+                            call_result = unknown_type;
                             break;
                         }
                         if (called_on_type && !member->is_static) {
@@ -2867,7 +2873,7 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                                                expression.span);
                         }
                         validate_script_call(*member, argument_types, expression, expression.span);
-                        result = member->type;
+                        call_result = member->type;
                         const bool dynamic_dispatch =
                             !called_on_type && !called_on_super && !member->is_static &&
                             script_symbols_ &&
@@ -2878,16 +2884,17 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                              script_symbols_->may_dispatch_coroutine(*inner, callee.value())));
                         if (called_on_super) {
                             model_.api_resolutions_.insert_or_assign(
-                                &callee, ApiResolution{
-                                             ApiResolutionKind::script_super,
-                                             object_resolution->owner, "", callee.value(), result,
-                                             static_cast<std::uint16_t>(member->required_arguments),
-                                             static_cast<std::uint16_t>(member->parameters.size()),
-                                             member->is_vararg, true});
+                                &callee,
+                                ApiResolution{
+                                    ApiResolutionKind::script_super, object_resolution->owner, "",
+                                    callee.value(), call_result,
+                                    static_cast<std::uint16_t>(member->required_arguments),
+                                    static_cast<std::uint16_t>(member->parameters.size()),
+                                    member->is_vararg, true});
                         } else if (dynamic_dispatch) {
                             model_.api_resolutions_.insert_or_assign(
                                 &callee, ApiResolution{ApiResolutionKind::dynamic_method, "", "",
-                                                       "", result, 0, 0, true, false});
+                                                       "", call_result, 0, 0, true, false});
                         }
                         break;
                     }
@@ -2930,21 +2937,21 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                                     "script new() received arguments but target has no _init",
                                     expression.span);
                             }
-                            result = {TypeKind::object, script_owner->script_name};
+                            call_result = {TypeKind::object, script_owner->script_name};
                             model_.api_resolutions_.emplace(
                                 &callee, ApiResolution{ApiResolutionKind::script_constructor,
                                                        script_owner->native_class_name, "", "",
-                                                       result, 0, 0, false, true});
+                                                       call_result, 0, 0, false, true});
                             break;
                         }
                         if (!called_on_type && callee.value() == "free") {
                             if (argument_count != 0)
                                 diagnostics_.error("GDS4064", "free() does not accept arguments",
                                                    expression.span);
-                            result = void_type;
+                            call_result = void_type;
                             model_.api_resolutions_.emplace(
                                 &callee, ApiResolution{ApiResolutionKind::script_free, "", "", "",
-                                                       result, 0, 0, false, true});
+                                                       call_result, 0, 0, false, true});
                             break;
                         }
                         const auto* member =
@@ -2959,7 +2966,7 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                                             &callee,
                                             ApiResolution{ApiResolutionKind::dynamic_method,
                                                           script_owner->godot_base_type, "", "",
-                                                          result,
+                                                          call_result,
                                                           method ? method->required_arguments
                                                                  : std::uint16_t{0},
                                                           method ? method->maximum_arguments
@@ -2975,7 +2982,7 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                                             object_resolution->owner,
                                             method ? method->owner : "",
                                             "",
-                                            result,
+                                            call_result,
                                             method ? method->required_arguments : std::uint16_t{0},
                                             method ? method->maximum_arguments : std::uint16_t{0},
                                             method && method->is_vararg,
@@ -2996,10 +3003,10 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                                 }
                             }
                             if (!called_on_type && !called_on_super) {
-                                result = variant_type;
+                                call_result = variant_type;
                                 model_.api_resolutions_.emplace(
                                     &callee, ApiResolution{ApiResolutionKind::dynamic_method, "",
-                                                           "", "", result, 0, 0, true, false});
+                                                           "", "", call_result, 0, 0, true, false});
                                 break;
                             }
                             diagnostics_.error("GDS4055",
@@ -3032,7 +3039,7 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                                                expression.span);
                         }
                         validate_script_call(*member, argument_types, expression, expression.span);
-                        result = member->type;
+                        call_result = member->type;
                         const bool explicit_self_receiver =
                             callee.operand(0)->kind() == ast::ExpressionKind::identifier &&
                             callee.operand(0)->value() == "self";
@@ -3049,14 +3056,14 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                             model_.api_resolutions_.emplace(
                                 &callee, ApiResolution{
                                              ApiResolutionKind::script_super,
-                                             object_resolution->owner, "", "", result,
+                                             object_resolution->owner, "", "", call_result,
                                              static_cast<std::uint16_t>(member->required_arguments),
                                              static_cast<std::uint16_t>(member->parameters.size()),
                                              member->is_vararg, true});
                         } else if (dynamic_dispatch) {
                             model_.api_resolutions_.emplace(
                                 &callee, ApiResolution{ApiResolutionKind::dynamic_method, "", "",
-                                                       "", result, 0, 0, true, false});
+                                                       "", call_result, 0, 0, true, false});
                         }
                         break;
                     }
@@ -3072,22 +3079,22 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                                                    "external member '" + callee.value() +
                                                        "' is not callable",
                                                    expression.span);
-                                result = unknown_type;
+                                call_result = unknown_type;
                             } else if (member->is_static) {
                                 diagnostics_.error("GDS4057",
                                                    "static external method '" + callee.value() +
                                                        "' must be called on its type",
                                                    expression.span);
-                                result = unknown_type;
+                                call_result = unknown_type;
                             } else {
                                 validate_script_call(*member, argument_types, expression,
                                                      expression.span);
-                                result = member->type;
+                                call_result = member->type;
                                 model_.api_resolutions_.emplace(
                                     &callee,
                                     ApiResolution{
                                         ApiResolutionKind::dynamic_method, external_owner->name, "",
-                                        "", result,
+                                        "", call_result,
                                         static_cast<std::uint16_t>(member->required_arguments),
                                         static_cast<std::uint16_t>(member->parameters.size()),
                                         member->is_vararg, false});
@@ -3100,15 +3107,15 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                                                    "' has no declared method '" + callee.value() +
                                                    "'",
                                                expression.span);
-                            result = unknown_type;
+                            call_result = unknown_type;
                             break;
                         }
                     }
                     if (object_type.is_dynamic()) {
-                        result = variant_type;
+                        call_result = variant_type;
                         model_.api_resolutions_.emplace(
                             &callee, ApiResolution{ApiResolutionKind::dynamic_method, "", "", "",
-                                                   result, 0, 0, true, false});
+                                                   call_result, 0, 0, true, false});
                         break;
                     }
                     std::string owner;
@@ -3136,10 +3143,10 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                                                "Godot object new() does not accept arguments",
                                                expression.span);
                         }
-                        result = object_type;
+                        call_result = object_type;
                         model_.api_resolutions_.emplace(
                             &callee, ApiResolution{ApiResolutionKind::constructor, owner, "", "",
-                                                   result, 0, 0, false, true});
+                                                   call_result, 0, 0, false, true});
                         break;
                     }
                     const bool dynamically_typed_object =
@@ -3147,10 +3154,10 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                         (api_.find_class(object_type.name) ||
                          (script_symbols_ && script_symbols_->find_external(object_type.name)));
                     if (!method && !latest_method && dynamically_typed_object && !called_on_type) {
-                        result = variant_type;
+                        call_result = variant_type;
                         model_.api_resolutions_.emplace(
                             &callee, ApiResolution{ApiResolutionKind::dynamic_method, "", "", "",
-                                                   result, 0, 0, true, false});
+                                                   call_result, 0, 0, true, false});
                         break;
                     }
                     if (!method && !owner.empty() && !object_type.is_dynamic()) {
@@ -3185,40 +3192,40 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                                 object_resolution->owner,
                                 method ? method->owner : "",
                                 "",
-                                result,
+                                call_result,
                                 method ? method->required_arguments : std::uint16_t{0},
                                 method ? method->maximum_arguments : std::uint16_t{0},
                                 method && method->is_vararg,
                                 true};
                         }
                     } else {
-                        result = analyze_expression(callee);
+                        call_result = analyze_expression(callee);
                     }
                 } else {
-                    result = analyze_expression(callee);
+                    call_result = analyze_expression(callee);
                     diagnostics_.error(
                         "GDS4072",
                         "expression is not directly callable; invoke a Callable through .call(...)",
                         expression.span);
-                    result = unknown_type;
+                    call_result = unknown_type;
                 }
             } while (false);
-            return result;
+            return call_result;
         }();
         break;
     case ast::ExpressionKind::member:
         result = [this, &expression, &property_resolution]() -> Type {
-            Type result = unknown_type;
+            Type member_result = unknown_type;
             do {
                 const auto object_type = analyze_expression(*expression.operand(0));
                 if (object_type.kind == TypeKind::enumeration) {
                     if (const auto* global =
                             api_.find_global_enum_value(object_type.name, expression.value())) {
-                        result = object_type;
+                        member_result = object_type;
                         model_.api_resolutions_.emplace(
                             &expression, ApiResolution{ApiResolutionKind::global_enum_value,
                                                        std::to_string(global->value), "", "",
-                                                       result, 0, 0, false, true});
+                                                       member_result, 0, 0, false, true});
                         break;
                     }
                     if (const auto separator = object_type.name.rfind('.');
@@ -3227,11 +3234,11 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                         const auto enum_name = object_type.name.substr(separator + 1);
                         if (const auto* class_value =
                                 api_.find_class_enum_value(owner, enum_name, expression.value())) {
-                            result = object_type;
+                            member_result = object_type;
                             model_.api_resolutions_.emplace(
                                 &expression, ApiResolution{ApiResolutionKind::global_enum_value,
                                                            std::to_string(class_value->value), "",
-                                                           "", result, 0, 0, false, true});
+                                                           "", member_result, 0, 0, false, true});
                             break;
                         }
                     }
@@ -3250,15 +3257,15 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                                                "enum '" + object_type.name + "' has no member '" +
                                                    expression.value() + "'",
                                                expression.span);
-                            result = unknown_type;
+                            member_result = unknown_type;
                         } else {
-                            result = object_type;
+                            member_result = object_type;
                             model_.referenced_extension_abis_.insert(
                                 external_enum.owner->provider_abi);
                             model_.api_resolutions_.emplace(
                                 &expression, ApiResolution{ApiResolutionKind::global_enum_value,
                                                            std::to_string(found->value), "", "",
-                                                           result, 0, 0, false, true});
+                                                           member_result, 0, 0, false, true});
                         }
                     } else if (inner_enum.enumeration) {
                         const auto found = std::find_if(
@@ -3270,7 +3277,7 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                                                "enum '" + object_type.name + "' has no member '" +
                                                    expression.value() + "'",
                                                expression.span);
-                            result = unknown_type;
+                            member_result = unknown_type;
                         } else {
                             auto native_owner = inner_enum.owner->native_class_name;
                             if (native_owner.empty() && script_symbols_ && current_script_) {
@@ -3279,7 +3286,7 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                                     native_owner = published->native_class_name;
                                 }
                             }
-                            result = object_type;
+                            member_result = object_type;
                             model_.api_resolutions_.emplace(
                                 &expression,
                                 ApiResolution{ApiResolutionKind::enum_member,
@@ -3288,14 +3295,14 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                                                         "::" + inner_enum.enumeration->name
                                                   : native_owner +
                                                         "::" + inner_enum.enumeration->name,
-                                              "", "", result, 0, 0, false, true});
+                                              "", "", member_result, 0, 0, false, true});
                         }
                     } else if (enumeration == enum_members_.end() && !project_enum.enumeration) {
                         diagnostics_.error("GDS4041",
                                            "enum '" + object_type.name + "' has no member '" +
                                                expression.value() + "'",
                                            expression.span);
-                        result = unknown_type;
+                        member_result = unknown_type;
                     } else if (enumeration != enum_members_.end()) {
                         const auto member = enumeration->second.find(expression.value());
                         if (member == enumeration->second.end()) {
@@ -3303,13 +3310,13 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                                                "enum '" + object_type.name + "' has no member '" +
                                                    expression.value() + "'",
                                                expression.span);
-                            result = unknown_type;
+                            member_result = unknown_type;
                         } else {
-                            result = object_type;
+                            member_result = object_type;
                             model_.api_resolutions_.emplace(
                                 &expression,
                                 ApiResolution{ApiResolutionKind::enum_member, object_type.name, "",
-                                              "", result, 0, 0, false, true});
+                                              "", member_result, 0, 0, false, true});
                         }
                     } else {
                         const auto found = std::find_if(
@@ -3321,14 +3328,15 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                                                "enum '" + object_type.name + "' has no member '" +
                                                    expression.value() + "'",
                                                expression.span);
-                            result = unknown_type;
+                            member_result = unknown_type;
                         } else {
-                            result = object_type;
+                            member_result = object_type;
                             model_.api_resolutions_.emplace(
-                                &expression, ApiResolution{ApiResolutionKind::enum_member,
-                                                           project_enum.native_owner + "::" +
-                                                               project_enum.enumeration->name,
-                                                           "", "", result, 0, 0, false, true});
+                                &expression,
+                                ApiResolution{ApiResolutionKind::enum_member,
+                                              project_enum.native_owner +
+                                                  "::" + project_enum.enumeration->name,
+                                              "", "", member_result, 0, 0, false, true});
                         }
                     }
                     record_script_dependency(project_enum.owner);
@@ -3339,14 +3347,14 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                     object_resolution->kind == ApiResolutionKind::script_super) {
                     diagnostics_.error("GDS4089", "super members can only be used as method calls",
                                        expression.span);
-                    result = unknown_type;
+                    member_result = unknown_type;
                     break;
                 }
                 if (object_type.is_dynamic()) {
-                    result = variant_type;
+                    member_result = variant_type;
                     model_.api_resolutions_.emplace(
                         &expression, ApiResolution{ApiResolutionKind::dynamic_property, "", "", "",
-                                                   result, 0, 0, false, false});
+                                                   member_result, 0, 0, false, false});
                     break;
                 }
                 if (object_type.kind == TypeKind::script_resource) {
@@ -3355,27 +3363,27 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                     if (!target) {
                         diagnostics_.error("GDS4062", "script resource metadata is unavailable",
                                            expression.span);
-                        result = unknown_type;
+                        member_result = unknown_type;
                         break;
                     }
                     record_script_dependency(target);
                     if (const auto* inner =
                             script_symbols_->find_inner(*target, expression.value())) {
-                        result = {TypeKind::object, inner->native_class_name};
+                        member_result = {TypeKind::object, inner->native_class_name};
                         model_.api_resolutions_.emplace(
                             &expression, ApiResolution{ApiResolutionKind::inner_type_reference,
-                                                       inner->native_class_name, "", "", result, 0,
-                                                       0, false, true});
+                                                       inner->native_class_name, "", "",
+                                                       member_result, 0, 0, false, true});
                         break;
                     }
                     if (const auto* enumeration =
                             script_symbols_->find_enum(*target, expression.value())) {
-                        result = {TypeKind::enumeration,
-                                  target->native_class_name + "::" + enumeration->name};
+                        member_result = {TypeKind::enumeration,
+                                         target->native_class_name + "::" + enumeration->name};
                         model_.api_resolutions_.emplace(
                             &expression,
-                            ApiResolution{ApiResolutionKind::script_enum_type, result.name, "", "",
-                                          result, 0, 0, false, true});
+                            ApiResolution{ApiResolutionKind::script_enum_type, member_result.name,
+                                          "", "", member_result, 0, 0, false, true});
                         break;
                     }
                     const auto* member = script_symbols_->find_member(*target, expression.value());
@@ -3384,37 +3392,38 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                                            "script resource '" + target->script_name +
                                                "' has no member '" + expression.value() + "'",
                                            expression.span);
-                        result = unknown_type;
+                        member_result = unknown_type;
                         break;
                     }
                     if (member->kind == ScriptMemberKind::constant) {
-                        result = member->type;
+                        member_result = member->type;
                         model_.api_resolutions_.emplace(
                             &expression, ApiResolution{ApiResolutionKind::script_constant,
-                                                       target->native_class_name, "", "", result, 0,
-                                                       0, false, true});
+                                                       target->native_class_name, "", "",
+                                                       member_result, 0, 0, false, true});
                         break;
                     }
                     if (member->kind == ScriptMemberKind::enum_value) {
-                        result = member->type;
+                        member_result = member->type;
                         model_.api_resolutions_.emplace(
                             &expression,
                             ApiResolution{ApiResolutionKind::enum_member, target->native_class_name,
-                                          "", "", result, 0, 0, false, true});
+                                          "", "", member_result, 0, 0, false, true});
                         break;
                     }
                     if (member->kind == ScriptMemberKind::field && member->is_static) {
                         const bool runtime_static_field =
                             current_script_ && current_script_->is_tool && !target->is_tool;
-                        result = runtime_static_field || member->getter_is_coroutine ? variant_type
-                                                                                     : member->type;
+                        member_result = runtime_static_field || member->getter_is_coroutine
+                                            ? variant_type
+                                            : member->type;
                         auto resolution = ApiResolution{
                             runtime_static_field ? ApiResolutionKind::script_runtime_static_field
                                                  : ApiResolutionKind::script_property,
                             target->native_class_name,
                             "_gdpp_get_" + expression.value(),
                             "_gdpp_set_" + expression.value(),
-                            result,
+                            member_result,
                             0,
                             0,
                             false,
@@ -3433,7 +3442,7 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                                                "' cannot be accessed on a script resource",
                                            expression.span);
                     }
-                    result = unknown_type;
+                    member_result = unknown_type;
                     break;
                 }
                 if (const auto* inner = object_type.kind == TypeKind::object
@@ -3451,11 +3460,11 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                             const auto& nested_identity = nested->native_class_name.empty()
                                                               ? nested->name
                                                               : nested->native_class_name;
-                            result = {TypeKind::object, nested_identity};
+                            member_result = {TypeKind::object, nested_identity};
                             model_.api_resolutions_.emplace(
-                                &expression,
-                                ApiResolution{ApiResolutionKind::inner_type_reference,
-                                              nested_identity, "", "", result, 0, 0, false, true});
+                                &expression, ApiResolution{ApiResolutionKind::inner_type_reference,
+                                                           nested_identity, "", "", member_result,
+                                                           0, 0, false, true});
                             break;
                         }
                         if (const auto enumeration = find_inner_enum(
@@ -3470,11 +3479,11 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                                     native_owner = published->native_class_name;
                                 }
                             }
-                            result = {TypeKind::enumeration,
-                                      native_owner.empty()
-                                          ? enumeration.owner->name + "." +
-                                                enumeration.enumeration->name
-                                          : native_owner + "::" + enumeration.enumeration->name};
+                            member_result = {
+                                TypeKind::enumeration,
+                                native_owner.empty()
+                                    ? enumeration.owner->name + "." + enumeration.enumeration->name
+                                    : native_owner + "::" + enumeration.enumeration->name};
                             model_.api_resolutions_.emplace(
                                 &expression,
                                 ApiResolution{ApiResolutionKind::script_enum_type,
@@ -3483,7 +3492,7 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                                                         "::" + enumeration.enumeration->name
                                                   : native_owner +
                                                         "::" + enumeration.enumeration->name,
-                                              "", "", result, 0, 0, false, true});
+                                              "", "", member_result, 0, 0, false, true});
                             break;
                         }
                     }
@@ -3494,12 +3503,13 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                                                "internal class '" + inner->name +
                                                    "' has no member '" + expression.value() + "'",
                                                expression.span);
-                            result = unknown_type;
+                            member_result = unknown_type;
                         } else {
-                            result = variant_type;
+                            member_result = variant_type;
                             model_.api_resolutions_.emplace(
-                                &expression, ApiResolution{ApiResolutionKind::dynamic_property, "",
-                                                           "", "", result, 0, 0, false, false});
+                                &expression,
+                                ApiResolution{ApiResolutionKind::dynamic_property, "", "", "",
+                                              member_result, 0, 0, false, false});
                         }
                         break;
                     }
@@ -3508,46 +3518,46 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                             diagnostics_.error(
                                 "GDS4096", "only instance internal methods can be Callable values",
                                 expression.span);
-                            result = unknown_type;
+                            member_result = unknown_type;
                         } else {
-                            result = {TypeKind::builtin, "Callable"};
+                            member_result = {TypeKind::builtin, "Callable"};
                             model_.api_resolutions_.emplace(
                                 &expression,
                                 ApiResolution{ApiResolutionKind::script_callable, inner->name, "",
-                                              "", result, 0, 0, false, false});
+                                              "", member_result, 0, 0, false, false});
                         }
                         break;
                     }
                     if (found->kind == ScriptMemberKind::enum_value) {
-                        result = found->type;
+                        member_result = found->type;
                         model_.api_resolutions_.emplace(
                             &expression,
                             ApiResolution{ApiResolutionKind::enum_member, inner->native_class_name,
-                                          "", "", result, 0, 0, false, true});
+                                          "", "", member_result, 0, 0, false, true});
                         break;
                     }
                     if (found->kind == ScriptMemberKind::constant) {
-                        result = found->type;
+                        member_result = found->type;
                         model_.api_resolutions_.emplace(
                             &expression, ApiResolution{ApiResolutionKind::script_constant,
                                                        inner->native_class_name.empty()
                                                            ? inner->name
                                                            : inner->native_class_name,
-                                                       "", "", result, 0, 0, false, true});
+                                                       "", "", member_result, 0, 0, false, true});
                         break;
                     }
                     if (found->kind == ScriptMemberKind::signal && !accessed_on_type) {
-                        result = found->type;
+                        member_result = found->type;
                         model_.api_resolutions_.emplace(
                             &expression,
                             ApiResolution{ApiResolutionKind::script_signal, inner->name, "", "",
-                                          result, 0, 0, false, false});
+                                          member_result, 0, 0, false, false});
                         break;
                     }
                     if (found->kind != ScriptMemberKind::field) {
                         diagnostics_.error("GDS4058", "invalid internal class member access",
                                            expression.span);
-                        result = unknown_type;
+                        member_result = unknown_type;
                         break;
                     }
                     if (accessed_on_type && !found->is_static) {
@@ -3555,15 +3565,15 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                                            "instance field '" + expression.value() +
                                                "' cannot be accessed on an internal class type",
                                            expression.span);
-                        result = unknown_type;
+                        member_result = unknown_type;
                         break;
                     }
-                    result = found->getter_is_coroutine ? variant_type : found->type;
+                    member_result = found->getter_is_coroutine ? variant_type : found->type;
                     auto resolution = ApiResolution{ApiResolutionKind::script_property,
                                                     inner->name,
                                                     "_gdpp_get_" + expression.value(),
                                                     "_gdpp_set_" + expression.value(),
-                                                    result,
+                                                    member_result,
                                                     0,
                                                     0,
                                                     false,
@@ -3594,13 +3604,13 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                         object_resolution->kind == ApiResolutionKind::script_type_reference;
                     if (const auto* enumeration =
                             script_symbols_->find_enum(*script_owner, expression.value())) {
-                        result = {TypeKind::enumeration,
-                                  script_owner->native_class_name + "::" + enumeration->name};
+                        member_result = {TypeKind::enumeration, script_owner->native_class_name +
+                                                                    "::" + enumeration->name};
                         model_.api_resolutions_.emplace(
                             &expression, ApiResolution{ApiResolutionKind::script_enum_type,
                                                        script_owner->native_class_name +
                                                            "::" + enumeration->name,
-                                                       "", "", result, 0, 0, false, true});
+                                                       "", "", member_result, 0, 0, false, true});
                         break;
                     }
                     const auto* member =
@@ -3608,33 +3618,34 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                     if (!member) {
                         if (accessed_on_type && api_.has_class_enum(script_owner->godot_base_type,
                                                                     expression.value())) {
-                            result = {TypeKind::enumeration,
-                                      script_owner->godot_base_type + "." + expression.value()};
+                            member_result = {TypeKind::enumeration, script_owner->godot_base_type +
+                                                                        "." + expression.value()};
                             model_.api_resolutions_.emplace(
                                 &expression,
                                 ApiResolution{ApiResolutionKind::global_enum_type,
                                               "godot::" + script_owner->godot_base_type +
                                                   "::" + expression.value(),
-                                              "", "", result, 0, 0, false, true});
+                                              "", "", member_result, 0, 0, false, true});
                             break;
                         }
                         if (const auto* constant = api_.find_class_constant(
                                 script_owner->godot_base_type, expression.value())) {
-                            result = {TypeKind::integer, "int"};
+                            member_result = {TypeKind::integer, "int"};
                             model_.api_resolutions_.emplace(
                                 &expression, ApiResolution{ApiResolutionKind::global_constant,
                                                            std::to_string(constant->value), "", "",
-                                                           result, 0, 0, false, true});
+                                                           member_result, 0, 0, false, true});
                             break;
                         }
                         if (!accessed_on_type) {
                             if (api_.find_signal(script_owner->godot_base_type,
                                                  expression.value())) {
-                                result = {TypeKind::builtin, "Signal"};
+                                member_result = {TypeKind::builtin, "Signal"};
                                 model_.api_resolutions_.emplace(
-                                    &expression, ApiResolution{ApiResolutionKind::script_signal,
-                                                               script_owner->godot_base_type, "",
-                                                               "", result, 0, 0, false, false});
+                                    &expression,
+                                    ApiResolution{ApiResolutionKind::script_signal,
+                                                  script_owner->godot_base_type, "", "",
+                                                  member_result, 0, 0, false, false});
                                 break;
                             }
                             if (const auto* property = api_.find_property(
@@ -3643,50 +3654,51 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                                     script_owner->attached ? ApiResolutionKind::dynamic_property
                                                            : ApiResolutionKind::property,
                                     *property);
-                                result = resolution.type;
+                                member_result = resolution.type;
                                 model_.api_resolutions_.emplace(&expression, std::move(resolution));
                                 break;
                             }
                         }
                         if (!accessed_on_type) {
-                            result = variant_type;
+                            member_result = variant_type;
                             model_.api_resolutions_.emplace(
-                                &expression, ApiResolution{ApiResolutionKind::dynamic_property, "",
-                                                           "", "", result, 0, 0, false, false});
+                                &expression,
+                                ApiResolution{ApiResolutionKind::dynamic_property, "", "", "",
+                                              member_result, 0, 0, false, false});
                             break;
                         }
                         diagnostics_.error("GDS4055",
                                            "script type '" + script_owner->script_name +
                                                "' has no member '" + expression.value() + "'",
                                            expression.span);
-                        result = unknown_type;
+                        member_result = unknown_type;
                         break;
                     }
                     if (accessed_on_type && member->kind == ScriptMemberKind::constant) {
-                        result = member->type;
+                        member_result = member->type;
                         model_.api_resolutions_.emplace(
                             &expression, ApiResolution{ApiResolutionKind::script_constant,
                                                        script_owner->native_class_name, "", "",
-                                                       result, 0, 0, false, true});
+                                                       member_result, 0, 0, false, true});
                         break;
                     }
                     if (member->kind == ScriptMemberKind::enum_value) {
-                        result = member->type;
+                        member_result = member->type;
                         model_.api_resolutions_.emplace(
                             &expression, ApiResolution{ApiResolutionKind::enum_member,
                                                        script_owner->native_class_name, "", "",
-                                                       result, 0, 0, false, true});
+                                                       member_result, 0, 0, false, true});
                         break;
                     }
                     if (member->kind == ScriptMemberKind::constant) {
                         // Godot permits class constants through script instances and Autoload
                         // names. Lower them to the native class scope so no singleton lookup is
                         // required.
-                        result = member->type;
+                        member_result = member->type;
                         model_.api_resolutions_.emplace(
                             &expression, ApiResolution{ApiResolutionKind::script_constant,
                                                        script_owner->native_class_name, "", "",
-                                                       result, 0, 0, false, true});
+                                                       member_result, 0, 0, false, true});
                         break;
                     }
                     if (accessed_on_type && member->kind == ScriptMemberKind::field &&
@@ -3695,7 +3707,7 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                                            "instance field '" + expression.value() +
                                                "' cannot be accessed on a script type",
                                            expression.span);
-                        result = unknown_type;
+                        member_result = unknown_type;
                         break;
                     }
                     if (member->kind == ScriptMemberKind::signal) {
@@ -3703,13 +3715,13 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                             diagnostics_.error("GDS4094",
                                                "signals cannot be accessed on a script type",
                                                expression.span);
-                            result = unknown_type;
+                            member_result = unknown_type;
                         } else {
-                            result = {TypeKind::builtin, "Signal"};
+                            member_result = {TypeKind::builtin, "Signal"};
                             model_.api_resolutions_.emplace(
                                 &expression, ApiResolution{ApiResolutionKind::script_signal,
                                                            script_owner->native_class_name, "", "",
-                                                           result, 0, 0, false, false});
+                                                           member_result, 0, 0, false, false});
                         }
                         break;
                     }
@@ -3719,13 +3731,13 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                                 "GDS4096",
                                 "only instance script methods can be used as Callable values",
                                 expression.span);
-                            result = unknown_type;
+                            member_result = unknown_type;
                         } else {
-                            result = {TypeKind::builtin, "Callable"};
+                            member_result = {TypeKind::builtin, "Callable"};
                             model_.api_resolutions_.emplace(
                                 &expression, ApiResolution{ApiResolutionKind::script_callable,
                                                            script_owner->native_class_name, "", "",
-                                                           result, 0, 0, false, false});
+                                                           member_result, 0, 0, false, false});
                         }
                         break;
                     }
@@ -3734,7 +3746,7 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                                            "script member '" + expression.value() +
                                                "' is not an instance field",
                                            expression.span);
-                        result = unknown_type;
+                        member_result = unknown_type;
                         break;
                     }
                     const bool runtime_static_field = current_script_ && current_script_->is_tool &&
@@ -3742,8 +3754,9 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                                                       member->is_static;
                     const bool attached_instance_field =
                         script_owner->attached && !accessed_on_type && !member->is_static;
-                    result = runtime_static_field || member->getter_is_coroutine ? variant_type
-                                                                                 : member->type;
+                    member_result = runtime_static_field || member->getter_is_coroutine
+                                        ? variant_type
+                                        : member->type;
                     auto resolution = ApiResolution{
                         runtime_static_field      ? ApiResolutionKind::script_runtime_static_field
                         : attached_instance_field ? ApiResolutionKind::dynamic_property
@@ -3751,7 +3764,7 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                         script_owner->native_class_name,
                         "_gdpp_get_" + expression.value(),
                         "_gdpp_set_" + expression.value(),
-                        result,
+                        member_result,
                         0,
                         0,
                         false,
@@ -3770,12 +3783,13 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                     if (accessed_on_type) {
                         if (const auto* enumeration = script_symbols_->find_external_enum(
                                 *external_owner, expression.value())) {
-                            result = {TypeKind::enumeration,
-                                      external_owner->name + "." + enumeration->name};
+                            member_result = {TypeKind::enumeration,
+                                             external_owner->name + "." + enumeration->name};
                             model_.referenced_extension_abis_.insert(external_owner->provider_abi);
                             model_.api_resolutions_.emplace(
-                                &expression, ApiResolution{ApiResolutionKind::global_enum_type, "0",
-                                                           "", "", result, 0, 0, false, true});
+                                &expression,
+                                ApiResolution{ApiResolutionKind::global_enum_type, "0", "", "",
+                                              member_result, 0, 0, false, true});
                             break;
                         }
                         for (const auto& enumeration : external_owner->enums) {
@@ -3786,16 +3800,16 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                                              });
                             if (found == enumeration.entries.end())
                                 continue;
-                            result = {TypeKind::enumeration,
-                                      external_owner->name + "." + enumeration.name};
+                            member_result = {TypeKind::enumeration,
+                                             external_owner->name + "." + enumeration.name};
                             model_.referenced_extension_abis_.insert(external_owner->provider_abi);
                             model_.api_resolutions_.emplace(
                                 &expression, ApiResolution{ApiResolutionKind::global_enum_value,
                                                            std::to_string(found->value), "", "",
-                                                           result, 0, 0, false, true});
+                                                           member_result, 0, 0, false, true});
                             break;
                         }
-                        if (result.kind == TypeKind::enumeration)
+                        if (member_result.kind == TypeKind::enumeration)
                             break;
                     }
                     if (const auto* member = script_symbols_->find_external_member(
@@ -3806,40 +3820,40 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                                                    "external constant '" + expression.value() +
                                                        "' must be accessed on its type",
                                                    expression.span);
-                                result = unknown_type;
+                                member_result = unknown_type;
                             } else {
-                                result = member->type;
+                                member_result = member->type;
                                 model_.api_resolutions_.emplace(
                                     &expression,
                                     ApiResolution{ApiResolutionKind::global_constant,
                                                   std::to_string(member->constant_value), "", "",
-                                                  result, 0, 0, false, true});
+                                                  member_result, 0, 0, false, true});
                             }
                         } else if (accessed_on_type) {
                             diagnostics_.error("GDS4058",
                                                "external instance member '" + expression.value() +
                                                    "' cannot be accessed on its type",
                                                expression.span);
-                            result = unknown_type;
+                            member_result = unknown_type;
                         } else if (member->kind == ScriptMemberKind::function) {
-                            result = {TypeKind::builtin, "Callable"};
+                            member_result = {TypeKind::builtin, "Callable"};
                             model_.api_resolutions_.emplace(
                                 &expression, ApiResolution{ApiResolutionKind::external_callable,
-                                                           external_owner->name, "", "", result, 0,
-                                                           0, false, false});
+                                                           external_owner->name, "", "",
+                                                           member_result, 0, 0, false, false});
                         } else if (member->kind == ScriptMemberKind::signal) {
-                            result = {TypeKind::builtin, "Signal"};
+                            member_result = {TypeKind::builtin, "Signal"};
                             model_.api_resolutions_.emplace(
                                 &expression, ApiResolution{ApiResolutionKind::external_signal,
-                                                           external_owner->name, "", "", result, 0,
-                                                           0, false, false});
+                                                           external_owner->name, "", "",
+                                                           member_result, 0, 0, false, false});
                         } else {
-                            result = member->type;
+                            member_result = member->type;
                             ApiResolution resolution{ApiResolutionKind::dynamic_property,
                                                      external_owner->name,
                                                      "",
                                                      "",
-                                                     result,
+                                                     member_result,
                                                      0,
                                                      0,
                                                      false,
@@ -3855,7 +3869,7 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                                                "' has no declared member '" + expression.value() +
                                                "'",
                                            expression.span);
-                        result = unknown_type;
+                        member_result = unknown_type;
                         break;
                     }
                 }
@@ -3876,63 +3890,63 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                     object_resolution->kind == ApiResolutionKind::type_reference;
                 if (accessed_on_type) {
                     if (api_.has_class_enum(owner, expression.value())) {
-                        result = {TypeKind::enumeration, owner + "." + expression.value()};
+                        member_result = {TypeKind::enumeration, owner + "." + expression.value()};
                         model_.api_resolutions_.emplace(
                             &expression,
                             ApiResolution{ApiResolutionKind::global_enum_type,
                                           "godot::" + owner + "::" + expression.value(), "", "",
-                                          result, 0, 0, false, true});
+                                          member_result, 0, 0, false, true});
                         break;
                     }
                     if (const auto* constant =
                             api_.find_builtin_constant(owner, expression.value())) {
-                        result = type_from_godot_api(constant->type);
+                        member_result = type_from_godot_api(constant->type);
                         model_.api_resolutions_.emplace(
                             &expression,
                             ApiResolution{ApiResolutionKind::builtin_constant, constant->value, "",
-                                          "", result, 0, 0, false, true});
+                                          "", member_result, 0, 0, false, true});
                         break;
                     }
                 }
                 if (const auto* constant = api_.find_class_constant(owner, expression.value())) {
-                    result = {TypeKind::integer, "int"};
+                    member_result = {TypeKind::integer, "int"};
                     model_.api_resolutions_.emplace(
                         &expression, ApiResolution{ApiResolutionKind::global_constant,
-                                                   std::to_string(constant->value), "", "", result,
-                                                   0, 0, false, true});
+                                                   std::to_string(constant->value), "", "",
+                                                   member_result, 0, 0, false, true});
                     break;
                 }
                 if (!accessed_on_type && api_.find_signal(owner, expression.value())) {
-                    result = {TypeKind::builtin, "Signal"};
+                    member_result = {TypeKind::builtin, "Signal"};
                     model_.api_resolutions_.emplace(
                         &expression, ApiResolution{ApiResolutionKind::script_signal, owner, "", "",
-                                                   result, 0, 0, false, false});
+                                                   member_result, 0, 0, false, false});
                 } else if (const auto* property = api_.find_property(owner, expression.value())) {
                     auto resolution = property_resolution(ApiResolutionKind::property, *property);
-                    result = resolution.type;
+                    member_result = resolution.type;
                     model_.api_resolutions_.emplace(&expression, std::move(resolution));
                 } else if (object_type.kind == TypeKind::dictionary) {
                     // GDScript supports dictionary.key as syntax sugar for dictionary["key"].
-                    result = variant_type;
+                    member_result = variant_type;
                     model_.api_resolutions_.emplace(
                         &expression, ApiResolution{ApiResolutionKind::dynamic_property, "", "", "",
-                                                   result, 0, 0, false, false});
+                                                   member_result, 0, 0, false, false});
                 } else {
                     const bool dynamically_typed_object =
                         object_type.kind == TypeKind::object &&
                         (api_.find_class(object_type.name) ||
                          (script_symbols_ && script_symbols_->find_external(object_type.name)));
                     if (dynamically_typed_object && !accessed_on_type) {
-                        result = variant_type;
+                        member_result = variant_type;
                         model_.api_resolutions_.emplace(
                             &expression, ApiResolution{ApiResolutionKind::dynamic_property, "", "",
-                                                       "", result, 0, 0, false, false});
+                                                       "", member_result, 0, 0, false, false});
                     } else {
-                        result = unknown_type;
+                        member_result = unknown_type;
                     }
                 }
             } while (false);
-            return result;
+            return member_result;
         }();
         break;
     case ast::ExpressionKind::subscript: {
