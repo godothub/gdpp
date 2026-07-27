@@ -31,6 +31,8 @@ func run() -> String:
         packed_color_oob_write,
         wrong_array_key,
         missing_dictionary_key,
+        missing_dictionary_named_key,
+        present_null_dictionary_named_key,
         missing_method,
         missing_property_read,
         missing_property_write,
@@ -244,6 +246,20 @@ func missing_dictionary_key() -> void:
     var values: Variant = {"present": 1}
     var value: Variant = values["missing"]
     after("missing_dictionary_key:" + str(value))
+
+
+func missing_dictionary_named_key() -> void:
+    before("missing_dictionary_named_key")
+    var values := {"present": 1}
+    var value: Variant = values.missing
+    after("missing_dictionary_named_key:" + str(value))
+
+
+func present_null_dictionary_named_key() -> void:
+    before("present_null_dictionary_named_key")
+    var values: Dictionary[String, Variant] = {"present": null}
+    var value: Variant = values.present
+    after("present_null_dictionary_named_key:" + str(value))
 
 
 func missing_method() -> void:

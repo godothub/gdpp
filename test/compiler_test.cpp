@@ -3943,16 +3943,32 @@ TEST_CASE("compiler lowers Dictionary named access through its keyed native ABI"
                          "func mutate(values: Dictionary, increment: int) -> Variant:\n"
                          "    values.score += increment\n"
                          "    values.label = \"ready\"\n"
-                         "    return values.score\n");
+                         "    return values.score\n"
+                         "func source() -> Dictionary:\n"
+                         "    return {}\n"
+                         "func read_source() -> Variant:\n"
+                         "    return source().missing\n");
 
     REQUIRE(result.success);
     REQUIRE(result.unit.source.find("_gdpp_dictionary_target_") != std::string::npos);
     REQUIRE(result.unit.source.find("static const godot::Variant _gdpp_dictionary_read_key_") !=
             std::string::npos);
+    REQUIRE(result.unit.source.find("gdpp::runtime::checked_dictionary_get(") != std::string::npos);
+    REQUIRE(result.unit.source.find("if (script_function_failed())") != std::string::npos);
+    REQUIRE(result.unit.source.find(").get(") == std::string::npos);
     REQUIRE(result.unit.source.find("godot::Variant &_gdpp_dictionary_slot_") != std::string::npos);
     REQUIRE(result.unit.source.find("[_gdpp_dictionary_key_") != std::string::npos);
     REQUIRE(result.unit.source.find("gdpp::runtime::get_named") == std::string::npos);
     REQUIRE(result.unit.source.find("gdpp::runtime::set_named") == std::string::npos);
+    const auto read_source = result.unit.source.find("::read_source(");
+    const auto receiver = result.unit.source.find("_gdpp_dictionary_read_receiver_", read_source);
+    const auto receiver_fault = result.unit.source.find("if (script_function_failed())", receiver);
+    const auto receiver_lookup =
+        result.unit.source.find("gdpp::runtime::checked_dictionary_get(", receiver_fault);
+    REQUIRE(read_source != std::string::npos);
+    REQUIRE(receiver != std::string::npos);
+    REQUIRE(receiver_fault != std::string::npos);
+    REQUIRE(receiver_fault < receiver_lookup);
 }
 
 TEST_CASE("dynamic named access preserves Dictionary dot syntax across Variant boundaries") {
