@@ -10,7 +10,7 @@ foreach(required_plugin_metadata IN ITEMS
         "description=\"GDScript AOT & Extension\""
         "author=\"GodotHub\""
         "website=\"https://godothub.com\""
-        "version=\"1.8.0\""
+        "version=\"1.8.1\""
         "script=\"plugin.gd\"")
     string(FIND "${plugin_metadata}" "${required_plugin_metadata}" metadata_offset)
     if(metadata_offset EQUAL -1)

@@ -10,10 +10,10 @@ on:
         type: boolean
         default: false
       release_version:
-        description: Release version without a v prefix (for example, 1.8.0)
+        description: Release version without a v prefix (for example, 1.8.1)
         required: true
         type: string
-        default: 1.8.0
+        default: 1.8.1
 
 permissions:
   contents: read
