@@ -14,7 +14,8 @@
 - `Dictionary[key]` 与 `Dictionary.key` 读取分别进入 Godot keyed/named Variant ABI 的有效性结果，以一次查找区分缺失/强类型非法键和已存储的 `null`；点号读取保留强类型 Dictionary 的声明值类型，当 `StringName` 不能进入声明键存储时在前端拒绝，并保持接收者优先的故障顺序。
 - 对缺失键、强类型键/值及只读存储完整匹配 Dictionary 直接和复合赋值故障；点号写入使用原生 `StringName` ABI，非法直接写入终止当前函数，而强类型复合值被拒绝时保持原条目并像官方 GDScript 一样继续。
 - 新增基于符号身份的全函数证明，只对局部、非强类型 Dictionary 字面量中已存在的槽位执行原地复合更新；重赋值、别名、调用、下标、未知键、强类型存储、方法访问和闭包捕获都会撤销证明并保留完整受检路径。
-- 不放宽任何阈值即把 fault-safe 后端恢复到商业 10% 性能合同：清缓存的官方 Godot 4.7.1 Universal 2 source/AOT 差分完整匹配 64 个 fault 调用者和 39 项值哈希，5 轮性能矩阵通过启动、固定帧及全部 13 个 family；Dictionary、String 与 Variant 运算分别比 GDScript 快 5.60%、10.16% 和 0.37%。
+- 已经是 `Variant` 的值跨越 native-to-Variant 边界时直接借用，不再构造相同临时值；编译器拥有且只使用一次的赋值 RHS 快照通过 godot-cpp 移动构造/赋值提交。接收者先于 RHS、故障检查、自赋值、共享容器身份及受检转换保持不变，String 与动态标量循环不再承担重复引用计数复制。
+- 不放宽任何阈值即把 fault-safe 后端恢复到商业 10% 性能合同：清缓存的官方 Godot 4.7.1 Universal 2 source/AOT 差分完整匹配 64 个 fault 调用者和 39 项值哈希，5 轮性能矩阵通过启动、固定帧及全部 13 个 family；Dictionary、String 与 Variant 运算分别比 GDScript 快 8.28%、8.65% 和 27.29%。
 - 将本地 lambda 的参数数量和变参身份编码进生成 C++ 类型，并仅在具体 Callable 仍处于创建调用栈内时保留原生参数 tuple；精确参数不再往返 Variant，赋值/逃逸、失效宿主、缺省参数、结构化容器和动态路径仍执行完整 Godot Callable 与严格 Variant 校验。
 - 精确本地 Callable 的原生参数分支与严格 Variant 回退改为结构互斥，在保留快速路径的同时通过 MSVC 的 warning-as-error 不可达代码分析，并继续兼容 Clang 与 GCC。
 - 精确同类型的显式 Variant 转换先于 Godot 通用转换矩阵执行快速路径；官方 Godot 4.7.1 候选矩阵的全部行为 oracle 和 10% 门禁均通过，本地 Callable family 实测比 GDScript 快 33.33%，Variant 运算慢 2.17%。
