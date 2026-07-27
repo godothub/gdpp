@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <string>
 #include <string_view>
+#include <thread>
 
 TEST_CASE("compiler generates bindable GDExtension C++") {
     const std::string source = "extends Node\n"
@@ -5678,6 +5679,24 @@ TEST_CASE("compiler analyzes legal arithmetic chains without recursive stack gro
     REQUIRE(result.success);
     REQUIRE(result.metrics.ast_expression_count >= operand_count);
     REQUIRE(result.optimization.constants_folded >= operand_count - 1U);
+}
+
+TEST_CASE("compiler owns enough worker stack for deeply nested postfix semantics") {
+    std::string source{
+        "extends RefCounted\nfunc lookup(value: Variant) -> Variant:\n    return value"};
+    constexpr std::size_t access_count = 48;
+    for (std::size_t index = 0; index < access_count; ++index)
+        source += ".get(\"next\")";
+    source += '\n';
+
+    gdpp::CompileResult result;
+    std::thread embedding_worker{
+        [&]() { result = gdpp::Compiler{}.compile("nested_postfix.gd", source); }};
+    embedding_worker.join();
+
+    REQUIRE(result.success);
+    REQUIRE(result.metrics.ast_expression_count >= access_count * 2U);
+    REQUIRE(result.unit.source.find("GDPPNative_NestedPostfix::lookup") != std::string::npos);
 }
 
 TEST_CASE("instance Godot methods cannot be called through type references") {
