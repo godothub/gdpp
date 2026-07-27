@@ -103,35 +103,8 @@ jobs:
           test -f "$output/gdpp-attached.pck"
           test -f "$fixture/addons/vendor/binary/libgdpp_test_vendor.release.linux.x86_64.so"
           test -f "$fixture/addons/gdpp/binary/libgdpp.release.linux.x86_64.so"
-          set +e
           timeout 15s "$output/gdpp-attached.x86_64" --headless \
             2>&1 | tee "$output/gdpp-attached-runtime.log"
-          attached_runtime_status="${PIPESTATUS[0]}"
-          set -e
-          if (( attached_runtime_status != 0 )); then
-            sdk_version="$(printf '%s' "$GODOT_VERSION" | cut -d. -f1,2)"
-            native_root="$fixture/addons/gdpp/build/project/native-direct/$sdk_version/linux/x86_64/release"
-            binding_library="$fixture/addons/gdpp/sdk/$sdk_version/lib/libgodot-cpp.linux.template_release.x86_64.a"
-            unstripped_library="$native_root/libgdpp.release.linux.x86_64.unstripped.so"
-            c++ -shared "$native_root"/objects/*.o "$binding_library" \
-              -Wl,--exclude-libs,ALL \
-              -Wl,--version-script="$fixture/addons/gdpp/build/project/symbols.map" \
-              -Wl,--gc-sections -Wl,-O1 \
-              -o "$unstripped_library"
-            exported_library="$(
-              find "$output" -type f \
-                -name 'libgdpp.release.linux.x86_64.so' -print -quit
-            )"
-            test -n "$exported_library"
-            cp "$unstripped_library" "$exported_library"
-            gdb --batch \
-              -ex 'set pagination off' \
-              -ex run \
-              -ex 'thread apply all bt full' \
-              --args "$output/gdpp-attached.x86_64" --headless \
-              2>&1 | tee "$output/gdpp-attached-runtime-backtrace.log" || true
-            exit "$attached_runtime_status"
-          fi
           timeout 30s "$output/gdpp-attached.x86_64" --headless -- \
             --gdpp-fault-matrix \
             2>&1 | tee "$output/gdpp-attached-fault-aot.log"
