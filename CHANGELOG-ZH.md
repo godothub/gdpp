@@ -20,6 +20,7 @@
 - macOS Universal Debug 导出可以复用经过验证、仅提供 Release 的第三方 provider fat binary；GDPP 只在导出包内的描述符字节中增加 Debug 别名，不修改客户源码目录中的描述符或动态库。
 - 生成的 breakpoint fixture 会与真实 godot-cpp 一同编译，并使用官方 Godot 4.6.2 对附着第三方 GDExtension 的 Debug、Release 项目执行导出和运行验证。
 - 前端新增有界多错误恢复、完整源码范围 AST 序列化 golden、coverage-guided fuzz 和 Godot 4.7.1 stable 语言漂移报告，覆盖官方 114 个合法及 76 个非法 parser fixture。
+- 所有单文件与项目编译入口统一运行在 GDPP 自有的 16 MiB 工作线程栈上，拆分占用最大的调用/成员语义分析帧，并保留可重入编译，不再继承 Godot 最小约 512 KiB 的脚本工作线程栈；深层后缀调用链回归直接覆盖真实嵌入边界。
 - 前端 AST visitor 的穷举哨兵兼容 Clang 14 的 fuzzer-only 严格告警构建，同时继续在编译期拒绝任何未处理的节点类型。
 - deferred Signal 运行门禁改为有界等待可观察完成，不再假设固定的一帧阶段；Linux、macOS 与 Windows 发布验证由此保持确定性，同时仍会拒绝真正丢失的回调。
 - MIR 的 value/operation 使用稳定且不含地址的身份，支持版本化控制流快照序列化、source ownership 与密集前驱校验；优化预算和失败均保持事务，不会破坏输入。
@@ -27,7 +28,7 @@
 - 穷举验证 Godot 4.4～4.7 API 表中的每条生成元数据、参数范围、属性读写 ABI、Signal 契约、enum/bitfield、标量返回和禁止的原生指针边界。
 - 无源码成品为完全由运行时拼接的脚本路径保留规范 Script 身份，覆盖相对路径、UID、同步/线程 ResourceLoader、缓存相等、`exists()`、`get_script()` 和 `.new()`；编译项目清单外路径确定失败。
 - 使用真实导出后的 ENet 多 peer 验证 authority/any-peer RPC、本地/远端执行、传输模式、channel、顺序、拒绝和继承 override 配置，不再用单进程 metadata 代替网络行为。
-- 真实 ENet 集成夹具按引擎所有权顺序退出：先注销 SceneTree 自定义 multiplayer 根路径，再关闭 peer、释放复制节点，消除 Godot 4.4～4.7 的重复 `tree_exited` 清理诊断。
+- 真实 ENet 重连与退出统一遵循确定的节点/缓存、peer、SceneTree 根所有权顺序：复制节点先离树，再替换或关闭 peer，清空 API 的 peer 引用，最后注销并释放自定义 multiplayer 根；成功与中止清理均可重复执行，消除 Godot 4.4～4.7 的重复 `tree_exited` 缓存诊断。
 - 对全部非 MAX Variant 值家族和完整 fault 矩阵执行原生 GDScript/AOT 对照，覆盖普通/强类型容器、全部 PackedArray、错误键、越界、整数故障、Callable、空/失效 Object、Ref 和第三方调用。
 - await 赋值先以 A-normal form 固定接收者与下标，再求右值；局部、字段、属性和动态下标在挂起前后保持单次求值、写回所有权、惰性分支和生命周期。
 - 缺失的默认参数在有序调用 prologue 内求值，并允许默认表达式真正挂起；接收者、此前显式/默认参数、vararg 和逐次调用状态均跨恢复保留。
