@@ -5579,6 +5579,45 @@ TEST_CASE("compiler contains fatal expression faults and preserves Godot assignm
     REQUIRE(index_call < write);
 }
 
+TEST_CASE("compiler polls script faults only at statically fallible expression boundaries") {
+    const gdpp::Compiler compiler;
+    const auto result = compiler.compile(
+        "fault_effects.gd", "extends RefCounted\n"
+                            "func pure(index: int) -> int:\n"
+                            "    var text := \"gdpp\"\n"
+                            "    text = text.to_upper() if (index & 1) == 0 else text.to_lower()\n"
+                            "    var total := text.length()\n"
+                            "    total += (index & 7) + 1\n"
+                            "    return total\n"
+                            "func converted_argument(index: Variant) -> String:\n"
+                            "    return \"gdpp\".substr(index)\n"
+                            "func fallible(values: Array[int], divisor: int) -> int:\n"
+                            "    return values[9] / divisor\n");
+
+    REQUIRE(result.success);
+    const auto& source = result.unit.source;
+    const auto pure = source.find("::pure(");
+    const auto converted = source.find("::converted_argument(", pure);
+    const auto fallible = source.find("::fallible(", converted);
+    REQUIRE(pure != std::string::npos);
+    REQUIRE(converted != std::string::npos);
+    REQUIRE(fallible != std::string::npos);
+    const auto pure_body = source.substr(pure, converted - pure);
+    const auto converted_body = source.substr(converted, fallible - converted);
+    const auto fallible_body = source.substr(fallible);
+
+    REQUIRE(pure_body.find("if (script_function_failed())") == std::string::npos);
+    REQUIRE(pure_body.find(".to_upper()") != std::string::npos);
+    REQUIRE(pure_body.find(".to_lower()") != std::string::npos);
+    REQUIRE(pure_body.find("gdpp::integer::add(") != std::string::npos);
+    REQUIRE(converted_body.find("gdpp::runtime::strict_builtin_storage<int64_t>(") !=
+            std::string::npos);
+    REQUIRE(converted_body.find("if (script_function_failed())") != std::string::npos);
+    REQUIRE(fallible_body.find("gdpp::runtime::checked_typed_array_get<") != std::string::npos);
+    REQUIRE(fallible_body.find("gdpp::runtime::integer_divide(") != std::string::npos);
+    REQUIRE(fallible_body.find("if (script_function_failed())") != std::string::npos);
+}
+
 TEST_CASE("specialized calls stop argument evaluation at the first fatal fault") {
     const gdpp::Compiler compiler;
     const auto result = compiler.compile(
