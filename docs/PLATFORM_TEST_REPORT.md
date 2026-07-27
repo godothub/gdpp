@@ -9,7 +9,7 @@
 | 最近正式发布运行 | 1.7.10 / `https://github.com/abandoft/gdpp/actions/runs/30170732292` |
 | 1.8.0 发布状态 | 本地候选门禁完成；正式发布矩阵由 release workflow 执行 |
 | 目标发行资产 | `gdpp-mac.zip`、`gdpp-linux.zip`、`gdpp-win.zip`、`SHA256SUMS` |
-| 本地编译器单元测试 | 547 / 547 |
+| 本地编译器单元测试 | 549 / 549 |
 
 本报告只描述可重复证据。内部商业语料和客户项目不按名称公开；它们只能补充发现问题，不能替代
 产品级 fixture 与 CI。
@@ -20,12 +20,12 @@
 |---|---|
 | 开发 core CTest | 21 项发布前合同 |
 | 开发 plugin CTest | 23 项发布前合同 |
-| 编译器单元 | 547 / 547 |
+| 编译器单元 | 549 / 549 |
 | godot-cpp SDK | macOS 上完整重建 4.4、4.5、4.6、4.7 `template_release` |
 | 官方 Godot 4.7.1 直接构建 | 当前 compiler 生成、顺序编译并链接真实客户项目库成功 |
 | 官方 Godot 4.7.1 AOT runtime | 重新生成 Universal 2 成品后，arm64 与 Rosetta x86_64 的 FunctionState、异步虚函数、协程 lambda、await 默认参数、协程访问器、Callable/Signal、全 Variant fault 和项目脚本生命周期成功 |
-| 官方 Godot 4.7.1 fault 差分 | source/AOT 的 59 个调用者恢复序列、39 项值矩阵哈希、await 默认参数及协程访问器结果完全一致；覆盖缺失 `Dictionary.key` 与存在 `null` 的消歧 |
-| 官方 Godot 4.7.1 性能 | 13/13 family、启动和固定帧全部通过 10% 门禁；最终 5 轮候选中 Dictionary AOT -7.40%、String AOT -11.56%、Variant AOT +1.61% |
+| 官方 Godot 4.7.1 fault 差分 | 清缓存 source/AOT 的 64 个调用者恢复序列、39 项值矩阵哈希、await 默认参数及协程访问器结果完全一致；覆盖 Dictionary 缺键、`null`、强类型直接/复合写入和只读写入 |
+| 官方 Godot 4.7.1 性能 | 13/13 family、启动和固定帧全部通过 10% 门禁；最终 5 轮候选中 Dictionary AOT -5.60%、String AOT -10.16%、Variant AOT -0.37% |
 | 官方 Godot 4.5.2 AOT runtime | Universal 2 Release 导出后连续独立运行 10 次；动态 Script、Attached provider 与真实多 peer RPC 全部干净退出 |
 | custom/double add-on | 4.7 double 从精确 API 干净构建；compiler、SDK、descriptor、静态库和 manifest 审计成功 |
 | 官方 Godot 4.6.2 Release | Universal 2 Attached provider 导出、独立运行成功 |
@@ -53,11 +53,12 @@ CLI 入口误当成 GDPP 语义；每个 oracle 仍独占进程、退出码、�
 arm64、Rosetta x86_64 均输出 `GDPP_DYNAMIC_SCRIPT_RUNTIME_OK`、`GDPP_RPC_RUNTIME_OK` 和
 `GDPP_ATTACHED_EXPORT_RUNTIME_OK`，随后三个独立 AOT oracle 再次通过。
 
-最终 fault polling 与字典 keyed lookup 版本又使用官方 4.7.1 Universal 2 Release 模板重建
-AOT 与 GDScript 对照成品，并执行 5 轮 AB/BA、每轮 5 个样本、每个 family 10,000 次迭代。
-行为 oracle 先通过，随后 13/13 family、启动与固定帧门禁全部通过；Dictionary、String、Variant
-的 AOT mean 相对 GDScript 分别为 -7.40%、-11.56%、+1.61%。独立 provider 成品的 source/AOT
-fault 序列还验证缺失点号键会中止、存在 `null` 会继续，以及非法强类型复合键不会继续执行。
+最终 fault polling 与 Dictionary named/keyed ABI 版本又清理生成物、对象和项目库，使用官方
+4.7.1 Universal 2 Release 模板重建 AOT 与 GDScript 对照成品，并执行 5 轮 AB/BA、每轮 5 个
+样本、每个 family 10,000 次迭代。行为 oracle 先通过，随后 13/13 family、启动与固定帧门禁
+全部通过；Dictionary、String、Variant 的 AOT mean 相对 GDScript 分别为 -5.60%、-10.16%、
+-0.37%。独立 provider 成品的 64 组 source/AOT fault 序列逐字一致，覆盖缺失点号键、合法
+`null`、只读直接/复合写入、非法强类型直接值，以及官方会保持原值并继续的非法强类型复合值。
 
 ## 正式发布门禁
 
@@ -65,7 +66,7 @@ fault 序列还验证缺失点号键会中止、存在 `null` 会继续，以及
 
 | 门禁 | 环境 | 验证 |
 |---|---|---|
-| Compiler core | Ubuntu 22.04、macOS 15、Windows 2025 | C++17、严格 warning、547 项单元 |
+| Compiler core | Ubuntu 22.04、macOS 15、Windows 2025 | C++17、严格 warning、549 项单元 |
 | ASan | Ubuntu 22.04 | 地址错误和 leak 阻断 |
 | UBSan | Ubuntu 22.04 | 未定义行为阻断 |
 | TSan | Ubuntu 22.04 | 线程数据竞争阻断 |
