@@ -307,6 +307,9 @@ class CodeGenerator final {
     mutable std::unordered_map<std::string, const typed::Function*> local_functions_;
     mutable std::unordered_map<std::string, const typed::Function*> constructor_functions_;
     mutable std::unordered_map<FlowSymbolId, std::string> local_expression_overrides_;
+    mutable std::unordered_map<FlowSymbolId, std::unordered_set<std::string>>
+        proven_local_dictionary_slots_;
+    mutable std::size_t dictionary_proof_scope_depth_{0};
     mutable std::unordered_map<const typed::Expression*, std::string> exact_expression_overrides_;
     mutable bool lowering_assignment_{false};
     mutable bool current_static_context_{false};

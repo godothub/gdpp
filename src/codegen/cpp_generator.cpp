@@ -182,6 +182,115 @@ struct AsyncLocalSymbol final {
     Type type;
 };
 
+using DictionarySlotProofs = std::unordered_map<FlowSymbolId, std::unordered_set<std::string>>;
+
+void collect_local_dictionary_candidates(const std::vector<typed::Statement>& statements,
+                                         DictionarySlotProofs& candidates) {
+    for (const auto& statement : statements) {
+        if (statement.kind == typed::StatementKind::variable && !statement.is_constant &&
+            statement.symbol_identity != 0 &&
+            statement.declared_type.kind == TypeKind::dictionary &&
+            statement.declared_type.name == "Dictionary" && statement.expression &&
+            statement.expression->kind == typed::ExpressionKind::dictionary_literal &&
+            statement.expression->type.kind == TypeKind::dictionary &&
+            statement.expression->type.name == "Dictionary") {
+            auto& keys = candidates[statement.symbol_identity];
+            for (std::size_t index = 0; index + 1 < statement.expression->operands.size();
+                 index += 2) {
+                if (!statement.expression->operands[index])
+                    continue;
+                const auto& key = *statement.expression->operands[index];
+                if (key.kind == typed::ExpressionKind::literal &&
+                    (key.literal_kind == typed::LiteralKind::string ||
+                     key.literal_kind == typed::LiteralKind::string_name)) {
+                    keys.insert(key.value);
+                }
+            }
+        }
+        collect_local_dictionary_candidates(statement.body, candidates);
+        collect_local_dictionary_candidates(statement.else_body, candidates);
+        collect_local_dictionary_candidates(statement.guard_prefix, candidates);
+        collect_local_dictionary_candidates(statement.assert_condition_prefix, candidates);
+        collect_local_dictionary_candidates(statement.assert_message_prefix, candidates);
+    }
+}
+
+void audit_local_dictionary_statements(const std::vector<typed::Statement>& statements,
+                                       DictionarySlotProofs& candidates,
+                                       bool allow_named_receiver = true);
+
+void audit_local_dictionary_expression(const typed::Expression& expression,
+                                       DictionarySlotProofs& candidates,
+                                       const bool allowed_named_receiver = false,
+                                       const bool allow_named_receiver = true) {
+    if (expression.kind == typed::ExpressionKind::identifier &&
+        candidates.find(expression.symbol_identity) != candidates.end() &&
+        !allowed_named_receiver) {
+        candidates.erase(expression.symbol_identity);
+    }
+
+    if (expression.kind == typed::ExpressionKind::lambda && expression.lambda) {
+        // A captured Dictionary can outlive this function or be invoked re-entrantly. Keep
+        // closure lowering on the general checked path even when the current body only performs
+        // named access.
+        audit_local_dictionary_statements(expression.lambda->body, candidates, false);
+        return;
+    }
+
+    const bool named_member = allow_named_receiver &&
+                              expression.kind == typed::ExpressionKind::member &&
+                              expression.resolution == typed::ResolutionKind::dynamic_property &&
+                              !expression.operands.empty();
+    for (std::size_t index = 0; index < expression.operands.size(); ++index) {
+        if (!expression.operands[index])
+            continue;
+        audit_local_dictionary_expression(*expression.operands[index], candidates,
+                                          named_member && index == 0, allow_named_receiver);
+    }
+}
+
+void audit_local_dictionary_pattern(const typed::MatchPattern& pattern,
+                                    DictionarySlotProofs& candidates,
+                                    const bool allow_named_receiver) {
+    if (pattern.expression)
+        audit_local_dictionary_expression(*pattern.expression, candidates, false,
+                                          allow_named_receiver);
+    for (const auto& key : pattern.keys)
+        if (key)
+            audit_local_dictionary_expression(*key, candidates, false, allow_named_receiver);
+    for (const auto& child : pattern.elements)
+        audit_local_dictionary_pattern(child, candidates, allow_named_receiver);
+}
+
+void audit_local_dictionary_statements(const std::vector<typed::Statement>& statements,
+                                       DictionarySlotProofs& candidates,
+                                       const bool allow_named_receiver) {
+    for (const auto& statement : statements) {
+        if (statement.expression)
+            audit_local_dictionary_expression(*statement.expression, candidates, false,
+                                              allow_named_receiver);
+        if (statement.condition)
+            audit_local_dictionary_expression(*statement.condition, candidates, false,
+                                              allow_named_receiver);
+        for (const auto& pattern : statement.patterns)
+            audit_local_dictionary_pattern(pattern, candidates, allow_named_receiver);
+        audit_local_dictionary_statements(statement.body, candidates, allow_named_receiver);
+        audit_local_dictionary_statements(statement.else_body, candidates, allow_named_receiver);
+        audit_local_dictionary_statements(statement.guard_prefix, candidates, allow_named_receiver);
+        audit_local_dictionary_statements(statement.assert_condition_prefix, candidates,
+                                          allow_named_receiver);
+        audit_local_dictionary_statements(statement.assert_message_prefix, candidates,
+                                          allow_named_receiver);
+    }
+}
+
+DictionarySlotProofs prove_local_dictionary_slots(const std::vector<typed::Statement>& statements) {
+    DictionarySlotProofs candidates;
+    collect_local_dictionary_candidates(statements, candidates);
+    audit_local_dictionary_statements(statements, candidates);
+    return candidates;
+}
+
 void collect_match_declarations(const typed::MatchPattern& pattern,
                                 std::unordered_set<FlowSymbolId>& symbols) {
     if (pattern.kind == typed::MatchPatternKind::binding && pattern.symbol_identity != 0)
@@ -2797,16 +2906,22 @@ std::string CodeGenerator::emit_dictionary_member_assignment(const typed::Statem
     const auto key = "_gdpp_dictionary_key_" + suffix;
     const auto value = "_gdpp_dictionary_value_" + suffix;
 
+    const auto& receiver = *target.operands.at(0);
+    const auto proven =
+        receiver.kind == typed::ExpressionKind::identifier && receiver.symbol_identity != 0 &&
+        proven_local_dictionary_slots_.find(receiver.symbol_identity) !=
+            proven_local_dictionary_slots_.end() &&
+        proven_local_dictionary_slots_.at(receiver.symbol_identity).find(target.value) !=
+            proven_local_dictionary_slots_.at(receiver.symbol_identity).end();
     std::string result = prefix + "{\n" + nested_prefix + "auto &&" + dictionary + " = " +
-                         emit_expression(*target.operands.at(0)) + ";\n" + nested_prefix +
-                         "static const godot::Variant " + key + " = " +
-                         godot_string_name(target.value) + ";\n";
-    if (statement.operation != "=") {
+                         emit_expression(receiver) + ";\n" + nested_prefix;
+    if (statement.operation != "=" && proven) {
         const auto slot = "_gdpp_dictionary_slot_" + suffix;
-        result +=
-            nested_prefix + "godot::Variant &" + slot + " = " + dictionary + "[" + key + "];\n";
-        result += nested_prefix + "const auto " + value + " = " +
-                  emit_expression(*statement.expression) + ";\n";
+        result += "static const godot::Variant " + key + " = " + godot_string_name(target.value) +
+                  ";\n" + nested_prefix + "godot::Variant &" + slot + " = " + dictionary + "[" +
+                  key + "];\n" + nested_prefix + "const auto " + value + " = " +
+                  emit_expression(*statement.expression) + ";\n" +
+                  emit_script_failure_return(indentation + 1, in_async_continuation_);
         const auto operation = statement.operation.substr(0, statement.operation.size() - 1);
         if (statement.expression->type.kind == TypeKind::integer ||
             statement.expression->type.kind == TypeKind::enumeration) {
@@ -2816,10 +2931,39 @@ std::string CodeGenerator::emit_dictionary_member_assignment(const typed::Statem
             result += nested_prefix + "gdpp::runtime::compound_assign(" + slot +
                       ", godot::Variant::" + variant_operator(operation) + ", " + value + ");\n";
         }
+        result += emit_script_failure_return(indentation + 1, in_async_continuation_);
+    } else if (statement.operation != "=") {
+        const auto current = "_gdpp_dictionary_current_" + suffix;
+        result += "static const godot::StringName " + key + " = " +
+                  godot_string_name(target.value) + ";\n" + nested_prefix + "godot::Variant " +
+                  current + " = gdpp::runtime::checked_dictionary_get_named(" + dictionary + ", " +
+                  key + ", " + script_location(target.span) + ");\n" +
+                  emit_script_failure_return(indentation + 1, in_async_continuation_) +
+                  nested_prefix + "const auto " + value + " = " +
+                  emit_expression(*statement.expression) + ";\n" +
+                  emit_script_failure_return(indentation + 1, in_async_continuation_);
+        const auto operation = statement.operation.substr(0, statement.operation.size() - 1);
+        if (statement.expression->type.kind == TypeKind::integer ||
+            statement.expression->type.kind == TypeKind::enumeration) {
+            result += nested_prefix + "gdpp::runtime::compound_assign_integer(" + current +
+                      ", godot::Variant::" + variant_operator(operation) + ", " + value + ");\n";
+        } else {
+            result += nested_prefix + "gdpp::runtime::compound_assign(" + current +
+                      ", godot::Variant::" + variant_operator(operation) + ", " + value + ");\n";
+        }
+        result += emit_script_failure_return(indentation + 1, in_async_continuation_) +
+                  nested_prefix + "gdpp::runtime::unchecked_dictionary_set_named(" + dictionary +
+                  ", " + key + ", " + current + ", " + script_location(target.span) + ");\n" +
+                  emit_script_failure_return(indentation + 1, in_async_continuation_);
     } else {
-        result += nested_prefix + "const godot::Variant " + value + " = " +
-                  "gdpp::runtime::to_variant(" + emit_expression(*statement.expression) + ");\n" +
-                  nested_prefix + dictionary + "[" + key + "] = " + value + ";\n";
+        result += "static const godot::StringName " + key + " = " +
+                  godot_string_name(target.value) + ";\n" + nested_prefix +
+                  "const godot::Variant " + value + " = " + "gdpp::runtime::to_variant(" +
+                  emit_expression(*statement.expression) + ");\n" +
+                  emit_script_failure_return(indentation + 1, in_async_continuation_) +
+                  nested_prefix + "gdpp::runtime::checked_dictionary_set_named(" + dictionary +
+                  ", " + key + ", " + value + ", " + script_location(target.span) + ");\n" +
+                  emit_script_failure_return(indentation + 1, in_async_continuation_);
     }
     return result + prefix + "}\n";
 }
@@ -4576,17 +4720,22 @@ std::string CodeGenerator::emit_expression(const typed::Expression& expression) 
                 const auto suffix = std::to_string(temporary_counter_++);
                 const auto key = "_gdpp_dictionary_read_key_" + suffix;
                 const auto lookup = [&](const std::string& receiver) {
-                    return "gdpp::runtime::checked_dictionary_get(" + receiver +
-                           ", ([]() -> const godot::Variant& { static const godot::Variant " + key +
-                           " = " + godot_string_name(expression.value) + "; return " + key +
+                    return "gdpp::runtime::checked_dictionary_get_named(" + receiver +
+                           ", ([]() -> const godot::StringName& { static const godot::StringName " +
+                           key + " = " + godot_string_name(expression.value) + "; return " + key +
                            "; }()), " + script_location(expression.span) + ")";
                 };
-                if (!expression_may_fail(*expression.operands.at(0)))
-                    return lookup(object);
-                const auto receiver = "_gdpp_dictionary_read_receiver_" + suffix;
-                return "([&]() -> godot::Variant { auto &&" + receiver + " = " + object +
-                       "; if (script_function_failed()) return {}; return " + lookup(receiver) +
-                       "; }())";
+                std::string value;
+                if (!expression_may_fail(*expression.operands.at(0))) {
+                    value = lookup(object);
+                } else {
+                    const auto receiver = "_gdpp_dictionary_read_receiver_" + suffix;
+                    value = "([&]() -> godot::Variant { auto &&" + receiver + " = " + object +
+                            "; if (script_function_failed()) return {}; return " +
+                            lookup(receiver) + "; }())";
+                }
+                return emit_conversion(expression.type, {TypeKind::variant, "Variant"},
+                                       std::move(value), &expression.span);
             }
             auto value = "gdpp::runtime::get_named(" + object + ", " +
                          godot_string_name(expression.value) + ", " +
@@ -4870,6 +5019,10 @@ std::string CodeGenerator::emit_expression(const typed::Expression& expression) 
         // retain the same failure state.
         result += emit_script_function_scope(1);
         result += emit_debug_frame(lambda.span.begin.line, 1);
+        const auto saved_dictionary_slots = proven_local_dictionary_slots_;
+        const auto saved_dictionary_scope_depth = dictionary_proof_scope_depth_;
+        proven_local_dictionary_slots_.clear();
+        dictionary_proof_scope_depth_ = 0;
         if (has_parameter_control_flow(lambda.parameters)) {
             result += emit_parameter_cells(lambda.parameters, 1);
             result += emit_parameter_initialization_chain(lambda.parameters, lambda.rest_parameter,
@@ -4892,6 +5045,8 @@ std::string CodeGenerator::emit_expression(const typed::Expression& expression) 
             }
             result += emit_statements(lambda.body, 1);
         }
+        proven_local_dictionary_slots_ = saved_dictionary_slots;
+        dictionary_proof_scope_depth_ = saved_dictionary_scope_depth;
         current_return_type_ = saved_return;
         in_callable_lambda_ = saved_callable;
         in_function_body_ = saved_function;
@@ -4924,8 +5079,18 @@ std::string CodeGenerator::emit_statements(const std::vector<typed::Statement>& 
                                            const std::size_t indentation,
                                            const std::size_t begin) const {
     const auto saved_overrides = local_expression_overrides_;
+    const bool owns_dictionary_proof = dictionary_proof_scope_depth_ == 0;
+    DictionarySlotProofs saved_dictionary_slots;
+    if (owns_dictionary_proof) {
+        saved_dictionary_slots = proven_local_dictionary_slots_;
+        proven_local_dictionary_slots_ = prove_local_dictionary_slots(statements);
+    }
+    ++dictionary_proof_scope_depth_;
     auto result = emit_async_statements(statements, indentation, begin, {}, {}, false);
+    --dictionary_proof_scope_depth_;
     local_expression_overrides_ = saved_overrides;
+    if (owns_dictionary_proof)
+        proven_local_dictionary_slots_ = std::move(saved_dictionary_slots);
     return result;
 }
 
@@ -6065,7 +6230,8 @@ std::string CodeGenerator::emit_statement_body(const typed::Statement& statement
             } else {
                 result += nested_prefix + "gdpp::runtime::unchecked_dictionary_set(" +
                           container_name + ", gdpp::runtime::to_variant(" + index_name +
-                          "), gdpp::runtime::to_variant(" + assigned + "));\n";
+                          "), gdpp::runtime::to_variant(" + assigned + "), " +
+                          script_location(target.span) + ");\n";
             }
             result += prefix + "}\n";
             return result;
