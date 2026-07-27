@@ -9,7 +9,7 @@
 | 最近正式发布运行 | 1.7.10 / `https://github.com/abandoft/gdpp/actions/runs/30170732292` |
 | 1.8.0 发布状态 | 本地候选门禁完成；正式发布矩阵由 release workflow 执行 |
 | 目标发行资产 | `gdpp-mac.zip`、`gdpp-linux.zip`、`gdpp-win.zip`、`SHA256SUMS` |
-| 本地编译器单元测试 | 543 / 543 |
+| 本地编译器单元测试 | 544 / 544 |
 
 本报告只描述可重复证据。内部商业语料和客户项目不按名称公开；它们只能补充发现问题，不能替代
 产品级 fixture 与 CI。
@@ -20,10 +20,11 @@
 |---|---|
 | 开发 core CTest | 21 项发布前合同 |
 | 开发 plugin CTest | 23 项发布前合同 |
-| 编译器单元 | 543 / 543 |
+| 编译器单元 | 544 / 544 |
 | godot-cpp SDK | macOS 上完整重建 4.4、4.5、4.6、4.7 `template_release` |
 | 官方 Godot 4.7.1 直接构建 | 当前 compiler 生成、顺序编译并链接真实客户项目库成功 |
 | 官方 Godot 4.7.1 AOT runtime | FunctionState、异步虚函数、await 默认参数、协程访问器、Callable/Signal、全 Variant fault 和项目脚本生命周期成功 |
+| 官方 Godot 4.5.2 AOT runtime | Universal 2 Release 导出后连续独立运行 10 次；动态 Script、Attached provider 与真实多 peer RPC 全部干净退出 |
 | custom/double add-on | 4.7 double 从精确 API 干净构建；compiler、SDK、descriptor、静态库和 manifest 审计成功 |
 | 官方 Godot 4.6.2 Release | Universal 2 Attached provider 导出、独立运行成功 |
 | 官方 Godot 4.6.2 Debug | Universal 2 Attached provider 导出、独立运行成功 |
@@ -44,7 +45,7 @@
 
 | 门禁 | 环境 | 验证 |
 |---|---|---|
-| Compiler core | Ubuntu 22.04、macOS 15、Windows 2025 | C++17、严格 warning、543 项单元 |
+| Compiler core | Ubuntu 22.04、macOS 15、Windows 2025 | C++17、严格 warning、544 项单元 |
 | ASan | Ubuntu 22.04 | 地址错误和 leak 阻断 |
 | UBSan | Ubuntu 22.04 | 未定义行为阻断 |
 | TSan | Ubuntu 22.04 | 线程数据竞争阻断 |

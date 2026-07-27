@@ -48,6 +48,8 @@
 - coverage-guided fuzz、非法 UTF-8/NUL、递归/链长/诊断预算及最小语料进入 CI。
 - Godot 4.7.1 的 114 个合法和 76 个非法 parser fixture、Unicode 与 warning/annotation
   注册表具有固定快照和 stable drift 报告。
+- `Compiler` 与 `ProjectCompiler` 拥有固定 16 MiB 工作线程栈，最大调用/成员分析帧已经拆分；
+  可重入调用不重复建线程，宿主嵌入线程的栈大小不能再改变合法输入的编译结果。
 
 ### M2：类型与运行语义
 
@@ -57,7 +59,8 @@
   FunctionState、捕获和跨脚本 ABI。
 - Signal/Callable 覆盖 bind/unbind、one-shot/deferred/reference-counted、发射期变更、宿主销毁、
   并发调用及嵌套/递归共享容器。
-- 真实 ENet 多 peer 覆盖 RPC authority/any-peer、local/remote、传输模式、channel、排序与拒绝。
+- 真实 ENet 多 peer 覆盖 RPC authority/any-peer、local/remote、传输模式、channel、排序、
+  拒绝、同一脚本节点跨 peer 重连，以及节点/缓存、peer、SceneTree 根的确定退出。
 - 全项目编译清单提供动态拼接 `.gd` 路径、相对路径、UID、同步/线程 ResourceLoader、缓存、
   `exists()` 和 Script `.new()` 的无源码身份；清单外路径确定失败。
 - custom/double SDK 由精确 API SHA-256、precision、版本、godot-cpp 和 ABI 生产并审计。

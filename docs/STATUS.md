@@ -8,7 +8,7 @@
 - 审计版本：GDPP 1.8.0。
 - 功能审计范围：1.8.0 发布分支当前提交；正式发布门禁由同一提交的 release workflow 执行。
 - 最近正式发布门禁：1.7.10 / GitHub Actions `30170732292`，46 个作业全部成功。
-- 本地编译器单元测试：543 / 543。
+- 本地编译器单元测试：544 / 544。
 - Godot 目标：4.4、4.5、4.6、4.7；CI 使用 4.4.1、4.5.2、4.6.3、4.7.1。
 - SDK schema：12；生成项目 runtime ABI：18。
 
@@ -48,13 +48,16 @@
 
 - 前端具有可恢复多错误解析、完整 AST/`SourceSpan` 序列化 golden、coverage-guided fuzz、
   资源预算以及 Godot 4.7.1 官方合法/非法语料漂移门禁。
+- 单文件与全项目入口都切换到 GDPP 自有 16 MiB 编译线程栈，调用/成员分析的大型 C++ 栈帧已
+  分离；宿主的约 512 KiB 脚本线程栈不再决定合法深层后缀表达式能否编译。
 - 38 个非 `MAX` Variant 家族、PackedArray、强类型 Array/Dictionary、Callable、空值、失效
   Object/Ref、错误键、越界和整数故障均进入统一 source/AOT fault 差分；故障携带源码位置并
   只中止当前脚本函数。
 - 真正挂起的实例/静态/lambda/内部类/属性访问器、await 默认参数和赋值目标都使用同一
   FunctionState 契约；项目 ABI 变化会传递失效所有消费者。
 - 真实 ENet 多 peer RPC 门禁覆盖 authority/any-peer、call-local/remote、transfer mode、
-  channel、排序、拒绝和导出后运行，不再以单进程反射代替网络语义。
+  channel、排序、拒绝、同一脚本节点重连和导出后运行；节点/缓存、peer、SceneTree 根按确定
+  顺序清理，不再以单进程反射或偶然退出顺序代替网络语义。
 - 项目中的每个可交付 `.gd` 都登记为无源码 `Script` 身份。运行时拼接路径、相对路径、UID、
   `ResourceLoader` 同步/线程加载、缓存、`exists()` 和 `.new()` 都从编译清单解析；清单之外的
   动态路径确定失败，不会在成品中偷偷依赖源码。
