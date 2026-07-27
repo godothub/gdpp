@@ -2888,10 +2888,49 @@ bool CodeGenerator::expression_may_fail(const typed::Expression& expression) con
     case typed::ExpressionKind::lambda:
         return false;
     case typed::ExpressionKind::identifier:
-        if (expression.resolution == typed::ResolutionKind::dynamic_property ||
-            expression.resolution == typed::ResolutionKind::script_property ||
-            expression.resolution == typed::ResolutionKind::script_runtime_static_field)
+        switch (expression.resolution) {
+        case typed::ResolutionKind::external_singleton:
+        case typed::ResolutionKind::external_callable:
+        case typed::ResolutionKind::external_signal:
+        case typed::ResolutionKind::dynamic_method:
+        case typed::ResolutionKind::dynamic_property:
+        case typed::ResolutionKind::script_property:
+        case typed::ResolutionKind::script_runtime_static_field:
             return true;
+        case typed::ResolutionKind::none:
+        case typed::ResolutionKind::godot_method:
+        case typed::ResolutionKind::godot_property:
+        case typed::ResolutionKind::godot_constructor:
+        case typed::ResolutionKind::godot_singleton:
+        case typed::ResolutionKind::godot_type:
+        case typed::ResolutionKind::external_type:
+        case typed::ResolutionKind::script_type:
+        case typed::ResolutionKind::script_autoload:
+        case typed::ResolutionKind::script_constant:
+        case typed::ResolutionKind::local_constant:
+        case typed::ResolutionKind::script_enum_type:
+        case typed::ResolutionKind::script_resource:
+        case typed::ResolutionKind::script_constructor:
+        case typed::ResolutionKind::external_constructor:
+        case typed::ResolutionKind::external_static_method:
+        case typed::ResolutionKind::external_super_method:
+        case typed::ResolutionKind::inner_constructor:
+        case typed::ResolutionKind::inner_type:
+        case typed::ResolutionKind::script_super:
+        case typed::ResolutionKind::script_signal:
+        case typed::ResolutionKind::script_callable:
+        case typed::ResolutionKind::script_static_callable:
+        case typed::ResolutionKind::script_static_field:
+        case typed::ResolutionKind::script_free:
+        case typed::ResolutionKind::enum_member:
+        case typed::ResolutionKind::utility_function:
+        case typed::ResolutionKind::global_constant:
+        case typed::ResolutionKind::global_enum_type:
+        case typed::ResolutionKind::global_enum_value:
+        case typed::ResolutionKind::builtin_constant:
+        case typed::ResolutionKind::intrinsic:
+            break;
+        }
         return expression.storage_type.kind != TypeKind::unknown &&
                expression.storage_type != expression.type &&
                conversion_may_fail(expression.type, expression.storage_type);
