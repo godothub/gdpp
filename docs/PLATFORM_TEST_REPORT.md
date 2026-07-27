@@ -9,7 +9,7 @@
 | 最近正式发布运行 | 1.7.10 / `https://github.com/abandoft/gdpp/actions/runs/30170732292` |
 | 1.8.0 发布状态 | 本地候选门禁完成；正式发布矩阵由 release workflow 执行 |
 | 目标发行资产 | `gdpp-mac.zip`、`gdpp-linux.zip`、`gdpp-win.zip`、`SHA256SUMS` |
-| 本地编译器单元测试 | 544 / 544 |
+| 本地编译器单元测试 | 545 / 545 |
 
 本报告只描述可重复证据。内部商业语料和客户项目不按名称公开；它们只能补充发现问题，不能替代
 产品级 fixture 与 CI。
@@ -20,10 +20,12 @@
 |---|---|
 | 开发 core CTest | 21 项发布前合同 |
 | 开发 plugin CTest | 23 项发布前合同 |
-| 编译器单元 | 544 / 544 |
+| 编译器单元 | 545 / 545 |
 | godot-cpp SDK | macOS 上完整重建 4.4、4.5、4.6、4.7 `template_release` |
 | 官方 Godot 4.7.1 直接构建 | 当前 compiler 生成、顺序编译并链接真实客户项目库成功 |
 | 官方 Godot 4.7.1 AOT runtime | FunctionState、异步虚函数、await 默认参数、协程访问器、Callable/Signal、全 Variant fault 和项目脚本生命周期成功 |
+| 官方 Godot 4.7.1 fault 差分 | source/AOT 的 57 个调用者恢复序列、39 项值矩阵哈希、await 默认参数及协程访问器结果完全一致 |
+| 官方 Godot 4.7.1 性能 | 13/13 family、启动和固定帧全部通过 10% 门禁；Callable AOT -33.33%，Variant AOT +2.17% |
 | 官方 Godot 4.5.2 AOT runtime | Universal 2 Release 导出后连续独立运行 10 次；动态 Script、Attached provider 与真实多 peer RPC 全部干净退出 |
 | custom/double add-on | 4.7 double 从精确 API 干净构建；compiler、SDK、descriptor、静态库和 manifest 审计成功 |
 | 官方 Godot 4.6.2 Release | Universal 2 Attached provider 导出、独立运行成功 |
@@ -43,13 +45,19 @@
 release 模板默认关闭 path overrides 并忽略 `--script`，因此发布门禁不把官方模板明确禁用的
 CLI 入口误当成 GDPP 语义；每个 oracle 仍独占进程、退出码、无诊断日志与精确成功标记。
 
+本轮候选还在同一官方 4.7.1 引擎下分别运行源码 `runtime_fault_oracle.gd` 和导出的 Universal 2
+成品。两端的 `GDPP_FAULT_MATRIX` 与 `GDPP_VALUE_MATRIX` 逐字一致；AOT 另在独立进程输出
+`GDPP_AWAIT_DEFAULT_AOT_RUNTIME_OK` 和 `GDPP_COROUTINE_ACCESSOR_AOT_RUNTIME_OK`。性能矩阵
+使用同一引擎/模板、3 轮 AB/BA、每轮 5 个样本、每个 family 10,000 次迭代，行为 oracle 先于
+性能判定通过。
+
 ## 正式发布门禁
 
 ### 编译器与宿主
 
 | 门禁 | 环境 | 验证 |
 |---|---|---|
-| Compiler core | Ubuntu 22.04、macOS 15、Windows 2025 | C++17、严格 warning、544 项单元 |
+| Compiler core | Ubuntu 22.04、macOS 15、Windows 2025 | C++17、严格 warning、545 项单元 |
 | ASan | Ubuntu 22.04 | 地址错误和 leak 阻断 |
 | UBSan | Ubuntu 22.04 | 未定义行为阻断 |
 | TSan | Ubuntu 22.04 | 线程数据竞争阻断 |
