@@ -210,5 +210,5 @@ ABI；缺失键、非法强类型键和键存在但值为 `Nil` 不会被混淆�
 
 局部 Dictionary 槽位优化不改变 typed IR。C++ 后端以 `FlowSymbolId` 对完整函数执行保守使用
 审计；只有非强类型字面量的已知初始键，且容器从未重赋值、别名、逃逸、下标访问、调用方法或被
-闭包捕获时，复合写入才取得原地 `Variant&`。证明失败只是选择受检 getter/setter，不会删除 IR
-节点、求值或 fault 边界。
+闭包捕获时，读取才借用 `const Variant&`，复合写入才取得原地 `Variant&`。证明失败只是选择
+受检 getter/setter，不会删除 IR 节点、求值或 fault 边界。
