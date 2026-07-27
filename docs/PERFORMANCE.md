@@ -65,20 +65,20 @@ CI 在 Godot 4.4.1、4.5.2、4.6.3、4.7.1 的兼容作业中执行该矩阵。�
 5 个样本和每个 case 10,000 次迭代下通过完整行为与性能门禁：
 
 ```text
-Dictionary mean: GDS 199.84 ns / AOT 183.30 ns（AOT -8.28%）
-String mean:     GDS 138.84 ns / AOT 126.82 ns（AOT -8.65%）
-Variant mean:    GDS 22.76 ns / AOT 16.55 ns（AOT -27.29%）
+Dictionary mean: GDS 199.49 ns / AOT 138.11 ns（AOT -30.77%）
+String mean:     GDS 150.64 ns / AOT 126.35 ns（AOT -16.13%）
+Variant mean:    GDS 23.07 ns / AOT 16.74 ns（AOT -27.43%）
 13/13 benchmark families、启动、固定帧：全部 <= 10%
 行为 oracle：PASS
 ```
 
-该结果来自 fault frame 最终效应分析、Dictionary 写入合同、Variant 边界借用及单次 RHS 快照
+该结果来自 fault frame 最终效应分析、Dictionary 读写合同、Variant 边界借用及单次 RHS 快照
 移动提交版本，用于证明完整错误传播没有依靠热点轮询换取正确性，也没有通过放宽阈值掩盖回归。
 named/keyed Variant ABI 对包括 `Nil` 在内的所有结果都用一次查找返回有效位；直接/复合、强类型
 和只读写入保留官方故障边界。只有经完整函数符号身份与逃逸审计证明安全的局部非强类型字面量
-已存在键才原地更新；重赋值、别名、调用、下标、未知键、强类型、方法访问或闭包捕获都会回到
-受检 getter/setter。数值会随机器和 Godot patch 变化，正式发布仍要求四个目标版本各自在
-Linux runner 独立通过同一门禁。
+已存在键才借用读取或原地更新；重赋值、别名、调用、下标、未知键、强类型、方法访问或闭包捕获
+都会回到受检 getter/setter。数值会随机器和 Godot patch 变化，正式发布仍要求四个目标版本
+各自在 Linux runner 独立通过同一门禁。
 
 最近一次 Windows 联机事件补充审计在同一机器、相同输入和三轮 warm 运行下得到：
 
