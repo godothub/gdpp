@@ -10,6 +10,7 @@
 - 引入脚本 fault frame：致命 GDScript 操作只终止当前生成函数，调用方可继续执行；同时保留源码求值顺序、惰性分支、专用调用参数顺序、Callable 默认返回，以及 Variant、容器、对象和第三方扩展边界的精确 `.gd` 路径、行列诊断。
 - 同步 fault frame 改为调用局部、线程局部状态，协程持久 fault 状态由 FunctionState 恢复互斥锁串行拥有；活动帧检查在生成调用点内联，失败标记不会跨线程、协程、嵌套调用或 GDExtension ABI 泄漏。
 - 将本地 lambda 的参数数量和变参身份编码进生成 C++ 类型，并仅在具体 Callable 仍处于创建调用栈内时保留原生参数 tuple；精确参数不再往返 Variant，赋值/逃逸、失效宿主、缺省参数、结构化容器和动态路径仍执行完整 Godot Callable 与严格 Variant 校验。
+- 精确本地 Callable 的原生参数分支与严格 Variant 回退改为结构互斥，在保留快速路径的同时通过 MSVC 的 warning-as-error 不可达代码分析，并继续兼容 Clang 与 GCC。
 - 精确同类型的显式 Variant 转换先于 Godot 通用转换矩阵执行快速路径；官方 Godot 4.7.1 候选矩阵的全部行为 oracle 和 10% 门禁均通过，本地 Callable family 实测比 GDScript 快 33.33%，Variant 运算慢 2.17%。
 - 动态标量、Object/Ref、Array/Dictionary、PackedArray 和 Attached 属性写入统一执行 Godot 严格运行时存储转换，不再接受 godot-cpp 更宽松的 cast，也不会把非法值静默变成默认值。
 - 静态/preload 初始化以及 Attached 字段、`_init`、`@onready` 阶段分别采用事务和故障隔离；失败的部分状态不会发布，后续对象构造与调用方仍能按 GDScript 默认值语义继续。
