@@ -1,3 +1,11 @@
+## 1.8.1
+
+- MIR operation identities are now assigned only after unreachable-block pruning and predecessor reconstruction, in canonical block/instruction/terminator order. Nested `if/else` trees whose branches all `return`, `break`, or `continue` no longer retain holes from discarded join blocks or fail with a spurious `GDS5118`.
+- The lowerer and optimizer share one operation-ID canonicalizer, so every CFG-mutating path restores the same deterministic layout. The verifier now rejects missing, duplicate, out-of-range, permuted, and non-dense identities without allowing a corrupt large ID to drive unbounded allocation.
+- Added lowerer, verifier, and full project-compiler regressions for nested terminal-branch pruning and hostile out-of-range/permuted IDs. The local compiler suite passes 553/553 cases and core CTest passes 21/21.
+- Certified a clean release-plugin installation on Windows 11 x86_64 with MSVC and official Godot 4.6.1 through import, Release AOT, native compilation, linking, export, and standalone execution. The exported package audit covered 391 files and 42 loadable resources, found exactly one project library, and reported zero violations.
+- The Windows loopback protocol certification covers HTTP login, four JSON downloads, WebSocket binary frames, protobuf, remote avatars, both gift platforms, likes, heroes, scores, group synchronization, a 97-packet gift burst, clean server close, short frames, and truncated/malformed messages. Every scenario preserved a 5,000-object pool and exited successfully; malformed-message diagnostics matched the native GDScript failure boundary.
+
 ## 1.8.0
 
 - Shorten the generated customer GDExtension C entry ABI to `gdpp_library_init` and enforce that exact symbol across generated registration code, runtime descriptors, Apple embedded registration, ELF/Mach-O export lists, Wasm inspection, PCK audits, and platform release gates.
