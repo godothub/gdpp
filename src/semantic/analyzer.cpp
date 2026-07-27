@@ -959,9 +959,13 @@ Type SemanticAnalyzer::type_from_name(const std::string& name, SourceSpan span) 
                 project_enum.native_owner + "::" + project_enum.enumeration->name};
     }
     if (const auto separator = name.find('.'); separator != std::string::npos) {
-        const auto alias = script_resource_aliases_.find(name.substr(0, separator));
-        if (alias != script_resource_aliases_.end()) {
-            const auto* owner = alias->second;
+        const auto owner_name = name.substr(0, separator);
+        const auto alias = script_resource_aliases_.find(owner_name);
+        const auto* owner =
+            alias != script_resource_aliases_.end()
+                ? alias->second
+                : script_symbols_ ? script_symbols_->find_class(owner_name) : nullptr;
+        if (owner) {
             const auto member_name = name.substr(separator + 1);
             record_script_dependency(owner);
             if (const auto* inner = script_symbols_->find_inner(*owner, member_name))
@@ -986,7 +990,10 @@ Type SemanticAnalyzer::type_from_name(const std::string& name, SourceSpan span) 
                 }
             }
             diagnostics_.error("GDS4059",
-                               "script resource alias '" + name.substr(0, separator) +
+                               (alias != script_resource_aliases_.end()
+                                    ? "script resource alias '"
+                                    : "project script type '") +
+                                   owner_name +
                                    "' has no type '" + member_name + "'",
                                span);
             return unknown_type;
@@ -3602,6 +3609,18 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                     const bool accessed_on_type =
                         object_resolution &&
                         object_resolution->kind == ApiResolutionKind::script_type_reference;
+                    if (accessed_on_type) {
+                        if (const auto* inner =
+                                script_symbols_->find_inner(*script_owner, expression.value())) {
+                            member_result = {TypeKind::object, inner->native_class_name};
+                            model_.api_resolutions_.emplace(
+                                &expression,
+                                ApiResolution{ApiResolutionKind::inner_type_reference,
+                                              inner->native_class_name, "", "", member_result, 0,
+                                              0, false, true});
+                            break;
+                        }
+                    }
                     if (const auto* enumeration =
                             script_symbols_->find_enum(*script_owner, expression.value())) {
                         member_result = {TypeKind::enumeration, script_owner->native_class_name +

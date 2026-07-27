@@ -2992,6 +2992,38 @@ TEST_CASE("project compiler lowers cross-script constants enums and resource fac
     REQUIRE(consumer_source.find("IDLE:0,ACTIVE:4,BOOST:8") != std::string::npos);
 }
 
+TEST_CASE("project compiler resolves globally named script inner types") {
+    const auto root = fixture_root("project-global-inner-types");
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
+    write_text(root / "ast.gd", "extends RefCounted\n"
+                                "class_name ProjectAst\n"
+                                "class NodeBase extends RefCounted:\n"
+                                "    pass\n"
+                                "class ScriptNode extends NodeBase:\n"
+                                "    enum State { READY, COMPLETE }\n");
+    write_text(root / "consumer.gd",
+               "extends RefCounted\n"
+               "class_name ProjectAstConsumer\n"
+               "var current: ProjectAst.ScriptNode\n"
+               "func create() -> ProjectAst.ScriptNode:\n"
+               "    return ProjectAst.ScriptNode.new()\n"
+               "func accepts(value: ProjectAst.ScriptNode) -> bool:\n"
+               "    return value is ProjectAst.ScriptNode\n"
+               "func state() -> ProjectAst.ScriptNode.State:\n"
+               "    return ProjectAst.ScriptNode.State.COMPLETE\n");
+
+    const auto result = gdpp::ProjectCompiler{}.compile(project_options(root));
+
+    REQUIRE(result.success);
+    const auto consumer =
+        std::find_if(result.scripts.begin(), result.scripts.end(), [](const auto& script) {
+            return script.relative_path.filename() == "consumer.gd";
+        });
+    REQUIRE(consumer != result.scripts.end());
+    REQUIRE_EQ(consumer->dependencies, std::vector<std::string>{"ast.gd"});
+}
+
 TEST_CASE("project compiler resolves Godot resource UIDs before semantic typing") {
     const auto root = fixture_root("project-resource-uids");
     std::error_code error;
