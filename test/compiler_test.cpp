@@ -3951,24 +3951,111 @@ TEST_CASE("compiler lowers Dictionary named access through its keyed native ABI"
 
     REQUIRE(result.success);
     REQUIRE(result.unit.source.find("_gdpp_dictionary_target_") != std::string::npos);
-    REQUIRE(result.unit.source.find("static const godot::Variant _gdpp_dictionary_read_key_") !=
+    REQUIRE(result.unit.source.find("static const godot::StringName _gdpp_dictionary_read_key_") !=
             std::string::npos);
-    REQUIRE(result.unit.source.find("gdpp::runtime::checked_dictionary_get(") != std::string::npos);
+    REQUIRE(result.unit.source.find("gdpp::runtime::checked_dictionary_get_named(") !=
+            std::string::npos);
     REQUIRE(result.unit.source.find("if (script_function_failed())") != std::string::npos);
     REQUIRE(result.unit.source.find(").get(") == std::string::npos);
-    REQUIRE(result.unit.source.find("godot::Variant &_gdpp_dictionary_slot_") != std::string::npos);
-    REQUIRE(result.unit.source.find("[_gdpp_dictionary_key_") != std::string::npos);
+    REQUIRE(result.unit.source.find("godot::Variant _gdpp_dictionary_current_") !=
+            std::string::npos);
+    REQUIRE(result.unit.source.find("gdpp::runtime::checked_dictionary_set_named(") !=
+            std::string::npos);
+    REQUIRE(result.unit.source.find("gdpp::runtime::unchecked_dictionary_set_named(") !=
+            std::string::npos);
+    REQUIRE(result.unit.source.find("godot::Variant &_gdpp_dictionary_slot_") == std::string::npos);
     REQUIRE(result.unit.source.find("gdpp::runtime::get_named") == std::string::npos);
     REQUIRE(result.unit.source.find("gdpp::runtime::set_named") == std::string::npos);
     const auto read_source = result.unit.source.find("::read_source(");
     const auto receiver = result.unit.source.find("_gdpp_dictionary_read_receiver_", read_source);
     const auto receiver_fault = result.unit.source.find("if (script_function_failed())", receiver);
     const auto receiver_lookup =
-        result.unit.source.find("gdpp::runtime::checked_dictionary_get(", receiver_fault);
+        result.unit.source.find("gdpp::runtime::checked_dictionary_get_named(", receiver_fault);
     REQUIRE(read_source != std::string::npos);
     REQUIRE(receiver != std::string::npos);
     REQUIRE(receiver_fault != std::string::npos);
     REQUIRE(receiver_fault < receiver_lookup);
+}
+
+TEST_CASE("compiler only updates proven local Dictionary slots in place") {
+    const gdpp::Compiler compiler;
+    const auto local =
+        compiler.compile("local_dictionary_slot.gd", "func mutate(increment: int) -> int:\n"
+                                                     "    var values := {\"score\": 1}\n"
+                                                     "    values.score = 2\n"
+                                                     "    values.score += increment\n"
+                                                     "    return values.score\n");
+    REQUIRE(local.success);
+    REQUIRE(local.unit.source.find("godot::Variant &_gdpp_dictionary_slot_") != std::string::npos);
+    REQUIRE(local.unit.source.find("unchecked_dictionary_set_named(") == std::string::npos);
+
+    const auto require_checked = [&](const std::string& path, const std::string& source) {
+        const auto result = compiler.compile(path, source);
+        REQUIRE(result.success);
+        REQUIRE(result.unit.source.find("godot::Variant &_gdpp_dictionary_slot_") ==
+                std::string::npos);
+        REQUIRE(result.unit.source.find("checked_dictionary_get_named(") != std::string::npos);
+        REQUIRE(result.unit.source.find("unchecked_dictionary_set_named(") != std::string::npos);
+    };
+    require_checked("dictionary_parameter.gd",
+                    "func mutate(values: Dictionary, increment: int) -> void:\n"
+                    "    values.score += increment\n");
+    require_checked("escaped_dictionary.gd", "func consume(_values: Dictionary) -> void:\n"
+                                             "    pass\n"
+                                             "func mutate(increment: int) -> void:\n"
+                                             "    var values := {\"score\": 1}\n"
+                                             "    consume(values)\n"
+                                             "    values.score += increment\n");
+    require_checked("aliased_dictionary.gd", "func mutate(increment: int) -> void:\n"
+                                             "    var values := {\"score\": 1}\n"
+                                             "    var alias := values\n"
+                                             "    alias.score = 2\n"
+                                             "    values.score += increment\n");
+    require_checked("readonly_dictionary.gd", "func mutate(increment: int) -> void:\n"
+                                              "    var values := {\"score\": 1}\n"
+                                              "    values.make_read_only()\n"
+                                              "    values.score += increment\n");
+    require_checked("unknown_dictionary_key.gd", "func mutate(increment: int) -> void:\n"
+                                                 "    var values := {\"score\": 1}\n"
+                                                 "    values.other += increment\n");
+    require_checked("reassigned_dictionary.gd", "func mutate(increment: int) -> void:\n"
+                                                "    var values := {\"score\": 1}\n"
+                                                "    values = {\"score\": 2}\n"
+                                                "    values.score += increment\n");
+    require_checked("subscripted_dictionary.gd", "func mutate(increment: int) -> void:\n"
+                                                 "    var values := {\"score\": 1}\n"
+                                                 "    var observed := values[\"score\"]\n"
+                                                 "    values.score += increment + observed\n");
+    require_checked("captured_dictionary.gd", "func mutate(increment: int) -> void:\n"
+                                              "    var values := {\"score\": 1}\n"
+                                              "    var callback := func() -> void:\n"
+                                              "        values.score += 1\n"
+                                              "    callback.call()\n"
+                                              "    values.score += increment\n");
+    require_checked("typed_local_dictionary.gd",
+                    "func mutate(increment: int) -> void:\n"
+                    "    var values: Dictionary[String, int] = {\"score\": 1}\n"
+                    "    values.score += increment\n");
+}
+
+TEST_CASE("typed Dictionary named access enforces its key and value contracts") {
+    const gdpp::Compiler compiler;
+    const auto valid =
+        compiler.compile("typed_dictionary_named_access.gd",
+                         "func read(values: Dictionary[String, int]) -> int:\n"
+                         "    return values.score\n"
+                         "func write(values: Dictionary[StringName, int], value: int) -> void:\n"
+                         "    values.score = value\n");
+    const auto invalid = compiler.compile("invalid_typed_dictionary_named_access.gd",
+                                          "func write(values: Dictionary[int, int]) -> void:\n"
+                                          "    values.score = 1\n");
+
+    REQUIRE(valid.success);
+    REQUIRE(valid.unit.source.find("checked_dictionary_get_named(") != std::string::npos);
+    REQUIRE(valid.unit.source.find("strict_builtin_storage<int64_t>(") != std::string::npos);
+    REQUIRE(!invalid.success);
+    REQUIRE(std::any_of(invalid.diagnostics.begin(), invalid.diagnostics.end(),
+                        [](const auto& diagnostic) { return diagnostic.code == "GDS4002"; }));
 }
 
 TEST_CASE("dynamic named access preserves Dictionary dot syntax across Variant boundaries") {
