@@ -4,9 +4,11 @@
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import hashlib
 import importlib
 import json
+import os
 import subprocess
 import sys
 import time
@@ -72,13 +74,13 @@ def generate_binding_headers(source_root: Path, output: Path) -> tuple[Path, flo
     return generated_include, round(time.monotonic() - started, 4)
 
 
-def native_syntax_command(
+def native_syntax_commands(
     compiler: Path,
     compiler_id: str,
     source_root: Path,
     generated_include: Path,
     project_output: Path,
-) -> list[str]:
+) -> list[tuple[Path, list[str]]]:
     sources = sorted((project_output / "generated").glob("*.cpp"))
     sources.append(project_output / "register_types.cpp")
     missing = [path for path in sources if not path.is_file()]
@@ -130,8 +132,41 @@ def native_syntax_command(
         ]
         command.extend(f"-D{definition}" for definition in definitions)
         command.extend(f"-I{directory}" for directory in include_directories)
-    command.extend(str(source) for source in sources)
-    return command
+    return [(source, command + [str(source)]) for source in sources]
+
+
+def invoke_native_syntax(
+    commands: list[tuple[Path, list[str]]], timeout: float, jobs: int
+) -> dict:
+    started = time.monotonic()
+
+    def compile_unit(item: tuple[Path, list[str]]) -> dict:
+        source, command = item
+        result = invoke(command, timeout)
+        result["path"] = source.as_posix()
+        return result
+
+    with concurrent.futures.ThreadPoolExecutor(
+        max_workers=min(max(1, jobs), len(commands))
+    ) as executor:
+        translation_units = list(executor.map(compile_unit, commands))
+
+    failures = [result for result in translation_units if result["exit_code"] != 0]
+    diagnostics = []
+    for result in failures:
+        output = result["stderr"] or result["stdout"]
+        diagnostics.append(f"{result['path']}:\n{output}")
+    return {
+        "exit_code": 0 if not failures else 1,
+        "elapsed_seconds": round(time.monotonic() - started, 4),
+        "translation_unit_count": len(translation_units),
+        "failed_translation_unit_count": len(failures),
+        "translation_units": translation_units,
+        "stdout": "",
+        "stderr": "\n".join(diagnostics)[-16000:],
+        "timed_out": any(result["timed_out"] for result in translation_units),
+        "crashed": any(result["crashed"] for result in translation_units),
+    }
 
 
 def invoke(command: list[str], timeout: float) -> dict:
@@ -179,7 +214,12 @@ def main() -> int:
     parser.add_argument("--file-timeout", type=float, default=10.0)
     parser.add_argument("--project-timeout", type=float, default=60.0)
     parser.add_argument("--native-build-timeout", type=float, default=600.0)
+    parser.add_argument(
+        "--native-jobs", type=int, default=min(8, os.cpu_count() or 1)
+    )
     args = parser.parse_args()
+    if args.native_jobs < 1:
+        parser.error("--native-jobs must be at least 1")
 
     manifest = load_json(args.manifest)
     corpus = args.corpus.resolve()
@@ -229,12 +269,14 @@ def main() -> int:
         relative_project = project_spec["path"]
         project_root = corpus / relative_project
         scripts = sorted(project_root.rglob("*.gd"))
+        run_isolated = project_spec.get("run_isolated", True)
         project_report = {
             "path": relative_project,
             "status": "running",
-            "phase": "isolated_compile",
+            "phase": "isolated_compile" if run_isolated else "project_compile",
             "script_count": len(scripts),
             "isolated_successes": 0,
+            "isolated_compile_enabled": run_isolated,
             "minimum_isolated_successes": project_spec["minimum_isolated_successes"],
             "require_project_native_success": project_spec.get(
                 "require_project_native_success", False
@@ -242,36 +284,43 @@ def main() -> int:
             "scripts": [],
         }
         report["projects"].append(project_report)
-        print(
-            f"[{project_index}/{project_count}] {relative_project}: "
-            f"compiling {len(scripts)} script(s) in isolation",
-            flush=True,
-        )
-
-        for script in scripts:
-            relative_script = script.relative_to(corpus).as_posix()
-            digest = hashlib.sha256(relative_script.encode("utf-8")).hexdigest()[:16]
-            generated = output / "generated" / digest
-            result = invoke(
-                [
-                    str(compiler),
-                    "compile",
-                    str(script),
-                    "--output",
-                    str(generated),
-                    "--target-godot",
-                    args.target_godot,
-                ],
-                args.file_timeout,
+        if run_isolated:
+            print(
+                f"[{project_index}/{project_count}] {relative_project}: "
+                f"compiling {len(scripts)} script(s) in isolation",
+                flush=True,
             )
-            result["path"] = relative_script
-            project_report["scripts"].append(result)
-            total_scripts += 1
-            if result["exit_code"] == 0:
-                project_report["isolated_successes"] += 1
-                total_successes += 1
-            elif result["timed_out"] or result["crashed"] or result["exit_code"] not in (1,):
-                hard_failures.append(f"unsafe isolated compile result for {relative_script}")
+
+            for script in scripts:
+                relative_script = script.relative_to(corpus).as_posix()
+                digest = hashlib.sha256(relative_script.encode("utf-8")).hexdigest()[:16]
+                generated = output / "generated" / digest
+                result = invoke(
+                    [
+                        str(compiler),
+                        "compile",
+                        str(script),
+                        "--output",
+                        str(generated),
+                        "--target-godot",
+                        args.target_godot,
+                    ],
+                    args.file_timeout,
+                )
+                result["path"] = relative_script
+                project_report["scripts"].append(result)
+                total_scripts += 1
+                if result["exit_code"] == 0:
+                    project_report["isolated_successes"] += 1
+                    total_successes += 1
+                elif (
+                    result["timed_out"]
+                    or result["crashed"]
+                    or result["exit_code"] not in (1,)
+                ):
+                    hard_failures.append(
+                        f"unsafe isolated compile result for {relative_script}"
+                    )
         write_report(report, report_path, total_scripts, total_successes, hard_failures, "running")
 
         # ProjectCompiler intentionally requires its output to remain inside the Godot project.
@@ -316,8 +365,8 @@ def main() -> int:
                 "validating generated C++",
                 flush=True,
             )
-            native_result = invoke(
-                native_syntax_command(
+            native_result = invoke_native_syntax(
+                native_syntax_commands(
                     args.cxx_compiler.resolve(),
                     args.compiler_id,
                     source_sdk_root,
@@ -325,6 +374,7 @@ def main() -> int:
                     project_output,
                 ),
                 args.native_build_timeout,
+                args.native_jobs,
             )
             project_report["native_syntax"] = native_result
             if native_result["exit_code"] != 0:
@@ -341,9 +391,14 @@ def main() -> int:
         project_report["status"] = "completed"
         project_report["phase"] = "completed"
         write_report(report, report_path, total_scripts, total_successes, hard_failures, "running")
+        isolated_status = (
+            f"{project_report['isolated_successes']}/{project_report['script_count']} isolated"
+            if project_report["isolated_compile_enabled"]
+            else "isolated compile skipped"
+        )
         print(
             f"[{project_index}/{project_count}] {relative_project}: "
-            f"{project_report['isolated_successes']}/{project_report['script_count']} isolated; "
+            f"{isolated_status}; "
             f"project exit={project_result['exit_code']}; "
             f"native exit={project_report.get('native_syntax', {}).get('exit_code', 'skipped')}",
             flush=True,
@@ -352,13 +407,18 @@ def main() -> int:
     write_report(report, report_path, total_scripts, total_successes, hard_failures, "completed")
 
     print(
-        f"official corpus: {total_successes}/{total_scripts} scripts compiled in isolation; "
+        f"compatibility corpus: {total_successes}/{total_scripts} scripts compiled in isolation; "
         f"{len(hard_failures)} hard failure(s); report: {report_path}",
         flush=True,
     )
     for project in report["projects"]:
+        isolated_status = (
+            f"{project['isolated_successes']}/{project['script_count']}"
+            if project["isolated_compile_enabled"]
+            else "skipped"
+        )
         print(
-            f"  {project['path']}: {project['isolated_successes']}/{project['script_count']}; "
+            f"  {project['path']}: isolated={isolated_status}; "
             f"project exit={project['project_compile']['exit_code']}; "
             f"native exit={project.get('native_syntax', {}).get('exit_code', 'skipped')}"
         )

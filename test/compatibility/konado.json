@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "repository": {
+    "name": "godothub/konado",
+    "url": "https://github.com/godothub/konado.git",
+    "commit": "cfe8181ca0699a1825f5a08f026142e75b1d712f",
+    "license_file": "LICENSE",
+    "license": "MulanPSL-2.0",
+    "sparse_paths": [
+      "addons",
+      "sample",
+      "tests"
+    ],
+    "required_files": [
+      "addons/konado/editor/ks_editor/ks_syntax_highlighter.gd",
+      "addons/konado/scripts/dialogue/knd_dialogue_manager.gd",
+      "tests/i18n/test_knd_i18n.gd"
+    ]
+  },
+  "projects": [
+    {
+      "path": ".",
+      "minimum_isolated_successes": 0,
+      "run_isolated": false,
+      "require_project_native_success": true
+    }
+  ]
+}

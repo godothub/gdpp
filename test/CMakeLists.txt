@@ -203,6 +203,46 @@ if(GDPP_BUILD_CLI)
             PROPERTIES FIXTURES_REQUIRED official_compatibility_corpus TIMEOUT 1200
         )
 
+        set(GDPP_KONADO_CORPUS_MANIFEST
+            "${PROJECT_SOURCE_DIR}/test/compatibility/konado.json")
+        set(GDPP_KONADO_CORPUS_DIRECTORY
+            "${PROJECT_BINARY_DIR}/compatibility/konado")
+        set(GDPP_KONADO_CORPUS_OUTPUT
+            "${PROJECT_BINARY_DIR}/compatibility/konado-results")
+        add_test(
+            NAME gdpp.compatibility.fetch_konado
+            COMMAND
+                "${Python3_EXECUTABLE}"
+                "${PROJECT_SOURCE_DIR}/tools/fetch_compatibility_corpus.py"
+                --manifest "${GDPP_KONADO_CORPUS_MANIFEST}"
+                --destination "${GDPP_KONADO_CORPUS_DIRECTORY}"
+                --build-root "${PROJECT_SOURCE_DIR}/build"
+        )
+        set_tests_properties(
+            gdpp.compatibility.fetch_konado
+            PROPERTIES FIXTURES_SETUP konado_compatibility_corpus TIMEOUT 180
+        )
+        add_test(
+            NAME gdpp.compatibility.konado
+            COMMAND
+                "${Python3_EXECUTABLE}"
+                "${PROJECT_SOURCE_DIR}/tools/run_compatibility_corpus.py"
+                --manifest "${GDPP_KONADO_CORPUS_MANIFEST}"
+                --corpus "${GDPP_KONADO_CORPUS_DIRECTORY}"
+                --compiler "$<TARGET_FILE:gdpp>"
+                --cxx-compiler "${CMAKE_CXX_COMPILER}"
+                --compiler-id "${CMAKE_CXX_COMPILER_ID}"
+                --sdk-root "${PROJECT_SOURCE_DIR}"
+                --output "${GDPP_KONADO_CORPUS_OUTPUT}"
+                --target-godot 4.7
+                --project-timeout 180
+                --native-build-timeout 1200
+        )
+        set_tests_properties(
+            gdpp.compatibility.konado
+            PROPERTIES FIXTURES_REQUIRED konado_compatibility_corpus TIMEOUT 1800
+        )
+
         set(GDPP_PARSER_CORPUS_MANIFEST
             "${PROJECT_SOURCE_DIR}/test/compatibility/godot_parser_4_7.json")
         set(GDPP_PARSER_CORPUS_DIRECTORY
