@@ -59,6 +59,9 @@
   FunctionState、捕获和跨脚本 ABI。
 - Signal/Callable 覆盖 bind/unbind、one-shot/deferred/reference-counted、发射期变更、宿主销毁、
   并发调用及嵌套/递归共享容器。
+- 同步调用的 fault frame 是线程局部栈状态；协程恢复由 FunctionState 互斥串行拥有同一持久
+  状态。本地 lambda 的参数数量、变参身份和原生参数快照进入生成 C++ 类型，逃逸或赋值后自动
+  降级到完整 Callable/Variant ABI，保持失效对象与错误参数诊断。
 - 真实 ENet 多 peer 覆盖 RPC authority/any-peer、local/remote、传输模式、channel、排序、
   拒绝、同一脚本节点跨 peer 重连，以及节点/缓存、peer、SceneTree 根的确定退出。
 - 全项目编译清单提供动态拼接 `.gd` 路径、相对路径、UID、同步/线程 ResourceLoader、缓存、
@@ -81,6 +84,8 @@
 
 - 所有可达 HIR/MIR 节点要么生成有效 C++17，要么在前端/验证阶段失败，不输出注释占位。
 - runtime failure 携带 `.gd` 路径、行列、实际/期望类型并维持当前函数中止。
+- 同步 fault 检查在生成调用点内联，精确同类型 Variant 转换和未逃逸本地 Callable 消除可证明
+  的重复装箱/全局对象查询；官方 4.7.1 行为 oracle 与 10% 性能门禁同时通过。
 - `.gd`→C++/native 符号图、全部 native meta/enum/bitfield/real_t/precision ABI 和 API 范围
   进入自动审计。
 - 项目脚本 `Object.free()` 通过 Godot Variant 调度，保留 RefCounted 和锁定对象保护。
