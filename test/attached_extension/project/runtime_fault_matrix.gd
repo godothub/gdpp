@@ -34,6 +34,7 @@ func run() -> String:
         missing_dictionary_named_key,
         present_null_dictionary_named_key,
         missing_dictionary_named_compound,
+        local_dictionary_integer_divide_zero,
         read_only_dictionary_named_set,
         read_only_dictionary_named_compound,
         invalid_typed_dictionary_named_value_set,
@@ -272,6 +273,13 @@ func missing_dictionary_named_compound() -> void:
     var values := {"present": 1}
     values.missing += 1
     after("missing_dictionary_named_compound:" + str(values))
+
+
+func local_dictionary_integer_divide_zero() -> void:
+    before("local_dictionary_integer_divide_zero")
+    var values := {"score": 7}
+    values.score /= 0
+    after("local_dictionary_integer_divide_zero:" + str(values))
 
 
 func read_only_dictionary_named_set() -> void:
