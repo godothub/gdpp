@@ -86,12 +86,14 @@ class CodeGenerator final {
     };
 
     [[nodiscard]] std::string emit_expression(const typed::Expression& expression) const;
+    [[nodiscard]] bool expression_may_fail(const typed::Expression& expression) const;
+    [[nodiscard]] bool conversion_may_fail(const Type& target, const Type& source) const;
+    [[nodiscard]] bool assignment_may_fail(const typed::Statement& statement) const;
     [[nodiscard]] std::string emit_integer_binary(const typed::Expression& expression) const;
-    [[nodiscard]] std::string emit_integer_operation(std::string_view operation,
-                                                     std::string left_value,
-                                                     std::string right_value,
-                                                     const Type& result_type,
-                                                     const SourceSpan& span) const;
+    [[nodiscard]] std::string
+    emit_integer_operation(std::string_view operation, std::string left_value,
+                           std::string right_value, const Type& result_type, const SourceSpan& span,
+                           bool left_may_fail = true, bool right_may_fail = true) const;
     [[nodiscard]] static std::string script_location(const SourceSpan& span);
     [[nodiscard]] std::string emit_truthy(const typed::Expression& expression) const;
     [[nodiscard]] std::string emit_conversion(const Type& target, const Type& source,

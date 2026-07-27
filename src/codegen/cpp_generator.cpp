@@ -2854,17 +2854,223 @@ std::string CodeGenerator::emit_truthy(const typed::Expression& expression) cons
     return "(gdpp::runtime::to_variant(" + value + ")).booleanize()";
 }
 
+bool CodeGenerator::conversion_may_fail(const Type& target, const Type& source) const {
+    if (target.kind == TypeKind::void_type || target.is_dynamic() || target == source)
+        return false;
+    if (target.kind == TypeKind::enumeration && source.kind == TypeKind::enumeration)
+        return false;
+    if (source.kind == TypeKind::nil && target.kind == TypeKind::object)
+        return false;
+
+    // Dynamic-to-static storage is the principal checked conversion boundary. Packed arrays and
+    // typed containers also validate their element contract even when the source itself is
+    // statically known. All other accepted static conversions lower to native casts, object
+    // identity casts, or value-wrapper construction and cannot set the GDPP script-fault state.
+    if (source.is_dynamic())
+        return true;
+    if (target.is_packed_array() && target != source)
+        return true;
+    const bool constrained_container =
+        (target.kind == TypeKind::array && target.name != "Array") ||
+        (target.kind == TypeKind::dictionary && target.name != "Dictionary");
+    return constrained_container && target != source;
+}
+
+bool CodeGenerator::expression_may_fail(const typed::Expression& expression) const {
+    const auto any_operand_may_fail = [&]() {
+        return std::any_of(
+            expression.operands.begin(), expression.operands.end(),
+            [&](const auto& operand) { return operand && expression_may_fail(*operand); });
+    };
+
+    switch (expression.kind) {
+    case typed::ExpressionKind::literal:
+    case typed::ExpressionKind::lambda:
+        return false;
+    case typed::ExpressionKind::identifier:
+        if (expression.resolution == typed::ResolutionKind::dynamic_property ||
+            expression.resolution == typed::ResolutionKind::script_property ||
+            expression.resolution == typed::ResolutionKind::script_runtime_static_field)
+            return true;
+        return expression.storage_type.kind != TypeKind::unknown &&
+               expression.storage_type != expression.type &&
+               conversion_may_fail(expression.type, expression.storage_type);
+    case typed::ExpressionKind::unary: {
+        if (any_operand_may_fail())
+            return true;
+        if (expression.operands.empty())
+            return true;
+        const auto& operand = *expression.operands.front();
+        const bool integer_like =
+            operand.type.kind == TypeKind::integer || operand.type.kind == TypeKind::enumeration;
+        if (expression.value == "not" ||
+            (integer_like && (expression.value == "-" || expression.value == "~")) ||
+            ((expression.value == "+" || expression.value == "-") && operand.type.is_numeric()))
+            return false;
+        return true;
+    }
+    case typed::ExpressionKind::await_expression:
+    case typed::ExpressionKind::node_reference:
+    case typed::ExpressionKind::subscript:
+        return true;
+    case typed::ExpressionKind::binary: {
+        if (any_operand_may_fail())
+            return true;
+        if (expression.value == "and" || expression.value == "or" || expression.value == "is" ||
+            expression.value == "is not")
+            return false;
+        if (expression.value == "as" || expression.value == "in" || expression.value == "not in" ||
+            expression.value == "**")
+            return true;
+        if (expression.operands.size() < 2)
+            return true;
+        const auto& left = expression.operands.at(0)->type;
+        const auto& right = expression.operands.at(1)->type;
+        const bool integer_left =
+            left.kind == TypeKind::integer || left.kind == TypeKind::enumeration;
+        const bool integer_right =
+            right.kind == TypeKind::integer || right.kind == TypeKind::enumeration;
+        if (integer_left && integer_right)
+            return expression.value == "/" || expression.value == "%";
+        if (left.is_dynamic() || right.is_dynamic())
+            return true;
+        if (left.kind == TypeKind::builtin || right.kind == TypeKind::builtin)
+            return true;
+        if (left.is_numeric() && right.is_numeric())
+            return false;
+        return !((left.kind == TypeKind::string && right.kind == TypeKind::string) ||
+                 (left.kind == TypeKind::string_name && right.kind == TypeKind::string_name) ||
+                 (left.kind == TypeKind::boolean && right.kind == TypeKind::boolean) ||
+                 ((left.kind == TypeKind::object || left.kind == TypeKind::nil) &&
+                  (right.kind == TypeKind::object || right.kind == TypeKind::nil)));
+    }
+    case typed::ExpressionKind::call: {
+        if (any_operand_may_fail() || expression.operands.empty())
+            return true;
+        const auto& callee = *expression.operands.front();
+        if (expression.resolution == typed::ResolutionKind::script_resource)
+            return false;
+        // String methods execute entirely inside a value wrapper: unlike Object, Callable,
+        // Signal, Array, and Dictionary methods, they cannot re-enter project code or report a
+        // GDPP runtime fault. This is deliberately a narrow proof, not a list of benchmark names.
+        if (callee.resolution == typed::ResolutionKind::godot_method &&
+            callee.kind == typed::ExpressionKind::member && !callee.operands.empty() &&
+            (callee.operands.front()->type.kind == TypeKind::string ||
+             callee.operands.front()->type.kind == TypeKind::string_name)) {
+            const auto* method = api_.find_method(callee.resolved_owner, callee.value);
+            if (!method)
+                return true;
+            for (std::size_t index = 1; index < expression.operands.size(); ++index) {
+                const auto* argument = api_.argument(*method, index - 1);
+                if (!argument || conversion_may_fail(type_from_godot_api(argument->type),
+                                                     expression.operands[index]->type)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+        if (callee.resolution == typed::ResolutionKind::godot_constructor &&
+            expression.operands.size() == 2) {
+            return conversion_may_fail(expression.type, expression.operands.at(1)->type);
+        }
+        return true;
+    }
+    case typed::ExpressionKind::member:
+        if (any_operand_may_fail())
+            return true;
+        if (expression.resolution == typed::ResolutionKind::dynamic_property &&
+            !expression.operands.empty() &&
+            expression.operands.front()->type.kind == TypeKind::dictionary)
+            return false;
+        if (expression.resolution == typed::ResolutionKind::godot_method ||
+            expression.resolution == typed::ResolutionKind::script_callable ||
+            expression.resolution == typed::ResolutionKind::script_signal ||
+            expression.resolution == typed::ResolutionKind::enum_member ||
+            expression.resolution == typed::ResolutionKind::builtin_constant ||
+            expression.resolution == typed::ResolutionKind::global_constant ||
+            expression.resolution == typed::ResolutionKind::global_enum_value ||
+            expression.resolution == typed::ResolutionKind::global_enum_type ||
+            expression.resolution == typed::ResolutionKind::script_constant ||
+            expression.resolution == typed::ResolutionKind::script_enum_type ||
+            expression.resolution == typed::ResolutionKind::inner_type)
+            return false;
+        if (expression.resolution == typed::ResolutionKind::godot_property &&
+            expression.direct_access && !expression.operands.empty() &&
+            expression.operands.front()->type.kind == TypeKind::builtin)
+            return false;
+        return true;
+    case typed::ExpressionKind::conditional:
+        if (any_operand_may_fail() || expression.operands.size() < 3)
+            return true;
+        return conversion_may_fail(expression.type, expression.operands.at(0)->type) ||
+               conversion_may_fail(expression.type, expression.operands.at(2)->type);
+    case typed::ExpressionKind::array_literal:
+    case typed::ExpressionKind::dictionary_literal: {
+        if (any_operand_may_fail())
+            return true;
+        const bool constrained =
+            (expression.type.kind == TypeKind::array && expression.type.name != "Array") ||
+            (expression.type.kind == TypeKind::dictionary && expression.type.name != "Dictionary");
+        return constrained && std::any_of(expression.operands.begin(), expression.operands.end(),
+                                          [](const auto& operand) {
+                                              return operand && operand->type.is_dynamic();
+                                          });
+    }
+    }
+    return true;
+}
+
+bool CodeGenerator::assignment_may_fail(const typed::Statement& statement) const {
+    if (statement.kind != typed::StatementKind::assignment || !statement.condition ||
+        !statement.expression)
+        return true;
+    const auto& target = *statement.condition;
+    if (target.kind != typed::ExpressionKind::identifier ||
+        target.resolution == typed::ResolutionKind::dynamic_property ||
+        target.resolution == typed::ResolutionKind::script_property ||
+        target.resolution == typed::ResolutionKind::script_runtime_static_field)
+        return true;
+    if (expression_may_fail(*statement.expression))
+        return true;
+    const auto& destination =
+        target.assignment_type.kind == TypeKind::unknown ? target.type : target.assignment_type;
+    if (statement.operation == "=")
+        return conversion_may_fail(destination, statement.expression->type);
+    if (target.type.is_dynamic() || statement.expression->type.is_dynamic())
+        return true;
+    if (conversion_may_fail(destination, target.type))
+        return true;
+    std::string_view operation{statement.operation};
+    if (!operation.empty())
+        operation.remove_suffix(1);
+    const bool integer_target =
+        target.type.kind == TypeKind::integer || target.type.kind == TypeKind::enumeration;
+    const bool integer_value = statement.expression->type.kind == TypeKind::integer ||
+                               statement.expression->type.kind == TypeKind::enumeration;
+    if (integer_target && integer_value)
+        return operation == "/" || operation == "%" || operation == "**";
+    if (target.type.is_numeric() && statement.expression->type.is_numeric())
+        return false;
+    if ((target.type.kind == TypeKind::string || target.type.kind == TypeKind::string_name) &&
+        target.type == statement.expression->type && operation == "+")
+        return false;
+    return true;
+}
+
 std::string CodeGenerator::emit_integer_binary(const typed::Expression& expression) const {
     auto left = emit_expression(*expression.operands.at(0));
     auto right = emit_expression(*expression.operands.at(1));
     return emit_integer_operation(expression.value, std::move(left), std::move(right),
-                                  expression.type, expression.span);
+                                  expression.type, expression.span,
+                                  expression_may_fail(*expression.operands.at(0)),
+                                  expression_may_fail(*expression.operands.at(1)));
 }
 
 std::string CodeGenerator::emit_integer_operation(const std::string_view operation,
                                                   std::string left_value, std::string right_value,
-                                                  const Type& result_type,
-                                                  const SourceSpan& span) const {
+                                                  const Type& result_type, const SourceSpan& span,
+                                                  const bool left_may_fail,
+                                                  const bool right_may_fail) const {
     const auto suffix = std::to_string(temporary_counter_++);
     const auto left = "_gdpp_integer_left_" + suffix;
     const auto right = "_gdpp_integer_right_" + suffix;
@@ -2897,12 +3103,18 @@ std::string CodeGenerator::emit_integer_operation(const std::string_view operati
     else
         evaluated = "(" + left + " " + std::string{operation} + " " + right + ")";
     const auto evaluated_name = "_gdpp_integer_result_" + suffix;
+    const auto left_check =
+        left_may_fail ? std::string{" if (script_function_failed()) return {};"} : std::string{};
+    const auto right_check =
+        right_may_fail ? std::string{" if (script_function_failed()) return {};"} : std::string{};
+    const bool operation_may_fail = operation == "/" || operation == "%" || operation == "**";
+    const auto result_check = operation_may_fail
+                                  ? std::string{" if (script_function_failed()) return {};"}
+                                  : std::string{};
     return "([&]() -> " + cpp_type(result_type) + " { const int64_t " + left + " = " +
-           std::move(left_value) + "; if (script_function_failed()) return {}; const int64_t " +
-           right + " = " + std::move(right_value) +
-           "; if (script_function_failed()) return {}; const auto " + evaluated_name + " = " +
-           evaluated + "; if (script_function_failed()) return {}; return " + evaluated_name +
-           "; }())";
+           std::move(left_value) + ";" + left_check + " const int64_t " + right + " = " +
+           std::move(right_value) + ";" + right_check + " const auto " + evaluated_name + " = " +
+           evaluated + ";" + result_check + " return " + evaluated_name + "; }())";
 }
 
 std::string CodeGenerator::script_location(const SourceSpan& span) {
@@ -3193,15 +3405,18 @@ std::string CodeGenerator::emit_expression(const typed::Expression& expression) 
             const auto left_name = "_gdpp_logic_left_" + suffix;
             const auto right_name = "_gdpp_logic_right_" + suffix;
             std::string result = "([&]() -> bool { const bool " + left_name + " = " +
-                                 emit_truthy(*expression.operands.at(0)) +
-                                 "; if (script_function_failed()) return false; ";
+                                 emit_truthy(*expression.operands.at(0)) + "; ";
+            if (expression_may_fail(*expression.operands.at(0)))
+                result += "if (script_function_failed()) return false; ";
             if (expression.value == "and")
                 result += "if (!" + left_name + ") return false; ";
             else
                 result += "if (" + left_name + ") return true; ";
-            result += "const bool " + right_name + " = " + emit_truthy(*expression.operands.at(1)) +
-                      "; if (script_function_failed()) return false; return " + right_name +
-                      "; }())";
+            result +=
+                "const bool " + right_name + " = " + emit_truthy(*expression.operands.at(1)) + "; ";
+            if (expression_may_fail(*expression.operands.at(1)))
+                result += "if (script_function_failed()) return false; ";
+            result += "return " + right_name + "; }())";
             return result;
         }
         const auto emit_ordered_operands = [&](const auto& evaluate) {
@@ -3211,12 +3426,16 @@ std::string CodeGenerator::emit_expression(const typed::Expression& expression) 
             auto left = emit_expression(*expression.operands.at(0));
             auto right = emit_expression(*expression.operands.at(1));
             const auto result_name = "_gdpp_binary_result_" + suffix;
-            return "([&]() -> " + cpp_type(expression.type) + " { const auto " + left_name + " = " +
-                   std::move(left) + "; if (script_function_failed()) return {}; const auto " +
-                   right_name + " = " + std::move(right) +
-                   "; if (script_function_failed()) return {}; const auto " + result_name + " = " +
-                   evaluate(left_name, right_name) +
-                   "; if (script_function_failed()) return {}; return " + result_name + "; }())";
+            std::string result = "([&]() -> " + cpp_type(expression.type) + " { const auto " +
+                                 left_name + " = " + std::move(left) + "; ";
+            if (expression_may_fail(*expression.operands.at(0)))
+                result += "if (script_function_failed()) return {}; ";
+            result += "const auto " + right_name + " = " + std::move(right) + "; ";
+            if (expression_may_fail(*expression.operands.at(1)))
+                result += "if (script_function_failed()) return {}; ";
+            result += "const auto " + result_name + " = " + evaluate(left_name, right_name) +
+                      "; if (script_function_failed()) return {}; return " + result_name + "; }())";
+            return result;
         };
         auto operation = expression.value;
         if (operation == "and")
@@ -3441,19 +3660,33 @@ std::string CodeGenerator::emit_expression(const typed::Expression& expression) 
         const auto suffix = std::to_string(temporary_counter_++);
         const auto condition = "_gdpp_conditional_condition_" + suffix;
         const auto value = "_gdpp_conditional_value_" + suffix;
+        const auto condition_check = expression_may_fail(*expression.operands.at(1))
+                                         ? std::string{" if (script_function_failed()) return {};"}
+                                         : std::string{};
+        const auto true_check =
+            expression_may_fail(*expression.operands.at(0)) ||
+                    conversion_may_fail(expression.type, expression.operands.at(0)->type)
+                ? std::string{" if (script_function_failed()) return {};"}
+                : std::string{};
+        const auto false_check =
+            expression_may_fail(*expression.operands.at(2)) ||
+                    conversion_may_fail(expression.type, expression.operands.at(2)->type)
+                ? std::string{" if (script_function_failed()) return {};"}
+                : std::string{};
         return "([&]() -> " + cpp_type(expression.type) + " { const bool " + condition + " = " +
-               emit_truthy(*expression.operands.at(1)) +
-               "; if (script_function_failed()) return {}; if (" + condition + ") { const auto " +
-               value + " = " + emit_branch(*expression.operands.at(0)) +
-               "; if (script_function_failed()) return {}; return " + value + "; } const auto " +
-               value + " = " + emit_branch(*expression.operands.at(2)) +
-               "; if (script_function_failed()) return {}; return " + value + "; }())";
+               emit_truthy(*expression.operands.at(1)) + ";" + condition_check + " if (" +
+               condition + ") { const auto " + value + " = " +
+               emit_branch(*expression.operands.at(0)) + ";" + true_check + " return " + value +
+               "; } const auto " + value + " = " + emit_branch(*expression.operands.at(2)) + ";" +
+               false_check + " return " + value + "; }())";
     }
     case typed::ExpressionKind::call: {
         const auto expression_failure_return =
             !expression.coroutine_call && expression.type.kind == TypeKind::void_type
                 ? std::string{"if (script_function_failed()) return; "}
                 : std::string{"if (script_function_failed()) return {}; "};
+        const auto call_failure_return =
+            expression_may_fail(expression) ? expression_failure_return : std::string{};
         if (expression.resolution == typed::ResolutionKind::script_resource)
             return cpp_type(expression.type) + "{}";
         const auto& callee = *expression.operands.at(0);
@@ -4165,7 +4398,7 @@ std::string CodeGenerator::emit_expression(const typed::Expression& expression) 
             result += " -> " + (expression.coroutine_call ? std::string{"godot::Variant"}
                                                           : cpp_type(expression.type));
         result += " { " + receiver_setup;
-        if (!receiver_setup.empty())
+        if (!receiver_setup.empty() && expression_may_fail(*callee.operands.at(0)))
             result += expression_failure_return;
         if (!receiver_name.empty() && callee.operands.at(0)->type.kind == TypeKind::object) {
             const auto message =
@@ -4195,7 +4428,8 @@ std::string CodeGenerator::emit_expression(const typed::Expression& expression) 
             } else {
                 result += "const auto " + temporary + " = " + emit_expression(argument) + "; ";
             }
-            result += expression_failure_return;
+            if (expression_may_fail(argument))
+                result += expression_failure_return;
         }
         std::string rest_name;
         if (direct_vararg) {
@@ -4236,9 +4470,9 @@ std::string CodeGenerator::emit_expression(const typed::Expression& expression) 
             const auto result_name = "_gdpp_call_result_" + suffix;
             result += "const auto " + result_name + " = " +
                       (godot_method ? emit_api_return(expression.type, std::move(call)) : call) +
-                      "; " + expression_failure_return + "return " + result_name;
+                      "; " + call_failure_return + "return " + result_name;
         } else {
-            result += call + "; " + expression_failure_return;
+            result += call + "; " + call_failure_return;
         }
         return result + "; }())";
     }
@@ -4461,9 +4695,14 @@ std::string CodeGenerator::emit_expression(const typed::Expression& expression) 
             } else {
                 emitted = "gdpp::runtime::to_variant(" + emitted + ")";
             }
-            result += "{ const auto " + value + " = " + emitted +
-                      "; if (script_function_failed()) return {}; " + array + "[" +
-                      std::to_string(index) + "] = " + value + "; } ";
+            result += "{ const auto " + value + " = " + emitted + "; ";
+            if (expression_may_fail(*expression.operands[index]) ||
+                (runtime_typed &&
+                 conversion_may_fail(container_argument_type(descriptor->arguments.front()),
+                                     expression.operands[index]->type))) {
+                result += "if (script_function_failed()) return {}; ";
+            }
+            result += array + "[" + std::to_string(index) + "] = " + value + "; } ";
         }
         return result + "return " + array + "; }())";
     }
@@ -4493,10 +4732,21 @@ std::string CodeGenerator::emit_expression(const typed::Expression& expression) 
                 emitted_key = "gdpp::runtime::to_variant(" + emitted_key + ")";
                 emitted_value = "gdpp::runtime::to_variant(" + emitted_value + ")";
             }
-            result += "{ const auto " + key + " = " + emitted_key +
-                      "; if (script_function_failed()) return {}; const auto " + value + " = " +
-                      emitted_value + "; if (script_function_failed()) return {}; " + dictionary +
-                      ".set(" + key + ", " + value + "); } ";
+            result += "{ const auto " + key + " = " + emitted_key + "; ";
+            if (expression_may_fail(*expression.operands[index]) ||
+                (runtime_typed &&
+                 conversion_may_fail(container_argument_type(descriptor->arguments.at(0)),
+                                     expression.operands[index]->type))) {
+                result += "if (script_function_failed()) return {}; ";
+            }
+            result += "const auto " + value + " = " + emitted_value + "; ";
+            if (expression_may_fail(*expression.operands[index + 1]) ||
+                (runtime_typed &&
+                 conversion_may_fail(container_argument_type(descriptor->arguments.at(1)),
+                                     expression.operands[index + 1]->type))) {
+                result += "if (script_function_failed()) return {}; ";
+            }
+            result += dictionary + ".set(" + key + ", " + value + "); } ";
         }
         return result + "return " + dictionary + "; }())";
     }
@@ -5478,7 +5728,7 @@ std::string CodeGenerator::emit_statement(const typed::Statement& statement,
                                           const std::size_t indentation) const {
     auto result = emit_debug_line(statement.span.begin.line, indentation) +
                   emit_statement_body(statement, indentation);
-    if (statement.kind == typed::StatementKind::assignment)
+    if (statement.kind == typed::StatementKind::assignment && assignment_may_fail(statement))
         result += emit_script_failure_return(indentation, in_async_continuation_);
     return result;
 }
@@ -5492,7 +5742,9 @@ std::string CodeGenerator::emit_statement_body(const typed::Statement& statement
         // explicit so nodiscard Godot value types and ordinary conversion expressions remain
         // warning-clean under commercial -Wall/-Wextra builds.
         return prefix + "static_cast<void>(" + emit_expression(*statement.expression) + ");\n" +
-               emit_script_failure_return(indentation, in_async_continuation_);
+               (expression_may_fail(*statement.expression)
+                    ? emit_script_failure_return(indentation, in_async_continuation_)
+                    : std::string{});
     case typed::StatementKind::return_statement:
         if (statement.expression) {
             const auto value_name = "_gdpp_return_value_" + std::to_string(temporary_counter_++);
@@ -5508,8 +5760,13 @@ std::string CodeGenerator::emit_statement_body(const typed::Statement& statement
                                         emit_expression(*statement.expression),
                                         &statement.expression->span);
             }
-            std::string result = prefix + "const auto " + value_name + " = " + value + ";\n" +
-                                 emit_script_failure_return(indentation, in_async_continuation_);
+            const bool value_may_fail =
+                expression_may_fail(*statement.expression) ||
+                (!current_return_type_.is_dynamic() &&
+                 conversion_may_fail(current_return_type_, statement.expression->type));
+            std::string result = prefix + "const auto " + value_name + " = " + value + ";\n";
+            if (value_may_fail)
+                result += emit_script_failure_return(indentation, in_async_continuation_);
             if (current_coroutine_abi_)
                 return result + coroutine_return(indentation, value_name, in_async_continuation_);
             if (in_callable_lambda_)
@@ -5535,19 +5792,29 @@ std::string CodeGenerator::emit_statement_body(const typed::Statement& statement
             return prefix + "/* invalid nested await */;\n";
         }
         return prefix + "static_cast<void>(" + emit_expression(*statement.expression) + ");\n" +
-               emit_script_failure_return(indentation, in_async_continuation_);
+               (expression_may_fail(*statement.expression)
+                    ? emit_script_failure_return(indentation, in_async_continuation_)
+                    : std::string{});
     case typed::StatementKind::await_variable:
         if (await_can_suspend(statement)) {
             diagnostics_.error("GDS3006", "nested await reached code generation", statement.span);
             return prefix + "/* invalid nested await */;\n";
         }
-        return prefix + "[[maybe_unused]] " + (statement.is_constant ? "const " : "") +
-               cpp_type(statement.declared_type) + " " + sanitize_identifier(statement.name) +
-               " = " +
-               emit_conversion(statement.declared_type, statement.expression->type,
-                               emit_expression(*statement.expression),
-                               &statement.expression->span) +
-               ";\n" + emit_script_failure_return(indentation, in_async_continuation_);
+        {
+            std::string result =
+                prefix + "[[maybe_unused]] " + (statement.is_constant ? "const " : "") +
+                cpp_type(statement.declared_type) + " " + sanitize_identifier(statement.name) +
+                " = " +
+                emit_conversion(statement.declared_type, statement.expression->type,
+                                emit_expression(*statement.expression),
+                                &statement.expression->span) +
+                ";\n";
+            if (expression_may_fail(*statement.expression) ||
+                conversion_may_fail(statement.declared_type, statement.expression->type)) {
+                result += emit_script_failure_return(indentation, in_async_continuation_);
+            }
+            return result;
+        }
     case typed::StatementKind::assert_statement: {
         std::string result = prefix + "#ifdef GDPP_SCRIPT_DEBUG_ENABLED\n";
         for (const auto& child : statement.assert_condition_prefix)
@@ -5562,18 +5829,26 @@ std::string CodeGenerator::emit_statement_body(const typed::Statement& statement
         result += prefix + "}\n";
         return result + prefix + "#endif\n";
     }
-    case typed::StatementKind::variable:
-        return prefix + "[[maybe_unused]] " + (statement.is_constant ? "const " : "") +
-               (statement.expression && statement.expression->kind == typed::ExpressionKind::lambda
-                    ? std::string{"auto"}
-                    : cpp_type(statement.declared_type)) +
-               " " + sanitize_identifier(statement.name) +
-               (statement.expression
-                    ? " = " + emit_conversion(statement.declared_type, statement.expression->type,
-                                              emit_expression(*statement.expression),
-                                              &statement.expression->span)
-                    : "{}") +
-               ";\n" + emit_script_failure_return(indentation, in_async_continuation_);
+    case typed::StatementKind::variable: {
+        std::string result =
+            prefix + "[[maybe_unused]] " + (statement.is_constant ? "const " : "") +
+            (statement.expression && statement.expression->kind == typed::ExpressionKind::lambda
+                 ? std::string{"auto"}
+                 : cpp_type(statement.declared_type)) +
+            " " + sanitize_identifier(statement.name) +
+            (statement.expression
+                 ? " = " + emit_conversion(statement.declared_type, statement.expression->type,
+                                           emit_expression(*statement.expression),
+                                           &statement.expression->span)
+                 : "{}") +
+            ";\n";
+        if (statement.expression &&
+            (expression_may_fail(*statement.expression) ||
+             conversion_may_fail(statement.declared_type, statement.expression->type))) {
+            result += emit_script_failure_return(indentation, in_async_continuation_);
+        }
+        return result;
+    }
     case typed::StatementKind::assignment: {
         const auto& target = *statement.condition;
         if (!lowering_assignment_) {
@@ -5609,12 +5884,16 @@ std::string CodeGenerator::emit_statement_body(const typed::Statement& statement
             if (receiver && !receiver_is_type_namespace) {
                 result += nested_prefix + "auto &&" + receiver_name + " = " +
                           emit_expression(*receiver) + ";\n";
-                result += emit_script_failure_return(indentation + 1, in_async_continuation_);
+                if (expression_may_fail(*receiver)) {
+                    result += emit_script_failure_return(indentation + 1, in_async_continuation_);
+                }
                 exact_expression_overrides_[receiver] = receiver_name;
             }
             result += nested_prefix + "const auto " + value_name + " = " +
                       emit_expression(*statement.expression) + ";\n";
-            result += emit_script_failure_return(indentation + 1, in_async_continuation_);
+            if (expression_may_fail(*statement.expression)) {
+                result += emit_script_failure_return(indentation + 1, in_async_continuation_);
+            }
             exact_expression_overrides_[statement.expression.get()] = value_name;
             lowering_assignment_ = true;
             result += emit_statement_body(statement, indentation + 1);
@@ -5689,7 +5968,7 @@ std::string CodeGenerator::emit_statement_body(const typed::Statement& statement
                            (statement.expression->type.kind == TypeKind::integer ||
                             statement.expression->type.kind == TypeKind::enumeration)) {
                     assigned = emit_integer_operation(operation, current_name, value_name,
-                                                      target.type, target.span);
+                                                      target.type, target.span, false, false);
                 } else {
                     assigned = "(" + current_name + " " + operation + " " + value_name + ")";
                 }
@@ -5763,10 +6042,10 @@ std::string CodeGenerator::emit_statement_body(const typed::Statement& statement
                     value = emit_conversion(target.type, statement.expression->type, right_name,
                                             &statement.expression->span);
                     value = emit_integer_operation(operation, current_name, std::move(value),
-                                                   target.type, target.span);
+                                                   target.type, target.span, false, true);
                 } else if (integer_target && integer_value) {
                     value = emit_integer_operation(operation, current_name, right_name, target.type,
-                                                   target.span);
+                                                   target.span, false, false);
                 } else if (!target.type.is_dynamic() && target.type.is_numeric() &&
                            statement.expression->type.is_dynamic()) {
                     value = emit_conversion(target.type, statement.expression->type, right_name,
@@ -5799,7 +6078,9 @@ std::string CodeGenerator::emit_statement_body(const typed::Statement& statement
             const auto inner = indent(write_indentation + 1);
             return outer + "{\n" + inner + "const auto " + assigned + " = " + std::move(value) +
                    ";\n" +
-                   emit_script_failure_return(write_indentation + 1, in_async_continuation_) +
+                   (assignment_may_fail(statement)
+                        ? emit_script_failure_return(write_indentation + 1, in_async_continuation_)
+                        : std::string{}) +
                    inner + write(assigned) + ";\n" + outer + "}\n";
         };
         if (target.resolution == typed::ResolutionKind::script_runtime_static_field) {
