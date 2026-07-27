@@ -4718,6 +4718,25 @@ std::string CodeGenerator::emit_expression(const typed::Expression& expression) 
         if (expression.resolution == typed::ResolutionKind::dynamic_property) {
             if (expression.operands.at(0)->type.kind == TypeKind::dictionary) {
                 const auto suffix = std::to_string(temporary_counter_++);
+                const auto& dictionary_receiver = *expression.operands.at(0);
+                const auto proof =
+                    dictionary_receiver.kind == typed::ExpressionKind::identifier &&
+                    dictionary_receiver.symbol_identity != 0
+                        ? proven_local_dictionary_slots_.find(
+                              dictionary_receiver.symbol_identity)
+                        : proven_local_dictionary_slots_.end();
+                const bool proven =
+                    proof != proven_local_dictionary_slots_.end() &&
+                    proof->second.find(expression.value) != proof->second.end();
+                if (proven) {
+                    const auto key = "_gdpp_proven_dictionary_read_key_" + suffix;
+                    const auto value =
+                        "([&]() -> const godot::Variant& { static const godot::Variant " + key +
+                        " = " + godot_string_name(expression.value) + "; return " + object + "[" +
+                        key + "]; }())";
+                    return emit_conversion(expression.type, {TypeKind::variant, "Variant"}, value,
+                                           &expression.span);
+                }
                 const auto key = "_gdpp_dictionary_read_key_" + suffix;
                 const auto lookup = [&](const std::string& receiver) {
                     return "gdpp::runtime::checked_dictionary_get_named(" + receiver +
