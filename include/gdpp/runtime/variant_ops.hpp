@@ -23,6 +23,7 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <tuple>
 #include <type_traits>
 #include <utility>
 
@@ -70,8 +71,17 @@ class CoroutineFunctionState final : public godot::RefCounted {
 };
 
 struct ScriptFaultState final {
-    std::atomic_bool failed{false};
+    // A fault state is only installed in the thread-local active invocation. Coroutine states
+    // can migrate between threads, but CoroutineFunctionState serializes continuation ownership
+    // before the state is installed on the resuming thread. Keeping the flag invocation-local
+    // lets generated hot paths fold redundant success checks instead of issuing an atomic load
+    // after every expression.
+    bool failed{false};
 };
+
+namespace detail {
+extern thread_local ScriptFaultState* active_script_fault;
+} // namespace detail
 
 struct ScriptSourceLocation final {
     const char* path{nullptr};
@@ -90,15 +100,23 @@ enum class ScriptFaultPolicy : std::uint8_t {
 // (disabled by Godot) and never allows a failure marker to escape across a GDExtension ABI call.
 class ScriptFunctionScope final {
   public:
-    ScriptFunctionScope() noexcept;
-    explicit ScriptFunctionScope(ScriptFaultPolicy policy) noexcept;
+    ScriptFunctionScope() noexcept : state_{&local_}, previous_{detail::active_script_fault} {
+        detail::active_script_fault = state_;
+    }
+    explicit ScriptFunctionScope(const ScriptFaultPolicy policy) noexcept
+        : state_{policy == ScriptFaultPolicy::inherit_existing && detail::active_script_fault
+                     ? detail::active_script_fault
+                     : &local_},
+          previous_{detail::active_script_fault} {
+        detail::active_script_fault = state_;
+    }
     explicit ScriptFunctionScope(const CoroutineStatePtr& coroutine) noexcept;
-    ~ScriptFunctionScope();
+    ~ScriptFunctionScope() { detail::active_script_fault = previous_; }
 
     ScriptFunctionScope(const ScriptFunctionScope&) = delete;
     ScriptFunctionScope& operator=(const ScriptFunctionScope&) = delete;
 
-    [[nodiscard]] bool failed() const noexcept;
+    [[nodiscard]] bool failed() const noexcept { return state_ && state_->failed; }
 
   private:
     ScriptFaultState local_;
@@ -135,8 +153,14 @@ class ScriptInitializationState final {
     std::mutex mutex_;
 };
 
-void mark_script_failure() noexcept;
-[[nodiscard]] bool script_function_failed() noexcept;
+inline void mark_script_failure() noexcept {
+    if (detail::active_script_fault)
+        detail::active_script_fault->failed = true;
+}
+
+[[nodiscard]] inline bool script_function_failed() noexcept {
+    return detail::active_script_fault && detail::active_script_fault->failed;
+}
 [[nodiscard]] godot::String describe_variant_type(const godot::Variant& value);
 void report_script_failure(const godot::String& message, ScriptSourceLocation location = {});
 void report_script_failure(const godot::String& message, const char* source_path, std::int64_t line,
@@ -221,11 +245,13 @@ template <typename Target>
                                            const ScriptSourceLocation location = {}) {
     if (script_function_failed())
         return {};
-    bool compatible = godot::Variant::can_convert(value.get_type(), target_type);
+    const auto source_type = value.get_type();
+    if (source_type == target_type)
+        return static_cast<Target>(value);
+    bool compatible = godot::Variant::can_convert(source_type, target_type);
     if (target_type == godot::Variant::STRING) {
-        compatible = value.get_type() == godot::Variant::STRING ||
-                     value.get_type() == godot::Variant::STRING_NAME ||
-                     value.get_type() == godot::Variant::NODE_PATH;
+        compatible =
+            source_type == godot::Variant::STRING_NAME || source_type == godot::Variant::NODE_PATH;
     }
     if (!compatible) {
         report_script_failure(godot::String{"Cannot convert "} + describe_variant_type(value) +
@@ -486,48 +512,95 @@ void bind_variant_method(const godot::StringName& class_name, const godot::Metho
 // generated C++ retains the concrete adapter type can invoke the closure directly. This removes
 // CallableCustom dispatch and heap-backed argument packing from typed hot paths without changing
 // first-class Callable behavior.
-template <std::size_t Size> class LocalCallableArguments final {
+template <typename... Values> class LocalCallableArguments final {
   public:
-    explicit LocalCallableArguments(std::array<godot::Variant, Size> values)
-        : values_(std::move(values)) {}
+    explicit LocalCallableArguments(Values... values) : values_(std::move(values)...) {}
 
-    [[nodiscard]] std::int64_t size() const noexcept { return static_cast<std::int64_t>(Size); }
-    [[nodiscard]] const godot::Variant& operator[](std::size_t index) const noexcept {
-        return values_[index];
+    [[nodiscard]] constexpr std::int64_t size() const noexcept {
+        return static_cast<std::int64_t>(sizeof...(Values));
+    }
+
+    template <std::size_t Index> [[nodiscard]] decltype(auto) get() const noexcept {
+        return std::get<Index>(values_);
+    }
+
+    [[nodiscard]] godot::Variant operator[](const std::size_t index) const {
+        return variant_at(index, std::index_sequence_for<Values...>{});
     }
 
   private:
-    std::array<godot::Variant, Size> values_;
+    template <std::size_t... Indices>
+    [[nodiscard]] godot::Variant variant_at(const std::size_t index,
+                                            std::index_sequence<Indices...>) const {
+        godot::Variant result;
+        const bool found =
+            (false || ... ||
+             (index == Indices ? (result = to_variant(std::get<Indices>(values_)), true) : false));
+        static_cast<void>(found);
+        return result;
+    }
+
+    std::tuple<Values...> values_;
 };
 
-template <typename Callback> class LocalCallable final : public godot::Callable {
-  public:
-    LocalCallable(godot::Object* owner, std::size_t required_arguments,
-                  std::size_t maximum_arguments, Callback callback)
-        : godot::Callable(make_callable(owner, required_arguments, maximum_arguments,
-                                        [bridge = callback](const godot::Array& arguments) mutable {
-                                            return bridge(arguments);
-                                        })),
-          callback_(std::move(callback)), required_arguments_(required_arguments),
-          positional_arguments_(maximum_arguments) {}
+template <std::size_t Index, typename... Values>
+[[nodiscard]] godot::Variant
+local_callable_argument(const LocalCallableArguments<Values...>& arguments) {
+    if constexpr (Index < sizeof...(Values))
+        return to_variant(arguments.template get<Index>());
+    return {};
+}
 
-    LocalCallable(godot::Object* owner, std::size_t required_arguments,
-                  std::size_t positional_arguments, bool is_vararg, Callback callback)
-        : godot::Callable(make_callable(owner, required_arguments, positional_arguments, is_vararg,
+template <std::size_t Index>
+[[nodiscard]] godot::Variant local_callable_argument(const godot::Array& arguments) {
+    return Index < static_cast<std::size_t>(arguments.size()) ? arguments[Index] : godot::Variant{};
+}
+
+// A direct local invocation retains the native argument types at the call site. Exact typed
+// parameters can therefore cross the lambda ABI without a Variant round trip; erased/escaped
+// Callables and every non-exact conversion still use the same strict Godot conversion boundary.
+template <typename Target, std::size_t Index, typename... Values>
+[[nodiscard]] Target
+local_callable_typed_argument(const LocalCallableArguments<Values...>& arguments,
+                              const godot::Variant::Type target_type,
+                              const ScriptSourceLocation location = {}) {
+    if constexpr (Index >= sizeof...(Values)) {
+        return {};
+    } else {
+        using Source =
+            std::remove_cv_t<std::remove_reference_t<decltype(arguments.template get<Index>())>>;
+        if constexpr (std::is_same_v<Target, Source>)
+            return arguments.template get<Index>();
+        return strict_builtin_storage<Target>(to_variant(arguments.template get<Index>()),
+                                              target_type, location);
+    }
+}
+
+template <typename Target, std::size_t Index>
+[[nodiscard]] Target local_callable_typed_argument(const godot::Array& arguments,
+                                                   const godot::Variant::Type target_type,
+                                                   const ScriptSourceLocation location = {}) {
+    const auto value =
+        Index < static_cast<std::size_t>(arguments.size()) ? arguments[Index] : godot::Variant{};
+    return strict_builtin_storage<Target>(value, target_type, location);
+}
+
+template <typename Callback, std::size_t RequiredArguments, std::size_t PositionalArguments,
+          bool IsVararg>
+class LocalCallable final : public godot::Callable {
+  public:
+    LocalCallable(godot::Object* owner, Callback callback)
+        : godot::Callable(make_callable(owner, RequiredArguments, PositionalArguments, IsVararg,
                                         [bridge = callback](const godot::Array& arguments) mutable {
                                             return bridge(arguments);
                                         })),
-          callback_(std::move(callback)), required_arguments_(required_arguments),
-          positional_arguments_(positional_arguments), is_vararg_(is_vararg) {}
+          callback_(std::move(callback)) {}
 
     LocalCallable(const LocalCallable& other)
-        : godot::Callable(other), callback_(other.callback_), direct_(other.direct_),
-          required_arguments_(other.required_arguments_),
-          positional_arguments_(other.positional_arguments_), is_vararg_(other.is_vararg_) {}
+        : godot::Callable(other), callback_(other.callback_), direct_(other.direct_) {}
     LocalCallable(LocalCallable&& other) noexcept
         : godot::Callable(std::move(other)), callback_(std::move(other.callback_)),
-          direct_(other.direct_), required_arguments_(other.required_arguments_),
-          positional_arguments_(other.positional_arguments_), is_vararg_(other.is_vararg_) {}
+          direct_(other.direct_) {}
 
     LocalCallable& operator=(const LocalCallable& other) {
         if (this == &other)
@@ -536,9 +609,6 @@ template <typename Callback> class LocalCallable final : public godot::Callable 
         // C++17 closure types are not generally assignable. The copied Godot Callable already
         // owns the correct continuation, so assigned adapters conservatively use that ABI path.
         direct_ = false;
-        required_arguments_ = other.required_arguments_;
-        positional_arguments_ = other.positional_arguments_;
-        is_vararg_ = other.is_vararg_;
         return *this;
     }
     LocalCallable& operator=(LocalCallable&& other) noexcept {
@@ -546,9 +616,6 @@ template <typename Callback> class LocalCallable final : public godot::Callable 
             return *this;
         godot::Callable::operator=(std::move(other));
         direct_ = false;
-        required_arguments_ = other.required_arguments_;
-        positional_arguments_ = other.positional_arguments_;
-        is_vararg_ = other.is_vararg_;
         return *this;
     }
     LocalCallable& operator=(const godot::Callable& other) {
@@ -570,8 +637,7 @@ template <typename Callback> class LocalCallable final : public godot::Callable 
     [[nodiscard]] godot::Variant call(const Arguments&... arguments) const {
         if (!direct_)
             return godot::Callable::call(arguments...);
-        LocalCallableArguments<sizeof...(Arguments)> values(
-            std::array<godot::Variant, sizeof...(Arguments)>{arguments...});
+        LocalCallableArguments<std::decay_t<Arguments>...> values(arguments...);
         return callback_(values);
     }
 
@@ -581,62 +647,53 @@ template <typename Callback> class LocalCallable final : public godot::Callable 
         if (!direct_)
             return call_callable_at(location, static_cast<const godot::Callable&>(*this),
                                     arguments...);
-        if (!godot::Callable::is_valid()) {
-            report_script_failure("Attempt to call a null or freed Callable.", location);
-            return {};
-        }
+        // The concrete adapter can only remain direct inside the generated invocation that
+        // created it. Its owner is therefore either null (a static lambda) or the currently
+        // executing, engine-locked script object. Escaped and assigned values deliberately lose
+        // the direct flag and take call_callable_at(), which performs the full ObjectDB validity
+        // check before dispatch. Repeating that global lookup for every local lambda iteration is
+        // both redundant and materially slower than GDScript's local callable path.
         constexpr auto argument_count = sizeof...(Arguments);
-        if (argument_count < required_arguments_ ||
-            (!is_vararg_ && argument_count > positional_arguments_)) {
+        if constexpr (argument_count < RequiredArguments ||
+                      (!IsVararg && argument_count > PositionalArguments)) {
             report_script_failure(
                 godot::String{"Invalid Callable argument count: received "} +
                     godot::String::num_int64(static_cast<std::int64_t>(argument_count)) +
                     ", expected " +
-                    godot::String::num_int64(static_cast<std::int64_t>(required_arguments_)) +
-                    (required_arguments_ == positional_arguments_
+                    godot::String::num_int64(static_cast<std::int64_t>(RequiredArguments)) +
+                    (RequiredArguments == PositionalArguments
                          ? godot::String{}
                          : godot::String{" to "} +
                                godot::String::num_int64(
-                                   static_cast<std::int64_t>(positional_arguments_))) +
+                                   static_cast<std::int64_t>(PositionalArguments))) +
                     ".",
                 location);
             return {};
         }
-        LocalCallableArguments<argument_count> values(
-            std::array<godot::Variant, argument_count>{arguments...});
+        LocalCallableArguments<std::decay_t<Arguments>...> values(arguments...);
         return callback_(values);
     }
 
   private:
     mutable Callback callback_;
     bool direct_{true};
-    std::size_t required_arguments_{0};
-    std::size_t positional_arguments_{0};
-    bool is_vararg_{false};
 };
 
-template <typename Callback, typename... Arguments>
-[[nodiscard]] godot::Variant call_callable_at(const ScriptSourceLocation location,
-                                              const LocalCallable<Callback>& callable,
-                                              Arguments&&... arguments) {
+template <typename Callback, std::size_t RequiredArguments, std::size_t PositionalArguments,
+          bool IsVararg, typename... Arguments>
+[[nodiscard]] godot::Variant call_callable_at(
+    const ScriptSourceLocation location,
+    const LocalCallable<Callback, RequiredArguments, PositionalArguments, IsVararg>& callable,
+    Arguments&&... arguments) {
     return callable.call_checked(location, std::forward<Arguments>(arguments)...);
 }
 
-template <typename Callback>
-[[nodiscard]] auto make_local_callable(godot::Object* owner, std::size_t required_arguments,
-                                       std::size_t maximum_arguments, Callback&& callback) {
+template <std::size_t RequiredArguments, std::size_t PositionalArguments, bool IsVararg = false,
+          typename Callback>
+[[nodiscard]] auto make_local_callable(godot::Object* owner, Callback&& callback) {
     using StoredCallback = std::decay_t<Callback>;
-    return LocalCallable<StoredCallback>(owner, required_arguments, maximum_arguments,
-                                         std::forward<Callback>(callback));
-}
-
-template <typename Callback>
-[[nodiscard]] auto make_local_callable(godot::Object* owner, std::size_t required_arguments,
-                                       std::size_t positional_arguments, bool is_vararg,
-                                       Callback&& callback) {
-    using StoredCallback = std::decay_t<Callback>;
-    return LocalCallable<StoredCallback>(owner, required_arguments, positional_arguments, is_vararg,
-                                         std::forward<Callback>(callback));
+    return LocalCallable<StoredCallback, RequiredArguments, PositionalArguments, IsVararg>(
+        owner, std::forward<Callback>(callback));
 }
 
 [[nodiscard]] godot::Variant call_dynamic_impl(godot::Variant& target,

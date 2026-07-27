@@ -152,8 +152,7 @@ TEST_CASE("compiler centralizes packed values at every generated Variant boundar
             std::string::npos);
     REQUIRE(result.unit.source.find("const auto _gdpp_array_value_") != std::string::npos);
     REQUIRE(result.unit.source.find(" = gdpp::runtime::to_variant(bytes);") != std::string::npos);
-    REQUIRE(result.unit.source.find("gdpp::runtime::script_function_failed()") !=
-            std::string::npos);
+    REQUIRE(result.unit.source.find("script_function_failed()") != std::string::npos);
     REQUIRE(result.unit.source.find(".set(_gdpp_dictionary_key_") != std::string::npos);
 }
 
@@ -892,7 +891,7 @@ TEST_CASE("compiler generates registered internal classes and native lambda Call
     REQUIRE(result.unit.header.find(
                 "GDCLASS(GDPPNative_Modern__Payload, gdpp::runtime::AttachedScriptBehavior)") !=
             std::string::npos);
-    REQUIRE(result.unit.source.find("gdpp::runtime::make_local_callable(this, 1, 1") !=
+    REQUIRE(result.unit.source.find("gdpp::runtime::make_local_callable<1, 1, false>(this") !=
             std::string::npos);
     REQUIRE(result.unit.source.find("InternalClassResource<GDPPNative_Modern__Payload>") !=
             std::string::npos);
@@ -907,7 +906,7 @@ TEST_CASE("lambda call frames copy creation snapshots per invocation") {
                                                                 "        return captured\n");
 
     REQUIRE(result.success);
-    const auto callable = result.unit.source.find("gdpp::runtime::make_local_callable(");
+    const auto callable = result.unit.source.find("gdpp::runtime::make_local_callable<");
     const auto creation_snapshot =
         result.unit.source.find(") mutable -> godot::Variant {", callable);
     const auto invocation_snapshot =
@@ -944,7 +943,7 @@ TEST_CASE("async loop lambdas snapshot symbol-identified cells at creation") {
     const auto cell = source.find("std::make_shared<int64_t>(captured)");
     const auto snapshot = source.find("[[maybe_unused]] auto _gdpp_lambda_capture_", cell);
     const auto snapshot_source = source.find(" = (*_gdpp_async_cell_", snapshot);
-    const auto callable = source.find("gdpp::runtime::make_local_callable(", snapshot_source);
+    const auto callable = source.find("gdpp::runtime::make_local_callable<", snapshot_source);
     const auto invocation = source.find("return [=]() mutable -> godot::Variant {", callable);
     const auto captured_write = source.find("_gdpp_lambda_capture_", invocation);
     REQUIRE(cell != std::string::npos);
@@ -1021,14 +1020,13 @@ TEST_CASE("static lambdas support defaults without binding an instance owner") {
                                                        "        return value + 1\n");
 
     REQUIRE(result.success);
-    REQUIRE(result.unit.source.find("gdpp::runtime::make_local_callable(nullptr, 0, 1") !=
+    REQUIRE(result.unit.source.find("gdpp::runtime::make_local_callable<0, 1, false>(nullptr") !=
             std::string::npos);
     REQUIRE(result.unit.source.find(".size() > 0 ?") != std::string::npos);
     const auto callable = result.unit.source.find("mutable -> godot::Variant {");
     const auto scope = result.unit.source.find("gdpp::runtime::ScriptFunctionScope", callable);
     const auto parameter = result.unit.source.find("int64_t value =", callable);
-    const auto parameter_check =
-        result.unit.source.find("gdpp::runtime::script_function_failed()", parameter);
+    const auto parameter_check = result.unit.source.find("script_function_failed()", parameter);
     REQUIRE(callable < scope);
     REQUIRE(scope < parameter);
     REQUIRE(parameter < parameter_check);
@@ -1044,8 +1042,7 @@ TEST_CASE("void lambdas return a Variant when argument conversion fails") {
 
     REQUIRE(result.success);
     const auto callable = result.unit.source.find("mutable -> godot::Variant {");
-    const auto failure =
-        result.unit.source.find("if (gdpp::runtime::script_function_failed())", callable);
+    const auto failure = result.unit.source.find("if (script_function_failed())", callable);
     REQUIRE(callable != std::string::npos);
     REQUIRE(failure != std::string::npos);
     REQUIRE(result.unit.source.find("return godot::Variant{};", failure) != std::string::npos);
@@ -1060,8 +1057,7 @@ TEST_CASE("typed lambdas return their declared default value after runtime failu
 
     REQUIRE(result.success);
     const auto callable = result.unit.source.find("mutable -> godot::Variant {");
-    const auto failure =
-        result.unit.source.find("if (gdpp::runtime::script_function_failed())", callable);
+    const auto failure = result.unit.source.find("if (script_function_failed())", callable);
     REQUIRE(callable != std::string::npos);
     REQUIRE(failure != std::string::npos);
     REQUIRE(result.unit.source.find("return gdpp::runtime::to_variant(int64_t{});", failure) !=
@@ -1077,7 +1073,7 @@ TEST_CASE("variadic lambdas receive excess arguments as a Godot Array") {
         "        return required + optional + values.size()\n");
 
     REQUIRE(result.success);
-    REQUIRE(result.unit.source.find("gdpp::runtime::make_local_callable(nullptr, 1, 2, true") !=
+    REQUIRE(result.unit.source.find("gdpp::runtime::make_local_callable<1, 2, true>(nullptr") !=
             std::string::npos);
     REQUIRE(result.unit.source.find("godot::Array values;") != std::string::npos);
     REQUIRE(result.unit.source.find("values.resize(") != std::string::npos);
@@ -1889,8 +1885,7 @@ TEST_CASE("compiler restores signal arguments for await-initialized locals") {
     REQUIRE(result.unit.source.find("gdpp::runtime::await_result(") != std::string::npos);
     REQUIRE(result.unit.source.find("godot::Variant side =") != std::string::npos);
     const auto argument = result.unit.source.find("= side;");
-    const auto failure =
-        result.unit.source.find("gdpp::runtime::script_function_failed()", argument);
+    const auto failure = result.unit.source.find("script_function_failed()", argument);
     const auto print = result.unit.source.find("godot::UtilityFunctions::print(", failure);
     REQUIRE(argument < failure);
     REQUIRE(failure < print);
@@ -2969,7 +2964,8 @@ TEST_CASE("compiler preserves owner-free static fields methods lambdas and super
     REQUIRE(result.unit.source.find("_gdpp_static_total_storage()") != std::string::npos);
     REQUIRE(result.unit.source.find("GDPPNative_StaticContext__Parent::score()") !=
             std::string::npos);
-    REQUIRE(result.unit.source.find("make_local_callable(nullptr") != std::string::npos);
+    REQUIRE(result.unit.source.find("make_local_callable<") != std::string::npos);
+    REQUIRE(result.unit.source.find(">(nullptr") != std::string::npos);
     REQUIRE(result.unit.source.find("GDPPNative_StaticContext__Child::_gdpp_set_total(") !=
             std::string::npos);
     REQUIRE(result.unit.source.find("GDPPNative_StaticContext__Child::_gdpp_get_total()") !=
@@ -4052,12 +4048,34 @@ TEST_CASE("compiler retains local lambda adapters for direct native calls") {
                              "    return operation.call(value)\n");
 
     REQUIRE(result.success);
-    REQUIRE(result.unit.source.find("auto operation = gdpp::runtime::make_local_callable(") !=
+    REQUIRE(result.unit.source.find("auto operation = gdpp::runtime::make_local_callable<") !=
             std::string::npos);
     REQUIRE(result.unit.source.find("[=](const auto &_gdpp_lambda_arguments_") !=
             std::string::npos);
+    REQUIRE(result.unit.source.find("gdpp::runtime::local_callable_typed_argument<int64_t, 0>(") !=
+            std::string::npos);
     REQUIRE(result.unit.source.find(") mutable -> godot::Variant {") != std::string::npos);
     REQUIRE(result.unit.source.find("godot::Callable operation") == std::string::npos);
+}
+
+TEST_CASE("local lambda ABI keeps dynamic and structural parameters on strict Variant boundaries") {
+    const gdpp::Compiler compiler;
+    const auto result = compiler.compile(
+        "local_callable_boundaries.gd",
+        "func make() -> Callable:\n"
+        "    return func(number: int, dynamic: Variant, values: Array[int]) -> int:\n"
+        "        return number + int(dynamic) + values[0]\n");
+
+    REQUIRE(result.success);
+    REQUIRE(result.unit.source.find("make_local_callable<3, 3, false>") != std::string::npos);
+    REQUIRE(result.unit.source.find("gdpp::runtime::local_callable_typed_argument<int64_t, 0>(") !=
+            std::string::npos);
+    REQUIRE(result.unit.source.find("gdpp::runtime::local_callable_argument<1>(") !=
+            std::string::npos);
+    const auto structural = result.unit.source.find("gdpp::runtime::local_callable_argument<2>(");
+    REQUIRE(structural != std::string::npos);
+    REQUIRE(result.unit.source.rfind("gdpp::runtime::strict_typed_storage<", structural) !=
+            std::string::npos);
 }
 
 TEST_CASE("compiler emits ordered portable operations for typed integers") {
@@ -5508,7 +5526,7 @@ TEST_CASE("compiler contains fatal expression faults and preserves Godot assignm
 
     const auto direct = source.find("::direct()");
     const auto bounds = source.find("gdpp::runtime::checked_array_get", direct);
-    const auto bounds_failure = source.find("gdpp::runtime::script_function_failed()", bounds);
+    const auto bounds_failure = source.find("script_function_failed()", bounds);
     const auto right = source.find("godot::String(\"right\")", bounds);
     REQUIRE(direct != std::string::npos);
     REQUIRE(bounds != std::string::npos);
@@ -5525,16 +5543,14 @@ TEST_CASE("compiler contains fatal expression faults and preserves Godot assignm
 
     const auto logical = source.find("::logical(");
     const auto logical_bounds = source.find("gdpp::runtime::checked_array_get", logical);
-    const auto logical_failure =
-        source.find("gdpp::runtime::script_function_failed()", logical_bounds);
+    const auto logical_failure = source.find("script_function_failed()", logical_bounds);
     const auto logical_right = source.find("godot::String(\"logical-right\")", logical_bounds);
     REQUIRE(logical_bounds < logical_failure);
     REQUIRE(logical_failure < logical_right);
 
     const auto conditional = source.find("::conditional(");
     const auto condition_bounds = source.find("gdpp::runtime::checked_array_get", conditional);
-    const auto condition_failure =
-        source.find("gdpp::runtime::script_function_failed()", condition_bounds);
+    const auto condition_failure = source.find("script_function_failed()", condition_bounds);
     const auto selected = source.find("godot::String(\"selected\")", condition_bounds);
     const auto fallback = source.find("godot::String(\"fallback\")", condition_bounds);
     REQUIRE(condition_bounds < condition_failure);
@@ -5575,7 +5591,7 @@ TEST_CASE("specialized calls stop argument evaluation at the first fatal fault")
                                           const std::string& invocation) {
         const auto start = source.find("::" + method + "(");
         const auto bounds = source.find("gdpp::runtime::checked_array_get", start);
-        const auto failure = source.find("gdpp::runtime::script_function_failed()", bounds);
+        const auto failure = source.find("script_function_failed()", bounds);
         const auto last = source.find("godot::String(\"" + last_marker + "\")", bounds);
         const auto call = source.find(invocation, last);
         REQUIRE(start != std::string::npos);

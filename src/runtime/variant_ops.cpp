@@ -43,9 +43,11 @@ class CoroutineState final {
     bool exposed{false};
 };
 
-namespace {
-
+namespace detail {
 thread_local ScriptFaultState* active_script_fault = nullptr;
+} // namespace detail
+
+namespace {
 
 godot::ObjectID variant_object_id(const godot::Variant& value) {
     // Calling the conversion operator explicitly is intentional. MSVC otherwise considers the
@@ -206,39 +208,11 @@ godot::String CoroutineFunctionState::_to_string() const {
            godot::String::num_int64(static_cast<std::int64_t>(get_instance_id())) + ">";
 }
 
-ScriptFunctionScope::ScriptFunctionScope() noexcept
-    : state_{&local_}, previous_{active_script_fault} {
-    active_script_fault = state_;
-}
-
-ScriptFunctionScope::ScriptFunctionScope(const ScriptFaultPolicy policy) noexcept
-    : state_{policy == ScriptFaultPolicy::inherit_existing && active_script_fault
-                 ? active_script_fault
-                 : &local_},
-      previous_{active_script_fault} {
-    active_script_fault = state_;
-}
-
 ScriptFunctionScope::ScriptFunctionScope(const CoroutineStatePtr& coroutine) noexcept
-    : state_{coroutine_script_fault(coroutine)}, previous_{active_script_fault} {
+    : state_{coroutine_script_fault(coroutine)}, previous_{detail::active_script_fault} {
     if (!state_)
         state_ = &local_;
-    active_script_fault = state_;
-}
-
-ScriptFunctionScope::~ScriptFunctionScope() { active_script_fault = previous_; }
-
-bool ScriptFunctionScope::failed() const noexcept {
-    return state_ && state_->failed.load(std::memory_order_relaxed);
-}
-
-void mark_script_failure() noexcept {
-    if (active_script_fault)
-        active_script_fault->failed.store(true, std::memory_order_relaxed);
-}
-
-bool script_function_failed() noexcept {
-    return active_script_fault && active_script_fault->failed.load(std::memory_order_relaxed);
+    detail::active_script_fault = state_;
 }
 
 bool ScriptInitializationState::run(const char* failure_message,

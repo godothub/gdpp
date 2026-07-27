@@ -2164,9 +2164,19 @@ std::string CodeGenerator::emit_parameter_initializer(const typed::Parameter& pa
                            parameter.span);
         return {};
     }
-    const auto argument = std::string{arguments} + "[" + std::to_string(index) + "]";
+    const auto argument = "gdpp::runtime::local_callable_argument<" + std::to_string(index) + ">(" +
+                          std::string{arguments} + ")";
+    const Type variant_type_descriptor{TypeKind::variant, "Variant"};
+    const bool direct_builtin =
+        !parameter.type.is_dynamic() && !describe_container_type(parameter.type) &&
+        !parameter.type.is_packed_array() && parameter.type.kind != TypeKind::object &&
+        classify_conversion(parameter.type, variant_type_descriptor) == ConversionKind::dynamic;
     const auto supplied =
-        emit_conversion(parameter.type, {TypeKind::variant, "Variant"}, argument, &parameter.span);
+        direct_builtin
+            ? "gdpp::runtime::local_callable_typed_argument<" + cpp_type(parameter.type) + ", " +
+                  std::to_string(index) + ">(" + std::string{arguments} + ", " +
+                  variant_type(parameter.type) + ", " + script_location(parameter.span) + ")"
+            : emit_conversion(parameter.type, variant_type_descriptor, argument, &parameter.span);
     std::string value = supplied;
     if (parameter.default_value) {
         value = std::string{arguments} + ".size() > " + std::to_string(index) + " ? " + supplied +
@@ -2244,9 +2254,10 @@ std::string CodeGenerator::emit_parameter_initialization_chain(
             arguments.empty()
                 ? "!gdpp::runtime::is_default_argument(" + parameter_native_name(parameter) + ")"
                 : std::string{arguments} + ".size() > " + std::to_string(index);
-        const auto supplied_value =
-            arguments.empty() ? parameter_native_name(parameter)
-                              : std::string{arguments} + "[" + std::to_string(index) + "]";
+        const auto supplied_value = arguments.empty() ? parameter_native_name(parameter)
+                                                      : "gdpp::runtime::local_callable_argument<" +
+                                                            std::to_string(index) + ">(" +
+                                                            std::string{arguments} + ")";
         result += prefix + "if (" + supplied + ") {\n";
         result += indent(indentation + 1) + commit + "(gdpp::runtime::to_variant(" +
                   supplied_value + "));\n";
@@ -2887,12 +2898,10 @@ std::string CodeGenerator::emit_integer_operation(const std::string_view operati
         evaluated = "(" + left + " " + std::string{operation} + " " + right + ")";
     const auto evaluated_name = "_gdpp_integer_result_" + suffix;
     return "([&]() -> " + cpp_type(result_type) + " { const int64_t " + left + " = " +
-           std::move(left_value) +
-           "; if (gdpp::runtime::script_function_failed()) return {}; const int64_t " + right +
-           " = " + std::move(right_value) +
-           "; if (gdpp::runtime::script_function_failed()) return {}; const auto " +
-           evaluated_name + " = " + evaluated +
-           "; if (gdpp::runtime::script_function_failed()) return {}; return " + evaluated_name +
+           std::move(left_value) + "; if (script_function_failed()) return {}; const int64_t " +
+           right + " = " + std::move(right_value) +
+           "; if (script_function_failed()) return {}; const auto " + evaluated_name + " = " +
+           evaluated + "; if (script_function_failed()) return {}; return " + evaluated_name +
            "; }())";
 }
 
@@ -3185,14 +3194,14 @@ std::string CodeGenerator::emit_expression(const typed::Expression& expression) 
             const auto right_name = "_gdpp_logic_right_" + suffix;
             std::string result = "([&]() -> bool { const bool " + left_name + " = " +
                                  emit_truthy(*expression.operands.at(0)) +
-                                 "; if (gdpp::runtime::script_function_failed()) return false; ";
+                                 "; if (script_function_failed()) return false; ";
             if (expression.value == "and")
                 result += "if (!" + left_name + ") return false; ";
             else
                 result += "if (" + left_name + ") return true; ";
             result += "const bool " + right_name + " = " + emit_truthy(*expression.operands.at(1)) +
-                      "; if (gdpp::runtime::script_function_failed()) return false; return " +
-                      right_name + "; }())";
+                      "; if (script_function_failed()) return false; return " + right_name +
+                      "; }())";
             return result;
         }
         const auto emit_ordered_operands = [&](const auto& evaluate) {
@@ -3203,13 +3212,11 @@ std::string CodeGenerator::emit_expression(const typed::Expression& expression) 
             auto right = emit_expression(*expression.operands.at(1));
             const auto result_name = "_gdpp_binary_result_" + suffix;
             return "([&]() -> " + cpp_type(expression.type) + " { const auto " + left_name + " = " +
-                   std::move(left) +
-                   "; if (gdpp::runtime::script_function_failed()) return {}; const auto " +
+                   std::move(left) + "; if (script_function_failed()) return {}; const auto " +
                    right_name + " = " + std::move(right) +
-                   "; if (gdpp::runtime::script_function_failed()) return {}; const auto " +
-                   result_name + " = " + evaluate(left_name, right_name) +
-                   "; if (gdpp::runtime::script_function_failed()) return {}; return " +
-                   result_name + "; }())";
+                   "; if (script_function_failed()) return {}; const auto " + result_name + " = " +
+                   evaluate(left_name, right_name) +
+                   "; if (script_function_failed()) return {}; return " + result_name + "; }())";
         };
         auto operation = expression.value;
         if (operation == "and")
@@ -3436,18 +3443,17 @@ std::string CodeGenerator::emit_expression(const typed::Expression& expression) 
         const auto value = "_gdpp_conditional_value_" + suffix;
         return "([&]() -> " + cpp_type(expression.type) + " { const bool " + condition + " = " +
                emit_truthy(*expression.operands.at(1)) +
-               "; if (gdpp::runtime::script_function_failed()) return {}; if (" + condition +
-               ") { const auto " + value + " = " + emit_branch(*expression.operands.at(0)) +
-               "; if (gdpp::runtime::script_function_failed()) return {}; return " + value +
-               "; } const auto " + value + " = " + emit_branch(*expression.operands.at(2)) +
-               "; if (gdpp::runtime::script_function_failed()) return {}; return " + value +
-               "; }())";
+               "; if (script_function_failed()) return {}; if (" + condition + ") { const auto " +
+               value + " = " + emit_branch(*expression.operands.at(0)) +
+               "; if (script_function_failed()) return {}; return " + value + "; } const auto " +
+               value + " = " + emit_branch(*expression.operands.at(2)) +
+               "; if (script_function_failed()) return {}; return " + value + "; }())";
     }
     case typed::ExpressionKind::call: {
         const auto expression_failure_return =
             !expression.coroutine_call && expression.type.kind == TypeKind::void_type
-                ? std::string{"if (gdpp::runtime::script_function_failed()) return; "}
-                : std::string{"if (gdpp::runtime::script_function_failed()) return {}; "};
+                ? std::string{"if (script_function_failed()) return; "}
+                : std::string{"if (script_function_failed()) return {}; "};
         if (expression.resolution == typed::ResolutionKind::script_resource)
             return cpp_type(expression.type) + "{}";
         const auto& callee = *expression.operands.at(0);
@@ -3463,7 +3469,7 @@ std::string CodeGenerator::emit_expression(const typed::Expression& expression) 
                 invocation += "const godot::Variant _gdpp_super_argument_" + suffix + "_" +
                               std::to_string(index - 1) + " = gdpp::runtime::to_variant(" +
                               emit_expression(*expression.operands[index]) +
-                              "); if (gdpp::runtime::script_function_failed()) return {}; ";
+                              "); if (script_function_failed()) return {}; ";
             }
             invocation +=
                 "return gdpp::runtime::call_attached_native_base(" + self_object_expression() +
@@ -3473,7 +3479,7 @@ std::string CodeGenerator::emit_expression(const typed::Expression& expression) 
             for (std::size_t index = 1; index < expression.operands.size(); ++index) {
                 invocation += ", _gdpp_super_argument_" + suffix + "_" + std::to_string(index - 1);
             }
-            invocation += "); if (gdpp::runtime::script_function_failed()) return {}; return "
+            invocation += "); if (script_function_failed()) return {}; return "
                           "_gdpp_super_result_" +
                           suffix + "; }())";
             const auto call_begin =
@@ -3494,7 +3500,7 @@ std::string CodeGenerator::emit_expression(const typed::Expression& expression) 
                 invocation += "const godot::Variant _gdpp_static_argument_" + suffix + "_" +
                               std::to_string(index - 1) + " = gdpp::runtime::to_variant(" +
                               emit_expression(*expression.operands[index]) +
-                              "); if (gdpp::runtime::script_function_failed()) return {}; ";
+                              "); if (script_function_failed()) return {}; ";
             }
             invocation += "return gdpp::runtime::call_external_static_at(" +
                           script_location(expression.span) + ", " +
@@ -3503,7 +3509,7 @@ std::string CodeGenerator::emit_expression(const typed::Expression& expression) 
             for (std::size_t index = 1; index < expression.operands.size(); ++index) {
                 invocation += ", _gdpp_static_argument_" + suffix + "_" + std::to_string(index - 1);
             }
-            invocation += "); if (gdpp::runtime::script_function_failed()) return {}; return "
+            invocation += "); if (script_function_failed()) return {}; return "
                           "_gdpp_static_result_" +
                           suffix + "; }())";
             const auto call_begin =
@@ -3955,12 +3961,12 @@ std::string CodeGenerator::emit_expression(const typed::Expression& expression) 
             const auto callable_name = "_gdpp_callable_" + suffix;
             std::string result = "([&]() -> godot::Variant { auto &&" + callable_name + " = " +
                                  emit_expression(*callee.operands.at(0)) +
-                                 "; if (gdpp::runtime::script_function_failed()) return {}; ";
+                                 "; if (script_function_failed()) return {}; ";
             for (std::size_t index = 1; index < expression.operands.size(); ++index) {
                 result += "const auto _gdpp_callable_argument_" + suffix + "_" +
                           std::to_string(index - 1) + " = " +
                           emit_expression(*expression.operands[index]) +
-                          "; if (gdpp::runtime::script_function_failed()) return {}; ";
+                          "; if (script_function_failed()) return {}; ";
             }
             result += "const godot::Variant _gdpp_callable_result_" + suffix +
                       " = gdpp::runtime::call_callable_at(" + script_location(expression.span) +
@@ -3971,7 +3977,7 @@ std::string CodeGenerator::emit_expression(const typed::Expression& expression) 
                           suffix + "_" + std::to_string(index - 1) + ")";
             }
             return result +
-                   "); if (gdpp::runtime::script_function_failed()) return {}; return "
+                   "); if (script_function_failed()) return {}; return "
                    "_gdpp_callable_result_" +
                    suffix + "; }())";
         }
@@ -4010,14 +4016,14 @@ std::string CodeGenerator::emit_expression(const typed::Expression& expression) 
                                   : callee.kind == typed::ExpressionKind::identifier
                                       ? self_object_expression()
                                       : emit_expression(*callee.operands.at(0))) +
-                                 "); if (gdpp::runtime::script_function_failed()) return {}; "
+                                 "); if (script_function_failed()) return {}; "
                                  "static const godot::StringName " +
                                  method_name + " = " + godot_string_name(callee.value) + "; ";
             for (std::size_t index = 1; index < expression.operands.size(); ++index) {
                 result += "const godot::Variant _gdpp_dynamic_argument_" + suffix + "_" +
                           std::to_string(index - 1) + " = gdpp::runtime::to_variant(" +
                           emit_expression(*expression.operands[index]) +
-                          "); if (gdpp::runtime::script_function_failed()) return {}; ";
+                          "); if (script_function_failed()) return {}; ";
             }
             result += "const godot::Variant _gdpp_dynamic_result_" + suffix +
                       " = gdpp::runtime::call_dynamic_at(" + script_location(expression.span) +
@@ -4026,7 +4032,7 @@ std::string CodeGenerator::emit_expression(const typed::Expression& expression) 
                 result += ", _gdpp_dynamic_argument_" + suffix + "_" + std::to_string(index - 1);
             }
             const auto invocation = result +
-                                    "); if (gdpp::runtime::script_function_failed()) return {}; "
+                                    "); if (script_function_failed()) return {}; "
                                     "return _gdpp_dynamic_result_" +
                                     suffix + "; }())";
             return expression.coroutine_call || expression.type.is_dynamic()
@@ -4329,7 +4335,7 @@ std::string CodeGenerator::emit_expression(const typed::Expression& expression) 
                    "); return {}; } const auto "
                    "_gdpp_member_result = " +
                    access +
-                   "; if (gdpp::runtime::script_function_failed()) return {}; return "
+                   "; if (script_function_failed()) return {}; return "
                    "_gdpp_member_result; }())";
         };
         const auto connector =
@@ -4411,16 +4417,15 @@ std::string CodeGenerator::emit_expression(const typed::Expression& expression) 
             const auto value_name = "_gdpp_dynamic_value_" + suffix;
             return "([&]() -> godot::Variant { godot::Variant " + target_name + " = " +
                    "gdpp::runtime::to_variant(" + emit_expression(*expression.operands.at(0)) +
-                   "); if (gdpp::runtime::script_function_failed()) return {}; const "
+                   "); if (script_function_failed()) return {}; const "
                    "godot::Variant " +
                    key_name + " = gdpp::runtime::to_variant(" +
                    emit_expression(*expression.operands.at(1)) +
-                   "); if (gdpp::runtime::script_function_failed()) return {}; const "
+                   "); if (script_function_failed()) return {}; const "
                    "godot::Variant " +
                    value_name + " = gdpp::runtime::get_key(" + target_name + ", " + key_name +
                    ", " + script_location(expression.span) +
-                   "); if (gdpp::runtime::script_function_failed()) return {}; return " +
-                   value_name + "; }())";
+                   "); if (script_function_failed()) return {}; return " + value_name + "; }())";
         }
         const auto suffix = std::to_string(temporary_counter_++);
         const auto target_name = "_gdpp_subscript_target_" + suffix;
@@ -4428,14 +4433,12 @@ std::string CodeGenerator::emit_expression(const typed::Expression& expression) 
         const auto value_name = "_gdpp_subscript_value_" + suffix;
         return "([&]() -> " + cpp_type(expression.type) + " { auto &&" + target_name + " = " +
                emit_expression(*expression.operands.at(0)) +
-               "; if (gdpp::runtime::script_function_failed()) return {}; const auto " +
-               index_name + " = " + emit_expression(*expression.operands.at(1)) +
-               "; if (gdpp::runtime::script_function_failed()) return {}; const auto " +
-               value_name + " = " +
+               "; if (script_function_failed()) return {}; const auto " + index_name + " = " +
+               emit_expression(*expression.operands.at(1)) +
+               "; if (script_function_failed()) return {}; const auto " + value_name + " = " +
                emit_subscript_read(expression.operands.at(0)->type, expression.type, target_name,
                                    index_name, expression.span) +
-               "; if (gdpp::runtime::script_function_failed()) return {}; return " + value_name +
-               "; }())";
+               "; if (script_function_failed()) return {}; return " + value_name + "; }())";
     }
     case typed::ExpressionKind::array_literal: {
         const auto descriptor = describe_container_type(expression.type);
@@ -4459,7 +4462,7 @@ std::string CodeGenerator::emit_expression(const typed::Expression& expression) 
                 emitted = "gdpp::runtime::to_variant(" + emitted + ")";
             }
             result += "{ const auto " + value + " = " + emitted +
-                      "; if (gdpp::runtime::script_function_failed()) return {}; " + array + "[" +
+                      "; if (script_function_failed()) return {}; " + array + "[" +
                       std::to_string(index) + "] = " + value + "; } ";
         }
         return result + "return " + array + "; }())";
@@ -4491,9 +4494,8 @@ std::string CodeGenerator::emit_expression(const typed::Expression& expression) 
                 emitted_value = "gdpp::runtime::to_variant(" + emitted_value + ")";
             }
             result += "{ const auto " + key + " = " + emitted_key +
-                      "; if (gdpp::runtime::script_function_failed()) return {}; const auto " +
-                      value + " = " + emitted_value +
-                      "; if (gdpp::runtime::script_function_failed()) return {}; " + dictionary +
+                      "; if (script_function_failed()) return {}; const auto " + value + " = " +
+                      emitted_value + "; if (script_function_failed()) return {}; " + dictionary +
                       ".set(" + key + ", " + value + "); } ";
         }
         return result + "return " + dictionary + "; }())";
@@ -4524,11 +4526,10 @@ std::string CodeGenerator::emit_expression(const typed::Expression& expression) 
             }
             result += "    return ";
         }
-        result += "gdpp::runtime::make_local_callable(";
+        result += "gdpp::runtime::make_local_callable<" + std::to_string(required) + ", " +
+                  std::to_string(lambda.parameters.size()) + ", " +
+                  (lambda.rest_parameter ? "true" : "false") + ">(";
         result += lambda.owner_bound ? self_object_expression() : "nullptr";
-        result += ", " + std::to_string(required) + ", " + std::to_string(lambda.parameters.size());
-        if (lambda.rest_parameter)
-            result += ", true";
         // GDScript captures the value visible when the Callable is created, then copies that
         // snapshot into a fresh invocation frame for every call. Scalar writes inside one call
         // therefore do not persist into the next call, while Array/Dictionary/Object copies keep
@@ -4703,14 +4704,25 @@ std::string CodeGenerator::emit_script_function_scope(const std::size_t indentat
         constructor = "(" + current_coroutine_state_ + ")";
     else if (inherit_existing)
         constructor = "(gdpp::runtime::ScriptFaultPolicy::inherit_existing)";
-    return indent(indentation) + "gdpp::runtime::ScriptFunctionScope _gdpp_script_function_scope" +
-           constructor + ";\n";
+    auto result = indent(indentation) +
+                  "gdpp::runtime::ScriptFunctionScope _gdpp_script_function_scope" + constructor +
+                  ";\n";
+    // A synchronous invocation owns its fault state for the entire native call. Read that state
+    // directly so Release hot loops do not perform a TLS lookup after every fault boundary.
+    // Coroutine continuations can outlive this C++ scope and therefore keep using the thread-local
+    // accessor backed by their shared CoroutineState.
+    if (!current_coroutine_abi_) {
+        result += indent(indentation) + "[[maybe_unused]] const auto script_function_failed = "
+                                        "[&_gdpp_script_function_scope]() noexcept { "
+                                        "return _gdpp_script_function_scope.failed(); };\n";
+    }
+    return result;
 }
 
 std::string CodeGenerator::emit_script_failure_return(const std::size_t indentation,
                                                       const bool continuation_context) const {
     const auto prefix = indent(indentation);
-    std::string result = prefix + "if (gdpp::runtime::script_function_failed()) {\n";
+    std::string result = prefix + "if (script_function_failed()) {\n";
     if (current_coroutine_abi_) {
         result += coroutine_return(indentation + 1, "godot::Variant{}", continuation_context);
     } else if (in_callable_lambda_) {
@@ -5192,26 +5204,24 @@ std::string CodeGenerator::emit_async_statements(
             // iterator and body capture different storage.
             result += prefix + "{\n";
             result += lift_async_loop_locals(statement, indentation + 1);
-            result += indent(indentation + 1) + "const auto " + iterable +
-                      " = std::make_shared<godot::Variant>(" +
-                      emit_expression(*statement.condition) + ");\n" + indent(indentation + 1) +
-                      "if (gdpp::runtime::script_function_failed()) {\n" +
-                      async_return(indentation + 2, continuation_context) +
-                      indent(indentation + 1) + "}\n" + indent(indentation + 1) + "const auto " +
-                      iterator + " = std::make_shared<godot::Variant>();\n" +
-                      indent(indentation + 1) + "const auto " + available +
-                      " = std::make_shared<bool>(gdpp::runtime::iter_init(*" + iterable + ", *" +
-                      iterator + ", " + script_location(statement.condition->span) + "));\n" +
-                      indent(indentation + 1) + "if (gdpp::runtime::script_function_failed()) {\n" +
-                      async_return(indentation + 2, continuation_context) +
-                      indent(indentation + 1) + "}\n" + indent(indentation + 1) + "const auto " +
-                      loop + " = std::make_shared<std::function<void()>>();\n" +
-                      indent(indentation + 1) + "const std::weak_ptr<std::function<void()>> " +
-                      weak_loop + " = " + loop + ";\n" + indent(indentation + 1) + "*" + loop +
-                      " = [=]() mutable {\n" + indent(indentation + 2) + "const auto " +
-                      keep_alive + " = " + weak_loop + ".lock();\n" + indent(indentation + 2) +
-                      "if (!" + keep_alive + ") return;\n" + indent(indentation + 2) + "if (!*" +
-                      available + ") {\n";
+            result +=
+                indent(indentation + 1) + "const auto " + iterable +
+                " = std::make_shared<godot::Variant>(" + emit_expression(*statement.condition) +
+                ");\n" + indent(indentation + 1) + "if (script_function_failed()) {\n" +
+                async_return(indentation + 2, continuation_context) + indent(indentation + 1) +
+                "}\n" + indent(indentation + 1) + "const auto " + iterator +
+                " = std::make_shared<godot::Variant>();\n" + indent(indentation + 1) +
+                "const auto " + available + " = std::make_shared<bool>(gdpp::runtime::iter_init(*" +
+                iterable + ", *" + iterator + ", " + script_location(statement.condition->span) +
+                "));\n" + indent(indentation + 1) + "if (script_function_failed()) {\n" +
+                async_return(indentation + 2, continuation_context) + indent(indentation + 1) +
+                "}\n" + indent(indentation + 1) + "const auto " + loop +
+                " = std::make_shared<std::function<void()>>();\n" + indent(indentation + 1) +
+                "const std::weak_ptr<std::function<void()>> " + weak_loop + " = " + loop + ";\n" +
+                indent(indentation + 1) + "*" + loop + " = [=]() mutable {\n" +
+                indent(indentation + 2) + "const auto " + keep_alive + " = " + weak_loop +
+                ".lock();\n" + indent(indentation + 2) + "if (!" + keep_alive + ") return;\n" +
+                indent(indentation + 2) + "if (!*" + available + ") {\n";
             result += emit_async_statements({}, indentation + 3, 0, continuation, terminal, true,
                                             loop_control);
             result += async_return(indentation + 3, true) + indent(indentation + 2) + "}\n" +
@@ -5223,12 +5233,11 @@ std::string CodeGenerator::emit_async_statements(
                                       "gdpp::runtime::iter_get(*" + iterable + ", *" + iterator +
                                           ", " + script_location(statement.condition->span) + ")",
                                       &statement.span) +
-                      ";\n" + indent(indentation + 2) +
-                      "if (gdpp::runtime::script_function_failed()) return;\n";
+                      ";\n" + indent(indentation + 2) + "if (script_function_failed()) return;\n";
             const auto advance =
                 "*" + available + " = gdpp::runtime::iter_next(*" + iterable + ", *" + iterator +
                 ", " + script_location(statement.condition->span) +
-                "); if (gdpp::runtime::script_function_failed()) return; (*" + keep_alive + ")();";
+                "); if (script_function_failed()) return; (*" + keep_alive + ")();";
             auto nested_loop = std::make_shared<AsyncLoopControl>();
             nested_loop->break_tails = continuation;
             nested_loop->break_terminal = terminal;
@@ -7053,7 +7062,7 @@ void CodeGenerator::emit_inner_class_definition(const typed::Class& declaration,
             if (!field.is_constant && field.is_static) {
                 source << "            (void)_gdpp_static_" << sanitize_identifier(field.name)
                        << "_storage();\n"
-                       << "            if (gdpp::runtime::script_function_failed()) return;\n";
+                       << "            if (script_function_failed()) return;\n";
             }
         }
         if (has_static_initializer)
@@ -7102,11 +7111,10 @@ void CodeGenerator::emit_inner_class_definition(const typed::Class& declaration,
                << "const " << type << "& " << native_name << "::" << name << "() {\n"
                << "    gdpp::runtime::ScriptFunctionScope _gdpp_script_initialization_scope("
                   "gdpp::runtime::ScriptFaultPolicy::inherit_existing);\n"
-               << (has_static_initialization
-                       ? "    (void)_gdpp_ensure_static_initialized();\n"
-                         "    if (gdpp::runtime::script_function_failed()) return " +
-                             storage + ";\n"
-                       : "")
+               << (has_static_initialization ? "    (void)_gdpp_ensure_static_initialized();\n"
+                                               "    if (script_function_failed()) return " +
+                                                   storage + ";\n"
+                                             : "")
                << "    std::lock_guard<std::mutex> lock(_gdpp_constant_" << name << "_mutex());\n"
                << "    if (!_gdpp_constant_" << name << "_ready()) {\n"
                << "        "
@@ -7115,7 +7123,7 @@ void CodeGenerator::emit_inner_class_definition(const typed::Class& declaration,
                                                           emit_expression(*field.initializer),
                                                           &field.initializer->span))
                << ";\n"
-               << "        if (gdpp::runtime::script_function_failed()) return " << storage << ";\n"
+               << "        if (script_function_failed()) return " << storage << ";\n"
                << "        _gdpp_constant_" << name << "_ready() = true;\n"
                << "    }\n"
                << "    return _gdpp_constant_" << name << "_storage();\n}\n\n";
@@ -7186,7 +7194,7 @@ void CodeGenerator::emit_inner_class_definition(const typed::Class& declaration,
                                                   std::move(value))
                        << ";\n"
                        << (editor_safe || tool_mode ? "    " : "        ")
-                       << "if (gdpp::runtime::script_function_failed()) return;\n";
+                       << "if (script_function_failed()) return;\n";
                 if (!editor_safe && !tool_mode)
                     source << "    }\n";
             }
@@ -7205,18 +7213,18 @@ void CodeGenerator::emit_inner_class_definition(const typed::Class& declaration,
               "gdpp::runtime::ScriptFaultPolicy::inherit_existing);\n";
     if (has_static_initialization) {
         source << "    (void)_gdpp_ensure_static_initialized();\n"
-               << "    if (gdpp::runtime::script_function_failed()) return;\n";
+               << "    if (script_function_failed()) return;\n";
     }
     if (std::any_of(declaration.fields.begin(), declaration.fields.end(), cached_preload_field)) {
         source << "    _gdpp_preload_resources();\n"
-               << "    if (gdpp::runtime::script_function_failed()) return;\n";
+               << "    if (script_function_failed()) return;\n";
     }
     source << "}\n\n"
            << "void " << native_name << "::_gdpp_initialize_instance() {\n"
            << "    gdpp::runtime::ScriptFunctionScope _gdpp_script_initialization_scope("
               "gdpp::runtime::ScriptFaultPolicy::inherit_existing);\n"
            << "    " << base_cpp << "::_gdpp_initialize_instance();\n"
-           << "    if (gdpp::runtime::script_function_failed()) return;\n";
+           << "    if (script_function_failed()) return;\n";
     if (needs_editor_hint)
         source << "    const bool gdpp_editor_hint = gdpp::runtime::is_editor_hint();\n";
     emit_instance_initializers();
@@ -7225,7 +7233,7 @@ void CodeGenerator::emit_inner_class_definition(const typed::Class& declaration,
            << "    gdpp::runtime::ScriptFunctionScope _gdpp_script_initialization_scope("
               "gdpp::runtime::ScriptFaultPolicy::inherit_existing);\n"
            << "    " << base_cpp << "::_gdpp_initialize_onready();\n"
-           << "    if (gdpp::runtime::script_function_failed()) return;\n";
+           << "    if (script_function_failed()) return;\n";
     for (const auto& field : declaration.fields) {
         if (field.onready && field.initializer) {
             source << "    "
@@ -7234,7 +7242,7 @@ void CodeGenerator::emit_inner_class_definition(const typed::Class& declaration,
                                                               emit_expression(*field.initializer),
                                                               &field.initializer->span))
                    << ";\n"
-                   << "    if (gdpp::runtime::script_function_failed()) return;\n";
+                   << "    if (script_function_failed()) return;\n";
         }
     }
     source << "}\n\n";
@@ -7308,7 +7316,7 @@ void CodeGenerator::emit_inner_class_definition(const typed::Class& declaration,
                                                           emit_expression(*field.initializer),
                                                           &field.initializer->span))
                << ";\n"
-               << prefix << "if (gdpp::runtime::script_function_failed()) return;\n";
+               << prefix << "if (script_function_failed()) return;\n";
     }
     if (has_cached_preloads) {
         source << "        },\n"
@@ -7476,7 +7484,7 @@ void CodeGenerator::emit_inner_class_definition(const typed::Class& declaration,
             source << "    gdpp::runtime::ScriptFunctionScope _gdpp_script_initialization_scope("
                       "gdpp::runtime::ScriptFaultPolicy::inherit_existing);\n"
                    << "    (void)_gdpp_ensure_static_initialized();\n"
-                   << "    if (gdpp::runtime::script_function_failed()) return;\n";
+                   << "    if (script_function_failed()) return;\n";
         }
         if (field.setter && !field.setter->method.empty()) {
             source << "    " << sanitize_identifier(field.setter->method) << "(value);\n";
@@ -8459,7 +8467,7 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
         for (const auto& header_file : dependency_headers)
             source << "#include \"" << header_file << "\"\n";
     }
-    source << '\n';
+    source << "\nusing gdpp::runtime::script_function_failed;\n\n";
     attached_script_ = true;
     for (const auto& [qualified, declaration] : ordered_inner_classes) {
         emit_inner_class_definition(*declaration, source, inner_native_names_.at(qualified),
@@ -8485,7 +8493,7 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
             if (!variable.is_constant && variable.is_static) {
                 source << "            (void)_gdpp_static_" << sanitize_identifier(variable.name)
                        << "_storage();\n"
-                       << "            if (gdpp::runtime::script_function_failed()) return;\n";
+                       << "            if (script_function_failed()) return;\n";
             }
         }
         if (has_static_initializer)
@@ -8542,11 +8550,10 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
                << "const " << type << "& " << unit.class_name << "::" << name << "() {\n"
                << "    gdpp::runtime::ScriptFunctionScope _gdpp_script_initialization_scope("
                   "gdpp::runtime::ScriptFaultPolicy::inherit_existing);\n"
-               << (has_static_initialization
-                       ? "    (void)_gdpp_ensure_static_initialized();\n"
-                         "    if (gdpp::runtime::script_function_failed()) return " +
-                             storage + ";\n"
-                       : "")
+               << (has_static_initialization ? "    (void)_gdpp_ensure_static_initialized();\n"
+                                               "    if (script_function_failed()) return " +
+                                                   storage + ";\n"
+                                             : "")
                << "    std::lock_guard<std::mutex> lock(_gdpp_constant_" << name << "_mutex());\n"
                << "    if (!_gdpp_constant_" << name << "_ready()) {\n"
                << "        ";
@@ -8560,7 +8567,7 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
         }
         source << emit_storage_assignment(variable.type, storage, std::move(constant_value))
                << ";\n"
-               << "        if (gdpp::runtime::script_function_failed()) return " << storage << ";\n"
+               << "        if (script_function_failed()) return " << storage << ";\n"
                << "        _gdpp_constant_" << name << "_ready() = true;\n"
                << "    }\n"
                << "    return _gdpp_constant_" << name << "_storage();\n}\n\n";
@@ -8641,7 +8648,7 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
                                                   std::move(value))
                        << ";\n"
                        << (editor_safe || module.is_tool ? "    " : "        ")
-                       << "if (gdpp::runtime::script_function_failed()) return;\n";
+                       << "if (script_function_failed()) return;\n";
                 if (!editor_safe && !module.is_tool)
                     source << "    }\n";
             }
@@ -8677,18 +8684,18 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
                   "gdpp::runtime::ScriptFaultPolicy::inherit_existing);\n";
         if (has_static_initialization) {
             source << "    (void)_gdpp_ensure_static_initialized();\n"
-                   << "    if (gdpp::runtime::script_function_failed()) return;\n";
+                   << "    if (script_function_failed()) return;\n";
         }
         if (std::any_of(module.fields.begin(), module.fields.end(), cached_preload_field)) {
             source << "    _gdpp_preload_resources();\n"
-                   << "    if (gdpp::runtime::script_function_failed()) return;\n";
+                   << "    if (script_function_failed()) return;\n";
         }
         source << "}\n\nvoid " << unit.class_name << "::_gdpp_initialize_instance() {\n"
                << "    gdpp::runtime::ScriptFunctionScope _gdpp_script_initialization_scope("
                   "gdpp::runtime::ScriptFaultPolicy::inherit_existing);\n";
         if (!native_base_class.empty()) {
             source << "    " << native_base_class << "::_gdpp_initialize_instance();\n"
-                   << "    if (gdpp::runtime::script_function_failed()) return;\n";
+                   << "    if (script_function_failed()) return;\n";
         }
         if (needs_editor_hint)
             source << "    const bool gdpp_editor_hint = gdpp::runtime::is_editor_hint();\n";
@@ -8699,7 +8706,7 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
                << "    gdpp::runtime::ScriptFunctionScope _gdpp_script_initialization_scope("
                   "gdpp::runtime::ScriptFaultPolicy::inherit_existing);\n"
                << "    " << base_cpp << "::_gdpp_initialize_onready();\n"
-               << "    if (gdpp::runtime::script_function_failed()) return;\n";
+               << "    if (script_function_failed()) return;\n";
         for (const auto& field : module.fields) {
             if (field.onready && field.initializer) {
                 source << "    "
@@ -8709,7 +8716,7 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
                                               emit_expression(*field.initializer),
                                               &field.initializer->span))
                        << ";\n"
-                       << "    if (gdpp::runtime::script_function_failed()) return;\n";
+                       << "    if (script_function_failed()) return;\n";
             }
         }
         source << "}\n\n";
@@ -8742,7 +8749,7 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
                   "gdpp::runtime::ScriptFaultPolicy::inherit_existing);\n";
         if (has_static_initialization) {
             source << "    (void)_gdpp_ensure_static_initialized();\n"
-                   << "    if (gdpp::runtime::script_function_failed()) return;\n";
+                   << "    if (script_function_failed()) return;\n";
         }
         if (needs_editor_hint || (default_calls_initializer && !module.is_tool))
             source << "    const bool gdpp_editor_hint = gdpp::runtime::is_editor_hint();\n";
@@ -8750,7 +8757,7 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
         if (std::any_of(module.fields.begin(), module.fields.end(), cached_preload_field)) {
             source << (module.is_tool ? "    _gdpp_preload_resources();\n"
                                       : "    if (!gdpp_editor_hint) _gdpp_preload_resources();\n");
-            source << "    if (gdpp::runtime::script_function_failed()) return;\n";
+            source << "    if (script_function_failed()) return;\n";
         }
         emit_instance_initializers();
         if (has_native_rpc)
@@ -8790,7 +8797,7 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
                   "gdpp::runtime::ScriptFaultPolicy::inherit_existing);\n";
         if (has_static_initialization) {
             source << "    (void)_gdpp_ensure_static_initialized();\n"
-                   << "    if (gdpp::runtime::script_function_failed()) return;\n";
+                   << "    if (script_function_failed()) return;\n";
         }
         if (!module.is_tool || is_autoload)
             source << "    const bool gdpp_editor_hint = gdpp::runtime::is_editor_hint();\n";
@@ -8798,7 +8805,7 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
         if (std::any_of(module.fields.begin(), module.fields.end(), cached_preload_field)) {
             source << (module.is_tool ? "    _gdpp_preload_resources();\n"
                                       : "    if (!gdpp_editor_hint) _gdpp_preload_resources();\n");
-            source << "    if (gdpp::runtime::script_function_failed()) return;\n";
+            source << "    if (script_function_failed()) return;\n";
         }
         emit_instance_initializers();
         if (has_native_rpc)
@@ -8876,7 +8883,7 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
                                                           emit_expression(*variable.initializer),
                                                           &variable.initializer->span))
                << ";\n"
-               << prefix << "if (gdpp::runtime::script_function_failed()) return;\n";
+               << prefix << "if (script_function_failed()) return;\n";
     }
     if (has_cached_preloads) {
         source << "        },\n"
@@ -9071,7 +9078,7 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
             source << "    gdpp::runtime::ScriptFunctionScope _gdpp_script_initialization_scope("
                       "gdpp::runtime::ScriptFaultPolicy::inherit_existing);\n"
                    << "    (void)_gdpp_ensure_static_initialized();\n"
-                   << "    if (gdpp::runtime::script_function_failed()) return;\n";
+                   << "    if (script_function_failed()) return;\n";
         }
         if (variable.setter) {
             if (!variable.setter->method.empty()) {
