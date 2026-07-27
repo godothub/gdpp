@@ -569,10 +569,12 @@ local_callable_typed_argument(const LocalCallableArguments<Values...>& arguments
     } else {
         using Source =
             std::remove_cv_t<std::remove_reference_t<decltype(arguments.template get<Index>())>>;
-        if constexpr (std::is_same_v<Target, Source>)
+        if constexpr (std::is_same_v<Target, Source>) {
             return arguments.template get<Index>();
-        return strict_builtin_storage<Target>(to_variant(arguments.template get<Index>()),
-                                              target_type, location);
+        } else {
+            return strict_builtin_storage<Target>(to_variant(arguments.template get<Index>()),
+                                                  target_type, location);
+        }
     }
 }
 
