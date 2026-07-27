@@ -63,10 +63,35 @@ func _make_delayed_adder(captured: int) -> Callable:
 
 func _ready() -> void:
     super._ready()
-    if OS.get_cmdline_user_args().has("--gdpp-fault-matrix"):
+    var user_args := OS.get_cmdline_user_args()
+    if user_args.has("--gdpp-await-default-oracle"):
+        call_deferred(&"_verify_await_default_oracle")
+    elif user_args.has("--gdpp-coroutine-accessor-oracle"):
+        call_deferred(&"_verify_coroutine_accessor_oracle")
+    elif user_args.has("--gdpp-fault-matrix"):
         call_deferred(&"_verify_fault_matrix")
     else:
         call_deferred(&"_verify_export_runtime")
+
+
+func _verify_await_default_oracle() -> void:
+    var probe: Variant = AWAIT_DEFAULT_PROBE.new()
+    var failure: String = await probe.verify(get_tree())
+    if not failure.is_empty():
+        _fail(failure)
+        return
+    print("GDPP_AWAIT_DEFAULT_AOT_RUNTIME_OK")
+    get_tree().quit(0)
+
+
+func _verify_coroutine_accessor_oracle() -> void:
+    var probe: Variant = COROUTINE_ACCESSOR_PROBE.new()
+    var failure: String = await probe.verify(get_tree())
+    if not failure.is_empty():
+        _fail(failure)
+        return
+    print("GDPP_COROUTINE_ACCESSOR_AOT_RUNTIME_OK")
+    get_tree().quit(0)
 
 
 func _verify_fault_matrix() -> void:
