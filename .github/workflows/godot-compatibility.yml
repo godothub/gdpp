@@ -17,7 +17,7 @@ on:
         default: all
         options:
           - all
-          - official-corpus
+          - project-corpus
           - 4.4.1
           - 4.5.2
           - 4.6.3
@@ -32,14 +32,14 @@ concurrency:
 
 jobs:
   engine:
-    if: ${{ inputs.target != 'official-corpus' }}
+    if: ${{ inputs.target != 'project-corpus' }}
     name: Godot / ${{ matrix.version }}
     runs-on: ubuntu-22.04
     timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
-        version: ${{ fromJSON(inputs.target != 'all' && inputs.target != 'official-corpus' && format('["{0}"]', inputs.target) || '["4.4.1","4.5.2","4.6.3","4.7.1"]') }}
+        version: ${{ fromJSON(inputs.target != 'all' && inputs.target != 'project-corpus' && format('["{0}"]', inputs.target) || '["4.4.1","4.5.2","4.6.3","4.7.1"]') }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
@@ -397,9 +397,9 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
-  official-corpus:
-    if: ${{ inputs.target == 'all' || inputs.target == 'official-corpus' }}
-    name: Official project and parser corpus
+  project-corpus:
+    if: ${{ inputs.target == 'all' || inputs.target == 'project-corpus' }}
+    name: Project and parser corpora
     runs-on: ubuntu-22.04
     timeout-minutes: 30
     steps:
@@ -416,11 +416,11 @@ jobs:
           --build-root build
           --output build/godot-frontend-update
           --check-only
-      - name: Configure pinned official corpus
-        run: cmake --preset dev -DGDPP_ENABLE_OFFICIAL_CORPUS_TESTS=ON
+      - name: Configure project and parser corpora
+        run: cmake --preset dev -DGDPP_ENABLE_COMPATIBILITY_CORPUS_TESTS=ON
       - name: Build compiler
         run: cmake --build --preset dev --parallel
-      - name: Compile pinned official Godot projects and parser corpus
+      - name: Compile current project and parser corpora
         run: >-
           ctest --preset dev --verbose --output-on-failure
           -R '^gdpp\.compatibility\.'
@@ -428,9 +428,10 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: official-compatibility-reports
+          name: compatibility-reports
           path: |
             build/dev/compatibility/results/report.json
+            build/dev/compatibility/konado-results/report.json
             build/dev/compatibility/parser-results/report.json
             build/dev/compatibility/frontend-snapshot-diff.json
           if-no-files-found: warn

@@ -3,7 +3,7 @@
   "repository": {
     "name": "godothub/konado",
     "url": "https://github.com/godothub/konado.git",
-    "commit": "cfe8181ca0699a1825f5a08f026142e75b1d712f",
+    "branch": "main",
     "license_file": "LICENSE",
     "license": "MulanPSL-2.0",
     "sparse_paths": [

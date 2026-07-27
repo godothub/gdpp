@@ -65,6 +65,15 @@ add_test(
 )
 
 add_test(
+    NAME gdpp.compatibility.fetch_policy
+    COMMAND
+        "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/compatibility_fetch_test.py"
+        "${PROJECT_SOURCE_DIR}"
+        "${PROJECT_BINARY_DIR}/compatibility-fetch-test"
+)
+
+add_test(
     NAME gdpp.export.immutability
     COMMAND
         "${Python3_EXECUTABLE}"
@@ -165,7 +174,7 @@ if(GDPP_BUILD_CLI)
             --output "${PROJECT_BINARY_DIR}/assert-release-preprocess"
     )
 
-    if(GDPP_ENABLE_OFFICIAL_CORPUS_TESTS)
+    if(GDPP_ENABLE_COMPATIBILITY_CORPUS_TESTS)
         set(GDPP_CORPUS_MANIFEST
             "${PROJECT_SOURCE_DIR}/test/compatibility/official_projects.json")
         set(GDPP_CORPUS_DIRECTORY

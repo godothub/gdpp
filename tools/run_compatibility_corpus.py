@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compile a pinned official Godot corpus and enforce compatibility safety gates."""
+"""Compile a compatibility corpus and enforce frontend/native safety gates."""
 
 from __future__ import annotations
 
@@ -9,6 +9,7 @@ import hashlib
 import importlib
 import json
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -236,13 +237,20 @@ def main() -> int:
         stderr=subprocess.PIPE,
         check=True,
     ).stdout.strip()
-    expected_commit = manifest["repository"]["commit"]
-    if actual_commit != expected_commit:
+    repository = manifest["repository"]
+    expected_commit = repository.get("commit")
+    branch = repository.get("branch")
+    if bool(expected_commit) == bool(branch):
+        raise RuntimeError("repository must define exactly one of commit or branch")
+    if expected_commit is not None and actual_commit != expected_commit:
         raise RuntimeError(f"corpus commit mismatch: expected {expected_commit}, got {actual_commit}")
 
     report = {
         "schema_version": 2,
-        "repository": manifest["repository"],
+        "repository": {
+            **repository,
+            "resolved_commit": actual_commit,
+        },
         "target_godot": args.target_godot,
         "projects": [],
         "native_validation": {
@@ -267,7 +275,25 @@ def main() -> int:
     project_count = len(manifest["projects"])
     for project_index, project_spec in enumerate(manifest["projects"], 1):
         relative_project = project_spec["path"]
-        project_root = corpus / relative_project
+        project_root = (corpus / relative_project).resolve()
+        if project_root != corpus and corpus not in project_root.parents:
+            raise RuntimeError(
+                f"compatibility project path escapes the corpus: {relative_project}"
+            )
+        # Always compile the current compiler and corpus revision from a clean generated tree.
+        # This prevents a persistent developer workspace from validating stale generated C++.
+        project_output = project_root / "addons/gdpp/build/compatibility"
+        resolved_project_output = project_output.resolve()
+        if project_root not in resolved_project_output.parents:
+            raise RuntimeError(
+                f"compatibility output escapes the project: {resolved_project_output}"
+            )
+        if project_output.is_symlink():
+            raise RuntimeError(
+                f"compatibility output must not be a symbolic link: {project_output}"
+            )
+        if project_output.exists():
+            shutil.rmtree(project_output)
         scripts = sorted(project_root.rglob("*.gd"))
         run_isolated = project_spec.get("run_isolated", True)
         project_report = {
@@ -326,7 +352,7 @@ def main() -> int:
         # ProjectCompiler intentionally requires its output to remain inside the Godot project.
         # The sparse corpus itself lives below the repository build/ root, so this still obeys
         # the global artifact-location invariant without modifying checked-in source.
-        project_output = project_root / "addons/gdpp/build/compatibility"
+        project_report["clean_project_compile"] = True
         project_report["phase"] = "project_compile"
         print(
             f"[{project_index}/{project_count}] {relative_project}: project compile",

@@ -71,7 +71,8 @@ option(GDPP_BUILD_TESTS "Build compiler tests" ON)
 option(GDPP_BUILD_FUZZERS "Build coverage-guided compiler fuzz targets" OFF)
 option(GDPP_BUILD_EXTENSION "Build the Godot GDExtension" OFF)
 option(GDPP_WARNINGS_AS_ERRORS "Treat project warnings as errors" ON)
-option(GDPP_ENABLE_OFFICIAL_CORPUS_TESTS "Download and test pinned official Godot projects" OFF)
+option(GDPP_ENABLE_COMPATIBILITY_CORPUS_TESTS
+    "Download and test the project and parser compatibility corpora" OFF)
 option(GDPP_SERIALIZE_SDK_BINDING_BUILDS
     "Build complete godot-cpp SDK variants sequentially while retaining each variant's internal parallelism"
     ON)

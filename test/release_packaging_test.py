@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import shutil
 import sys
 import tempfile
@@ -491,6 +492,14 @@ class ReleasePackagingTest(unittest.TestCase):
         )
         self.assertIn("tools/update_godot_frontend.py", workflow)
         self.assertIn("test/compatibility/godot_frontend_4_7.json", workflow)
+        self.assertIn("build/dev/compatibility/konado-results/report.json", workflow)
+        konado = json.loads(
+            (
+                SOURCE_ROOT / "test/compatibility/konado.json"
+            ).read_text(encoding="utf-8")
+        )
+        self.assertEqual(konado["repository"].get("branch"), "main")
+        self.assertNotIn("commit", konado["repository"])
 
     def test_host_staging_excludes_msvc_import_products(self) -> None:
         source = create_host_component(self.temporary / "source", "windows-x64")
