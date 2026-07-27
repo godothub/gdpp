@@ -1226,6 +1226,32 @@ std::string CodeGenerator::enum_identifier(const std::string& value) {
     return "_gdpp_enum_" + sanitize_identifier(value);
 }
 
+void CodeGenerator::emit_named_enum_declaration(const typed::Enum& enumeration,
+                                                std::ostringstream& header,
+                                                const std::size_t indent) const {
+    const std::string outer(indent, ' ');
+    const std::string body(indent + 4, ' ');
+    const std::string nested(indent + 8, ' ');
+    header << outer << "struct " << sanitize_identifier(enumeration.name) << " {\n";
+    for (const auto& entry : enumeration.entries) {
+        header << body << "inline static constexpr int64_t " << enum_identifier(entry.name)
+               << " = " << entry.value << ";\n";
+    }
+    header << body << "static const godot::Dictionary& _gdpp_dictionary() {\n"
+           << nested << "static const godot::Dictionary value = [] {\n"
+           << nested << "    godot::Dictionary result;\n";
+    for (const auto& entry : enumeration.entries) {
+        header << nested << "    result[" << godot_string(entry.name) << "] = int64_t{"
+               << entry.value << "};\n";
+    }
+    header << nested << "    result.make_read_only();\n"
+           << nested << "    return result;\n"
+           << nested << "}();\n"
+           << nested << "return value;\n"
+           << body << "}\n"
+           << outer << "};\n";
+}
+
 std::string CodeGenerator::sanitize_qualified_identifier(std::string_view value) {
     std::string result;
     std::size_t begin = 0;
@@ -3469,7 +3495,8 @@ std::string CodeGenerator::emit_expression(const typed::Expression& expression) 
             return "_gdpp_static_" + sanitize_identifier(expression.value) + "_storage()";
         if (expression.resolution == typed::ResolutionKind::script_enum_type &&
             !expression.resolved_owner.empty())
-            return sanitize_qualified_identifier(expression.resolved_owner);
+            return sanitize_qualified_identifier(expression.resolved_owner) +
+                   "::_gdpp_dictionary()";
         if (expression.resolution == typed::ResolutionKind::enum_member)
             return enum_identifier(expression.value);
         if (expression.resolution == typed::ResolutionKind::script_constant &&
@@ -4666,6 +4693,11 @@ std::string CodeGenerator::emit_expression(const typed::Expression& expression) 
     case typed::ExpressionKind::member: {
         if (expression.resolution == typed::ResolutionKind::inner_type)
             return inner_cpp_type(expression.resolved_owner);
+        if (expression.resolution == typed::ResolutionKind::enum_member &&
+            !expression.resolved_owner.empty()) {
+            return sanitize_qualified_identifier(expression.resolved_owner) +
+                   "::" + enum_identifier(expression.value);
+        }
         if (expression.resolution == typed::ResolutionKind::external_callable) {
             return "gdpp::runtime::external_callable_at(gdpp::runtime::to_variant(" +
                    emit_expression(*expression.operands.at(0)) + "), " +
@@ -4679,7 +4711,8 @@ std::string CodeGenerator::emit_expression(const typed::Expression& expression) 
                    ")";
         }
         if (expression.resolution == typed::ResolutionKind::script_enum_type)
-            return sanitize_qualified_identifier(expression.resolved_owner);
+            return sanitize_qualified_identifier(expression.resolved_owner) +
+                   "::_gdpp_dictionary()";
         if (expression.resolution == typed::ResolutionKind::script_constant &&
             !expression.resolved_owner.empty()) {
             const auto inner_owner = inner_cpp_type(expression.resolved_owner);
@@ -7311,11 +7344,7 @@ void CodeGenerator::emit_inner_class_declaration(const typed::Class& declaration
                 header << "    inline static constexpr int64_t " << enum_identifier(entry.name)
                        << " = " << entry.value << ";\n";
         } else {
-            header << "    struct " << sanitize_identifier(enumeration.name) << " {\n";
-            for (const auto& entry : enumeration.entries)
-                header << "        inline static constexpr int64_t " << enum_identifier(entry.name)
-                       << " = " << entry.value << ";\n";
-            header << "    };\n";
+            emit_named_enum_declaration(enumeration, header, 4);
         }
     }
     for (const auto& field : declaration.fields) {
@@ -8749,12 +8778,7 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
                        << " = " << entry.value << ";\n";
             }
         } else {
-            header << "    struct " << sanitize_identifier(enumeration.name) << " {\n";
-            for (const auto& entry : enumeration.entries) {
-                header << "        inline static constexpr int64_t " << enum_identifier(entry.name)
-                       << " = " << entry.value << ";\n";
-            }
-            header << "    };\n";
+            emit_named_enum_declaration(enumeration, header, 4);
         }
     }
     if (!module.enums.empty())

@@ -3870,6 +3870,42 @@ TEST_CASE("compiler accepts multiline enums and contextual keyword iterators") {
     REQUIRE(result.unit.source.find("godot::Variant match =") != std::string::npos);
 }
 
+TEST_CASE("compiler preserves named enums as read-only Dictionary values") {
+    const gdpp::Compiler compiler;
+    const auto result =
+        compiler.compile("enum-dictionary.gd",
+                         "enum TokenType { IDENTIFIER = 2, NUMBER = 7 }\n"
+                         "func metadata() -> Dictionary:\n"
+                         "    return TokenType\n"
+                         "func names() -> Array:\n"
+                         "    return TokenType.keys()\n"
+                         "func name_for(value: int):\n"
+                         "    return TokenType.find_key(value)\n"
+                         "func has_name(value: String) -> bool:\n"
+                         "    return TokenType.has(value)\n"
+                         "func count() -> int:\n"
+                         "    return TokenType.size()\n");
+    const auto mutation =
+        compiler.compile("enum-mutation.gd",
+                         "enum TokenType { IDENTIFIER }\n"
+                         "func mutate() -> void:\n"
+                         "    TokenType.clear()\n"
+                         "    TokenType[\"IDENTIFIER\"] = 2\n");
+
+    REQUIRE(result.success);
+    REQUIRE(result.unit.header.find("static const godot::Dictionary& _gdpp_dictionary()") !=
+            std::string::npos);
+    REQUIRE(result.unit.header.find("result[godot::String(\"IDENTIFIER\")] = int64_t{2}") !=
+            std::string::npos);
+    REQUIRE(result.unit.header.find("result.make_read_only()") != std::string::npos);
+    REQUIRE(result.unit.source.find("TokenType::_gdpp_dictionary()") != std::string::npos);
+    REQUIRE(!mutation.success);
+    REQUIRE(std::any_of(mutation.diagnostics.begin(), mutation.diagnostics.end(),
+                        [](const auto& diagnostic) { return diagnostic.code == "GDS4165"; }));
+    REQUIRE(std::any_of(mutation.diagnostics.begin(), mutation.diagnostics.end(),
+                        [](const auto& diagnostic) { return diagnostic.code == "GDS4110"; }));
+}
+
 TEST_CASE("compiler generates single-evaluation match control flow") {
     const gdpp::Compiler compiler;
     const auto result =

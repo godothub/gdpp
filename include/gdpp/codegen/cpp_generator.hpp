@@ -263,6 +263,8 @@ class CodeGenerator final {
                                               const ScriptMemberSymbol& method) const;
     [[nodiscard]] bool managed_constant_field(const typed::Field& field) const;
     [[nodiscard]] bool managed_constant_reference(const typed::Expression& expression) const;
+    void emit_named_enum_declaration(const typed::Enum& enumeration,
+                                     std::ostringstream& header, std::size_t indent) const;
     void emit_inner_class_declaration(const typed::Class& declaration, std::ostringstream& header,
                                       const std::string& native_name,
                                       const std::string& source_name, bool tool_mode) const;

@@ -1237,6 +1237,10 @@ Type SemanticAnalyzer::resolve_binary_expression(const ast::Expression& expressi
             }
         }
         const auto* target = model_.api_resolution_of(*expression.operand(1));
+        if (target && target->kind == ApiResolutionKind::script_enum_type) {
+            target_type = {TypeKind::enumeration, target->owner};
+            model_.expression_types_.insert_or_assign(expression.operand(1).get(), target_type);
+        }
         const bool valid_target = target &&
                                   (target->kind == ApiResolutionKind::type_reference ||
                                    target->kind == ApiResolutionKind::external_type_reference ||
@@ -1276,6 +1280,10 @@ Type SemanticAnalyzer::resolve_binary_expression(const ast::Expression& expressi
             }
         }
         const auto* target = model_.api_resolution_of(*expression.operand(1));
+        if (target && target->kind == ApiResolutionKind::script_enum_type) {
+            target_type = {TypeKind::enumeration, target->owner};
+            model_.expression_types_.insert_or_assign(expression.operand(1).get(), target_type);
+        }
         const bool valid_target = target &&
                                   (target->kind == ApiResolutionKind::type_reference ||
                                    target->kind == ApiResolutionKind::external_type_reference ||
@@ -1595,11 +1603,13 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
             result = type_from_name(expression.value(), expression.span);
             if (const auto project_enum = find_project_enum(script_symbols_, expression.value());
                 project_enum.enumeration) {
+                const auto enum_owner =
+                    project_enum.native_owner + "::" + project_enum.enumeration->name;
+                result = {TypeKind::dictionary, "Dictionary"};
                 model_.api_resolutions_.emplace(
                     &expression,
-                    ApiResolution{ApiResolutionKind::script_enum_type,
-                                  project_enum.native_owner + "::" + project_enum.enumeration->name,
-                                  "", "", result, 0, 0, false, true});
+                    ApiResolution{ApiResolutionKind::script_enum_type, enum_owner, "", "", result,
+                                  0, 0, false, true});
             } else if (const auto external_enum =
                            find_external_enum(script_symbols_, expression.value());
                        external_enum.enumeration) {
@@ -1773,9 +1783,12 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                                                               "", "", result, 0, 0, false, false});
             }
             if (symbol->kind == SymbolKind::enum_type) {
+                const auto enum_owner = result.name;
+                result = {TypeKind::dictionary, "Dictionary"};
                 model_.api_resolutions_.emplace(
-                    &expression, ApiResolution{ApiResolutionKind::script_enum_type, result.name, "",
-                                               "", result, 0, 0, false, true});
+                    &expression,
+                    ApiResolution{ApiResolutionKind::script_enum_type, enum_owner, "", "", result,
+                                  0, 0, false, true});
             }
         } else if (const auto alias = script_resource_aliases_.find(expression.value());
                    alias != script_resource_aliases_.end()) {
@@ -3143,6 +3156,9 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                     const bool called_on_type =
                         object_resolution &&
                         object_resolution->kind == ApiResolutionKind::type_reference;
+                    const bool called_on_script_enum =
+                        object_resolution &&
+                        object_resolution->kind == ApiResolutionKind::script_enum_type;
                     if (called_on_type && object_type.kind == TypeKind::object &&
                         callee.value() == "new") {
                         if (argument_count != 0) {
@@ -3168,10 +3184,21 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                         break;
                     }
                     if (!method && !owner.empty() && !object_type.is_dynamic()) {
-                        diagnostics_.error("GDS4016",
-                                           "method '" + callee.value() +
-                                               "' is not available on Godot type '" + owner +
-                                               "' for the selected target version",
+                        diagnostics_.error(
+                            "GDS4016",
+                            called_on_script_enum
+                                ? "enum '" + object_resolution->owner +
+                                      "' has no Dictionary method '" + callee.value() + "'"
+                                : "method '" + callee.value() +
+                                      "' is not available on Godot type '" + owner +
+                                      "' for the selected target version",
+                            expression.span);
+                    }
+                    if (method && called_on_script_enum && !method->is_const) {
+                        diagnostics_.error("GDS4165",
+                                           "cannot call mutating Dictionary method '" +
+                                               callee.value() + "' on read-only enum '" +
+                                               object_resolution->owner + "'",
                                            expression.span);
                     }
                     if (method && called_on_type && !method->is_static) {
@@ -3225,6 +3252,44 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
             Type member_result = unknown_type;
             do {
                 const auto object_type = analyze_expression(*expression.operand(0));
+                const auto* object_resolution =
+                    model_.api_resolution_of(*expression.operand(0));
+                if (object_resolution &&
+                    object_resolution->kind == ApiResolutionKind::script_enum_type) {
+                    const auto& enum_owner = object_resolution->owner;
+                    const auto local = enum_members_.find(enum_owner);
+                    const auto project_enum = find_project_enum(script_symbols_, enum_owner);
+                    const auto inner_enum = find_inner_enum(enum_owner);
+                    bool found = false;
+                    if (local != enum_members_.end()) {
+                        found = local->second.find(expression.value()) != local->second.end();
+                    } else if (project_enum.enumeration) {
+                        found = std::any_of(
+                            project_enum.enumeration->entries.begin(),
+                            project_enum.enumeration->entries.end(),
+                            [&](const auto& entry) { return entry.name == expression.value(); });
+                    } else if (inner_enum.enumeration) {
+                        found = std::any_of(
+                            inner_enum.enumeration->entries.begin(),
+                            inner_enum.enumeration->entries.end(),
+                            [&](const auto& entry) { return entry.name == expression.value(); });
+                    }
+                    if (!found) {
+                        diagnostics_.error("GDS4041",
+                                           "enum '" + enum_owner + "' has no member '" +
+                                               expression.value() + "'",
+                                           expression.span);
+                        member_result = unknown_type;
+                    } else {
+                        member_result = {TypeKind::enumeration, enum_owner};
+                        model_.api_resolutions_.emplace(
+                            &expression,
+                            ApiResolution{ApiResolutionKind::enum_member, enum_owner, "", "",
+                                          member_result, 0, 0, false, true});
+                    }
+                    record_script_dependency(project_enum.owner);
+                    break;
+                }
                 if (object_type.kind == TypeKind::enumeration) {
                     if (const auto* global =
                             api_.find_global_enum_value(object_type.name, expression.value())) {
@@ -3349,7 +3414,6 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                     record_script_dependency(project_enum.owner);
                     break;
                 }
-                const auto* object_resolution = model_.api_resolution_of(*expression.operand(0));
                 if (object_resolution &&
                     object_resolution->kind == ApiResolutionKind::script_super) {
                     diagnostics_.error("GDS4089", "super members can only be used as method calls",
@@ -3385,12 +3449,13 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                     }
                     if (const auto* enumeration =
                             script_symbols_->find_enum(*target, expression.value())) {
-                        member_result = {TypeKind::enumeration,
-                                         target->native_class_name + "::" + enumeration->name};
+                        const auto enum_owner =
+                            target->native_class_name + "::" + enumeration->name;
+                        member_result = {TypeKind::dictionary, "Dictionary"};
                         model_.api_resolutions_.emplace(
                             &expression,
-                            ApiResolution{ApiResolutionKind::script_enum_type, member_result.name,
-                                          "", "", member_result, 0, 0, false, true});
+                            ApiResolution{ApiResolutionKind::script_enum_type, enum_owner, "", "",
+                                          member_result, 0, 0, false, true});
                         break;
                     }
                     const auto* member = script_symbols_->find_member(*target, expression.value());
@@ -3486,20 +3551,16 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                                     native_owner = published->native_class_name;
                                 }
                             }
-                            member_result = {
-                                TypeKind::enumeration,
+                            const auto enum_owner =
                                 native_owner.empty()
-                                    ? enumeration.owner->name + "." + enumeration.enumeration->name
-                                    : native_owner + "::" + enumeration.enumeration->name};
+                                    ? enumeration.owner->name + "::" +
+                                          enumeration.enumeration->name
+                                    : native_owner + "::" + enumeration.enumeration->name;
+                            member_result = {TypeKind::dictionary, "Dictionary"};
                             model_.api_resolutions_.emplace(
                                 &expression,
-                                ApiResolution{ApiResolutionKind::script_enum_type,
-                                              native_owner.empty()
-                                                  ? enumeration.owner->name +
-                                                        "::" + enumeration.enumeration->name
-                                                  : native_owner +
-                                                        "::" + enumeration.enumeration->name,
-                                              "", "", member_result, 0, 0, false, true});
+                                ApiResolution{ApiResolutionKind::script_enum_type, enum_owner, "",
+                                              "", member_result, 0, 0, false, true});
                             break;
                         }
                     }
@@ -3623,13 +3684,13 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                     }
                     if (const auto* enumeration =
                             script_symbols_->find_enum(*script_owner, expression.value())) {
-                        member_result = {TypeKind::enumeration, script_owner->native_class_name +
-                                                                    "::" + enumeration->name};
+                        const auto enum_owner =
+                            script_owner->native_class_name + "::" + enumeration->name;
+                        member_result = {TypeKind::dictionary, "Dictionary"};
                         model_.api_resolutions_.emplace(
-                            &expression, ApiResolution{ApiResolutionKind::script_enum_type,
-                                                       script_owner->native_class_name +
-                                                           "::" + enumeration->name,
-                                                       "", "", member_result, 0, 0, false, true});
+                            &expression,
+                            ApiResolution{ApiResolutionKind::script_enum_type, enum_owner, "", "",
+                                          member_result, 0, 0, false, true});
                         break;
                     }
                     const auto* member =
@@ -4302,8 +4363,12 @@ void SemanticAnalyzer::analyze_match_pattern(const ast::MatchPattern& pattern,
 }
 
 bool SemanticAnalyzer::is_assignment_target(const ast::Expression& expression) const noexcept {
-    if (expression.kind() == ast::ExpressionKind::subscript)
-        return expression.operand_count() == 2;
+    if (expression.kind() == ast::ExpressionKind::subscript) {
+        if (expression.operand_count() != 2)
+            return false;
+        const auto* container = model_.api_resolution_of(*expression.operand(0));
+        return !container || container->kind != ApiResolutionKind::script_enum_type;
+    }
     if (expression.kind() == ast::ExpressionKind::identifier) {
         if (const auto* symbol = model_.symbol_of(expression)) {
             return symbol->kind == SymbolKind::field || symbol->kind == SymbolKind::parameter ||
