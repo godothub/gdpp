@@ -44,11 +44,6 @@ godot::String canonical_script_path(const godot::String& value) {
     return path;
 }
 
-bool is_script_resource_request(const godot::String& value) {
-    const auto path = canonical_script_path(value);
-    return !path.is_empty() && path.get_extension().to_lower() == "gd";
-}
-
 godot::TypedArray<godot::Dictionary> method_list(const std::vector<godot::MethodInfo>& methods) {
     godot::TypedArray<godot::Dictionary> result;
     for (const auto& method : methods)
@@ -460,8 +455,8 @@ godot::PackedStringArray AttachedScriptResourceLoader::_get_recognized_extension
 
 bool AttachedScriptResourceLoader::_recognize_path(const godot::String& path,
                                                    const godot::StringName& type) const {
-    return is_script_resource_request(path) &&
-           (type.is_empty() || type == godot::StringName{"Script"});
+    return (type.is_empty() || type == godot::StringName{"Script"}) &&
+           find_attached_script(canonical_script_path(path)).has_value();
 }
 
 bool AttachedScriptResourceLoader::_handles_type(const godot::StringName& type) const {
@@ -469,7 +464,8 @@ bool AttachedScriptResourceLoader::_handles_type(const godot::StringName& type) 
 }
 
 godot::String AttachedScriptResourceLoader::_get_resource_type(const godot::String& path) const {
-    return is_script_resource_request(path) ? godot::String{"Script"} : godot::String{};
+    return find_attached_script(canonical_script_path(path)) ? godot::String{"Script"}
+                                                              : godot::String{};
 }
 
 godot::String
