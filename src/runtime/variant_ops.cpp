@@ -32,6 +32,25 @@
 
 namespace gdpp::runtime {
 
+void register_property_marker(const godot::StringName& class_name,
+                              const godot::PropertyInfo& marker) {
+    const GDExtensionPropertyInfo property_info = {
+        static_cast<GDExtensionVariantType>(marker.type),
+        marker.name._native_ptr(),
+        marker.class_name._native_ptr(),
+        marker.hint,
+        marker.hint_string._native_ptr(),
+        marker.usage,
+    };
+    const godot::StringName empty_method;
+    godot::gdextension_interface::classdb_register_extension_class_property(
+        godot::gdextension_interface::library,
+        class_name._native_ptr(),
+        &property_info,
+        empty_method._native_ptr(),
+        empty_method._native_ptr());
+}
+
 class CoroutineState final {
   public:
     godot::ObjectID owner;

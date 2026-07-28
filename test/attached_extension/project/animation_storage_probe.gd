@@ -1,5 +1,8 @@
 extends AnimationPlayer
 
+@export_category("Storage Probe")
+@export var verify_library := true
+
 
 func has_serialized_library() -> bool:
-    return has_animation(&"storage_probe")
+    return verify_library and has_animation(&"storage_probe")

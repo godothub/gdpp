@@ -6,6 +6,7 @@
 #include <godot_cpp/classes/ref.hpp>
 #include <godot_cpp/classes/ref_counted.hpp>
 #include <godot_cpp/core/object.hpp>
+#include <godot_cpp/core/property_info.hpp>
 #include <godot_cpp/variant/array.hpp>
 #include <godot_cpp/variant/callable.hpp>
 #include <godot_cpp/variant/color.hpp>
@@ -36,6 +37,12 @@ namespace gdpp::runtime {
 class CoroutineState;
 using CoroutineStatePtr = std::shared_ptr<CoroutineState>;
 using AwaitContinuation = std::function<void(const godot::Array&)>;
+
+// Property-list markers such as @export_category are reflection entries, not readable values.
+// godot-cpp's ClassDB::add_property() correctly rejects an empty getter for ordinary properties,
+// so generated classes register these marker records through the dedicated raw GDExtension ABI.
+void register_property_marker(const godot::StringName& class_name,
+                              const godot::PropertyInfo& marker);
 
 // GDScript exposes a pending coroutine as a RefCounted function-state object whose `completed`
 // signal is consumed by `await`. Returning a raw Signal is sufficient for a direct known await,

@@ -791,7 +791,12 @@ TEST_CASE("compiler generates serializable Godot export properties and inspector
             std::string::npos);
     REQUIRE(result.unit.source.find("godot::PROPERTY_HINT_RESOURCE_TYPE") != std::string::npos);
     REQUIRE(result.unit.header.find("godot::Ref<godot::Texture2D> icon{}") != std::string::npos);
-    REQUIRE(result.unit.source.find("godot::PROPERTY_USAGE_CATEGORY") != std::string::npos);
+    REQUIRE(result.unit.source.find(
+                "gdpp::runtime::register_property_marker(get_class_static(), "
+                "godot::PropertyInfo(godot::Variant::NIL, \"Advanced\"") !=
+            std::string::npos);
+    REQUIRE(result.unit.source.find(
+                "godot::PROPERTY_USAGE_CATEGORY), \"\", \"\")") == std::string::npos);
     REQUIRE(result.unit.header.find("godot::Variant inferred_count{}") != std::string::npos);
     REQUIRE(result.unit.source.find(
                 "inferred_count = gdpp::runtime::to_variant(static_cast<int64_t>(5))") !=

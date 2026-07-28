@@ -9901,10 +9901,11 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
             const auto prefix =
                 group.arguments.size() < 2 ? std::string{} : group.arguments[1].value;
             if (group.name == "export_category") {
-                source << "    ADD_PROPERTY(godot::PropertyInfo(godot::Variant::NIL, "
+                source << "    gdpp::runtime::register_property_marker(get_class_static(), "
+                          "godot::PropertyInfo(godot::Variant::NIL, "
                        << godot_text_argument(group_name)
                        << ", godot::PROPERTY_HINT_NONE, godot::String(), "
-                          "godot::PROPERTY_USAGE_CATEGORY), \"\", \"\");\n";
+                          "godot::PROPERTY_USAGE_CATEGORY));\n";
             } else {
                 source << "    " << (group.name == "export_subgroup" ? "ADD_SUBGROUP" : "ADD_GROUP")
                        << "(" << godot_text_argument(group_name) << ", "
