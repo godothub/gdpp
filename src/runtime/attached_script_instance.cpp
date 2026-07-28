@@ -854,17 +854,23 @@ godot::Variant dictionary_to_attached_instance(const godot::Dictionary& dictiona
     };
     AttachedScriptDescriptor descriptor;
     godot::Ref<AttachedScriptBehavior> behavior;
+    bool restorable = false;
     {
         std::lock_guard<std::mutex> lock{AttachedScriptInstance::instances_mutex()};
         const auto found = AttachedScriptInstance::instances().find(result.get_validated_object());
-        if (found == AttachedScriptInstance::instances().end() ||
-            found->second->behavior.is_null()) {
-            fail("Cannot restore a compiled script instance.");
-            discard_result();
-            return {};
+        if (found != AttachedScriptInstance::instances().end() &&
+            found->second->behavior.is_valid()) {
+            descriptor = found->second->descriptor;
+            behavior = found->second->behavior;
+            restorable = true;
         }
-        descriptor = found->second->descriptor;
-        behavior = found->second->behavior;
+    }
+    if (!restorable) {
+        // Releasing either RefCounted or caller-owned objects can destroy the ScriptInstance and
+        // re-enter the registry. Never perform that teardown while holding instances_mutex().
+        fail("Cannot restore a compiled script instance.");
+        discard_result();
+        return {};
     }
     for (const auto& property : descriptor.properties) {
         if (!dictionary.has(property.info.name))
