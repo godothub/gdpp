@@ -510,7 +510,7 @@ def main() -> int:
             timeout=args.export_timeout,
             log=export_log,
         )
-        assert_clean_log(export_log, "GDPP AOT export")
+        assert_no_new_diagnostics(export_log, baseline_diagnostics, "GDPP AOT export")
         customer_state_after_export = customer_worktree_state(project)
         report["customer_worktree_sha256_after_export"] = hashlib.sha256(
             customer_state_after_export

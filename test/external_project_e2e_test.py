@@ -47,6 +47,11 @@ class ExternalProjectE2ETest(unittest.TestCase):
                 E2E.assert_no_new_diagnostics(
                     regressed, baseline_diagnostics, "Godot import"
                 )
+        source = MODULE_PATH.read_text(encoding="utf-8")
+        self.assertIn(
+            'assert_no_new_diagnostics(export_log, baseline_diagnostics, "GDPP AOT export")',
+            source,
+        )
 
     def test_enable_plugin_preserves_existing_multiline_entries(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
