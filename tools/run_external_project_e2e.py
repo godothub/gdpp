@@ -111,15 +111,25 @@ def run_bootstrap_import(
 ) -> dict:
     attempts: list[dict] = []
     for attempt in range(1, maximum_attempts + 1):
+        log = output / f"{phase}-{attempt}.log"
         result = run(
             [str(godot), "--headless", "--editor", "--path", str(project), "--import"],
             cwd=project,
             timeout=timeout,
-            log=output / f"{phase}-{attempt}.log",
+            log=log,
             allow_failure=True,
         )
         attempts.append(result)
         if result["exit_code"] == 0:
+            # A fresh Godot scan can parse scripts before ResourceUID has indexed every tracked
+            # .uid sidecar. The process still exits successfully, and the next identical import
+            # resolves those identities from the completed cache. Treat that pass as bootstrap
+            # work instead of comparing its order-dependent diagnostics with the pristine run.
+            content = (
+                log.read_text(encoding="utf-8", errors="replace") if log.is_file() else ""
+            )
+            if "ERROR: Unrecognized UID:" in content and attempt < maximum_attempts:
+                continue
             return {
                 "attempts": attempts,
                 "successful_attempt": attempt,
