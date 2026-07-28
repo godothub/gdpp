@@ -116,11 +116,31 @@ def diagnostic_fingerprints(log: Path) -> list[str]:
     return fingerprints
 
 
-def assert_no_new_diagnostics(log: Path, baseline: set[str], phase: str) -> None:
-    current = set(diagnostic_fingerprints(log))
-    added = sorted(current - baseline)
-    if added:
-        fail(f"{phase} introduced a diagnostic not present in the pristine project: {added[0]}")
+def assert_no_new_diagnostics(
+    log: Path,
+    baseline: Counter[str],
+    phase: str,
+) -> None:
+    current = Counter(diagnostic_fingerprints(log))
+    regressions = sorted(
+        (message, count - baseline[message])
+        for message, count in current.items()
+        if count > baseline[message]
+    )
+    if regressions:
+        message, added_count = regressions[0]
+        fail(
+            f"{phase} introduced a diagnostic with {added_count} additional occurrence(s) "
+            f"not present at that count in the pristine project: {message}"
+        )
+
+
+def report_diagnostics(log: Path) -> tuple[Counter[str], list[dict]]:
+    diagnostics = Counter(diagnostic_fingerprints(log))
+    return diagnostics, [
+        {"message": message, "count": count}
+        for message, count in sorted(diagnostics.items())
+    ]
 
 
 def git_output(project: Path, arguments: list[str]) -> str:
@@ -382,7 +402,11 @@ def main() -> int:
     godot = args.godot_executable.resolve()
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=True)
-    for generated_directory in (output / "product", output / "audit-host"):
+    for generated_directory in (
+        output / "baseline-product",
+        output / "product",
+        output / "audit-host",
+    ):
         if generated_directory.is_symlink():
             fail(f"end-to-end output must not be a symbolic link: {generated_directory}")
         if generated_directory.exists():
@@ -444,17 +468,61 @@ def main() -> int:
             timeout=args.import_timeout,
             log=baseline_import_log,
         )
-        baseline_diagnostics = set(diagnostic_fingerprints(baseline_import_log))
-        report["baseline_diagnostics"] = [
-            {"message": message, "count": count}
-            for message, count in sorted(
-                Counter(diagnostic_fingerprints(baseline_import_log)).items()
-            )
-        ]
+        baseline_import_diagnostics, report["baseline_import_diagnostics"] = (
+            report_diagnostics(baseline_import_log)
+        )
+
+        preset, baseline_product = append_export_preset(
+            project,
+            args.host,
+            output / "baseline-product",
+        )
+        baseline_export_log = output / "baseline-export.log"
+        report["phases"]["baseline_export"] = run(
+            [
+                str(godot),
+                "--headless",
+                "--editor",
+                "--path",
+                str(project),
+                "--export-release",
+                preset,
+                str(baseline_product),
+            ],
+            cwd=project,
+            timeout=args.export_timeout,
+            log=baseline_export_log,
+        )
+        baseline_export_diagnostics, report["baseline_export_diagnostics"] = (
+            report_diagnostics(baseline_export_log)
+        )
+
+        baseline_executable = find_executable(baseline_product, args.host)
+        baseline_runtime_log = output / "baseline-runtime.log"
+        report["phases"]["baseline_runtime"] = run(
+            [
+                str(baseline_executable),
+                "--headless",
+                "--audio-driver",
+                "Dummy",
+                "--quit-after",
+                "300",
+            ],
+            cwd=baseline_product.parent,
+            timeout=args.runtime_timeout,
+            log=baseline_runtime_log,
+        )
+        baseline_runtime_diagnostics, report["baseline_runtime_diagnostics"] = (
+            report_diagnostics(baseline_runtime_log)
+        )
+        shutil.rmtree(output / "baseline-product")
 
         installed_addon = install_addon(addon_source, project, manifest["godot"]["target"])
         enable_plugin(project_file)
-        preset, product = append_export_preset(project, args.host, output / "product")
+        product_directory = output / "product"
+        product_directory.mkdir(parents=True, exist_ok=True)
+        _, _, product_path = export_contract(args.host, product_directory)
+        product = Path(product_path)
 
         bootstrap_import_log = output / "import-bootstrap.log"
         report["phases"]["import_bootstrap"] = run(
@@ -474,7 +542,7 @@ def main() -> int:
             timeout=args.import_timeout,
             log=import_log,
         )
-        assert_no_new_diagnostics(import_log, baseline_diagnostics, "Godot import")
+        assert_no_new_diagnostics(import_log, baseline_import_diagnostics, "Godot import")
         customer_state = customer_worktree_state(project)
         report["customer_worktree_sha256_before_export"] = hashlib.sha256(
             customer_state
@@ -512,7 +580,11 @@ def main() -> int:
             timeout=args.export_timeout,
             log=export_log,
         )
-        assert_no_new_diagnostics(export_log, baseline_diagnostics, "GDPP AOT export")
+        assert_no_new_diagnostics(
+            export_log,
+            baseline_export_diagnostics,
+            "GDPP AOT export",
+        )
         customer_state_after_export = customer_worktree_state(project)
         report["customer_worktree_sha256_after_export"] = hashlib.sha256(
             customer_state_after_export
@@ -587,7 +659,11 @@ def main() -> int:
             timeout=args.runtime_timeout,
             log=runtime_log,
         )
-        assert_clean_log(runtime_log, "exported project runtime")
+        assert_no_new_diagnostics(
+            runtime_log,
+            baseline_runtime_diagnostics,
+            "exported project runtime",
+        )
         report["artifacts"] = {
             "product": str(product),
             "pck": str(pck),
