@@ -2717,6 +2717,8 @@ std::string CodeGenerator::emit_api_return(const Type& target, std::string value
         return "static_cast<double>(" + value + ")";
     if (target.kind == TypeKind::boolean)
         return "static_cast<bool>(" + value + ")";
+    if (target.is_packed_array())
+        return cpp_type(target) + "(" + value + ")";
     return value;
 }
 

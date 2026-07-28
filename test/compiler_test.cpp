@@ -2757,6 +2757,8 @@ TEST_CASE("compiler iterates packed arrays with their Godot element types") {
                          "    var arguments: PackedStringArray = OS.get_cmdline_user_args()\n"
                          "    for argument: String in arguments:\n"
                          "        result += argument\n"
+                         "    for direct_argument: String in OS.get_cmdline_user_args():\n"
+                         "        result += direct_argument\n"
                          "    return result\n");
 
     REQUIRE(result.success);
@@ -2765,6 +2767,12 @@ TEST_CASE("compiler iterates packed arrays with their Godot element types") {
             std::string::npos);
     REQUIRE(result.unit.source.find("godot::String argument =") != std::string::npos);
     REQUIRE(result.unit.source.find("_gdpp_packed_iterable_") != std::string::npos);
+    REQUIRE(result.unit.source.find(
+                "gdpp::runtime::SharedPackedArray<godot::PackedStringArray>("
+                "_gdpp_call_receiver_") !=
+            std::string::npos);
+    REQUIRE(result.unit.source.find(".native().size()") != std::string::npos);
+    REQUIRE(result.unit.source.find(".native()[") != std::string::npos);
     REQUIRE(result.unit.source.find(".size();") != std::string::npos);
     REQUIRE(result.unit.source.find("auto &&_gdpp_packed_iterable_") != std::string::npos);
     REQUIRE(result.unit.source.find("_gdpp_packed_size_") == std::string::npos);
