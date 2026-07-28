@@ -4180,8 +4180,6 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                     auto resolution = property_resolution(ApiResolutionKind::property, *property);
                     member_result = resolution.type;
                     model_.api_resolutions_.emplace(&expression, std::move(resolution));
-                } else if (resolve_godot_callable(owner, accessed_on_type)) {
-                    break;
                 } else if (object_type.kind == TypeKind::dictionary) {
                     // GDScript supports dictionary.key as syntax sugar for dictionary["key"].
                     // A typed Dictionary accepts that sugar only when StringName can enter its
@@ -4199,6 +4197,8 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                     model_.api_resolutions_.emplace(
                         &expression, ApiResolution{ApiResolutionKind::dynamic_property, "", "", "",
                                                    member_result, 0, 0, false, false});
+                } else if (resolve_godot_callable(owner, accessed_on_type)) {
+                    break;
                 } else {
                     const bool dynamically_typed_object =
                         object_type.kind == TypeKind::object &&

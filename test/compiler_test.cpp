@@ -4102,7 +4102,9 @@ TEST_CASE("compiler lowers Dictionary named access through its keyed native ABI"
                          "func source() -> Dictionary:\n"
                          "    return {}\n"
                          "func read_source() -> Variant:\n"
-                         "    return source().missing\n");
+                         "    return source().missing\n"
+                         "func read_method_name_collision(values: Dictionary) -> Vector2:\n"
+                         "    return values.size\n");
 
     REQUIRE(result.success);
     REQUIRE(result.unit.source.find("_gdpp_dictionary_target_") != std::string::npos);
@@ -4121,6 +4123,7 @@ TEST_CASE("compiler lowers Dictionary named access through its keyed native ABI"
     REQUIRE(result.unit.source.find("godot::Variant &_gdpp_dictionary_slot_") == std::string::npos);
     REQUIRE(result.unit.source.find("gdpp::runtime::get_named") == std::string::npos);
     REQUIRE(result.unit.source.find("gdpp::runtime::set_named") == std::string::npos);
+    REQUIRE(result.unit.source.find("gdpp::runtime::bound_method_at(") == std::string::npos);
     const auto read_source = result.unit.source.find("::read_source(");
     const auto receiver = result.unit.source.find("_gdpp_dictionary_read_receiver_", read_source);
     const auto receiver_fault = result.unit.source.find("if (script_function_failed())", receiver);
