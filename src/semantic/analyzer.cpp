@@ -788,9 +788,15 @@ const ScriptClassSymbol*
 SemanticAnalyzer::find_script_class(const std::string& name) const noexcept {
     if (!script_symbols_)
         return nullptr;
+    if (const auto* script = script_symbols_->find_native_class(name))
+        return script;
+    // An unnamed script's file stem is an internal diagnostic identity, not a global GDScript
+    // class. It must never shadow a ClassDB type with the same spelling.
+    if (api_.find_class(name))
+        return nullptr;
     if (const auto* script = script_symbols_->find_class(name))
         return script;
-    return script_symbols_->find_native_class(name);
+    return nullptr;
 }
 
 const ScriptInnerClassSymbol*

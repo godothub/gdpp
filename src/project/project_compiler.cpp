@@ -2540,7 +2540,7 @@ ProjectCompileResult ProjectCompiler::compile_impl(const ProjectCompileOptions& 
         }
         script_symbols.add(std::move(symbol));
     }
-    script_symbols.canonicalize_project_types();
+    script_symbols.canonicalize_project_types(target_api);
     for (const auto& bridge : bridge_load.bridges) {
         for (const auto& type : bridge.classes) {
             ExternalClassSymbol external;

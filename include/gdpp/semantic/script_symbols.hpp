@@ -12,6 +12,8 @@
 
 namespace gdpp {
 
+class GodotApi;
+
 enum class ScriptMemberKind { field, constant, function, signal, enum_value };
 
 struct ScriptMemberSymbol {
@@ -117,7 +119,7 @@ class ScriptSymbolTable final {
     // Resolve source-level project type spellings after every script has been registered.
     // Public source ABIs retain stable GDScript identities, while the semantic graph uses the
     // exact generated native identity required by typed containers and cross-unit calls.
-    void canonicalize_project_types();
+    void canonicalize_project_types(const GodotApi& api);
     bool set_coroutine(const std::string& path, const std::string& inner_class,
                        const std::string& method, bool coroutine);
     bool set_parameter_type(const std::string& path, const std::string& inner_class,

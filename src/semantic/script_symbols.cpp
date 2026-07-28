@@ -1,5 +1,7 @@
 #include "gdpp/semantic/script_symbols.hpp"
 
+#include "gdpp/semantic/godot_api.hpp"
+
 #include <algorithm>
 #include <filesystem>
 #include <string_view>
@@ -40,7 +42,7 @@ void ScriptSymbolTable::add_resource_alias(std::string reference, std::string pr
     resource_aliases_.insert_or_assign(std::move(reference), std::move(project_path));
 }
 
-void ScriptSymbolTable::canonicalize_project_types() {
+void ScriptSymbolTable::canonicalize_project_types(const GodotApi& api) {
     const auto canonicalize = [&](const auto& self, Type& type,
                                   const ScriptClassSymbol& lexical_owner) -> void {
         if (const auto container = describe_container_type(type)) {
@@ -65,6 +67,20 @@ void ScriptSymbolTable::canonicalize_project_types() {
         if (type.kind != TypeKind::object && type.kind != TypeKind::enumeration)
             return;
 
+        // Unnamed scripts receive a file-stem identity for diagnostics and native symbol
+        // stability, but that spelling is not a GDScript global. Native engine types and their
+        // enums always retain the ClassDB namespace even when an unrelated script has the same
+        // filename.
+        if ((type.kind == TypeKind::object && api.find_class(type.name)) ||
+            (type.kind == TypeKind::enumeration && (api.has_global_enum(type.name) || ([&]() {
+                                                        const auto separator = type.name.rfind('.');
+                                                        return separator != std::string::npos &&
+                                                               api.has_class_enum(
+                                                                   type.name.substr(0, separator),
+                                                                   type.name.substr(separator + 1));
+                                                    })()))) {
+            return;
+        }
         if (const auto* script = find_class(type.name)) {
             type = {TypeKind::object, script->native_class_name};
             return;
@@ -89,6 +105,8 @@ void ScriptSymbolTable::canonicalize_project_types() {
             return;
         const auto owner_name = type.name.substr(0, separator);
         const auto member_name = type.name.substr(separator + 1);
+        if (api.find_class(owner_name))
+            return;
         auto* owner = find_class(owner_name);
         if (!owner)
             owner = find_autoload(owner_name);

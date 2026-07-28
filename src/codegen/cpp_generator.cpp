@@ -1228,9 +1228,9 @@ std::string godot_cpp_method_identifier(const std::string_view source_name) {
     // generator's stable escape table instead of applying the compiler's injective encoding for
     // customer identifiers.
     static const std::unordered_map<std::string_view, std::string_view> escaped{
-        {"class", "_class"},       {"char", "_char"},        {"short", "_short"},
-        {"bool", "_bool"},         {"int", "_int"},          {"default", "_default"},
-        {"case", "_case"},         {"switch", "_switch"},    {"export", "_export"},
+        {"class", "_class"},       {"char", "_char"},         {"short", "_short"},
+        {"bool", "_bool"},         {"int", "_int"},           {"default", "_default"},
+        {"case", "_case"},         {"switch", "_switch"},     {"export", "_export"},
         {"template", "_template"}, {"new", "new_"},           {"operator", "_operator"},
         {"typeof", "type_of"},     {"typename", "type_name"}, {"enum", "_enum"},
     };
@@ -1646,6 +1646,8 @@ std::string CodeGenerator::container_object_tag_identity(const std::string_view 
     const auto type = container_argument_type(type_name);
     if (type.kind != TypeKind::object)
         return std::string{type_name};
+    if (api_.find_class(type.name))
+        return type.name;
     if (const auto inner = inner_cpp_type(type.name); !inner.empty())
         return inner;
     if (script_symbols_) {
@@ -1659,6 +1661,8 @@ std::string CodeGenerator::container_object_tag_identity(const std::string_view 
 
 std::string CodeGenerator::container_object_runtime_name(const std::string_view type_name) const {
     const Type type{TypeKind::object, std::string{type_name}};
+    if (api_.find_class(type.name))
+        return type.name;
     if (!attached_script_source_path(type).empty()) {
         if (const auto inner = inner_cpp_type(type_name); !inner.empty())
             return inner_attached_native_base_type(type_name);
@@ -1810,6 +1814,8 @@ CodeGenerator::attached_script_source_path(const Type& type,
                                            const std::string_view resolved_owner) const {
     if (type.kind != TypeKind::object)
         return {};
+    if (api_.find_class(type.name))
+        return {};
 
     const auto current_inner_path = [&](const std::string_view identity) {
         if (identity.empty())
@@ -1834,9 +1840,9 @@ CodeGenerator::attached_script_source_path(const Type& type,
         if (identity.empty())
             return static_cast<const ScriptClassSymbol*>(nullptr);
         const auto name = std::string{identity};
-        if (const auto* script = script_symbols_->find_class(name))
+        if (const auto* script = script_symbols_->find_native_class(name))
             return script;
-        return script_symbols_->find_native_class(name);
+        return api_.find_class(name) ? nullptr : script_symbols_->find_class(name);
     };
     const auto find_inner = [&](const std::string_view identity) {
         if (identity.empty())
@@ -7851,7 +7857,9 @@ void CodeGenerator::emit_inner_class_declaration(const typed::Class& declaration
             header << " override;\n";
         }
         header << "    "
-               << (function.is_static ? "static " : function.name == "_init" ? "" : "virtual ")
+               << (function.is_static         ? "static "
+                   : function.name == "_init" ? ""
+                                              : "virtual ")
                << function_return_type(function) << ' ' << function_native_name(function) << '(';
         for (std::size_t index = 0; index < function.parameters.size(); ++index) {
             if (index != 0)
@@ -9419,7 +9427,7 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
         }
         if (current_script_) {
             const auto add_complete_script_type = [&](const Type& type) {
-                if (type.kind != TypeKind::object)
+                if (type.kind != TypeKind::object || api_.find_class(type.name))
                     return;
                 const auto* symbol = script_symbols_->find_class(type.name);
                 if (symbol && symbol != current_script_)

@@ -453,8 +453,7 @@ TEST_CASE("project compiler isolates tool access to runtime script state") {
         read_text(options.output_directory / "generated" / runtime->source_file_name);
     REQUIRE(tool_source.find("gdpp::runtime::ScriptResource<" + runtime->class_name + ">") !=
             std::string::npos);
-    REQUIRE(tool_header.find("template <typename T> struct ScriptResource") ==
-            std::string::npos);
+    REQUIRE(tool_header.find("template <typename T> struct ScriptResource") == std::string::npos);
     REQUIRE(tool_source.find("gdpp::runtime::is_editor_hint() ? godot::Variant()") !=
             std::string::npos);
     REQUIRE(tool_source.find("if (!gdpp::runtime::is_editor_hint()) " + runtime->class_name +
@@ -2354,6 +2353,31 @@ TEST_CASE("unnamed scripts inherit by path without becoming global classes") {
     REQUIRE(!std::filesystem::exists(options.output_directory / "manifest.txt"));
 }
 
+TEST_CASE("unnamed script stems never shadow native engine type namespaces") {
+    const auto root = fixture_root("project-native-type-stem-collision");
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
+    write_text(root / "ProgressBar.gd", "extends Control\n"
+                                        "@export var fill_mode: ProgressBar.FillMode = "
+                                        "ProgressBar.FILL_BEGIN_TO_END\n"
+                                        "@export var native_bar: ProgressBar\n");
+
+    auto options = project_options(root);
+    options.compiler.target_version = gdpp::GodotVersion::v4_7;
+    const auto result = gdpp::ProjectCompiler{}.compile(options);
+
+    REQUIRE(result.success);
+    REQUIRE_EQ(result.scripts.size(), std::size_t{1});
+    const auto source =
+        read_text(options.output_directory / "generated" / result.scripts.front().source_file_name);
+    const auto header =
+        read_text(options.output_directory / "generated" / result.scripts.front().header_file_name);
+    REQUIRE(source.find("get_named(godot::ProgressBar") == std::string::npos);
+    REQUIRE(source.find("to_variant(0)") != std::string::npos);
+    REQUIRE(header.find("ObjectStorage<godot::ProgressBar> native_bar") != std::string::npos);
+    REQUIRE(source.find("strict_attached_script_storage") == std::string::npos);
+}
+
 TEST_CASE("project compiler gives same-named unnamed scripts path-stable native identities") {
     const auto root = fixture_root("project-unnamed-native-identities");
     std::error_code error;
@@ -3621,8 +3645,7 @@ TEST_CASE("project compiler lowers cross-script constants enums and resource fac
     REQUIRE(consumer_source.find("IDLE:0,ACTIVE:4,BOOST:8") != std::string::npos);
     REQUIRE(consumer_source.find("_gdpp_constant_Factory_storage())>::missing()") !=
             std::string::npos);
-    REQUIRE(consumer_source.find("value = gdpp::runtime::ScriptResource<") !=
-            std::string::npos);
+    REQUIRE(consumer_source.find("value = gdpp::runtime::ScriptResource<") != std::string::npos);
     REQUIRE(consumer_source.find(">::missing();\n    return value;") != std::string::npos);
     const auto count_occurrences = [](const std::string_view text, const std::string_view needle) {
         std::size_t count = 0;
