@@ -423,8 +423,16 @@ func _export_file(path: String, _type: String, _features: PackedStringArray) -> 
 
 
 func _resource_requires_aot(path: String) -> bool:
-    if _resource_aot_requirements.has(path):
-        return bool(_resource_aot_requirements[path])
+    return _resource_requires_aot_for(path, _compiled_scripts, _resource_aot_requirements)
+
+
+static func _resource_requires_aot_for(
+    path: String,
+    compiled_scripts: Dictionary,
+    requirements: Dictionary
+) -> bool:
+    if requirements.has(path):
+        return bool(requirements[path])
 
     # Binary resources cannot be inspected safely without loading them. Preserve the existing
     # fail-closed transformation path for .scn/.res so embedded GDScript can never bypass source
@@ -432,48 +440,37 @@ func _resource_requires_aot(path: String) -> bool:
     # resources, which lets pure C#, GDExtension-language and data-only scenes follow Godot's
     # native exporter even when the current editor cannot execute that language.
     if path.get_extension().to_lower() in ["scn", "res"]:
-        _resource_aot_requirements[path] = true
+        requirements[path] = true
         return true
 
-    var pending := PackedStringArray([path])
-    var visited: Dictionary = {}
-    while not pending.is_empty():
-        var current := pending[pending.size() - 1]
-        pending.resize(pending.size() - 1)
-        if visited.has(current):
+    if _text_resource_mentions_gdscript(path):
+        requirements[path] = true
+        return true
+
+    # An external scene/resource dependency is exported and remapped under its own path. Pulling
+    # that dependency transitively into this root would instantiate unrelated foreign-language
+    # owners (for example a C# scene that merely instances a GDScript scene) and would also
+    # duplicate the child's transformation. Only a direct Script dependency belongs to this
+    # serialized root; nested resource paths retain Godot's ordinary per-resource remap contract.
+    for encoded_dependency: String in ResourceLoader.get_dependencies(path):
+        var dependency := _dependency_resource_path(encoded_dependency)
+        if dependency.is_empty():
             continue
-        visited[current] = true
-
-        var extension := current.get_extension().to_lower()
-        var source_path := current.trim_suffix("c") if current.ends_with(".gdc") else current
-        if extension in ["gd", "gdc"] or _compiled_scripts.has(source_path):
-            _resource_aot_requirements[path] = true
-            return true
-        if extension in ["scn", "res"]:
-            _resource_aot_requirements[path] = true
-            return true
-        if extension not in ["tscn", "tres"]:
-            continue
-        if _text_resource_mentions_gdscript(current):
-            _resource_aot_requirements[path] = true
+        var dependency_extension := dependency.get_extension().to_lower()
+        var source_path := (
+            dependency.trim_suffix("c")
+            if dependency.ends_with(".gdc")
+            else dependency
+        )
+        if dependency_extension in ["gd", "gdc"] or compiled_scripts.has(source_path):
+            requirements[path] = true
             return true
 
-        for encoded_dependency: String in ResourceLoader.get_dependencies(current):
-            var dependency := _dependency_resource_path(encoded_dependency)
-            if dependency.is_empty():
-                continue
-            var dependency_extension := dependency.get_extension().to_lower()
-            if dependency_extension in ["gd", "gdc"]:
-                _resource_aot_requirements[path] = true
-                return true
-            if dependency_extension in ["tscn", "tres", "scn", "res"]:
-                pending.push_back(dependency)
-
-    _resource_aot_requirements[path] = false
+    requirements[path] = false
     return false
 
 
-func _dependency_resource_path(encoded_dependency: String) -> String:
+static func _dependency_resource_path(encoded_dependency: String) -> String:
     for field: String in encoded_dependency.split("::", false):
         if field.begins_with("res://"):
             return field
@@ -486,7 +483,7 @@ func _dependency_resource_path(encoded_dependency: String) -> String:
     return ""
 
 
-func _text_resource_mentions_gdscript(path: String) -> bool:
+static func _text_resource_mentions_gdscript(path: String) -> bool:
     var file := FileAccess.open(path, FileAccess.READ)
     if file == null:
         # Classification must never turn an unreadable resource into an unchecked pass-through.
@@ -2163,8 +2160,16 @@ func _script_path(object: Object) -> String:
 
 
 func _is_gdscript_provider(script: Script, path: String) -> bool:
+    return _is_gdscript_provider_for(script, path, _compiled_scripts)
+
+
+static func _is_gdscript_provider_for(
+    script: Script,
+    path: String,
+    compiled_scripts: Dictionary
+) -> bool:
     var source_path := path.trim_suffix("c") if path.ends_with(".gdc") else path
-    if _compiled_scripts.has(source_path):
+    if compiled_scripts.has(source_path):
         return true
     var extension := path.get_extension().to_lower()
     return extension in ["gd", "gdc"] or (script != null and script.is_class(&"GDScript"))
