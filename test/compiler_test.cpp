@@ -5601,6 +5601,27 @@ TEST_CASE("internal static function values use owner-free callables") {
     REQUIRE(result.unit.source.find("godot::Callable(this") == std::string::npos);
 }
 
+TEST_CASE("internal static method calls use their isolated native symbol") {
+    const gdpp::Compiler compiler;
+    const auto result =
+        compiler.compile("internal_static_call.gd",
+                         "extends Resource\n"
+                         "class Calculator:\n"
+                         "    static func calculate(value: int) -> int:\n"
+                         "        return value + 1\n"
+                         "func calculate(value: int) -> int:\n"
+                         "    return Calculator.calculate(value)\n");
+
+    REQUIRE(result.success);
+    REQUIRE(result.unit.header.find(
+                "static int64_t _gdpp_script_method_calculate(int64_t value);") !=
+            std::string::npos);
+    REQUIRE(result.unit.source.find("::calculate(") == std::string::npos);
+    REQUIRE(result.unit.source.find(
+                "GDPPNative_InternalStaticCall__Calculator::_gdpp_script_method_calculate(") !=
+            std::string::npos);
+}
+
 TEST_CASE("unknown lowercase identifiers fail before native code generation") {
     const gdpp::Compiler compiler;
     const auto result = compiler.compile("typo.gd", "extends Node\n"

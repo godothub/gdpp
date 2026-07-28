@@ -254,6 +254,9 @@ class CodeGenerator final {
     [[nodiscard]] const typed::Function*
     find_inherited_inner_function(std::string_view base, std::string_view method,
                                   std::string* declaration_owner = nullptr) const noexcept;
+    [[nodiscard]] std::string
+    typed_inner_method_implementation_name(std::string_view owner,
+                                           const typed::Function& method) const;
     [[nodiscard]] std::string script_method_native_name(const ScriptClassSymbol& owner,
                                                         const ScriptMemberSymbol& method) const;
     [[nodiscard]] std::string
