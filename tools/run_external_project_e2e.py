@@ -642,6 +642,10 @@ def main() -> int:
 
         native_library = find_project_library(installed_addon, args.host)
         pck = find_pck(product)
+        # Keep the isolated host deterministic: it audits package contents, the runtime
+        # descriptor, source disclosure, and native payload shape without pretending to own the
+        # customer's autoloads or custom ResourceFormatLoaders. The exported executable launched
+        # immediately afterwards is the authoritative extension/resource runtime gate.
         audit_host = output / "audit-host"
         audit_host.mkdir(parents=True, exist_ok=True)
         (audit_host / "project.godot").write_text(
