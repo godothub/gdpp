@@ -451,7 +451,9 @@ TEST_CASE("project compiler isolates tool access to runtime script state") {
         read_text(options.output_directory / "generated" / tool->source_file_name);
     const auto runtime_source =
         read_text(options.output_directory / "generated" / runtime->source_file_name);
-    REQUIRE(tool_header.find("if (!T::_gdpp_tool_mode && gdpp::runtime::is_editor_hint())") !=
+    REQUIRE(tool_source.find("gdpp::runtime::ScriptResource<" + runtime->class_name + ">") !=
+            std::string::npos);
+    REQUIRE(tool_header.find("template <typename T> struct ScriptResource") ==
             std::string::npos);
     REQUIRE(tool_source.find("gdpp::runtime::is_editor_hint() ? godot::Variant()") !=
             std::string::npos);
@@ -3593,15 +3595,10 @@ TEST_CASE("project compiler lowers cross-script constants enums and resource fac
         read_text(options.output_directory / "generated/shared_consumer.gd.hpp");
     REQUIRE(consumer_header.find("#include <gdpp/runtime/attached_script.hpp>") !=
             std::string::npos);
-    REQUIRE(consumer_header.find("ScriptResource<GDPPNative_SharedValues_") != std::string::npos);
-    REQUIRE(consumer_header.find("operator godot::Variant() const") != std::string::npos);
-    REQUIRE(consumer_header.find("attached_script_resource(") != std::string::npos);
-    REQUIRE(consumer_header.find("godot::Ref<godot::Script> resource() const") !=
+    REQUIRE(consumer_header.find("gdpp::runtime::ScriptResource<GDPPNative_SharedValues_") !=
             std::string::npos);
-    REQUIRE(consumer_header.find("return gdpp::runtime::to_variant(resource())") !=
+    REQUIRE(consumer_header.find("template <typename T> struct ScriptResource") ==
             std::string::npos);
-    REQUIRE(consumer_header.find("return script;\n        } else {\n"
-                                 "            return {};\n        }") != std::string::npos);
     const auto consumer_source =
         read_text(options.output_directory / "generated/shared_consumer.gd.cpp");
     REQUIRE(consumer_source.find("SharedValues_") != std::string::npos);
@@ -3609,21 +3606,22 @@ TEST_CASE("project compiler lowers cross-script constants enums and resource fac
     REQUIRE(consumer_source.find("::LIMIT()") != std::string::npos);
     REQUIRE(consumer_source.find("::_gdpp_enum_ANONYMOUS") != std::string::npos);
     REQUIRE(consumer_source.find("::MASK()") != std::string::npos);
-    REQUIRE(consumer_source.find("ScriptResource<GDPPNative_SharedValues_") != std::string::npos);
+    REQUIRE(consumer_source.find("gdpp::runtime::ScriptResource<GDPPNative_SharedValues_") !=
+            std::string::npos);
     REQUIRE(consumer_source.find(".instantiate(") != std::string::npos);
     REQUIRE(consumer_source.find("[[maybe_unused]] "
-                                 "shared_consumer_gdpp_detail::ScriptResource<" +
+                                 "gdpp::runtime::ScriptResource<" +
                                  base_class +
                                  "> Alias = "
-                                 "shared_consumer_gdpp_detail::ScriptResource<" +
+                                 "gdpp::runtime::ScriptResource<" +
                                  base_class + ">{};") != std::string::npos);
     REQUIRE(consumer_source.find("godot::StringName(\"" + base_class + "\")") == std::string::npos);
     REQUIRE(consumer_source.find("_gdpp_call_argument_") != std::string::npos);
     REQUIRE(consumer_source.find("IDLE:0,ACTIVE:4,BOOST:8") != std::string::npos);
     REQUIRE(consumer_source.find("_gdpp_constant_Factory_storage())>::missing()") !=
             std::string::npos);
-    REQUIRE(consumer_source.find("value = " + std::string{"shared_consumer_gdpp_detail::"} +
-                                 "ScriptResource<") != std::string::npos);
+    REQUIRE(consumer_source.find("value = gdpp::runtime::ScriptResource<") !=
+            std::string::npos);
     REQUIRE(consumer_source.find(">::missing();\n    return value;") != std::string::npos);
     const auto count_occurrences = [](const std::string_view text, const std::string_view needle) {
         std::size_t count = 0;

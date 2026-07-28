@@ -1381,7 +1381,7 @@ std::string CodeGenerator::cpp_type(const Type& type) const {
     case TypeKind::script_resource:
         if (script_symbols_) {
             if (const auto* symbol = script_symbols_->find_path(type.name))
-                return detail_namespace_ + "::ScriptResource<" + symbol->native_class_name + ">";
+                return "gdpp::runtime::ScriptResource<" + symbol->native_class_name + ">";
         }
         return "godot::Variant";
     case TypeKind::builtin:
@@ -4868,7 +4868,7 @@ std::string CodeGenerator::emit_expression(const typed::Expression& expression) 
             const auto resource =
                 callee.operands.at(0)->type.kind == TypeKind::script_resource
                     ? emit_expression(*callee.operands.at(0))
-                    : detail_namespace_ + "::ScriptResource<" + callee.resolved_owner + ">{}";
+                    : "gdpp::runtime::ScriptResource<" + callee.resolved_owner + ">{}";
             receiver_setup = "auto " + receiver + " = " + resource + "; ";
             invocation = receiver + ".instantiate";
         } else if (callee.resolution == typed::ResolutionKind::inner_constructor) {
@@ -9120,70 +9120,6 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
     if (!emitted_container_object_tags.empty())
         header << '\n';
     header << "namespace " << detail_namespace_ << " {\n"
-           << "template <typename T> struct ScriptResource {\n"
-           << "private:\n"
-           << "    struct MissingTag {};\n"
-           << "    godot::Ref<godot::Script> _gdpp_resource;\n"
-           << "    static godot::Ref<godot::Script> materialize() {\n"
-           << "        if constexpr (T::_gdpp_attached) {\n"
-           << "            godot::String error;\n"
-           << "            const auto script = gdpp::runtime::attached_script_resource("
-              "godot::String(T::_gdpp_source_path), &error);\n"
-           << "            if (script.is_null()) {\n"
-           << "                godot::UtilityFunctions::push_error("
-              "godot::String(\"GDPP: cannot materialize compiled script resource: \") + "
-              "error);\n"
-           << "                return {};\n"
-           << "            }\n"
-           << "            return script;\n"
-           << "        } else {\n"
-           << "            return {};\n"
-           << "        }\n"
-           << "    }\n"
-           << "    explicit ScriptResource(MissingTag) {}\n"
-           << "public:\n"
-           << "    ScriptResource() : _gdpp_resource(materialize()) {}\n"
-           << "    static ScriptResource missing() { return ScriptResource(MissingTag{}); }\n"
-           << "    godot::Ref<godot::Script> resource() const { return _gdpp_resource; }\n"
-           << "    operator godot::Variant() const {\n"
-           << "        return gdpp::runtime::to_variant(resource());\n"
-           << "    }\n"
-           << "    template <typename... Args>\n"
-           << "    auto instantiate(Args &&...args) const {\n"
-           << "        if constexpr (T::_gdpp_attached) {\n"
-           << "            if (_gdpp_resource.is_null()) {\n"
-           << "                gdpp::runtime::report_script_failure("
-              "godot::String(\"Cannot instantiate a missing script resource.\"));\n"
-           << "                if constexpr (T::_gdpp_attached_ref_counted) {\n"
-           << "                    return godot::Ref<godot::RefCounted>();\n"
-           << "                } else {\n"
-           << "                    return static_cast<godot::Object *>(nullptr);\n"
-           << "                }\n"
-           << "            }\n"
-           << "            godot::Array gdpp_arguments;\n"
-           << "            (gdpp_arguments.push_back("
-              "gdpp::runtime::to_variant(std::forward<Args>(args))), "
-              "...);\n"
-           << "            godot::Variant instance = gdpp::runtime::instantiate_attached_script("
-              "godot::String(T::_gdpp_source_path), gdpp_arguments);\n"
-           << "            if constexpr (T::_gdpp_attached_ref_counted) {\n"
-           << "                godot::Object *object = instance;\n"
-           << "                return godot::Ref<godot::RefCounted>("
-              "godot::Object::cast_to<godot::RefCounted>(object));\n"
-           << "            } else {\n"
-           << "                return static_cast<godot::Object *>(instance);\n"
-           << "            }\n"
-           << "        } else if constexpr (std::is_base_of_v<godot::RefCounted, T>) {\n"
-           << "            if (!T::_gdpp_tool_mode && gdpp::runtime::is_editor_hint()) "
-              "return godot::Ref<T>();\n"
-           << "            return godot::Ref<T>(memnew(T(std::forward<Args>(args)...)));\n"
-           << "        } else {\n"
-           << "            if (!T::_gdpp_tool_mode && gdpp::runtime::is_editor_hint()) "
-              "return static_cast<T*>(nullptr);\n"
-           << "            return memnew(T(std::forward<Args>(args)...));\n"
-           << "        }\n"
-           << "    }\n"
-           << "};\n"
            << "template <typename T> struct InternalClassResource {\n"
            << "    template <typename... Args>\n"
            << "    static auto instantiate(Args &&...args) {\n"

@@ -1,11 +1,13 @@
 #pragma once
 
+#include "gdpp/runtime/attached_script.hpp"
 #include "gdpp/runtime/reference_semantics.hpp"
 
 #include <godot_cpp/classes/class_db_singleton.hpp>
 #include <godot_cpp/classes/ref.hpp>
 #include <godot_cpp/classes/ref_counted.hpp>
 #include <godot_cpp/core/object.hpp>
+#include <godot_cpp/core/memory.hpp>
 #include <godot_cpp/core/property_info.hpp>
 #include <godot_cpp/variant/array.hpp>
 #include <godot_cpp/variant/callable.hpp>
@@ -465,6 +467,100 @@ void register_autoload(const godot::StringName& name, godot::Object* instance);
 // published the provider object's ScriptInstance. It may be omitted for ordinary native objects.
 [[nodiscard]] godot::Variant script_identity(godot::Object* object,
                                              const char* source_path = nullptr);
+
+// A preload is a Script resource value, not the generated behavior class itself. Keeping this
+// wrapper in the shared runtime gives every generated unit the same Godot method-binding ABI for
+// script-valued fields, parameters, and returns. The template parameter retains the exact
+// compile-time script contract used by new(), constants, and static members.
+template <typename T> class ScriptResource final {
+  public:
+    ScriptResource() : resource_(materialize()) {}
+
+    explicit ScriptResource(const godot::Ref<godot::Script>& resource) : resource_(resource) {
+        validate_identity();
+    }
+
+    static ScriptResource missing() { return ScriptResource(MissingTag{}); }
+
+    [[nodiscard]] godot::Ref<godot::Script> resource() const { return resource_; }
+
+    [[nodiscard]] godot::Variant variant() const {
+        return godot::Variant(static_cast<const godot::Object*>(resource_.ptr()));
+    }
+
+    operator godot::Variant() const { return variant(); }
+
+    template <typename... Arguments> auto instantiate(Arguments&&... arguments) const {
+        if constexpr (T::_gdpp_attached) {
+            if (resource_.is_null()) {
+                report_script_failure("Cannot instantiate a missing script resource.");
+                if constexpr (T::_gdpp_attached_ref_counted)
+                    return godot::Ref<godot::RefCounted>();
+                else
+                    return static_cast<godot::Object*>(nullptr);
+            }
+            godot::Array values;
+            (values.push_back(to_variant(std::forward<Arguments>(arguments))), ...);
+            const godot::Variant instance =
+                instantiate_attached_script(godot::String{T::_gdpp_source_path}, values);
+            if constexpr (T::_gdpp_attached_ref_counted) {
+                godot::Object* object = instance;
+                return godot::Ref<godot::RefCounted>(
+                    godot::Object::cast_to<godot::RefCounted>(object));
+            } else {
+                return static_cast<godot::Object*>(instance);
+            }
+        } else if constexpr (std::is_base_of_v<godot::RefCounted, T>) {
+            if (!T::_gdpp_tool_mode && is_editor_hint())
+                return godot::Ref<T>();
+            return godot::Ref<T>(memnew(T(std::forward<Arguments>(arguments)...)));
+        } else {
+            if (!T::_gdpp_tool_mode && is_editor_hint())
+                return static_cast<T*>(nullptr);
+            return memnew(T(std::forward<Arguments>(arguments)...));
+        }
+    }
+
+  private:
+    struct MissingTag {};
+
+    explicit ScriptResource(MissingTag) {}
+
+    [[nodiscard]] static godot::Ref<godot::Script> materialize() {
+        if constexpr (T::_gdpp_attached) {
+            godot::String error;
+            const auto script =
+                attached_script_resource(godot::String{T::_gdpp_source_path}, &error);
+            if (script.is_null()) {
+                godot::UtilityFunctions::push_error(
+                    godot::String{"GDPP: cannot materialize compiled script resource: "} + error);
+                return {};
+            }
+            return script;
+        }
+        return {};
+    }
+
+    void validate_identity() {
+        if (resource_.is_null())
+            return;
+        const godot::String actual = resource_->get_path().simplify_path();
+        const godot::String expected = godot::String{T::_gdpp_source_path}.simplify_path();
+        if (actual == expected)
+            return;
+        report_script_failure(godot::String{"Cannot assign Script resource '"} + actual +
+                              "' to script type '" + expected + "'.");
+        resource_.unref();
+    }
+
+    godot::Ref<godot::Script> resource_;
+};
+
+template <typename T>
+[[nodiscard]] godot::Variant to_variant(const ScriptResource<T>& resource) {
+    return resource.variant();
+}
+
 [[nodiscard]] godot::Variant instantiate_external_class_at(const godot::StringName& name,
                                                            ScriptSourceLocation location = {});
 
@@ -981,3 +1077,51 @@ void checked_packed_array_set(SharedPackedArray<PackedArray>& target, std::int64
                                       ScriptSourceLocation location = {});
 
 } // namespace gdpp::runtime
+
+namespace godot {
+
+template <typename T>
+struct GetTypeInfo<gdpp::runtime::ScriptResource<T>> : GetTypeInfo<Ref<Script>> {};
+
+template <typename T>
+struct GetTypeInfo<const gdpp::runtime::ScriptResource<T>&>
+    : GetTypeInfo<gdpp::runtime::ScriptResource<T>> {};
+
+template <typename T> struct VariantCaster<gdpp::runtime::ScriptResource<T>> {
+    static gdpp::runtime::ScriptResource<T> cast(const Variant& value) {
+        return gdpp::runtime::ScriptResource<T>(static_cast<Ref<Script>>(value));
+    }
+};
+
+template <typename T>
+struct VariantCaster<const gdpp::runtime::ScriptResource<T>&>
+    : VariantCaster<gdpp::runtime::ScriptResource<T>> {};
+
+template <typename T> struct VariantObjectClassChecker<gdpp::runtime::ScriptResource<T>> {
+    static bool check(const Variant& value) {
+        Object* object = value.get_validated_object();
+        return object == nullptr || Object::cast_to<Script>(object) != nullptr;
+    }
+};
+
+template <typename T>
+struct VariantObjectClassChecker<const gdpp::runtime::ScriptResource<T>&>
+    : VariantObjectClassChecker<gdpp::runtime::ScriptResource<T>> {};
+
+template <typename T> struct PtrToArg<gdpp::runtime::ScriptResource<T>> {
+    static gdpp::runtime::ScriptResource<T> convert(const void* value) {
+        return gdpp::runtime::ScriptResource<T>(PtrToArg<Ref<Script>>::convert(value));
+    }
+
+    using EncodeT = Ref<Script>;
+
+    static void encode(const gdpp::runtime::ScriptResource<T>& value, void* output) {
+        PtrToArg<Ref<Script>>::encode(value.resource(), output);
+    }
+};
+
+template <typename T>
+struct PtrToArg<const gdpp::runtime::ScriptResource<T>&>
+    : PtrToArg<gdpp::runtime::ScriptResource<T>> {};
+
+} // namespace godot
