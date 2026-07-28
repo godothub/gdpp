@@ -2255,8 +2255,11 @@ std::string CodeGenerator::emit_explicit_conversion(const Type& target, const Ty
     if (is_explicitly_typed_container(target) && source.is_dynamic())
         return emit_conversion(target, source, std::move(value));
     if (is_explicitly_typed_container(target) && target != source) {
-        const auto base = target.kind == TypeKind::array ? "godot::Array" : "godot::Dictionary";
-        return std::string{base} + "(gdpp::runtime::to_variant(" + value + "))";
+        // `as Array[T]` and `as Dictionary[K, V]` construct a container with the target runtime
+        // signature. Returning only the untyped Array/Dictionary base loses both native and
+        // attached-script element identity, and also cannot initialize the generated typed
+        // wrapper because its validating constructors are intentionally explicit.
+        return cpp_type(target) + "(gdpp::runtime::to_variant(" + value + "))";
     }
     if (target.kind == TypeKind::enumeration)
         return emit_conversion(target, source, std::move(value));

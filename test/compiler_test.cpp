@@ -987,7 +987,11 @@ TEST_CASE("typed containers preserve internal class runtime identity without inc
                                          "var by_name: Dictionary[String, Payload] = {}\n"
                                          "func replace(values: Array[Payload]) -> Array[Payload]:\n"
                                          "    payloads = values\n"
-                                         "    return payloads\n");
+                                         "    return payloads\n"
+                                         "func make_payloads() -> Array[Payload]:\n"
+                                         "    return [] as Array[Payload]\n"
+                                         "func make_by_name() -> Dictionary[String, Payload]:\n"
+                                         "    return {} as Dictionary[String, Payload]\n");
 
     REQUIRE(result.success);
     REQUIRE(result.unit.header.find(
@@ -1008,6 +1012,15 @@ TEST_CASE("typed containers preserve internal class runtime identity without inc
             std::string::npos);
     REQUIRE(result.unit.header.find(
                 "godot::StringName(\"GDPPNative_InnerTypedContainers__Payload\")") ==
+            std::string::npos);
+    REQUIRE(result.unit.source.find("ScriptTypedArray<inner_typed_containers_gdpp_detail::"
+                                    "ContainerObjectTag_GDPPNative_InnerTypedContainers__Payload>"
+                                    "(gdpp::runtime::to_variant(godot::Array()))") !=
+            std::string::npos);
+    REQUIRE(result.unit.source.find("ScriptTypedDictionary<godot::String, "
+                                    "inner_typed_containers_gdpp_detail::"
+                                    "ContainerObjectTag_GDPPNative_InnerTypedContainers__Payload>"
+                                    "(gdpp::runtime::to_variant(([&]() -> godot::Dictionary") !=
             std::string::npos);
 }
 
