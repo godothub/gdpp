@@ -1380,6 +1380,41 @@ TEST_CASE("project compiler accepts variance-safe script override contracts") {
     REQUIRE(header.find("_gdpp_native_override_transform") != std::string::npos);
 }
 
+TEST_CASE("project compiler refines inferred cross-script enum override parameters") {
+    const auto root = fixture_root("project-inferred-enum-override");
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
+    write_text(root / "contract.gd", "extends RefCounted\n"
+                                     "class_name InferredEnumContract\n"
+                                     "enum Mode { NORMAL, RESET }\n");
+    write_text(root / "project.godot", "[application]\nconfig/name=\"Inferred enum override\"\n"
+                                       "[autoload]\n"
+                                       "InferredEnumContract=\"*res://contract.gd\"\n");
+    write_text(root / "base.gd", "extends Node\n"
+                                 "class_name InferredEnumBase\n"
+                                 "func reset(mode := InferredEnumContract.Mode.NORMAL) -> void:\n"
+                                 "    pass\n");
+    write_text(root / "child.gd", "extends InferredEnumBase\n"
+                                  "class_name InferredEnumChild\n"
+                                  "func reset(mode: InferredEnumContract.Mode = "
+                                  "InferredEnumContract.Mode.RESET) -> void:\n"
+                                  "    pass\n");
+
+    const auto options = project_options(root);
+    const auto result = gdpp::ProjectCompiler{}.compile(options);
+
+    REQUIRE(result.success);
+    const auto base_source =
+        read_text(options.output_directory / "generated/inferred_enum_base.gd.cpp");
+    const auto child_header =
+        read_text(options.output_directory / "generated/inferred_enum_child.gd.hpp");
+    const auto child_source =
+        read_text(options.output_directory / "generated/inferred_enum_child.gd.cpp");
+    REQUIRE(base_source.find("int64_t mode =") != std::string::npos);
+    REQUIRE(child_source.find("int64_t mode =") != std::string::npos);
+    REQUIRE(child_header.find("_gdpp_native_override_reset") == std::string::npos);
+}
+
 TEST_CASE("project compiler compares internal script overrides by emitted native ABI") {
     const auto root = fixture_root("project-inner-native-override-abi");
     std::error_code error;

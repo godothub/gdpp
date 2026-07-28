@@ -2411,6 +2411,22 @@ ProjectCompileResult ProjectCompiler::compile_impl(const ProjectCompileOptions& 
                         });
                     if (member == members.end())
                         continue;
+                    for (std::size_t parameter = 0; parameter < function.parameters.size();
+                         ++parameter) {
+                        if (!function.parameters[parameter].infer_type ||
+                            parameter >= member->parameters.size()) {
+                            continue;
+                        }
+                        const auto inferred = semantic.type_of(function.parameters[parameter]);
+                        if (inferred.kind == TypeKind::unknown ||
+                            member->parameters[parameter] == inferred) {
+                            continue;
+                        }
+                        member->parameters[parameter] = inferred;
+                        script_symbols.set_parameter_type(input.relative, inner_name, function.name,
+                                                          parameter, inferred);
+                        changed = true;
+                    }
                     const auto coroutine = semantic.is_coroutine(function);
                     if (member->is_coroutine != coroutine) {
                         member->is_coroutine = coroutine;

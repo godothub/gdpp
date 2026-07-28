@@ -112,6 +112,8 @@ class ScriptSymbolTable final {
     void add_resource_alias(std::string reference, std::string project_path);
     bool set_coroutine(const std::string& path, const std::string& inner_class,
                        const std::string& method, bool coroutine);
+    bool set_parameter_type(const std::string& path, const std::string& inner_class,
+                            const std::string& method, std::size_t parameter, Type type);
     bool set_accessor_coroutines(const std::string& path, const std::string& inner_class,
                                  const std::string& field, bool getter_coroutine,
                                  bool setter_coroutine);
