@@ -10,6 +10,7 @@ const RUNTIME_FAULT_MATRIX := preload("res://runtime_fault_matrix.gd")
 const RUNTIME_VALUE_MATRIX := preload("res://runtime_value_matrix.gd")
 const AWAIT_DEFAULT_PROBE := preload("res://await_default_probe.gd")
 const COROUTINE_ACCESSOR_PROBE := preload("res://coroutine_accessor_probe.gd")
+const STATE_TRANSPORT_PROBE := preload("res://state_transport_probe.gd")
 const RUNTIME_SHADER := preload("res://runtime_shader.gdshader")
 const ATTACHED_SCENE := preload("res://attached_scene.tscn")
 
@@ -390,6 +391,45 @@ func _verify_export_runtime() -> void:
         or indexed_entries.get(42) != dynamic_entry
     ):
         _fail("dynamic attached inner-class properties lost typed getter/setter semantics")
+        return
+
+    var transported_source: Variant = STATE_TRANSPORT_PROBE.new()
+    transported_source.value = 10
+    var transported_state: Dictionary = inst_to_dict(transported_source)
+    if (
+        transported_state.get(&"@path") != "res://state_transport_probe.gd"
+        or transported_state.get(&"@subpath") != NodePath()
+        or transported_state.get(&"value") != 11
+    ):
+        _fail("instance dictionary transport invoked an accessor or lost its script identity")
+        return
+    transported_state[&"value"] = 23
+    transported_state.erase(&"initializer_marker")
+    transported_state.erase(&"constructor_marker")
+    var transported_result: Variant = dict_to_inst(transported_state)
+    if (
+        transported_result == null
+        or transported_result.get_script() != STATE_TRANSPORT_PROBE
+        or transported_result.value != 123
+        or transported_result.initializer_marker != 0
+        or transported_result.constructor_marker != 0
+    ):
+        _fail(
+            "dictionary restoration replayed initialization, invoked a setter, or lost Script identity",
+        )
+        return
+
+    var inner_state: Dictionary = inst_to_dict(dynamic_entry)
+    var restored_entry: Variant = dict_to_inst(inner_state)
+    if (
+        inner_state.get(&"@path") != "res://inner_data.gd"
+        or inner_state.get(&"@subpath") != NodePath("Entry")
+        or restored_entry == null
+        or restored_entry.get_script() != dynamic_entry.get_script()
+        or restored_entry.count != 42
+        or restored_entry.label != "attached"
+    ):
+        _fail("internal-class dictionary transport lost its subpath, fields, or Script identity")
         return
 
     _shader_rect = TextureRect.new()
