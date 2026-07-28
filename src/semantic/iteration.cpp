@@ -8,7 +8,7 @@ IterationPlan make_iteration_plan(const Type& iterable, const Type& element_type
         return {IterationStrategy::intrinsic_range, {TypeKind::integer, "int"}};
     if (iterable.is_dynamic())
         return {IterationStrategy::dynamic_protocol, element_type};
-    if (iterable.kind == TypeKind::integer)
+    if (iterable.kind == TypeKind::integer || iterable.kind == TypeKind::enumeration)
         return {IterationStrategy::integer_count, {TypeKind::integer, "int"}};
     if (iterable.kind == TypeKind::floating)
         return {IterationStrategy::floating_count, {TypeKind::floating, "float"}};

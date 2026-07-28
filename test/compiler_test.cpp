@@ -5367,6 +5367,19 @@ TEST_CASE("local constants remain typed read-only values through native code gen
                         [](const auto& diagnostic) { return diagnostic.code == "GDS4006"; }));
 }
 
+TEST_CASE("compiler iterates named enum values as integer counts") {
+    const gdpp::Compiler compiler;
+    const auto result = compiler.compile("enum_count.gd", "enum State { IDLE, ACTIVE, COUNT }\n"
+                                                          "func values() -> Array[int]:\n"
+                                                          "    var result: Array[int] = []\n"
+                                                          "    for value in State.COUNT:\n"
+                                                          "        result.append(value)\n"
+                                                          "    return result\n");
+
+    REQUIRE(result.success);
+    REQUIRE(result.unit.source.find("const int64_t _gdpp_integer_limit_") != std::string::npos);
+}
+
 TEST_CASE("static constructors are validated and run through the class initialization guard") {
     const gdpp::Compiler compiler;
     const auto valid = compiler.compile("static_init.gd", "static var initialized: bool = false\n"

@@ -1290,7 +1290,8 @@ bool IrVerifier::verify_statement(const ir::Statement& statement) {
                 strategy_matches = iterable.is_dynamic();
                 break;
             case IterationStrategy::integer_count:
-                strategy_matches = iterable.kind == TypeKind::integer;
+                strategy_matches =
+                    iterable.kind == TypeKind::integer || iterable.kind == TypeKind::enumeration;
                 break;
             case IterationStrategy::floating_count:
                 strategy_matches = iterable.kind == TypeKind::floating;

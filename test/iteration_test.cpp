@@ -41,6 +41,7 @@ TEST_CASE("typed container descriptors preserve source constraints") {
 
 TEST_CASE("iteration plans classify every accepted iterable family") {
     const gdpp::Type integer{gdpp::TypeKind::integer, "int"};
+    const gdpp::Type enumeration{gdpp::TypeKind::enumeration, "State"};
     const gdpp::Type floating{gdpp::TypeKind::floating, "float"};
     const gdpp::Type vector2{gdpp::TypeKind::builtin, "Vector2"};
     const gdpp::Type vector2i{gdpp::TypeKind::builtin, "Vector2i"};
@@ -54,6 +55,8 @@ TEST_CASE("iteration plans classify every accepted iterable family") {
     const gdpp::Type object{gdpp::TypeKind::object, "CustomIterator"};
 
     REQUIRE_EQ(gdpp::make_iteration_plan(integer, integer, false).strategy,
+               gdpp::IterationStrategy::integer_count);
+    REQUIRE_EQ(gdpp::make_iteration_plan(enumeration, integer, false).strategy,
                gdpp::IterationStrategy::integer_count);
     REQUIRE_EQ(gdpp::make_iteration_plan(floating, floating, false).strategy,
                gdpp::IterationStrategy::floating_count);

@@ -1140,7 +1140,7 @@ bool SemanticAnalyzer::override_type_accepts(const Type& target,
 }
 
 Type SemanticAnalyzer::container_element_type(const Type& container, SourceSpan span) {
-    if (container.kind == TypeKind::integer)
+    if (container.kind == TypeKind::integer || container.kind == TypeKind::enumeration)
         return {TypeKind::integer, "int"};
     if (container.kind == TypeKind::floating)
         return {TypeKind::floating, "float"};
@@ -4927,8 +4927,9 @@ SemanticAnalyzer::FlowResult SemanticAnalyzer::analyze_statement(const ast::Stat
               iterable.name == "Vector3" || iterable.name == "Vector3i"));
         if (!iterable.is_dynamic() && iterable.kind != TypeKind::array &&
             iterable.kind != TypeKind::dictionary && iterable.kind != TypeKind::string &&
-            iterable.kind != TypeKind::integer && !mathematical_range &&
-            !iterable.is_packed_array() && iterable.kind != TypeKind::object) {
+            iterable.kind != TypeKind::integer && iterable.kind != TypeKind::enumeration &&
+            !mathematical_range && !iterable.is_packed_array() &&
+            iterable.kind != TypeKind::object) {
             diagnostics_.error("GDS4007", "for loop expression is not iterable",
                                statement.condition()->span);
         }
