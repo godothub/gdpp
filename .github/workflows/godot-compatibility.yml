@@ -466,7 +466,7 @@ jobs:
           - name: Open RPG
             id: open-rpg
             manifest: test/compatibility/open_rpg.json
-            godot: 4.6.3
+            godot: 4.6.2
             target: "4.6"
           - name: Source of Mana
             id: source-of-mana

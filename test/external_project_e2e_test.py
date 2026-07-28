@@ -18,6 +18,15 @@ SPEC.loader.exec_module(E2E)
 
 
 class ExternalProjectE2ETest(unittest.TestCase):
+    def test_runner_stabilizes_fresh_imports_before_enforcing_clean_logs(self) -> None:
+        source = MODULE_PATH.read_text(encoding="utf-8")
+        self.assertIn('"import_bootstrap"', source)
+        self.assertIn('output / "import-bootstrap.log"', source)
+        self.assertLess(
+            source.index('"import_bootstrap"'),
+            source.index('assert_clean_log(import_log, "Godot import")'),
+        )
+
     def test_enable_plugin_preserves_existing_multiline_entries(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             project = Path(temporary) / "project.godot"

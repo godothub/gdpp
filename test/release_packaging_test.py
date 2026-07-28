@@ -493,19 +493,21 @@ class ReleasePackagingTest(unittest.TestCase):
         self.assertIn("tools/update_godot_frontend.py", workflow)
         self.assertIn("test/compatibility/godot_frontend_4_7.json", workflow)
         self.assertIn("tools/run_external_project_e2e.py", workflow)
-        for manifest_name in (
-            "konado.json",
-            "pixelorama.json",
-            "open_rpg.json",
-            "source_of_mana.json",
-        ):
+        expected_engines = {
+            "konado.json": "4.7.1",
+            "pixelorama.json": "4.6.3",
+            "open_rpg.json": "4.6.2",
+            "source_of_mana.json": "4.7.1",
+        }
+        for manifest_name, expected_engine in expected_engines.items():
             manifest_path = SOURCE_ROOT / "test/compatibility" / manifest_name
             self.assertIn(f"test/compatibility/{manifest_name}", workflow)
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
             self.assertEqual(manifest["repository"].get("checkout"), "full")
             self.assertIn("branch", manifest["repository"])
             self.assertNotIn("commit", manifest["repository"])
-            self.assertRegex(manifest["godot"]["engine"], r"^4\.[0-9]+\.[0-9]+$")
+            self.assertEqual(manifest["godot"]["engine"], expected_engine)
+            self.assertIn(f"godot: {expected_engine}", workflow)
 
     def test_host_staging_excludes_msvc_import_products(self) -> None:
         source = create_host_component(self.temporary / "source", "windows-x64")

@@ -414,6 +414,17 @@ def main() -> int:
             log=validation_log,
         )
 
+        bootstrap_import_log = output / "import-bootstrap.log"
+        report["phases"]["import_bootstrap"] = run(
+            [str(godot), "--headless", "--editor", "--path", str(project), "--import"],
+            cwd=project,
+            timeout=args.import_timeout,
+            log=bootstrap_import_log,
+        )
+
+        # A fresh Godot checkout can load project settings, editor plugins, and the project theme
+        # before their imported artifacts exist. The first pass materializes that cache; the
+        # second pass is the authoritative customer-visible steady state and must be clean.
         import_log = output / "import.log"
         report["phases"]["import"] = run(
             [str(godot), "--headless", "--editor", "--path", str(project), "--import"],

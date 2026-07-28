@@ -2,7 +2,7 @@
   "schema_version": 1,
   "godot": {
     "target": "4.6",
-    "engine": "4.6.3"
+    "engine": "4.6.2"
   },
   "repository": {
     "name": "gdquest-demos/godot-open-rpg",
