@@ -195,6 +195,16 @@ def report_diagnostics(log: Path) -> tuple[Counter[str], list[dict]]:
     ]
 
 
+def clear_stale_evidence_logs(output: Path) -> None:
+    # A failed run can stop before later phases overwrite their logs. Evidence uploads must never
+    # combine a current report with a previous run's export or runtime output.
+    for log in output.glob("*.log"):
+        if log.is_symlink():
+            fail(f"end-to-end evidence log must not be a symbolic link: {log}")
+        if log.is_file():
+            log.unlink()
+
+
 def git_output(project: Path, arguments: list[str]) -> str:
     return subprocess.run(
         ["git", *arguments],
@@ -574,6 +584,7 @@ def main() -> int:
     godot = args.godot_executable.resolve()
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=True)
+    clear_stale_evidence_logs(output)
     for generated_directory in (
         output / "baseline-product",
         output / "product",

@@ -151,6 +151,24 @@ class ExternalProjectE2ETest(unittest.TestCase):
             self.assertIn("res://addons/two/plugin.cfg", content)
             self.assertIn("[rendering]", content)
 
+    def test_evidence_reset_removes_only_stale_top_level_logs(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary)
+            stale = output / "export.log"
+            retained = output / "report.json"
+            nested = output / "nested"
+            nested.mkdir()
+            nested_log = nested / "runtime.log"
+            stale.write_text("old", encoding="utf-8")
+            retained.write_text("{}", encoding="utf-8")
+            nested_log.write_text("nested", encoding="utf-8")
+
+            E2E.clear_stale_evidence_logs(output)
+
+            self.assertFalse(stale.exists())
+            self.assertTrue(retained.exists())
+            self.assertTrue(nested_log.exists())
+
     def test_repeated_runs_restore_the_exact_pristine_project_state(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             project = Path(temporary)
