@@ -439,8 +439,81 @@ jobs:
           name: compatibility-reports
           path: |
             build/dev/compatibility/results/report.json
-            build/dev/compatibility/konado-results/report.json
             build/dev/compatibility/parser-results/report.json
             build/dev/compatibility/frontend-snapshot-diff.json
+          if-no-files-found: warn
+          retention-days: 14
+
+  external-projects:
+    if: ${{ inputs.target == 'all' || inputs.target == 'project-corpus' }}
+    name: External project / ${{ matrix.name }}
+    runs-on: ubuntu-22.04
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Konado
+            id: konado
+            manifest: test/compatibility/konado.json
+            godot: 4.7.1
+            target: "4.7"
+          - name: Pixelorama
+            id: pixelorama
+            manifest: test/compatibility/pixelorama.json
+            godot: 4.6.3
+            target: "4.6"
+          - name: Open RPG
+            id: open-rpg
+            manifest: test/compatibility/open_rpg.json
+            godot: 4.6.3
+            target: "4.6"
+          - name: Source of Mana
+            id: source-of-mana
+            manifest: test/compatibility/source_of_mana.json
+            godot: 4.7.1
+            target: "4.7"
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          submodules: recursive
+      - id: godot
+        uses: ./.github/actions/setup-godot
+        with:
+          version: ${{ matrix.godot }}
+          templates: linux
+      - name: Build the installed add-on and matching SDK
+        shell: bash
+        run: >-
+          cmake --preset plugin
+          -DGDPP_GODOT_EXECUTABLE=${{ steps.godot.outputs.executable }}
+          -DGDPP_PACKAGE_GODOT_VERSIONS=${{ matrix.target }}
+          &&
+          cmake --build --preset plugin --parallel
+      - name: Fetch the complete moving upstream project
+        run: >-
+          python3 tools/fetch_compatibility_corpus.py
+          --manifest ${{ matrix.manifest }}
+          --destination build/external-projects/${{ matrix.id }}
+          --build-root build
+      - name: Import, AOT build, export, audit and launch
+        run: >-
+          python3 tools/run_external_project_e2e.py
+          --manifest ${{ matrix.manifest }}
+          --corpus build/external-projects/${{ matrix.id }}
+          --addon example/addons/gdpp
+          --godot-executable ${{ steps.godot.outputs.executable }}
+          --audit-script tools/audit_export_pck.gd
+          --immutability-script tools/verify_export_immutability.py
+          --output build/external-e2e/${{ matrix.id }}
+          --host linux
+      - name: Upload complete-project evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: external-project-${{ matrix.id }}
+          path: |
+            build/external-e2e/${{ matrix.id }}/*.json
+            build/external-e2e/${{ matrix.id }}/*.log
           if-no-files-found: warn
           retention-days: 14

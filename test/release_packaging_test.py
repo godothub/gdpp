@@ -474,7 +474,7 @@ class ReleasePackagingTest(unittest.TestCase):
         )
         self.assertIn('if [[ -s "$forbidden_diagnostics" ]]; then', workflow)
 
-    def test_godot_44_diagnostic_allowlist_tracks_the_fixture_source(self) -> None:
+    def test_godot_compatibility_workflow_tracks_complete_external_projects(self) -> None:
         workflow = (
             SOURCE_ROOT / ".github/workflows/godot-compatibility.yml"
         ).read_text(encoding="utf-8")
@@ -492,14 +492,20 @@ class ReleasePackagingTest(unittest.TestCase):
         )
         self.assertIn("tools/update_godot_frontend.py", workflow)
         self.assertIn("test/compatibility/godot_frontend_4_7.json", workflow)
-        self.assertIn("build/dev/compatibility/konado-results/report.json", workflow)
-        konado = json.loads(
-            (
-                SOURCE_ROOT / "test/compatibility/konado.json"
-            ).read_text(encoding="utf-8")
-        )
-        self.assertEqual(konado["repository"].get("branch"), "main")
-        self.assertNotIn("commit", konado["repository"])
+        self.assertIn("tools/run_external_project_e2e.py", workflow)
+        for manifest_name in (
+            "konado.json",
+            "pixelorama.json",
+            "open_rpg.json",
+            "source_of_mana.json",
+        ):
+            manifest_path = SOURCE_ROOT / "test/compatibility" / manifest_name
+            self.assertIn(f"test/compatibility/{manifest_name}", workflow)
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            self.assertEqual(manifest["repository"].get("checkout"), "full")
+            self.assertIn("branch", manifest["repository"])
+            self.assertNotIn("commit", manifest["repository"])
+            self.assertRegex(manifest["godot"]["engine"], r"^4\.[0-9]+\.[0-9]+$")
 
     def test_host_staging_excludes_msvc_import_products(self) -> None:
         source = create_host_component(self.temporary / "source", "windows-x64")
