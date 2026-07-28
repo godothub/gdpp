@@ -254,8 +254,9 @@ def export_contract(host: str, output: Path) -> tuple[str, str, str]:
     if host == "linux":
         return "Linux", "binary_format/architecture=\"x86_64\"", str(output / "product.x86_64")
     if host == "macos":
-        architecture = "arm64" if os.uname().machine == "arm64" else "x86_64"
-        return "macOS", f'binary_format/architecture="{architecture}"', str(output / "product.app")
+        # Official macOS export templates are Universal binaries. Matching that contract also
+        # exercises GDPP's dual-architecture SDK and catches either slice regressing.
+        return "macOS", 'binary_format/architecture="universal"', str(output / "product.app")
     if host == "windows":
         return "Windows Desktop", "binary_format/architecture=\"x86_64\"", str(output / "product.exe")
     fail(f"unsupported end-to-end host platform: {host}")

@@ -117,6 +117,16 @@ class ExternalProjectE2ETest(unittest.TestCase):
             self.assertIn("gdpp/allow_source_fallback=false", content)
             self.assertTrue((project / "artifacts").is_dir())
 
+    def test_macos_export_matches_the_official_universal_template(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary)
+            _, product = E2E.append_export_preset(
+                project, "macos", project / "artifacts"
+            )
+            content = (project / "export_presets.cfg").read_text(encoding="utf-8")
+            self.assertEqual(product, project / "artifacts/product.app")
+            self.assertIn('binary_format/architecture="universal"', content)
+
 
 if __name__ == "__main__":
     unittest.main(argv=[sys.argv[0]])
