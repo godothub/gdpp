@@ -1240,8 +1240,8 @@ void CodeGenerator::emit_named_enum_declaration(const typed::Enum& enumeration,
     const std::string nested(indent + 8, ' ');
     header << outer << "struct " << sanitize_identifier(enumeration.name) << " {\n";
     for (const auto& entry : enumeration.entries) {
-        header << body << "inline static constexpr int64_t " << enum_identifier(entry.name)
-               << " = " << entry.value << ";\n";
+        header << body << "inline static constexpr int64_t " << enum_identifier(entry.name) << " = "
+               << entry.value << ";\n";
     }
     header << body << "static const godot::Dictionary& _gdpp_dictionary() {\n"
            << nested << "static const godot::Dictionary value = [] {\n"
@@ -3352,6 +3352,111 @@ std::string CodeGenerator::script_location(const SourceSpan& span) {
            std::to_string(span.begin.line) + ", " + std::to_string(span.begin.column) + "}";
 }
 
+std::string CodeGenerator::emit_script_static_callable(const typed::Expression& expression) const {
+    const typed::Function* local_function = nullptr;
+    const ScriptMemberSymbol* project_function = nullptr;
+    std::string native_owner;
+    if (expression.resolved_owner.empty()) {
+        const auto found = local_functions_.find(expression.value);
+        if (found != local_functions_.end()) {
+            local_function = found->second;
+            native_owner = current_native_class_name_;
+        }
+    } else {
+        auto declaration = inner_declarations_.find(expression.resolved_owner);
+        if (declaration == inner_declarations_.end()) {
+            declaration = std::find_if(
+                inner_declarations_.begin(), inner_declarations_.end(), [&](const auto& candidate) {
+                    return inner_cpp_type(candidate.first) == expression.resolved_owner;
+                });
+        }
+        if (declaration != inner_declarations_.end()) {
+            const auto found =
+                std::find_if(declaration->second->functions.begin(),
+                             declaration->second->functions.end(), [&](const auto& function) {
+                                 return function.is_static && function.name == expression.value;
+                             });
+            if (found != declaration->second->functions.end()) {
+                local_function = &*found;
+                native_owner = inner_cpp_type(declaration->first);
+            }
+        }
+        if (!local_function && script_symbols_) {
+            if (const auto* inner = script_symbols_->find_inner_native(expression.resolved_owner)) {
+                project_function = script_symbols_->find_inner_member(*inner, expression.value);
+                native_owner = inner_cpp_type(expression.resolved_owner);
+            } else if (const auto* script =
+                           script_symbols_->find_native_class(expression.resolved_owner)) {
+                project_function = script_symbols_->find_member(*script, expression.value);
+                native_owner = expression.resolved_owner;
+            }
+        }
+    }
+    if ((!local_function && (!project_function || !project_function->is_static)) ||
+        native_owner.empty()) {
+        diagnostics_.error("GDS3010", "static callable metadata is unavailable", expression.span);
+        return "godot::Callable()";
+    }
+    const auto parameter_count =
+        local_function ? local_function->parameters.size() : project_function->parameters.size();
+    const auto required =
+        local_function ? static_cast<std::size_t>(std::count_if(
+                             local_function->parameters.begin(), local_function->parameters.end(),
+                             [](const auto& parameter) { return !parameter.default_value; }))
+                       : project_function->required_arguments;
+    const bool is_vararg =
+        local_function ? local_function->rest_parameter.has_value() : project_function->is_vararg;
+    const auto return_type = local_function ? local_function->return_type : project_function->type;
+    std::string result = "gdpp::runtime::make_callable(nullptr, " + std::to_string(required) +
+                         ", " + std::to_string(parameter_count);
+    if (is_vararg)
+        result += ", true";
+    result += ", [](const godot::Array& _gdpp_static_arguments) -> godot::Variant { ";
+    if (is_vararg) {
+        result += "godot::Array _gdpp_static_rest; "
+                  "_gdpp_static_rest.resize(_gdpp_static_arguments.size() > " +
+                  std::to_string(parameter_count) + " ? _gdpp_static_arguments.size() - " +
+                  std::to_string(parameter_count) + " : 0); ";
+        result += "for (std::int64_t index = " + std::to_string(parameter_count) +
+                  "; index < _gdpp_static_arguments.size(); ++index) "
+                  "_gdpp_static_rest[index - " +
+                  std::to_string(parameter_count) + "] = _gdpp_static_arguments[index]; ";
+    }
+    if (return_type.kind != TypeKind::void_type)
+        result += "return gdpp::runtime::to_variant(";
+    result += native_owner + "::" + sanitize_identifier(expression.value) + "(";
+    for (std::size_t index = 0; index < parameter_count; ++index) {
+        if (index != 0)
+            result += ", ";
+        const auto parameter_type = local_function ? local_function->parameters[index].type
+                                                   : project_function->parameters[index];
+        const bool has_default = local_function
+                                     ? local_function->parameters[index].default_value != nullptr
+                                     : index < project_function->default_parameters.size() &&
+                                           project_function->default_parameters[index];
+        const auto indexed = "_gdpp_static_arguments[" + std::to_string(index) + "]";
+        if (has_default) {
+            result += "_gdpp_static_arguments.size() > " + std::to_string(index) +
+                      " ? gdpp::runtime::to_variant(" + indexed +
+                      ") : gdpp::runtime::default_argument()";
+        } else {
+            result += emit_conversion(parameter_type, {TypeKind::variant, "Variant"}, indexed,
+                                      &expression.span);
+        }
+    }
+    if (is_vararg) {
+        if (parameter_count != 0)
+            result += ", ";
+        result += "_gdpp_static_rest";
+    }
+    result += ")";
+    if (return_type.kind != TypeKind::void_type)
+        result += ")";
+    else
+        result += "; return godot::Variant()";
+    return result + "; })";
+}
+
 std::string CodeGenerator::emit_expression(const typed::Expression& expression) const {
     struct ExpressionSpanScope final {
         const SourceSpan*& current;
@@ -3448,66 +3553,8 @@ std::string CodeGenerator::emit_expression(const typed::Expression& expression) 
         if (expression.resolution == typed::ResolutionKind::script_callable)
             return "godot::Callable(" + self_object_expression() + ", " +
                    godot_string_name(expression.value) + ")";
-        if (expression.resolution == typed::ResolutionKind::script_static_callable) {
-            const auto found = local_functions_.find(expression.value);
-            if (found == local_functions_.end() || current_native_class_name_.empty()) {
-                diagnostics_.error("GDS3010", "static callable metadata is unavailable",
-                                   expression.span);
-                return "godot::Callable()";
-            }
-            const auto& function = *found->second;
-            const auto required = static_cast<std::size_t>(
-                std::count_if(function.parameters.begin(), function.parameters.end(),
-                              [](const auto& parameter) { return !parameter.default_value; }));
-            std::string result = "gdpp::runtime::make_callable(nullptr, " +
-                                 std::to_string(required) + ", " +
-                                 std::to_string(function.parameters.size());
-            if (function.rest_parameter)
-                result += ", true";
-            result += ", [](const godot::Array& _gdpp_static_arguments) -> "
-                      "godot::Variant { ";
-            if (function.rest_parameter) {
-                result += "godot::Array _gdpp_static_rest; "
-                          "_gdpp_static_rest.resize(_gdpp_static_arguments.size() > " +
-                          std::to_string(function.parameters.size()) +
-                          " ? _gdpp_static_arguments.size() - " +
-                          std::to_string(function.parameters.size()) + " : 0); ";
-                result +=
-                    "for (std::int64_t index = " + std::to_string(function.parameters.size()) +
-                    "; index < _gdpp_static_arguments.size(); ++index) "
-                    "_gdpp_static_rest[index - " +
-                    std::to_string(function.parameters.size()) +
-                    "] = _gdpp_static_arguments[index]; ";
-            }
-            if (function.return_type.kind != TypeKind::void_type)
-                result += "return gdpp::runtime::to_variant(";
-            result += current_native_class_name_ + "::" + sanitize_identifier(function.name) + "(";
-            for (std::size_t index = 0; index < function.parameters.size(); ++index) {
-                if (index != 0)
-                    result += ", ";
-                const auto& parameter = function.parameters[index];
-                const auto indexed = "_gdpp_static_arguments[" + std::to_string(index) + "]";
-                if (parameter.default_value) {
-                    result += "_gdpp_static_arguments.size() > " + std::to_string(index) +
-                              " ? gdpp::runtime::to_variant(" + indexed +
-                              ") : gdpp::runtime::default_argument()";
-                } else {
-                    result += emit_conversion(parameter.type, {TypeKind::variant, "Variant"},
-                                              indexed, &parameter.span);
-                }
-            }
-            if (function.rest_parameter) {
-                if (!function.parameters.empty())
-                    result += ", ";
-                result += "_gdpp_static_rest";
-            }
-            result += ")";
-            if (function.return_type.kind != TypeKind::void_type)
-                result += ")";
-            else
-                result += "; return godot::Variant()";
-            return result + "; })";
-        }
+        if (expression.resolution == typed::ResolutionKind::script_static_callable)
+            return emit_script_static_callable(expression);
         if (expression.resolution == typed::ResolutionKind::script_static_field)
             return "_gdpp_static_" + sanitize_identifier(expression.value) + "_storage()";
         if (expression.resolution == typed::ResolutionKind::script_enum_type &&
@@ -4727,6 +4774,8 @@ std::string CodeGenerator::emit_expression(const typed::Expression& expression) 
                 object = "(" + object + ").ptr()";
             return "godot::Callable(" + object + ", " + godot_string_name(expression.value) + ")";
         }
+        if (expression.resolution == typed::ResolutionKind::script_static_callable)
+            return emit_script_static_callable(expression);
         if (expression.resolution == typed::ResolutionKind::global_constant ||
             expression.resolution == typed::ResolutionKind::global_enum_value)
             return expression.resolved_owner;
@@ -4750,13 +4799,11 @@ std::string CodeGenerator::emit_expression(const typed::Expression& expression) 
                 const auto& dictionary_receiver = *expression.operands.at(0);
                 const auto proof =
                     dictionary_receiver.kind == typed::ExpressionKind::identifier &&
-                    dictionary_receiver.symbol_identity != 0
-                        ? proven_local_dictionary_slots_.find(
-                              dictionary_receiver.symbol_identity)
+                            dictionary_receiver.symbol_identity != 0
+                        ? proven_local_dictionary_slots_.find(dictionary_receiver.symbol_identity)
                         : proven_local_dictionary_slots_.end();
-                const bool proven =
-                    proof != proven_local_dictionary_slots_.end() &&
-                    proof->second.find(expression.value) != proof->second.end();
+                const bool proven = proof != proven_local_dictionary_slots_.end() &&
+                                    proof->second.find(expression.value) != proof->second.end();
                 if (proven) {
                     const auto key = "_gdpp_proven_dictionary_read_key_" + suffix;
                     const auto value =
@@ -6344,8 +6391,7 @@ std::string CodeGenerator::emit_statement_body(const typed::Statement& statement
             const auto inner = indent(write_indentation + 1);
             constexpr std::string_view snapshot_prefix{"_gdpp_assignment_value_"};
             const bool owned_snapshot =
-                value.rfind(snapshot_prefix, 0) == 0 &&
-                value.size() > snapshot_prefix.size() &&
+                value.rfind(snapshot_prefix, 0) == 0 && value.size() > snapshot_prefix.size() &&
                 std::all_of(value.begin() + static_cast<std::ptrdiff_t>(snapshot_prefix.size()),
                             value.end(), [](const char character) {
                                 return std::isdigit(static_cast<unsigned char>(character)) != 0;

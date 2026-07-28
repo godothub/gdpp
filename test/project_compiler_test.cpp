@@ -1142,8 +1142,7 @@ TEST_CASE("project compiler exposes preloaded scripts as typed namespaces") {
     REQUIRE(source.find(library->class_name + "::answer(") != std::string::npos);
     REQUIRE(source.find(library->class_name + "::_gdpp_get_TAG()") != std::string::npos);
     REQUIRE(source.find(library->class_name +
-                        "::_gdpp_set_TAG(std::move(_gdpp_assignment_result_") !=
-            std::string::npos);
+                        "::_gdpp_set_TAG(std::move(_gdpp_assignment_result_") != std::string::npos);
     REQUIRE(source.find("cast_attached_script(gdpp::runtime::to_variant(value), "
                         "godot::String(\"res://library.gd\"))") != std::string::npos);
     REQUIRE(source.find("is_attached_script_instance") != std::string::npos);
@@ -3091,6 +3090,35 @@ TEST_CASE("project compiler lowers cross-script constants enums and resource fac
                std::size_t{2});
 }
 
+TEST_CASE("project compiler lowers cross-script static Callable values") {
+    const auto root = fixture_root("project-cross-static-callable");
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
+    write_text(root / "sorter.gd", "extends RefCounted\n"
+                                   "class_name ProjectSorter\n"
+                                   "static func compare(left: int, right: int = 0) -> bool:\n"
+                                   "    return left < right\n");
+    write_text(root / "consumer.gd", "extends Node\n"
+                                     "func sort_values(values: Array) -> void:\n"
+                                     "    values.sort_custom(ProjectSorter.compare)\n");
+
+    const auto options = project_options(root);
+    const auto result = gdpp::ProjectCompiler{}.compile(options);
+
+    REQUIRE(result.success);
+    const auto consumer =
+        std::find_if(result.scripts.begin(), result.scripts.end(), [](const auto& script) {
+            return script.relative_path.filename() == "consumer.gd";
+        });
+    REQUIRE(consumer != result.scripts.end());
+    const auto source =
+        read_text(options.output_directory / "generated" / consumer->source_file_name);
+    const auto& sorter_class = native_class_for(result, "sorter.gd");
+    REQUIRE(source.find("gdpp::runtime::make_callable(nullptr, 1, 2") != std::string::npos);
+    REQUIRE(source.find(sorter_class + "::compare(") != std::string::npos);
+    REQUIRE(source.find("godot::Callable(") == std::string::npos);
+}
+
 TEST_CASE("project compiler resolves globally named script inner types") {
     const auto root = fixture_root("project-global-inner-types");
     std::error_code error;
@@ -3101,16 +3129,15 @@ TEST_CASE("project compiler resolves globally named script inner types") {
                                 "    pass\n"
                                 "class ScriptNode extends NodeBase:\n"
                                 "    enum State { READY, COMPLETE }\n");
-    write_text(root / "consumer.gd",
-               "extends RefCounted\n"
-               "class_name ProjectAstConsumer\n"
-               "var current: ProjectAst.ScriptNode\n"
-               "func create() -> ProjectAst.ScriptNode:\n"
-               "    return ProjectAst.ScriptNode.new()\n"
-               "func accepts(value: ProjectAst.ScriptNode) -> bool:\n"
-               "    return value is ProjectAst.ScriptNode\n"
-               "func state() -> ProjectAst.ScriptNode.State:\n"
-               "    return ProjectAst.ScriptNode.State.COMPLETE\n");
+    write_text(root / "consumer.gd", "extends RefCounted\n"
+                                     "class_name ProjectAstConsumer\n"
+                                     "var current: ProjectAst.ScriptNode\n"
+                                     "func create() -> ProjectAst.ScriptNode:\n"
+                                     "    return ProjectAst.ScriptNode.new()\n"
+                                     "func accepts(value: ProjectAst.ScriptNode) -> bool:\n"
+                                     "    return value is ProjectAst.ScriptNode\n"
+                                     "func state() -> ProjectAst.ScriptNode.State:\n"
+                                     "    return ProjectAst.ScriptNode.State.COMPLETE\n");
 
     const auto result = gdpp::ProjectCompiler{}.compile(project_options(root));
 

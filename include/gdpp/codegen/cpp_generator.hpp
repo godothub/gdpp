@@ -85,6 +85,8 @@ class CodeGenerator final {
         Type type;
     };
 
+    [[nodiscard]] std::string
+    emit_script_static_callable(const typed::Expression& expression) const;
     [[nodiscard]] std::string emit_expression(const typed::Expression& expression) const;
     [[nodiscard]] bool expression_may_fail(const typed::Expression& expression) const;
     [[nodiscard]] bool conversion_may_fail(const Type& target, const Type& source) const;
@@ -265,8 +267,8 @@ class CodeGenerator final {
                                               const ScriptMemberSymbol& method) const;
     [[nodiscard]] bool managed_constant_field(const typed::Field& field) const;
     [[nodiscard]] bool managed_constant_reference(const typed::Expression& expression) const;
-    void emit_named_enum_declaration(const typed::Enum& enumeration,
-                                     std::ostringstream& header, std::size_t indent) const;
+    void emit_named_enum_declaration(const typed::Enum& enumeration, std::ostringstream& header,
+                                     std::size_t indent) const;
     void emit_inner_class_declaration(const typed::Class& declaration, std::ostringstream& header,
                                       const std::string& native_name,
                                       const std::string& source_name, bool tool_mode) const;

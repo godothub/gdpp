@@ -966,10 +966,9 @@ Type SemanticAnalyzer::type_from_name(const std::string& name, SourceSpan span) 
     if (const auto separator = name.find('.'); separator != std::string::npos) {
         const auto owner_name = name.substr(0, separator);
         const auto alias = script_resource_aliases_.find(owner_name);
-        const auto* owner =
-            alias != script_resource_aliases_.end()
-                ? alias->second
-                : script_symbols_ ? script_symbols_->find_class(owner_name) : nullptr;
+        const auto* owner = alias != script_resource_aliases_.end() ? alias->second
+                            : script_symbols_ ? script_symbols_->find_class(owner_name)
+                                              : nullptr;
         if (owner) {
             const auto member_name = name.substr(separator + 1);
             record_script_dependency(owner);
@@ -995,11 +994,9 @@ Type SemanticAnalyzer::type_from_name(const std::string& name, SourceSpan span) 
                 }
             }
             diagnostics_.error("GDS4059",
-                               (alias != script_resource_aliases_.end()
-                                    ? "script resource alias '"
-                                    : "project script type '") +
-                                   owner_name +
-                                   "' has no type '" + member_name + "'",
+                               (alias != script_resource_aliases_.end() ? "script resource alias '"
+                                                                        : "project script type '") +
+                                   owner_name + "' has no type '" + member_name + "'",
                                span);
             return unknown_type;
         }
@@ -1624,9 +1621,8 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                     project_enum.native_owner + "::" + project_enum.enumeration->name;
                 result = {TypeKind::dictionary, "Dictionary"};
                 model_.api_resolutions_.emplace(
-                    &expression,
-                    ApiResolution{ApiResolutionKind::script_enum_type, enum_owner, "", "", result,
-                                  0, 0, false, true});
+                    &expression, ApiResolution{ApiResolutionKind::script_enum_type, enum_owner, "",
+                                               "", result, 0, 0, false, true});
             } else if (const auto external_enum =
                            find_external_enum(script_symbols_, expression.value());
                        external_enum.enumeration) {
@@ -1803,9 +1799,8 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                 const auto enum_owner = result.name;
                 result = {TypeKind::dictionary, "Dictionary"};
                 model_.api_resolutions_.emplace(
-                    &expression,
-                    ApiResolution{ApiResolutionKind::script_enum_type, enum_owner, "", "", result,
-                                  0, 0, false, true});
+                    &expression, ApiResolution{ApiResolutionKind::script_enum_type, enum_owner, "",
+                                               "", result, 0, 0, false, true});
             }
         } else if (const auto alias = script_resource_aliases_.find(expression.value());
                    alias != script_resource_aliases_.end()) {
@@ -3215,15 +3210,15 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                         break;
                     }
                     if (!method && !owner.empty() && !object_type.is_dynamic()) {
-                        diagnostics_.error(
-                            "GDS4016",
-                            called_on_script_enum
-                                ? "enum '" + object_resolution->owner +
-                                      "' has no Dictionary method '" + callee.value() + "'"
-                                : "method '" + callee.value() +
-                                      "' is not available on Godot type '" + owner +
-                                      "' for the selected target version",
-                            expression.span);
+                        diagnostics_.error("GDS4016",
+                                           called_on_script_enum
+                                               ? "enum '" + object_resolution->owner +
+                                                     "' has no Dictionary method '" +
+                                                     callee.value() + "'"
+                                               : "method '" + callee.value() +
+                                                     "' is not available on Godot type '" + owner +
+                                                     "' for the selected target version",
+                                           expression.span);
                     }
                     if (method && called_on_script_enum && !method->is_const) {
                         diagnostics_.error("GDS4165",
@@ -3283,8 +3278,7 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
             Type member_result = unknown_type;
             do {
                 const auto object_type = analyze_expression(*expression.operand(0));
-                const auto* object_resolution =
-                    model_.api_resolution_of(*expression.operand(0));
+                const auto* object_resolution = model_.api_resolution_of(*expression.operand(0));
                 if (object_resolution &&
                     object_resolution->kind == ApiResolutionKind::script_enum_type) {
                     const auto& enum_owner = object_resolution->owner;
@@ -3314,9 +3308,8 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                     } else {
                         member_result = {TypeKind::enumeration, enum_owner};
                         model_.api_resolutions_.emplace(
-                            &expression,
-                            ApiResolution{ApiResolutionKind::enum_member, enum_owner, "", "",
-                                          member_result, 0, 0, false, true});
+                            &expression, ApiResolution{ApiResolutionKind::enum_member, enum_owner,
+                                                       "", "", member_result, 0, 0, false, true});
                     }
                     record_script_dependency(project_enum.owner);
                     break;
@@ -3552,9 +3545,14 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                         break;
                     }
                     if (member->kind == ScriptMemberKind::function && member->is_static) {
-                        diagnostics_.error(
-                            "GDS4096", "static script methods cannot be used as Callable values",
-                            expression.span);
+                        member_result = {TypeKind::builtin, "Callable"};
+                        model_.api_resolutions_.emplace(
+                            &expression,
+                            ApiResolution{ApiResolutionKind::script_static_callable,
+                                          target->native_class_name, "", "", member_result,
+                                          static_cast<std::uint16_t>(member->required_arguments),
+                                          static_cast<std::uint16_t>(member->parameters.size()),
+                                          member->is_vararg, true});
                     } else {
                         diagnostics_.error("GDS4058",
                                            "instance member '" + expression.value() +
@@ -3600,8 +3598,7 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                             }
                             const auto enum_owner =
                                 native_owner.empty()
-                                    ? enumeration.owner->name + "::" +
-                                          enumeration.enumeration->name
+                                    ? enumeration.owner->name + "::" + enumeration.enumeration->name
                                     : native_owner + "::" + enumeration.enumeration->name;
                             member_result = {TypeKind::dictionary, "Dictionary"};
                             model_.api_resolutions_.emplace(
@@ -3629,7 +3626,19 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                         break;
                     }
                     if (found->kind == ScriptMemberKind::function) {
-                        if (accessed_on_type || found->is_static) {
+                        if (found->is_static) {
+                            member_result = {TypeKind::builtin, "Callable"};
+                            const auto owner = inner->native_class_name.empty()
+                                                   ? inner->name
+                                                   : inner->native_class_name;
+                            model_.api_resolutions_.emplace(
+                                &expression,
+                                ApiResolution{ApiResolutionKind::script_static_callable, owner, "",
+                                              "", member_result,
+                                              static_cast<std::uint16_t>(found->required_arguments),
+                                              static_cast<std::uint16_t>(found->parameters.size()),
+                                              found->is_vararg, true});
+                        } else if (accessed_on_type) {
                             diagnostics_.error(
                                 "GDS4096", "only instance internal methods can be Callable values",
                                 expression.span);
@@ -3722,10 +3731,9 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                                 script_symbols_->find_inner(*script_owner, expression.value())) {
                             member_result = {TypeKind::object, inner->native_class_name};
                             model_.api_resolutions_.emplace(
-                                &expression,
-                                ApiResolution{ApiResolutionKind::inner_type_reference,
-                                              inner->native_class_name, "", "", member_result, 0,
-                                              0, false, true});
+                                &expression, ApiResolution{ApiResolutionKind::inner_type_reference,
+                                                           inner->native_class_name, "", "",
+                                                           member_result, 0, 0, false, true});
                             break;
                         }
                     }
@@ -3853,7 +3861,17 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                         break;
                     }
                     if (member->kind == ScriptMemberKind::function) {
-                        if (accessed_on_type || member->is_static) {
+                        if (member->is_static) {
+                            member_result = {TypeKind::builtin, "Callable"};
+                            model_.api_resolutions_.emplace(
+                                &expression,
+                                ApiResolution{
+                                    ApiResolutionKind::script_static_callable,
+                                    script_owner->native_class_name, "", "", member_result,
+                                    static_cast<std::uint16_t>(member->required_arguments),
+                                    static_cast<std::uint16_t>(member->parameters.size()),
+                                    member->is_vararg, true});
+                        } else if (accessed_on_type) {
                             diagnostics_.error(
                                 "GDS4096",
                                 "only instance script methods can be used as Callable values",
@@ -5962,9 +5980,8 @@ void SemanticAnalyzer::validate_annotations(const ast::VariableDeclaration& vari
     const bool explicit_variant_export =
         name == "export" && type.kind == TypeKind::variant &&
         (variable.type.has_value() || variable.initializer != nullptr);
-    if (!unchecked_export &&
-        ((type.is_dynamic() && !explicit_variant_export) || type.kind == TypeKind::nil ||
-         type.kind == TypeKind::void_type)) {
+    if (!unchecked_export && ((type.is_dynamic() && !explicit_variant_export) ||
+                              type.kind == TypeKind::nil || type.kind == TypeKind::void_type)) {
         diagnostics_.error("GDS4025", "exported fields require a concrete serializable type",
                            variable.span);
     }

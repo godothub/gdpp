@@ -27,8 +27,7 @@ TEST_CASE("compiler generates bindable GDExtension C++") {
     REQUIRE(result.unit.source.find("ClassDB::bind_method") != std::string::npos);
     REQUIRE(result.unit.source.find("auto _gdpp_assignment_value_") != std::string::npos);
     REQUIRE(result.unit.source.find("auto _gdpp_assignment_result_") != std::string::npos);
-    REQUIRE(result.unit.source.find(" = std::move(") !=
-            std::string::npos);
+    REQUIRE(result.unit.source.find(" = std::move(") != std::string::npos);
     REQUIRE(result.unit.source.find("value = std::move(_gdpp_assignment_result_") !=
             std::string::npos);
     REQUIRE(result.unit.source.find("const auto _gdpp_property_right_") != std::string::npos);
@@ -1336,16 +1335,14 @@ TEST_CASE("compiler preserves explicit Variant exports and rejects untyped expor
     const auto wrong_type =
         compiler.compile("wrong.gd", "@export_range(0, 10) var label: String = \"bad\"\n");
     const auto dynamic = compiler.compile("dynamic.gd", "@export var value: Variant\n");
-    const auto inferred =
-        compiler.compile("inferred.gd", "@export var value: Variant = 12\n");
+    const auto inferred = compiler.compile("inferred.gd", "@export var value: Variant = 12\n");
     const auto untyped = compiler.compile("untyped.gd", "@export var value\n");
     const auto unsupported = compiler.compile("rpc.gd", "@rpc var value: int = 1\n");
 
     REQUIRE(!wrong_type.success);
     REQUIRE(dynamic.success);
     REQUIRE(dynamic.unit.source.find("godot::Variant::NIL, \"value\"") != std::string::npos);
-    REQUIRE(dynamic.unit.source.find("godot::PROPERTY_USAGE_NIL_IS_VARIANT") !=
-            std::string::npos);
+    REQUIRE(dynamic.unit.source.find("godot::PROPERTY_USAGE_NIL_IS_VARIANT") != std::string::npos);
     REQUIRE(inferred.success);
     REQUIRE(inferred.unit.source.find("godot::Variant::INT, \"value\"") != std::string::npos);
     REQUIRE(!untyped.success);
@@ -1641,10 +1638,9 @@ TEST_CASE("compiler safely assigns every reference-backed Godot storage family")
             std::string::npos);
     for (const auto* storage :
          {"state", "typed_state", "labels", "bytes", "title", "key", "path", "callback"}) {
-        REQUIRE(result.unit.source.find("gdpp::runtime::assign_native_storage(" +
-                                        std::string{storage} +
-                                        ", std::move(_gdpp_assignment_result_") !=
-                std::string::npos);
+        REQUIRE(
+            result.unit.source.find("gdpp::runtime::assign_native_storage(" + std::string{storage} +
+                                    ", std::move(_gdpp_assignment_result_") != std::string::npos);
     }
 }
 
@@ -3326,18 +3322,17 @@ TEST_CASE("compiler applies Material ABI across every shader-capable property fa
 
 TEST_CASE("compiler routes hidden Godot property accessors through Object properties") {
     const gdpp::Compiler compiler;
-    const auto result = compiler.compile(
-        "hidden_property_accessors.gd",
-        "extends Node\n"
-        "func configure(option: OptionButton, control: Control) -> void:\n"
-        "    option.selected = 2\n"
-        "    control.anchors_preset = 1\n");
+    const auto result =
+        compiler.compile("hidden_property_accessors.gd",
+                         "extends Node\n"
+                         "func configure(option: OptionButton, control: Control) -> void:\n"
+                         "    option.selected = 2\n"
+                         "    control.anchors_preset = 1\n");
 
     REQUIRE(result.success);
     REQUIRE(result.unit.source.find("gdpp::runtime::set_named(") != std::string::npos);
     REQUIRE(result.unit.source.find("godot::StringName(\"selected\")") != std::string::npos);
-    REQUIRE(result.unit.source.find("godot::StringName(\"anchors_preset\")") !=
-            std::string::npos);
+    REQUIRE(result.unit.source.find("godot::StringName(\"anchors_preset\")") != std::string::npos);
     REQUIRE(result.unit.source.find("->_select_int(") == std::string::npos);
     REQUIRE(result.unit.source.find("->_set_anchors_layout_preset(") == std::string::npos);
 }
@@ -3880,17 +3875,16 @@ TEST_CASE("compiler rejects invalid enum declarations and members") {
 TEST_CASE("compiler accepts multiline enums and contextual keyword iterators") {
     const gdpp::Compiler compiler;
     const auto result =
-        compiler.compile("contextual-layout.gd",
-                         "enum DialogState\n"
-                         "{\n"
-                         "    OFF = 0,\n"
-                         "    PLAYING = 1\n"
-                         "}\n"
-                         "func collect(values: Array) -> Array:\n"
-                         "    var result: Array = []\n"
-                         "    for match in values:\n"
-                         "        result.append(match)\n"
-                         "    return result\n");
+        compiler.compile("contextual-layout.gd", "enum DialogState\n"
+                                                 "{\n"
+                                                 "    OFF = 0,\n"
+                                                 "    PLAYING = 1\n"
+                                                 "}\n"
+                                                 "func collect(values: Array) -> Array:\n"
+                                                 "    var result: Array = []\n"
+                                                 "    for match in values:\n"
+                                                 "        result.append(match)\n"
+                                                 "    return result\n");
 
     REQUIRE(result.success);
     REQUIRE(result.unit.header.find("_gdpp_enum_PLAYING = 1") != std::string::npos);
@@ -3900,24 +3894,22 @@ TEST_CASE("compiler accepts multiline enums and contextual keyword iterators") {
 TEST_CASE("compiler preserves named enums as read-only Dictionary values") {
     const gdpp::Compiler compiler;
     const auto result =
-        compiler.compile("enum-dictionary.gd",
-                         "enum TokenType { IDENTIFIER = 2, NUMBER = 7 }\n"
-                         "func metadata() -> Dictionary:\n"
-                         "    return TokenType\n"
-                         "func names() -> Array:\n"
-                         "    return TokenType.keys()\n"
-                         "func name_for(value: int):\n"
-                         "    return TokenType.find_key(value)\n"
-                         "func has_name(value: String) -> bool:\n"
-                         "    return TokenType.has(value)\n"
-                         "func count() -> int:\n"
-                         "    return TokenType.size()\n");
+        compiler.compile("enum-dictionary.gd", "enum TokenType { IDENTIFIER = 2, NUMBER = 7 }\n"
+                                               "func metadata() -> Dictionary:\n"
+                                               "    return TokenType\n"
+                                               "func names() -> Array:\n"
+                                               "    return TokenType.keys()\n"
+                                               "func name_for(value: int):\n"
+                                               "    return TokenType.find_key(value)\n"
+                                               "func has_name(value: String) -> bool:\n"
+                                               "    return TokenType.has(value)\n"
+                                               "func count() -> int:\n"
+                                               "    return TokenType.size()\n");
     const auto mutation =
-        compiler.compile("enum-mutation.gd",
-                         "enum TokenType { IDENTIFIER }\n"
-                         "func mutate() -> void:\n"
-                         "    TokenType.clear()\n"
-                         "    TokenType[\"IDENTIFIER\"] = 2\n");
+        compiler.compile("enum-mutation.gd", "enum TokenType { IDENTIFIER }\n"
+                                             "func mutate() -> void:\n"
+                                             "    TokenType.clear()\n"
+                                             "    TokenType[\"IDENTIFIER\"] = 2\n");
 
     REQUIRE(result.success);
     REQUIRE(result.unit.header.find("static const godot::Dictionary& _gdpp_dictionary()") !=
@@ -4102,20 +4094,17 @@ TEST_CASE("compiler only updates proven local Dictionary slots in place") {
                                    "_gdpp_proven_dictionary_read_key_") != std::string::npos);
     REQUIRE(local.unit.source.find("checked_dictionary_get_named(") == std::string::npos);
     REQUIRE(local.unit.source.find("unchecked_dictionary_set_named(") == std::string::npos);
-    const auto compound =
-        local.unit.source.find("gdpp::runtime::compound_assign_integer(");
+    const auto compound = local.unit.source.find("gdpp::runtime::compound_assign_integer(");
     REQUIRE(compound != std::string::npos);
-    REQUIRE(local.unit.source.find(
-                "gdpp::runtime::ScriptSourceLocation{_gdpp_source_path, 4, ", compound) !=
-            std::string::npos);
+    REQUIRE(local.unit.source.find("gdpp::runtime::ScriptSourceLocation{_gdpp_source_path, 4, ",
+                                   compound) != std::string::npos);
 
     const auto require_checked = [&](const std::string& path, const std::string& source) {
         const auto result = compiler.compile(path, source);
         REQUIRE(result.success);
         REQUIRE(result.unit.source.find("godot::Variant &_gdpp_dictionary_slot_") ==
                 std::string::npos);
-        REQUIRE(result.unit.source.find("_gdpp_proven_dictionary_read_key_") ==
-                std::string::npos);
+        REQUIRE(result.unit.source.find("_gdpp_proven_dictionary_read_key_") == std::string::npos);
         REQUIRE(result.unit.source.find("checked_dictionary_get_named(") != std::string::npos);
         REQUIRE(result.unit.source.find("unchecked_dictionary_set_named(") != std::string::npos);
     };
@@ -4395,30 +4384,28 @@ TEST_CASE("compiler preserves native scalar paths across dynamic boundaries") {
 
 TEST_CASE("compiler transfers consumed assignment snapshots without reference-backed copies") {
     const gdpp::Compiler compiler;
-    const auto result = compiler.compile(
-        "consumed_assignment.gd",
-        "func update(iterations: int) -> int:\n"
-        "    var dynamic: Variant = 1\n"
-        "    var text := \"gdpp\"\n"
-        "    var total := 0\n"
-        "    for index in range(iterations):\n"
-        "        dynamic = int(dynamic) + index\n"
-        "        text = text.to_upper() if (index & 1) == 0 else text.to_lower()\n"
-        "        total += int(dynamic) + text.length()\n"
-        "    return total\n");
+    const auto result =
+        compiler.compile("consumed_assignment.gd",
+                         "func update(iterations: int) -> int:\n"
+                         "    var dynamic: Variant = 1\n"
+                         "    var text := \"gdpp\"\n"
+                         "    var total := 0\n"
+                         "    for index in range(iterations):\n"
+                         "        dynamic = int(dynamic) + index\n"
+                         "        text = text.to_upper() if (index & 1) == 0 else text.to_lower()\n"
+                         "        total += int(dynamic) + text.length()\n"
+                         "    return total\n");
 
     REQUIRE(result.success);
     REQUIRE(result.unit.source.find("auto _gdpp_assignment_value_") != std::string::npos);
     REQUIRE(result.unit.source.find("const auto _gdpp_assignment_value_") == std::string::npos);
     REQUIRE(result.unit.source.find("auto _gdpp_assignment_result_") != std::string::npos);
-    REQUIRE(result.unit.source.find("= std::move(_gdpp_assignment_value_") !=
-            std::string::npos);
+    REQUIRE(result.unit.source.find("= std::move(_gdpp_assignment_value_") != std::string::npos);
     REQUIRE(result.unit.source.find("gdpp::runtime::assign_native_storage("
                                     "text, std::move(_gdpp_assignment_result_") !=
             std::string::npos);
     REQUIRE(result.unit.source.find("explicit_variant_cast<int64_t>("
-                                    "gdpp::runtime::to_variant(dynamic)") !=
-            std::string::npos);
+                                    "gdpp::runtime::to_variant(dynamic)") != std::string::npos);
 }
 
 TEST_CASE("compiler rejects direct Callable and unknown expression invocation") {
@@ -5363,6 +5350,24 @@ TEST_CASE("static function values use owner-free callables with default argument
     REQUIRE(result.unit.source.find("godot::Callable(this, godot::StringName(\"compare\"))") ==
             std::string::npos);
     REQUIRE(result.unit.source.find("gdpp::runtime::default_argument()") != std::string::npos);
+}
+
+TEST_CASE("internal static function values use owner-free callables") {
+    const gdpp::Compiler compiler;
+    const auto result =
+        compiler.compile("internal_static_callable.gd",
+                         "extends Resource\n"
+                         "class Sorter:\n"
+                         "    static func compare(left: int, right: int = 0) -> bool:\n"
+                         "        return left < right\n"
+                         "func sort_values(values: Array) -> void:\n"
+                         "    values.sort_custom(Sorter.compare)\n");
+
+    REQUIRE(result.success);
+    REQUIRE(result.unit.source.find("gdpp::runtime::make_callable(nullptr, 1, 2") !=
+            std::string::npos);
+    REQUIRE(result.unit.source.find("::compare(") != std::string::npos);
+    REQUIRE(result.unit.source.find("godot::Callable(this") == std::string::npos);
 }
 
 TEST_CASE("unknown lowercase identifiers fail before native code generation") {
