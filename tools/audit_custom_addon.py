@@ -35,6 +35,18 @@ def require_field(fields: dict[str, str], key: str, expected: str, label: str) -
         fail(f"{label} {key} is {actual!r}, expected {expected!r}")
 
 
+def source_contract(source_root: Path) -> tuple[str, str]:
+    cmake = source_root / "CMakeLists.txt"
+    if not cmake.is_file():
+        fail(f"source contract is missing: {cmake}")
+    content = cmake.read_text(encoding="utf-8")
+    schema = re.search(r"set\(GDPP_NATIVE_SDK_SCHEMA\s+([0-9]+)\)", content)
+    runtime = re.search(r"set\(GDPP_NATIVE_RUNTIME_ABI\s+([0-9]+)\)", content)
+    if not schema or not runtime:
+        fail("source SDK schema or runtime ABI is missing")
+    return schema.group(1), runtime.group(1)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--addon", required=True, type=Path)
@@ -42,10 +54,12 @@ def main() -> None:
     parser.add_argument("--version", required=True)
     parser.add_argument("--godot-version", required=True)
     parser.add_argument("--precision", required=True, choices=("single", "double"))
+    parser.add_argument("--source-root", type=Path, default=Path("."))
     arguments = parser.parse_args()
 
     addon = arguments.addon.resolve()
     api = arguments.api.resolve()
+    sdk_schema, runtime_abi = source_contract(arguments.source_root.resolve())
     if not addon.is_dir():
         fail(f"add-on root is missing: {addon}")
     if not api.is_file():
@@ -66,13 +80,13 @@ def main() -> None:
     if sdk_versions != [arguments.godot_version]:
         fail(f"custom package SDK versions are {sdk_versions!r}")
     sdk = sdk_root / arguments.godot_version
-    manifest = read_fields(sdk / "sdk.manifest", "GDPP_SDK 12")
+    manifest = read_fields(sdk / "sdk.manifest", f"GDPP_SDK {sdk_schema}")
     require_field(manifest, "api", arguments.godot_version, "SDK")
     require_field(manifest, "api_kind", "custom", "SDK")
     require_field(manifest, "api_sha256", api_digest, "SDK")
     require_field(manifest, "precision", arguments.precision, "SDK")
     require_field(manifest, "gdpp_version", arguments.version, "SDK")
-    require_field(manifest, "runtime_abi", "19", "SDK")
+    require_field(manifest, "runtime_abi", runtime_abi, "SDK")
     require_field(manifest, "distribution_binding", "template_release", "SDK")
     require_field(manifest, "distribution_optimization", "Release", "SDK")
 

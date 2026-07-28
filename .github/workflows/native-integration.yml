@@ -103,9 +103,12 @@ jobs:
       - name: Audit the custom ABI package
         shell: bash
         run: |
+          version="$(sed -n 's/^CMAKE_PROJECT_VERSION:STATIC=//p' \
+            build/ci-custom-double/CMakeCache.txt)"
+          test -n "$version"
           python3 tools/audit_custom_addon.py \
             --addon build/ci-custom-double/custom-addon/addons/gdpp \
             --api build/ci-custom-double-input/extension_api.json \
-            --version 1.8.2 \
+            --version "$version" \
             --godot-version 4.7 \
             --precision double

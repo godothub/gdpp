@@ -20,6 +20,7 @@ BINARY_ROOT = Path(sys.argv.pop(1)).resolve()
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(SOURCE_ROOT / "tools"))
 
+import audit_custom_addon  # noqa: E402
 import extract_changelog  # noqa: E402
 import package_platform_release  # noqa: E402
 import package_release  # noqa: E402
@@ -233,6 +234,25 @@ class ReleasePackagingTest(unittest.TestCase):
         )
         self.assertEqual(version, "1.7.10")
         return stage, archive_name
+
+    def test_custom_package_audit_reads_the_canonical_sdk_contract(self) -> None:
+        schema, runtime_abi = audit_custom_addon.source_contract(SOURCE_ROOT)
+        cmake = (SOURCE_ROOT / "CMakeLists.txt").read_text(encoding="utf-8")
+        self.assertIn(f"set(GDPP_NATIVE_SDK_SCHEMA {schema})", cmake)
+        self.assertIn(f"set(GDPP_NATIVE_RUNTIME_ABI {runtime_abi})", cmake)
+        audit_source = (SOURCE_ROOT / "tools/audit_custom_addon.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertNotRegex(
+            audit_source,
+            r'require_field\\(manifest, "runtime_abi", "[0-9]+", "SDK"\\)',
+        )
+        workflow = (
+            SOURCE_ROOT / ".github/workflows/native-integration.yml"
+        ).read_text(encoding="utf-8")
+        self.assertIn("CMAKE_PROJECT_VERSION:STATIC=", workflow)
+        self.assertIn('--version "$version"', workflow)
+        self.assertNotRegex(workflow, r"--version [0-9]+\\.[0-9]+\\.[0-9]+")
 
     def test_three_packages_contain_all_versions_and_only_supported_targets(self) -> None:
         expected_names = {
