@@ -115,6 +115,7 @@ class ExternalProjectE2ETest(unittest.TestCase):
             self.assertIn("script_export_mode=2", content)
             self.assertIn("gdpp/strip_gdscript_sources=true", content)
             self.assertIn("gdpp/allow_source_fallback=false", content)
+            self.assertTrue((project / "artifacts").is_dir())
 
 
 if __name__ == "__main__":

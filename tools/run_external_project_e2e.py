@@ -262,6 +262,7 @@ def export_contract(host: str, output: Path) -> tuple[str, str, str]:
 
 
 def append_export_preset(project: Path, host: str, output: Path) -> tuple[str, Path]:
+    output.mkdir(parents=True, exist_ok=True)
     preset_file = project / "export_presets.cfg"
     content = preset_file.read_text(encoding="utf-8") if preset_file.is_file() else ""
     indexes = [int(value) for value in re.findall(r"^\[preset\.(\d+)\]$", content, re.MULTILINE)]
