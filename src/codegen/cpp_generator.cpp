@@ -3649,9 +3649,8 @@ std::string CodeGenerator::emit_script_static_callable(const typed::Expression& 
     std::string result =
         "gdpp::runtime::make_named_callable(nullptr, " +
         godot_string_name(native_owner + "::" + expression.value) + ", " +
-        std::to_string(required) + ", " + std::to_string(parameter_count);
-    if (is_vararg)
-        result += ", true";
+        std::to_string(required) + ", " + std::to_string(parameter_count) +
+        (is_vararg ? ", true" : ", false");
     result += ", [](const godot::Array& _gdpp_static_arguments) -> godot::Variant { ";
     if (is_vararg) {
         result += "godot::Array _gdpp_static_rest; "

@@ -5653,7 +5653,7 @@ TEST_CASE("static function values use owner-free callables with default argument
     REQUIRE(result.success);
     REQUIRE(result.unit.source.find(
                 "gdpp::runtime::make_named_callable(nullptr, "
-                "godot::StringName(\"GDPPNative_StaticCallable::compare\"), 1, 2") !=
+                "godot::StringName(\"GDPPNative_StaticCallable::compare\"), 1, 2, false") !=
             std::string::npos);
     REQUIRE(result.unit.source.find("GDPPNative_StaticCallable::_gdpp_script_method_compare(") !=
             std::string::npos);
@@ -5692,10 +5692,30 @@ TEST_CASE("internal static function values use owner-free callables") {
     REQUIRE(result.unit.source.find(
                 "gdpp::runtime::make_named_callable(nullptr, "
                 "godot::StringName(\"GDPPNative_InternalStaticCallable__Sorter::compare\"), "
-                "1, 2") !=
+                "1, 2, false") !=
             std::string::npos);
     REQUIRE(result.unit.source.find("::_gdpp_script_method_compare(") != std::string::npos);
     REQUIRE(result.unit.source.find("godot::Callable(this") == std::string::npos);
+}
+
+TEST_CASE("static variadic function values preserve their callable ABI metadata") {
+    gdpp::CompileOptions options;
+    options.target_version = gdpp::GodotVersion::v4_7;
+    const gdpp::Compiler compiler;
+    const auto result =
+        compiler.compile("static_vararg_callable.gd",
+                         "extends Resource\n"
+                         "static func collect(required: int, ...values: Array) -> int:\n"
+                         "    return required + values.size()\n"
+                         "func callback() -> Callable:\n"
+                         "    return collect\n",
+                         options);
+
+    REQUIRE(result.success);
+    REQUIRE(result.unit.source.find(
+                "gdpp::runtime::make_named_callable(nullptr, "
+                "godot::StringName(\"GDPPNative_StaticVarargCallable::collect\"), "
+                "1, 1, true") != std::string::npos);
 }
 
 TEST_CASE("internal static method calls use their isolated native symbol") {
