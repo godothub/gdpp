@@ -565,16 +565,25 @@ class LambdaCallable final : public godot::CallableCustom {
   public:
     LambdaCallable(godot::Object* owner, std::size_t required_arguments,
                    std::size_t positional_arguments, bool is_vararg,
-                   CallableContinuation continuation)
+                   CallableContinuation continuation, godot::StringName identity = {})
         : owner_(owner ? owner->get_instance_id() : godot::ObjectID{}),
           required_arguments_(required_arguments), positional_arguments_(positional_arguments),
-          is_vararg_(is_vararg), continuation_(std::move(continuation)) {}
+          is_vararg_(is_vararg), continuation_(std::move(continuation)),
+          identity_(std::move(identity)) {}
 
     [[nodiscard]] std::uint32_t hash() const override {
+        if (!identity_.is_empty()) {
+            const auto owner = static_cast<std::uint64_t>(owner_);
+            return static_cast<std::uint32_t>(identity_.hash()) ^
+                   static_cast<std::uint32_t>(owner) ^
+                   static_cast<std::uint32_t>(owner >> 32U);
+        }
         return static_cast<std::uint32_t>(reinterpret_cast<std::uintptr_t>(this));
     }
 
-    [[nodiscard]] godot::String get_as_text() const override { return "GDPP lambda"; }
+    [[nodiscard]] godot::String get_as_text() const override {
+        return identity_.is_empty() ? godot::String{"GDPP lambda"} : godot::String{identity_};
+    }
 
     [[nodiscard]] bool is_valid() const override {
         // Static GDScript function values intentionally have no Object owner. The
@@ -588,7 +597,11 @@ class LambdaCallable final : public godot::CallableCustom {
 
     static bool compare_equal(const godot::CallableCustom* left,
                               const godot::CallableCustom* right) {
-        return left == right;
+        const auto* lhs = static_cast<const LambdaCallable*>(left);
+        const auto* rhs = static_cast<const LambdaCallable*>(right);
+        if (lhs->identity_.is_empty() || rhs->identity_.is_empty())
+            return left == right;
+        return lhs->owner_ == rhs->owner_ && lhs->identity_ == rhs->identity_;
     }
 
     [[nodiscard]] CompareEqualFunc get_compare_equal_func() const override {
@@ -597,7 +610,15 @@ class LambdaCallable final : public godot::CallableCustom {
 
     static bool compare_less(const godot::CallableCustom* left,
                              const godot::CallableCustom* right) {
-        return left < right;
+        const auto* lhs = static_cast<const LambdaCallable*>(left);
+        const auto* rhs = static_cast<const LambdaCallable*>(right);
+        if (lhs->identity_.is_empty() || rhs->identity_.is_empty())
+            return left < right;
+        const auto lhs_owner = static_cast<std::uint64_t>(lhs->owner_);
+        const auto rhs_owner = static_cast<std::uint64_t>(rhs->owner_);
+        if (lhs_owner != rhs_owner)
+            return lhs_owner < rhs_owner;
+        return godot::String{lhs->identity_} < godot::String{rhs->identity_};
     }
 
     [[nodiscard]] CompareLessFunc get_compare_less_func() const override {
@@ -642,6 +663,7 @@ class LambdaCallable final : public godot::CallableCustom {
     std::size_t positional_arguments_{0};
     bool is_vararg_{false};
     CallableContinuation continuation_;
+    godot::StringName identity_;
 };
 
 void report_invalid_member(const char* operation, const godot::StringName& name,
@@ -1585,6 +1607,18 @@ godot::Callable make_callable(godot::Object* owner, std::size_t required_argumen
     }
     return godot::Callable{memnew(LambdaCallable(owner, required_arguments, positional_arguments,
                                                  is_vararg, std::move(continuation)))};
+}
+
+godot::Callable make_named_callable(godot::Object* owner, const godot::StringName& identity,
+                                    std::size_t required_arguments,
+                                    std::size_t positional_arguments, const bool is_vararg,
+                                    CallableContinuation continuation) {
+    if (identity.is_empty() || !continuation || required_arguments > positional_arguments) {
+        godot::UtilityFunctions::push_error("GDPP: invalid named callable configuration");
+        return {};
+    }
+    return godot::Callable{memnew(LambdaCallable(owner, required_arguments, positional_arguments,
+                                                 is_vararg, std::move(continuation), identity))};
 }
 
 namespace {

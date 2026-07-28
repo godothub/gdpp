@@ -3646,8 +3646,10 @@ std::string CodeGenerator::emit_script_static_callable(const typed::Expression& 
     const bool is_vararg =
         local_function ? local_function->rest_parameter.has_value() : project_function->is_vararg;
     const auto return_type = local_function ? local_function->return_type : project_function->type;
-    std::string result = "gdpp::runtime::make_callable(nullptr, " + std::to_string(required) +
-                         ", " + std::to_string(parameter_count);
+    std::string result =
+        "gdpp::runtime::make_named_callable(nullptr, " +
+        godot_string_name(native_owner + "::" + expression.value) + ", " +
+        std::to_string(required) + ", " + std::to_string(parameter_count);
     if (is_vararg)
         result += ", true";
     result += ", [](const godot::Array& _gdpp_static_arguments) -> godot::Variant { ";

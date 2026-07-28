@@ -56,6 +56,10 @@ static func _await_static_result(signal_value: Signal) -> int:
     return 42
 
 
+static func _sum_static_arguments(values: Array) -> int:
+    return values[0] + values[1]
+
+
 func _make_delayed_adder(captured: int) -> Callable:
     return func delayed(signal_value: Signal, addend: int) -> int:
         await signal_value
@@ -139,6 +143,20 @@ func _verify_export_runtime() -> void:
     var child_count: Callable = self.get_child_count
     if child_count.call() != get_child_count():
         _fail("bound Godot object method Callable lost its receiver or result")
+        return
+    var first_static: Callable = _sum_static_arguments
+    var second_static: Callable = _sum_static_arguments
+    if first_static != second_static or first_static.hash() != second_static.hash():
+        _fail("repeated static function values lost their stable Callable identity")
+        return
+    var static_arguments := [19, 23]
+    var bound_static := (
+        first_static.bind(static_arguments)
+        if first_static == _sum_static_arguments
+        else first_static.bindv(static_arguments)
+    )
+    if bound_static.get_argument_count() != 0 or bound_static.call() != 42:
+        _fail("static Callable identity selected incompatible bound argument semantics")
         return
     var widened_return: WidenedReturnBase = WidenedReturnChild.new()
     var widened_total := 0

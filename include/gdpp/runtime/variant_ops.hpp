@@ -661,6 +661,13 @@ template <typename... Arguments>
 [[nodiscard]] godot::Callable make_callable(godot::Object* owner, std::size_t required_arguments,
                                             std::size_t positional_arguments, bool is_vararg,
                                             CallableContinuation continuation);
+// Generated named static functions are values with stable GDScript Callable identity. Repeated
+// reads of the same function must compare equal so bind/bindv selection, disconnect(), Dictionary
+// keys and callback de-duplication behave like their interpreted equivalents.
+[[nodiscard]] godot::Callable
+make_named_callable(godot::Object* owner, const godot::StringName& identity,
+                    std::size_t required_arguments, std::size_t positional_arguments,
+                    bool is_vararg, CallableContinuation continuation);
 
 // godot-cpp exposes instance-only vararg method binding. Generated scripts also require static
 // variadic methods and one ABI for attached ScriptExtension behavior classes, so register the raw
