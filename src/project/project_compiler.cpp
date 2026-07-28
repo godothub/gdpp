@@ -2412,19 +2412,19 @@ ProjectCompileResult ProjectCompiler::compile_impl(const ProjectCompileOptions& 
     // callee contract). Refine the provisional symbol graph to a semantic fixed point before
     // hashing public ABIs. Starting from the conservative graph guarantees that recursive call
     // groups never lose a possible suspension edge.
-    std::size_t callable_count = 0;
-    const auto count_inner_callables =
+    std::size_t refinement_budget = 0;
+    const auto count_inner_declarations =
         [&](const auto& self, const std::vector<ast::ClassDeclaration>& classes) -> void {
         for (const auto& declaration : classes) {
-            callable_count += declaration.functions.size();
+            refinement_budget += declaration.functions.size() + declaration.variables.size();
             self(self, declaration.classes);
         }
     };
     for (const auto& input : inputs) {
-        callable_count += input.script.functions.size();
-        count_inner_callables(count_inner_callables, input.script.classes);
+        refinement_budget += input.script.functions.size() + input.script.variables.size();
+        count_inner_declarations(count_inner_declarations, input.script.classes);
     }
-    for (std::size_t iteration = 0; iteration <= callable_count; ++iteration) {
+    for (std::size_t iteration = 0; iteration <= refinement_budget; ++iteration) {
         bool changed = false;
         for (auto& input : inputs) {
             DiagnosticBag provisional_diagnostics{options.compiler.frontend_limits.max_diagnostics};
@@ -2478,6 +2478,16 @@ ProjectCompileResult ProjectCompiler::compile_impl(const ProjectCompileOptions& 
                             });
                         if (member == members.end())
                             continue;
+                        if (variable.infer_type ||
+                            (variable.is_constant && !variable.type.has_value())) {
+                            const auto inferred = semantic.type_of(variable);
+                            if (inferred.kind != TypeKind::unknown && member->type != inferred) {
+                                member->type = inferred;
+                                script_symbols.set_variable_type(
+                                    input.relative, inner_name, variable.name, inferred);
+                                changed = true;
+                            }
+                        }
                         const bool getter_coroutine =
                             variable.getter && semantic.is_coroutine(*variable.getter);
                         const bool setter_coroutine =

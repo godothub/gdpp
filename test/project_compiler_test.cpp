@@ -2934,6 +2934,32 @@ TEST_CASE("project compiler preserves super as a compile-time receiver across su
     REQUIRE(source.find("@gdpp-await-value-") == std::string::npos);
 }
 
+TEST_CASE("project compiler never rebinds inherited object storage from a Variant view") {
+    const auto root = fixture_root("project-inherited-object-dynamic-write");
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
+    write_text(root / "base.gd", "extends Node2D\nclass_name DynamicObjectBase\n"
+                                "@onready var sprite := $Sprite2D as Sprite2D\n");
+    write_text(root / "child.gd", "extends DynamicObjectBase\nclass_name DynamicObjectChild\n"
+                                 "signal resumed\n"
+                                 "func update(texture: Texture2D) -> void:\n"
+                                 "    await resumed\n"
+                                 "    sprite.texture = texture\n");
+    const auto options = project_options(root);
+
+    const auto result = gdpp::ProjectCompiler{}.compile(options);
+
+    REQUIRE(result.success);
+    const auto child =
+        std::find_if(result.scripts.begin(), result.scripts.end(), [](const auto& script) {
+            return script.relative_path.filename() == "child.gd";
+        });
+    REQUIRE(child != result.scripts.end());
+    const auto source = read_text(options.output_directory / "generated" / child->source_file_name);
+    REQUIRE(source.find("set_texture(") != std::string::npos);
+    REQUIRE(source.find(" = _gdpp_dynamic_root_") == std::string::npos);
+}
+
 TEST_CASE("project symbol refinement keeps immediate await functions on the coroutine ABI") {
     const auto root = fixture_root("project-immediate-await-abi");
     std::error_code error;

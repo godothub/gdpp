@@ -114,6 +114,8 @@ class ScriptSymbolTable final {
                        const std::string& method, bool coroutine);
     bool set_parameter_type(const std::string& path, const std::string& inner_class,
                             const std::string& method, std::size_t parameter, Type type);
+    bool set_variable_type(const std::string& path, const std::string& inner_class,
+                           const std::string& variable, Type type);
     bool set_accessor_coroutines(const std::string& path, const std::string& inner_class,
                                  const std::string& field, bool getter_coroutine,
                                  bool setter_coroutine);

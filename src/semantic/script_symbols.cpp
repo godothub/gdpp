@@ -89,6 +89,32 @@ bool ScriptSymbolTable::set_parameter_type(const std::string& path, const std::s
     return true;
 }
 
+bool ScriptSymbolTable::set_variable_type(const std::string& path,
+                                          const std::string& inner_class,
+                                          const std::string& variable, Type type) {
+    const auto found = paths_.find(path);
+    if (found == paths_.end())
+        return false;
+    auto& owner = classes_[found->second];
+    auto* members = &owner.members;
+    if (!inner_class.empty()) {
+        const auto inner = std::find_if(owner.inner_classes.begin(), owner.inner_classes.end(),
+                                        [&](const auto& item) { return item.name == inner_class; });
+        if (inner == owner.inner_classes.end())
+            return false;
+        members = &inner->members;
+    }
+    const auto member = std::find_if(members->begin(), members->end(), [&](const auto& item) {
+        return (item.kind == ScriptMemberKind::field ||
+                item.kind == ScriptMemberKind::constant) &&
+               item.name == variable;
+    });
+    if (member == members->end() || member->type == type)
+        return false;
+    member->type = std::move(type);
+    return true;
+}
+
 bool ScriptSymbolTable::set_accessor_coroutines(const std::string& path,
                                                 const std::string& inner_class,
                                                 const std::string& field,
