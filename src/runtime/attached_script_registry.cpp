@@ -136,6 +136,8 @@ bool same_method_info(const godot::MethodInfo& left, const godot::MethodInfo& ri
 bool same_property(const AttachedScriptProperty& left, const AttachedScriptProperty& right) {
     return same_property_info(left.info, right.info) && left.has_default == right.has_default &&
            left.getter == right.getter && left.setter == right.setter &&
+           left.storage_getter == right.storage_getter &&
+           left.storage_setter == right.storage_setter &&
            (!left.has_default || same_variant(left.default_value, right.default_value));
 }
 
@@ -251,7 +253,8 @@ bool register_attached_script(AttachedScriptDescriptor descriptor, godot::String
     }
     if (!descriptor.editor_metadata_only) {
         for (const auto& property : descriptor.properties) {
-            if (!property.getter || !property.setter) {
+            if (!property.getter || !property.setter || !property.storage_getter ||
+                !property.storage_setter) {
                 set_error(error, "attached script property has no runtime accessor: " +
                                      godot::String{property.info.name});
                 return false;

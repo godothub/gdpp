@@ -73,6 +73,11 @@ struct AttachedScriptProperty {
     // getter/setter semantics and also work for inherited descriptors.
     AttachedPropertyGetter getter{nullptr};
     AttachedPropertySetter setter{nullptr};
+    // Deprecated GDScript instance-dictionary utilities serialize member slots directly: custom
+    // accessors and _set/_get must not run. Generated raw accessors preserve that distinction
+    // while still enforcing the native type contract on restoration.
+    AttachedPropertyGetter storage_getter{nullptr};
+    AttachedPropertySetter storage_setter{nullptr};
     bool has_default{false};
 };
 

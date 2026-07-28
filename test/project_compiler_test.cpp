@@ -2419,6 +2419,10 @@ TEST_CASE("attached internal classes dispatch self locally and other instances t
     REQUIRE(rejected > conversion);
     REQUIRE(write > rejected);
     REQUIRE(source.find("typed->_gdpp_set_value(") != std::string::npos);
+    REQUIRE(source.find("property.storage_getter = [](") != std::string::npos);
+    REQUIRE(source.find("gdpp::runtime::to_variant(typed->value)") != std::string::npos);
+    REQUIRE(source.find("property.storage_setter = [](") != std::string::npos);
+    REQUIRE(source.find("typed->value = converted") != std::string::npos);
 }
 
 TEST_CASE("attached ref-counted self arguments retain a typed strong reference") {

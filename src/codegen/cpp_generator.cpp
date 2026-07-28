@@ -7194,6 +7194,30 @@ void CodeGenerator::emit_attached_descriptor_definition(
                << "            if (storage_scope.failed()) return false;\n"
                << "            typed->_gdpp_set_" << name << "(converted);\n"
                << "            return !storage_scope.failed();\n"
+               << "        };\n"
+               << "        property.storage_getter = []("
+                  "gdpp::runtime::AttachedScriptBehavior *behavior) -> godot::Variant {\n"
+               << "            if (!behavior || !behavior->is_class(" << native_name
+               << "::get_class_static())) return {};\n"
+               << "            auto *typed = static_cast<" << native_name << " *>(behavior);\n"
+               << "            return gdpp::runtime::to_variant(typed->" << name << ");\n"
+               << "        };\n"
+               << "        property.storage_setter = []("
+                  "gdpp::runtime::AttachedScriptBehavior *behavior, "
+                  "const godot::Variant &value) -> bool {\n"
+               << "            if (!behavior || !behavior->is_class(" << native_name
+               << "::get_class_static())) return false;\n"
+               << "            gdpp::runtime::ScriptFunctionScope storage_scope("
+                  "gdpp::runtime::ScriptFaultPolicy::inherit_existing);\n"
+               << "            auto *typed = static_cast<" << native_name << " *>(behavior);\n"
+               << "            const auto converted = "
+               << emit_conversion(variable.type, {TypeKind::variant, "Variant"}, "value",
+                                  &variable.span)
+               << ";\n"
+               << "            if (storage_scope.failed()) return false;\n"
+               << "            "
+               << emit_storage_assignment(variable.type, "typed->" + name, "converted") << ";\n"
+               << "            return !storage_scope.failed();\n"
                << "        };\n";
         if (!variable.initializer || editor_safe_initializer(*variable.initializer)) {
             source << "        property.has_default = true;\n"
