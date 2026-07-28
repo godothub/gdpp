@@ -646,7 +646,18 @@ void collect_type(const Type& type, NativeTypeIncludes& includes, const GodotApi
     }
     if (type.kind == TypeKind::builtin)
         includes.builtins.insert(type.name);
-    else if (type.kind == TypeKind::object && api.find_class(type.name))
+    else if (type.kind == TypeKind::enumeration && script_symbols) {
+        const auto separator = type.name.rfind("::");
+        if (separator != std::string::npos) {
+            const auto native_owner = type.name.substr(0, separator);
+            if (script_symbols->find_native_class(native_owner)) {
+                includes.resolved_native_scripts.insert(native_owner);
+            } else if (const auto* inner = script_symbols->find_inner_native(native_owner)) {
+                if (const auto* owner = script_symbols->owner_of(*inner))
+                    includes.resolved_native_scripts.insert(owner->native_class_name);
+            }
+        }
+    } else if (type.kind == TypeKind::object && api.find_class(type.name))
         includes.objects.insert(type.name);
     else if (type.kind == TypeKind::object && script_symbols &&
              script_symbols->find_class(type.name))

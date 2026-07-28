@@ -801,6 +801,31 @@ TEST_CASE("project compiler resolves script and nested internal enum identities"
     REQUIRE(source.find(".get_type() == godot::Variant::INT") != std::string::npos);
 }
 
+TEST_CASE("project compiler includes complete owners for cross-script enum-only dependencies") {
+    const auto root = fixture_root("project-enum-owner-dependencies");
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
+    write_text(root / "enum_owner.gd", "extends RefCounted\n"
+                                       "class_name SharedEnumOwner\n"
+                                       "enum Mode { IDLE, READY }\n");
+    write_text(root / "consumer.gd", "extends RefCounted\n"
+                                     "class_name SharedEnumConsumer\n"
+                                     "func is_ready(mode: SharedEnumOwner.Mode) -> bool:\n"
+                                     "    return mode == SharedEnumOwner.Mode.READY\n");
+
+    const auto options = project_options(root);
+    const auto result = gdpp::ProjectCompiler{}.compile(options);
+
+    REQUIRE(result.success);
+    const auto source =
+        read_text(options.output_directory / "generated/shared_enum_consumer.gd.cpp");
+    const auto include = source.find("#include \"shared_enum_owner.gd.hpp\"");
+    const auto use = source.find("::Mode::_gdpp_enum_READY");
+    REQUIRE(include != std::string::npos);
+    REQUIRE(use != std::string::npos);
+    REQUIRE(include < use);
+}
+
 TEST_CASE("project compiler preserves nested internal class identities across cache hits") {
     const auto root = fixture_root("project-nested-internal-classes");
     std::error_code error;
