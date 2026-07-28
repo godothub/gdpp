@@ -257,6 +257,47 @@ func _verify_export_runtime() -> void:
     ):
         _fail("dynamic compiled Script construction lost behavior or canonical identity")
         return
+
+    # Exercise the complete runtime attachment path used by third-party systems that construct a
+    # native base first and attach a dynamically loaded GDScript afterwards. The cast intentionally
+    # targets the script base so the check also covers attached inheritance identity.
+    var dynamically_attached_node := Node.new()
+    var dynamically_attached_script: Variant = load("res://dynamic_attach_child.gd")
+    dynamically_attached_node.set_script(dynamically_attached_script)
+    var dynamically_attached_base := dynamically_attached_node as DynamicAttachBase
+    var dynamically_attached_signal_values := [-1]
+    if dynamically_attached_base == null:
+        dynamically_attached_node.free()
+        _fail("dynamic set_script attachment lost inherited script identity")
+        return
+    dynamically_attached_node.installed.connect(
+        func(value: int) -> void: dynamically_attached_signal_values[0] = value,
+    )
+    add_child(dynamically_attached_node)
+    await get_tree().process_frame
+    var dynamically_attached_identity_ok: bool = (
+        dynamically_attached_node.get_script() == dynamically_attached_script
+    )
+    var dynamically_attached_value: Variant = dynamically_attached_base.evaluate_attached()
+    var dynamically_attached_ready: Variant = dynamically_attached_base.ready_seen
+    if (
+        not dynamically_attached_identity_ok
+        or dynamically_attached_value != 42
+        or not dynamically_attached_ready
+        or dynamically_attached_signal_values[0] != 42
+    ):
+        dynamically_attached_node.queue_free()
+        _fail(
+            "dynamic set_script attachment mismatch: identity=%s value=%s ready=%s signal=%s"
+            % [
+                dynamically_attached_identity_ok,
+                dynamically_attached_value,
+                dynamically_attached_ready,
+                dynamically_attached_signal_values[0],
+            ],
+        )
+        return
+    dynamically_attached_node.queue_free()
     print("GDPP_DYNAMIC_SCRIPT_RUNTIME_OK")
 
     var completion_order: Array[int] = []
