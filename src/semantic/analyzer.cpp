@@ -4400,7 +4400,7 @@ SemanticAnalyzer::constant_string_expression(const ast::Expression& expression) 
 
 std::optional<std::int64_t>
 SemanticAnalyzer::constant_integer_expression(const ast::Expression& expression) const {
-    std::unordered_map<std::string, std::int64_t> constants;
+    auto constants = named_integer_constants_;
     for (const auto& scope : scopes_) {
         for (const auto& [name, symbol] : scope) {
             if (symbol.constant_integer_value)
@@ -5955,6 +5955,7 @@ void SemanticAnalyzer::analyze_enums(const std::vector<ast::EnumDeclaration>& de
             continue;
         }
         std::unordered_map<std::string, std::int64_t> values;
+        auto evaluation_constants = named_integer_constants_;
         std::int64_t next_value = 0;
         for (const auto& entry : declaration.entries) {
             if (values.find(entry.name) != values.end()) {
@@ -5962,7 +5963,7 @@ void SemanticAnalyzer::analyze_enums(const std::vector<ast::EnumDeclaration>& de
                                    entry.span);
                 continue;
             }
-            auto value = entry.value ? evaluate_integer_constant(*entry.value, values)
+            auto value = entry.value ? evaluate_integer_constant(*entry.value, evaluation_constants)
                                      : std::optional<std::int64_t>{next_value};
             if (!value) {
                 diagnostics_.error("GDS4039",
@@ -5972,6 +5973,18 @@ void SemanticAnalyzer::analyze_enums(const std::vector<ast::EnumDeclaration>& de
                 value = 0;
             }
             values.emplace(entry.name, *value);
+            evaluation_constants.insert_or_assign(entry.name, *value);
+            if (declaration.name) {
+                named_integer_constants_.insert_or_assign(*declaration.name + "." + entry.name,
+                                                          *value);
+                if (current_script_ && current_script_->globally_named) {
+                    named_integer_constants_.insert_or_assign(
+                        current_script_->script_name + "." + *declaration.name + "." + entry.name,
+                        *value);
+                }
+            } else {
+                named_integer_constants_.insert_or_assign(entry.name, *value);
+            }
             model_.enum_values_[&entry] = *value;
             if (!declaration.name) {
                 declare({SymbolKind::enum_value,
@@ -6616,6 +6629,22 @@ SemanticModel SemanticAnalyzer::analyze(const ast::Script& script) {
                 coroutine_getter_fields_.insert(member.name);
             if (member.kind == ScriptMemberKind::field && member.is_static)
                 static_fields_.insert(member.name);
+        }
+    }
+    for (const auto& variable : script.variables) {
+        if (!variable.is_constant || !variable.initializer)
+            continue;
+        const auto value =
+            evaluate_integer_constant(*variable.initializer, named_integer_constants_);
+        if (!value)
+            continue;
+        named_integer_constants_.insert_or_assign(variable.name, *value);
+        if (current_script_ && current_script_->globally_named) {
+            named_integer_constants_.insert_or_assign(
+                current_script_->script_name + "." + variable.name, *value);
+        } else if (script.class_name) {
+            named_integer_constants_.insert_or_assign(*script.class_name + "." + variable.name,
+                                                      *value);
         }
     }
     analyze_enums(script.enums);

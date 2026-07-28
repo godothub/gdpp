@@ -6,6 +6,19 @@
 #include <limits>
 
 namespace gdpp {
+namespace {
+
+std::optional<std::string> qualified_constant_name(const ast::Expression& expression) {
+    if (const auto* identifier = expression.get_if<ast::IdentifierExpression>())
+        return identifier->name;
+    const auto* member = expression.get_if<ast::MemberExpression>();
+    if (!member || !member->receiver)
+        return std::nullopt;
+    const auto receiver = qualified_constant_name(*member->receiver);
+    return receiver ? std::optional<std::string>{*receiver + "." + member->name} : std::nullopt;
+}
+
+} // namespace
 
 std::optional<std::int64_t>
 evaluate_integer_constant(const ast::Expression& expression,
@@ -24,6 +37,11 @@ evaluate_integer_constant(const ast::Expression& expression,
     }
     if (const auto* identifier = expression.get_if<ast::IdentifierExpression>()) {
         const auto found = previous.find(identifier->name);
+        return found == previous.end() ? std::nullopt : std::optional<std::int64_t>{found->second};
+    }
+    if (expression.get_if<ast::MemberExpression>()) {
+        const auto name = qualified_constant_name(expression);
+        const auto found = name ? previous.find(*name) : previous.end();
         return found == previous.end() ? std::nullopt : std::optional<std::int64_t>{found->second};
     }
     if (const auto* unary = expression.get_if<ast::UnaryExpression>()) {

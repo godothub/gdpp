@@ -667,8 +667,7 @@ TEST_CASE("compiler preserves typed container metadata in the native ABI") {
     REQUIRE(result.unit.header.find("godot::StringName(\"Node\")") != std::string::npos);
     REQUIRE(result.unit.header.find(
                 "godot::TypedArray<gdpp::runtime::container_tags::ContainerObjectTag_Node> "
-                "nodes") !=
-            std::string::npos);
+                "nodes") != std::string::npos);
     REQUIRE(result.unit.header.find("godot::TypedArray<int64_t> modes") != std::string::npos);
     REQUIRE(result.unit.header.find("godot::TypedDictionary<godot::String, int64_t> "
                                     "_gdpp_script_method_summarize(") != std::string::npos);
@@ -791,12 +790,11 @@ TEST_CASE("compiler generates serializable Godot export properties and inspector
             std::string::npos);
     REQUIRE(result.unit.source.find("godot::PROPERTY_HINT_RESOURCE_TYPE") != std::string::npos);
     REQUIRE(result.unit.header.find("godot::Ref<godot::Texture2D> icon{}") != std::string::npos);
-    REQUIRE(result.unit.source.find(
-                "gdpp::runtime::register_property_marker(get_class_static(), "
-                "godot::PropertyInfo(godot::Variant::NIL, \"Advanced\"") !=
+    REQUIRE(result.unit.source.find("gdpp::runtime::register_property_marker(get_class_static(), "
+                                    "godot::PropertyInfo(godot::Variant::NIL, \"Advanced\"") !=
             std::string::npos);
-    REQUIRE(result.unit.source.find(
-                "godot::PROPERTY_USAGE_CATEGORY), \"\", \"\")") == std::string::npos);
+    REQUIRE(result.unit.source.find("godot::PROPERTY_USAGE_CATEGORY), \"\", \"\")") ==
+            std::string::npos);
     REQUIRE(result.unit.header.find("godot::Variant inferred_count{}") != std::string::npos);
     REQUIRE(result.unit.source.find(
                 "inferred_count = gdpp::runtime::to_variant(static_cast<int64_t>(5))") !=
@@ -1148,8 +1146,7 @@ TEST_CASE("compiler preserves instance defaults and explicit null through native
                 "method.default_arguments.push_back(gdpp::runtime::default_argument())") !=
             std::string::npos);
     REQUIRE(result.unit.source.find("DEFVAL(godot::Variant())") == std::string::npos);
-    REQUIRE(result.unit.source.find(
-                "? gdpp::runtime::ObjectStorage<godot::Control>(") !=
+    REQUIRE(result.unit.source.find("? gdpp::runtime::ObjectStorage<godot::Control>(") !=
             std::string::npos);
     REQUIRE(result.unit.source.find(
                 ": gdpp::runtime::ObjectStorage<godot::Control>("
@@ -1166,8 +1163,8 @@ TEST_CASE("compiler gives native object defaults one exact parameter storage typ
                                               "    return parent\n");
 
     REQUIRE(result.success);
-    REQUIRE(result.unit.source.find(
-                "? gdpp::runtime::ObjectStorage<godot::TreeItem>(") != std::string::npos);
+    REQUIRE(result.unit.source.find("? gdpp::runtime::ObjectStorage<godot::TreeItem>(") !=
+            std::string::npos);
     REQUIRE(result.unit.source.find(
                 ": gdpp::runtime::ObjectStorage<godot::TreeItem>("
                 "gdpp::runtime::strict_native_object_value_storage<godot::TreeItem>") !=
@@ -1429,6 +1426,25 @@ TEST_CASE("compiler emits complete native RPC configuration for Node classes") {
     REQUIRE(result.unit.source.find("rpc[godot::StringName(\"update_remote\")] = config") !=
             std::string::npos);
     REQUIRE(result.unit.source.find("descriptor.rpc_config = rpc") != std::string::npos);
+}
+
+TEST_CASE("compiler resolves qualified integer constants in enums and RPC annotations") {
+    const gdpp::Compiler compiler;
+    const auto result = compiler.compile(
+        "qualified_rpc.gd", "extends Node\n"
+                            "class_name QualifiedRpc\n"
+                            "const FIRST_CHANNEL: int = 2\n"
+                            "enum EChannel {\n"
+                            "    CONNECT = QualifiedRpc.FIRST_CHANNEL,\n"
+                            "    ACTION,\n"
+                            "}\n"
+                            "@rpc(\"any_peer\", \"call_remote\", \"reliable\", EChannel.ACTION)\n"
+                            "func synchronize() -> void:\n"
+                            "    pass\n");
+
+    REQUIRE(result.success);
+    REQUIRE(result.unit.source.find("gdpp_rpc_config[\"channel\"] = int64_t{3}") !=
+            std::string::npos);
 }
 
 TEST_CASE("compiler preserves official RPC configuration field presence") {
@@ -2772,10 +2788,8 @@ TEST_CASE("compiler iterates packed arrays with their Godot element types") {
             std::string::npos);
     REQUIRE(result.unit.source.find("godot::String argument =") != std::string::npos);
     REQUIRE(result.unit.source.find("_gdpp_packed_iterable_") != std::string::npos);
-    REQUIRE(result.unit.source.find(
-                "gdpp::runtime::SharedPackedArray<godot::PackedStringArray>("
-                "_gdpp_call_receiver_") !=
-            std::string::npos);
+    REQUIRE(result.unit.source.find("gdpp::runtime::SharedPackedArray<godot::PackedStringArray>("
+                                    "_gdpp_call_receiver_") != std::string::npos);
     REQUIRE(result.unit.source.find(".native().size()") != std::string::npos);
     REQUIRE(result.unit.source.find(".native()[") != std::string::npos);
     REQUIRE(result.unit.source.find(".size();") != std::string::npos);
@@ -4125,11 +4139,9 @@ TEST_CASE("compiler encloses complete dynamic match guard expressions") {
                          "            pass\n");
 
     REQUIRE(result.success);
-    REQUIRE(result.unit.source.find(
-                "if ((gdpp::runtime::to_variant(([&]() -> godot::Variant") !=
+    REQUIRE(result.unit.source.find("if ((gdpp::runtime::to_variant(([&]() -> godot::Variant") !=
             std::string::npos);
-    REQUIRE(result.unit.source.find(
-                "if ((gdpp::runtime::to_variant(validation)).booleanize())") !=
+    REQUIRE(result.unit.source.find("if ((gdpp::runtime::to_variant(validation)).booleanize())") !=
             std::string::npos);
 }
 
@@ -4666,8 +4678,7 @@ TEST_CASE("compiler generates validated method-bound property accessors") {
     REQUIRE(result.success);
     REQUIRE(result.unit.source.find("return _gdpp_script_method_is_active();") !=
             std::string::npos);
-    REQUIRE(result.unit.source.find("_gdpp_script_method_set_active(value);") !=
-            std::string::npos);
+    REQUIRE(result.unit.source.find("_gdpp_script_method_set_active(value);") != std::string::npos);
     REQUIRE(result.unit.source.find("return is_active();") == std::string::npos);
     REQUIRE(result.unit.source.find("    set_active(value);") == std::string::npos);
     REQUIRE(result.unit.source.find("active = std::move(_gdpp_assignment_result_") !=
@@ -4699,12 +4710,10 @@ TEST_CASE("compiler isolates every method-bound property accessor target") {
     REQUIRE(result.success);
     REQUIRE(result.unit.source.find("return _gdpp_script_method_is_shared();") !=
             std::string::npos);
-    REQUIRE(result.unit.source.find("_gdpp_script_method_set_shared(value);") !=
-            std::string::npos);
+    REQUIRE(result.unit.source.find("_gdpp_script_method_set_shared(value);") != std::string::npos);
     REQUIRE(result.unit.source.find("return _gdpp_script_method_is_active();") !=
             std::string::npos);
-    REQUIRE(result.unit.source.find("_gdpp_script_method_set_active(value);") !=
-            std::string::npos);
+    REQUIRE(result.unit.source.find("_gdpp_script_method_set_active(value);") != std::string::npos);
     REQUIRE(result.unit.source.find("return is_shared();") == std::string::npos);
     REQUIRE(result.unit.source.find("    set_shared(value);") == std::string::npos);
     REQUIRE(result.unit.source.find("return is_active();") == std::string::npos);
@@ -4765,8 +4774,8 @@ TEST_CASE("compiler preserves coroutine property accessor ABI") {
     REQUIRE(bound_accessors.success);
     REQUIRE(bound_accessors.unit.header.find("godot::Variant _gdpp_get_value()") !=
             std::string::npos);
-    REQUIRE(bound_accessors.unit.source.find(
-                "return _gdpp_script_method_read_value();") != std::string::npos);
+    REQUIRE(bound_accessors.unit.source.find("return _gdpp_script_method_read_value();") !=
+            std::string::npos);
     REQUIRE(bound_accessors.unit.source.find("return read_value();") == std::string::npos);
     REQUIRE(static_accessors.success);
     REQUIRE(static_accessors.unit.header.find("static godot::Variant _gdpp_get_value()") !=
@@ -5581,18 +5590,16 @@ TEST_CASE("static function values use owner-free callables with default argument
 
 TEST_CASE("resolved lexical values shadow same-named script methods during code generation") {
     const gdpp::Compiler compiler;
-    const auto result =
-        compiler.compile("shadowed_method_value.gd",
-                         "extends Node\n"
-                         "func replace(value: String) -> void:\n"
-                         "    pass\n"
-                         "func forward(helper: Variant, replace: bool) -> void:\n"
-                         "    helper.confirm_code_completion(replace, self)\n");
+    const auto result = compiler.compile("shadowed_method_value.gd",
+                                         "extends Node\n"
+                                         "func replace(value: String) -> void:\n"
+                                         "    pass\n"
+                                         "func forward(helper: Variant, replace: bool) -> void:\n"
+                                         "    helper.confirm_code_completion(replace, self)\n");
 
     REQUIRE(result.success);
     REQUIRE(result.unit.source.find("gdpp::runtime::to_variant(replace)") != std::string::npos);
-    REQUIRE(result.unit.source.find(
-                "gdpp::runtime::to_variant(_gdpp_script_method_replace)") ==
+    REQUIRE(result.unit.source.find("gdpp::runtime::to_variant(_gdpp_script_method_replace)") ==
             std::string::npos);
 }
 
@@ -5616,19 +5623,18 @@ TEST_CASE("internal static function values use owner-free callables") {
 
 TEST_CASE("internal static method calls use their isolated native symbol") {
     const gdpp::Compiler compiler;
-    const auto result =
-        compiler.compile("internal_static_call.gd",
-                         "extends Resource\n"
-                         "class Calculator:\n"
-                         "    static func calculate(value: int) -> int:\n"
-                         "        return value + 1\n"
-                         "func calculate(value: int) -> int:\n"
-                         "    return Calculator.calculate(value)\n");
+    const auto result = compiler.compile("internal_static_call.gd",
+                                         "extends Resource\n"
+                                         "class Calculator:\n"
+                                         "    static func calculate(value: int) -> int:\n"
+                                         "        return value + 1\n"
+                                         "func calculate(value: int) -> int:\n"
+                                         "    return Calculator.calculate(value)\n");
 
     REQUIRE(result.success);
-    REQUIRE(result.unit.header.find(
-                "static int64_t _gdpp_script_method_calculate(int64_t value);") !=
-            std::string::npos);
+    REQUIRE(
+        result.unit.header.find("static int64_t _gdpp_script_method_calculate(int64_t value);") !=
+        std::string::npos);
     REQUIRE(result.unit.source.find("::calculate(") == std::string::npos);
     REQUIRE(result.unit.source.find(
                 "GDPPNative_InternalStaticCall__Calculator::_gdpp_script_method_calculate(") !=

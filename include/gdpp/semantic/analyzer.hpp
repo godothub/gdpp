@@ -351,6 +351,7 @@ class SemanticAnalyzer final {
     std::vector<Scope> scopes_;
     std::unordered_set<std::string> enum_types_;
     std::unordered_map<std::string, std::unordered_map<std::string, std::int64_t>> enum_members_;
+    std::unordered_map<std::string, std::int64_t> named_integer_constants_;
     std::unordered_set<std::string> accessor_fields_;
     std::unordered_set<std::string> coroutine_getter_fields_;
     std::unordered_set<std::string> static_fields_;

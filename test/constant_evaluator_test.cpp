@@ -10,10 +10,13 @@
 #include <limits>
 #include <optional>
 #include <string>
+#include <unordered_map>
 
 namespace {
 
-std::optional<std::int64_t> evaluate(std::string expression) {
+std::optional<std::int64_t>
+evaluate(std::string expression,
+         const std::unordered_map<std::string, std::int64_t>& constants = {}) {
     gdpp::DiagnosticBag diagnostics;
     const gdpp::SourceFile source{"constant.gd", "const VALUE = " + expression + "\n"};
     gdpp::Lexer lexer{source, diagnostics};
@@ -23,7 +26,7 @@ std::optional<std::int64_t> evaluate(std::string expression) {
     REQUIRE(!diagnostics.has_errors());
     REQUIRE_EQ(script.variables.size(), std::size_t{1});
     REQUIRE(script.variables.front().initializer != nullptr);
-    return gdpp::evaluate_integer_constant(*script.variables.front().initializer);
+    return gdpp::evaluate_integer_constant(*script.variables.front().initializer, constants);
 }
 
 } // namespace
@@ -58,4 +61,14 @@ TEST_CASE("integer constants normalize shifts and preserve signed bit operations
 TEST_CASE("integer constant division by zero remains a rejected constant expression") {
     REQUIRE(!evaluate("7 / 0"));
     REQUIRE(!evaluate("7 % 0"));
+}
+
+TEST_CASE("integer constants resolve qualified script and enum members") {
+    const std::unordered_map<std::string, std::int64_t> constants{
+        {"ProgressCommons.UnknownProgress", 0},
+        {"EChannel.CONNECT", 4},
+    };
+    REQUIRE_EQ(evaluate("ProgressCommons.UnknownProgress", constants),
+               std::optional<std::int64_t>{0});
+    REQUIRE_EQ(evaluate("EChannel.CONNECT + 1", constants), std::optional<std::int64_t>{5});
 }
