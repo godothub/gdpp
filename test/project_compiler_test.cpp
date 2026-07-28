@@ -3249,7 +3249,7 @@ TEST_CASE("project compiler lowers cross-script static Callable values") {
         read_text(options.output_directory / "generated" / consumer->source_file_name);
     const auto& sorter_class = native_class_for(result, "sorter.gd");
     REQUIRE(source.find("gdpp::runtime::make_callable(nullptr, 1, 2") != std::string::npos);
-    REQUIRE(source.find(sorter_class + "::compare(") != std::string::npos);
+    REQUIRE(source.find(sorter_class + "::_gdpp_script_method_compare(") != std::string::npos);
     REQUIRE(source.find("godot::Callable(") == std::string::npos);
 }
 

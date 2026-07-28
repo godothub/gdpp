@@ -5438,7 +5438,8 @@ TEST_CASE("static function values use owner-free callables with default argument
     REQUIRE(result.success);
     REQUIRE(result.unit.source.find("gdpp::runtime::make_callable(nullptr, 1, 2") !=
             std::string::npos);
-    REQUIRE(result.unit.source.find("GDPPNative_StaticCallable::compare(") != std::string::npos);
+    REQUIRE(result.unit.source.find("GDPPNative_StaticCallable::_gdpp_script_method_compare(") !=
+            std::string::npos);
     REQUIRE(result.unit.source.find("godot::Callable(this, godot::StringName(\"compare\"))") ==
             std::string::npos);
     REQUIRE(result.unit.source.find("gdpp::runtime::default_argument()") != std::string::npos);
@@ -5458,7 +5459,7 @@ TEST_CASE("internal static function values use owner-free callables") {
     REQUIRE(result.success);
     REQUIRE(result.unit.source.find("gdpp::runtime::make_callable(nullptr, 1, 2") !=
             std::string::npos);
-    REQUIRE(result.unit.source.find("::compare(") != std::string::npos);
+    REQUIRE(result.unit.source.find("::_gdpp_script_method_compare(") != std::string::npos);
     REQUIRE(result.unit.source.find("godot::Callable(this") == std::string::npos);
 }
 

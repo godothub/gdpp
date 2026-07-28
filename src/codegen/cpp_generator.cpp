@@ -3464,7 +3464,7 @@ std::string CodeGenerator::emit_script_static_callable(const typed::Expression& 
     }
     if (return_type.kind != TypeKind::void_type)
         result += "return gdpp::runtime::to_variant(";
-    result += native_owner + "::" + sanitize_identifier(expression.value) + "(";
+    result += native_owner + "::_gdpp_script_method_" + sanitize_identifier(expression.value) + "(";
     for (std::size_t index = 0; index < parameter_count; ++index) {
         if (index != 0)
             result += ", ";
