@@ -119,6 +119,14 @@ const AttachedScriptProperty* find_property(const AttachedScriptInstance* instan
     return found == instance->descriptor.properties.end() ? nullptr : &*found;
 }
 
+const AttachedScriptStaticProperty* find_static_property(const AttachedScriptInstance* instance,
+                                                         const godot::StringName& name) {
+    const auto found = std::find_if(
+        instance->descriptor.static_properties.begin(), instance->descriptor.static_properties.end(),
+        [&](const auto& item) { return item.name == name; });
+    return found == instance->descriptor.static_properties.end() ? nullptr : &*found;
+}
+
 const godot::MethodInfo* find_method(const AttachedScriptInstance* instance,
                                      const godot::StringName& name) {
     const auto found =
@@ -257,6 +265,14 @@ GDExtensionBool instance_set(AttachedScriptInstance* instance, const godot::Stri
         instance->metadata_values[*name] = *value;
         return true;
     }
+    if (const auto* property = find_property(instance, *name)) {
+        if (property->setter)
+            return property->setter(instance->behavior.ptr(), *value);
+        return godot::ClassDB::class_set_property(instance->behavior.ptr(), *name, *value) ==
+               godot::OK;
+    }
+    if (const auto* property = find_static_property(instance, *name))
+        return property->setter && property->setter(*value);
     if (find_method(instance, "_set")) {
         const godot::Variant property_name{*name};
         const godot::Variant* arguments[]{&property_name, value};
@@ -265,12 +281,7 @@ GDExtensionBool instance_set(AttachedScriptInstance* instance, const godot::Stri
         if (error.error == GDEXTENSION_CALL_OK && static_cast<bool>(handled))
             return true;
     }
-    const auto* property = find_property(instance, *name);
-    if (!property)
-        return false;
-    if (property->setter)
-        return property->setter(instance->behavior.ptr(), *value);
-    return godot::ClassDB::class_set_property(instance->behavior.ptr(), *name, *value) == godot::OK;
+    return false;
 }
 
 GDExtensionBool instance_get(AttachedScriptInstance* instance, const godot::StringName* name,
@@ -282,15 +293,37 @@ GDExtensionBool instance_get(AttachedScriptInstance* instance, const godot::Stri
                 *name, property->has_default ? property->default_value : godot::Variant{});
             return true;
         }
-        if (find_method(instance, *name)) {
-            *result = godot::Callable(instance->owner, *name);
+        if (get_attached_script_constant(instance->descriptor, *name, *result))
             return true;
-        }
         if (has_signal(instance, *name)) {
             *result = godot::Signal(instance->owner, *name);
             return true;
         }
+        if (find_method(instance, *name)) {
+            *result = godot::Callable(instance->owner, *name);
+            return true;
+        }
         return false;
+    }
+    if (const auto* property = find_property(instance, *name)) {
+        *result = property->getter
+                      ? property->getter(instance->behavior.ptr())
+                      : godot::ClassDB::class_get_property(instance->behavior.ptr(), *name);
+        return true;
+    }
+    if (get_attached_script_constant(instance->descriptor, *name, *result))
+        return true;
+    if (const auto* property = find_static_property(instance, *name)) {
+        *result = property->getter ? property->getter() : godot::Variant{};
+        return true;
+    }
+    if (has_signal(instance, *name)) {
+        *result = godot::Signal(instance->owner, *name);
+        return true;
+    }
+    if (find_method(instance, *name)) {
+        *result = godot::Callable(instance->owner, *name);
+        return true;
     }
     if (find_method(instance, "_get")) {
         const godot::Variant property_name{*name};
@@ -301,20 +334,6 @@ GDExtensionBool instance_get(AttachedScriptInstance* instance, const godot::Stri
             *result = value;
             return true;
         }
-    }
-    if (const auto* property = find_property(instance, *name)) {
-        *result = property->getter
-                      ? property->getter(instance->behavior.ptr())
-                      : godot::ClassDB::class_get_property(instance->behavior.ptr(), *name);
-        return true;
-    }
-    if (find_method(instance, *name)) {
-        *result = godot::Callable(instance->owner, *name);
-        return true;
-    }
-    if (has_signal(instance, *name)) {
-        *result = godot::Signal(instance->owner, *name);
-        return true;
     }
     return false;
 }

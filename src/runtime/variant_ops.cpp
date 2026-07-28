@@ -1711,26 +1711,57 @@ godot::Variant call_dynamic_impl(godot::Variant& target, const godot::StringName
         target.get_type() == godot::Variant::OBJECT) {
         return script_identity(static_cast<godot::Object*>(target));
     }
-    // `Script.new()` is a language-level constructor operation, not a ClassDB method. Calling
-    // Variant::callp("new") works for GDScript only because that language intercepts its own
-    // Script resource; a ScriptExtension otherwise reports an invalid dynamic call before
-    // `_instance_create()` can run. Route every runtime-discovered AOT Script through the same
-    // constructor used by statically resolved script resources, including varargs `_init`.
-    if (method == new_method && target.get_type() == godot::Variant::OBJECT) {
+    // Script constructors and static methods are language operations rather than ordinary
+    // ClassDB methods on the Script resource. Route every runtime-discovered AOT Script through
+    // its generated descriptor so dynamic and statically resolved calls share one ABI.
+    if (target.get_type() == godot::Variant::OBJECT) {
         auto* script =
             godot::Object::cast_to<AttachedCompiledScript>(target.get_validated_object());
         if (script) {
-            godot::Array constructor_arguments;
-            constructor_arguments.resize(static_cast<std::int64_t>(argument_count));
-            for (std::size_t index = 0; index < argument_count; ++index)
-                constructor_arguments[static_cast<std::int64_t>(index)] = *arguments[index];
-            godot::String error;
-            auto result = instantiate_attached_script(script->get_source_path(),
-                                                      constructor_arguments, &error);
-            if (!error.is_empty())
-                report_script_failure("GDPP: dynamic compiled Script construction failed: " + error,
-                                      location);
-            return result;
+            if (method == new_method) {
+                godot::Array constructor_arguments;
+                constructor_arguments.resize(static_cast<std::int64_t>(argument_count));
+                for (std::size_t index = 0; index < argument_count; ++index)
+                    constructor_arguments[static_cast<std::int64_t>(index)] = *arguments[index];
+                godot::String error;
+                auto result = instantiate_attached_script(script->get_source_path(),
+                                                          constructor_arguments, &error);
+                if (!error.is_empty()) {
+                    report_script_failure(
+                        "GDPP: dynamic compiled Script construction failed: " + error, location);
+                }
+                return result;
+            }
+            const auto descriptor = resolve_attached_script(script->get_source_path());
+            if (descriptor) {
+                const auto reflected =
+                    std::find_if(descriptor->methods.begin(), descriptor->methods.end(),
+                                 [&](const godot::MethodInfo& candidate) {
+                                     return candidate.name == method &&
+                                            (candidate.flags & godot::METHOD_FLAG_STATIC) != 0;
+                                 });
+                const auto dispatch =
+                    std::find_if(descriptor->method_dispatches.begin(),
+                                 descriptor->method_dispatches.end(),
+                                 [&](const AttachedScriptMethodDispatch& candidate) {
+                                     return candidate.name == method;
+                                 });
+                if (reflected != descriptor->methods.end() &&
+                    dispatch != descriptor->method_dispatches.end() && dispatch->call) {
+                    godot::Variant result;
+                    GDExtensionCallError error{GDEXTENSION_CALL_OK, 0, 0};
+                    dispatch->call(
+                        nullptr, nullptr,
+                        reinterpret_cast<const GDExtensionConstVariantPtr*>(arguments),
+                        static_cast<GDExtensionInt>(argument_count), result._native_ptr(), &error);
+                    if (error.error != GDEXTENSION_CALL_OK) {
+                        report_script_failure(call_error_message("static Script method", error),
+                                              location);
+                        return {};
+                    }
+                    return result;
+                }
+            }
         }
     }
     // Export conversion has already replaced every scene-owned GDScript instance with its

@@ -1,4 +1,5 @@
 #include "gdpp/runtime/attached_script.hpp"
+#include "gdpp/runtime/variant_ops.hpp"
 
 #include <godot_cpp/classes/engine.hpp>
 #include <godot_cpp/classes/engine_debugger.hpp>
@@ -63,6 +64,14 @@ const AttachedScriptProperty* find_property(const AttachedScriptDescriptor& desc
     const auto found = std::find_if(descriptor.properties.begin(), descriptor.properties.end(),
                                     [&](const auto& item) { return item.info.name == name; });
     return found == descriptor.properties.end() ? nullptr : &*found;
+}
+
+const AttachedScriptStaticProperty* find_static_property(const AttachedScriptDescriptor& descriptor,
+                                                         const godot::StringName& name) {
+    const auto found =
+        std::find_if(descriptor.static_properties.begin(), descriptor.static_properties.end(),
+                     [&](const auto& item) { return item.name == name; });
+    return found == descriptor.static_properties.end() ? nullptr : &*found;
 }
 
 struct DebugFrameRecord {
@@ -553,6 +562,50 @@ std::optional<AttachedScriptDescriptor> AttachedCompiledScript::descriptor() con
     return value;
 }
 
+bool AttachedCompiledScript::_get(const godot::StringName& name, godot::Variant& value) const {
+    const auto metadata = descriptor();
+    if (!metadata)
+        return false;
+    if (get_attached_script_constant(*metadata, name, value))
+        return true;
+    const auto* property = find_static_property(*metadata, name);
+    if (property && property->getter) {
+        value = property->getter();
+        return true;
+    }
+    const auto* method = find_method(*metadata, name);
+    if (!method || (method->flags & godot::METHOD_FLAG_STATIC) == 0)
+        return false;
+    const auto required_arguments =
+        method->arguments.size() >= method->default_arguments.size()
+            ? method->arguments.size() - method->default_arguments.size()
+            : 0U;
+    const auto positional_arguments = method->arguments.size();
+    const bool is_vararg = (method->flags & godot::METHOD_FLAG_VARARG) != 0;
+    godot::Ref<AttachedCompiledScript> script{const_cast<AttachedCompiledScript*>(this)};
+    value = make_named_callable(
+        const_cast<AttachedCompiledScript*>(this), name, required_arguments, positional_arguments,
+        is_vararg, [script, name](const godot::Array& arguments) mutable {
+            godot::Variant target{script};
+            std::vector<godot::Variant> values;
+            values.reserve(static_cast<std::size_t>(arguments.size()));
+            for (std::int64_t index = 0; index < arguments.size(); ++index)
+                values.push_back(arguments[index]);
+            std::vector<const godot::Variant*> pointers;
+            pointers.reserve(values.size());
+            for (const auto& argument : values)
+                pointers.push_back(&argument);
+            return call_dynamic_impl(target, name, pointers.data(), pointers.size());
+        });
+    return true;
+}
+
+bool AttachedCompiledScript::_set(const godot::StringName& name, const godot::Variant& value) {
+    const auto metadata = descriptor();
+    const auto* property = metadata ? find_static_property(*metadata, name) : nullptr;
+    return property && property->setter && property->setter(value);
+}
+
 bool AttachedCompiledScript::_editor_can_reload_from_file() { return false; }
 
 void AttachedCompiledScript::_placeholder_erased(void*) {}
@@ -723,6 +776,8 @@ godot::TypedArray<godot::StringName> AttachedCompiledScript::_get_members() cons
         return result;
     for (const auto& property : value->properties)
         result.push_back(property.info.name);
+    for (const auto& property : value->static_properties)
+        result.push_back(property.name);
     for (const auto& method : value->methods)
         result.push_back(method.name);
     for (const auto& signal : value->signals)

@@ -288,7 +288,7 @@ class CodeGenerator final {
         const std::string& base_script_path, const std::string& contract_hash, bool tool_mode,
         bool is_abstract, const std::vector<typed::Field>& fields,
         const std::vector<typed::Function>& functions, const std::vector<typed::Signal>& signals,
-        const std::vector<typed::Enum>& enums) const;
+        const std::vector<typed::Enum>& enums, const std::vector<typed::Class>& classes) const;
     [[nodiscard]] static std::string sanitize_identifier(const std::string& value);
     [[nodiscard]] static std::string sanitize_qualified_identifier(std::string_view value);
     [[nodiscard]] static std::string enum_identifier(const std::string& value);

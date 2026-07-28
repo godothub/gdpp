@@ -64,6 +64,8 @@ using AttachedBehaviorFactory = godot::Ref<AttachedScriptBehavior> (*)();
 using AttachedConstantResolver = godot::Variant (*)();
 using AttachedPropertyGetter = godot::Variant (*)(AttachedScriptBehavior*);
 using AttachedPropertySetter = bool (*)(AttachedScriptBehavior*, const godot::Variant&);
+using AttachedStaticPropertyGetter = godot::Variant (*)();
+using AttachedStaticPropertySetter = bool (*)(const godot::Variant&);
 
 struct AttachedScriptProperty {
     godot::PropertyInfo info;
@@ -79,6 +81,15 @@ struct AttachedScriptProperty {
     AttachedPropertyGetter storage_getter{nullptr};
     AttachedPropertySetter storage_setter{nullptr};
     bool has_default{false};
+};
+
+// GDScript permits static variables to be read and written through either the Script resource or
+// any live instance. Keep them outside the instance property list while retaining their typed
+// accessors, initialization contract, custom getter/setter behavior, and inherited lookup.
+struct AttachedScriptStaticProperty {
+    godot::StringName name;
+    AttachedStaticPropertyGetter getter{nullptr};
+    AttachedStaticPropertySetter setter{nullptr};
 };
 
 // Script constants that may touch ResourceLoader, ClassDB singletons, third-party services, or
@@ -115,6 +126,7 @@ struct AttachedScriptDescriptor {
     godot::StringName behavior_class;
     AttachedBehaviorFactory factory{nullptr};
     std::vector<AttachedScriptProperty> properties;
+    std::vector<AttachedScriptStaticProperty> static_properties;
     std::vector<godot::MethodInfo> methods;
     std::vector<AttachedScriptMethodDispatch> method_dispatches;
     std::vector<godot::MethodInfo> signals;
@@ -156,6 +168,11 @@ resolve_attached_script(const godot::String& source_path, godot::String* error =
 // resolution remain metadata-only and never invoke a resolver.
 [[nodiscard]] godot::Dictionary
 materialize_attached_script_constants(const AttachedScriptDescriptor& descriptor);
+// Reads one eager or deferred constant without materializing unrelated constants. Internal
+// classes use the same deferred constant contract and resolve to canonical Script resources.
+[[nodiscard]] bool
+get_attached_script_constant(const AttachedScriptDescriptor& descriptor,
+                             const godot::StringName& name, godot::Variant& value);
 
 class AttachedCompiledScript;
 
@@ -530,6 +547,8 @@ class AttachedCompiledScript : public godot::ScriptExtension {
     void set_contract_hash(const godot::String& contract_hash);
     [[nodiscard]] godot::String get_contract_hash() const;
 
+    bool _get(const godot::StringName& name, godot::Variant& value) const;
+    bool _set(const godot::StringName& name, const godot::Variant& value);
     bool _editor_can_reload_from_file() override;
     void _placeholder_erased(void* placeholder) override;
     bool _can_instantiate() const override;

@@ -17,6 +17,11 @@ const ATTACHED_SCENE := preload("res://attached_scene.tscn")
 signal first_lambda_resume
 signal second_lambda_resume
 
+enum { INSTANCE_ENUM_VALUE = 13 }
+enum InstanceMode { IDLE = 21, ACTIVE = 34 }
+
+static var dynamic_static_value := 8
+
 var _network_server: TCPServer
 var _network_peer: StreamPeerTCP
 var _network_png: PackedByteArray
@@ -120,6 +125,37 @@ func _verify_fault_matrix() -> void:
 
 
 func _verify_export_runtime() -> void:
+    var dynamic_owner: Variant = self
+    var instance_inner: Variant = dynamic_owner.ContainerItem.new(42)
+    var instance_mode: Dictionary = dynamic_owner.InstanceMode
+    if (
+        instance_inner == null
+        or instance_inner.value != 42
+        or dynamic_owner.INSTANCE_ENUM_VALUE != 13
+        or instance_mode.get(&"ACTIVE") != 34
+        or not instance_mode.is_read_only()
+    ):
+        _fail("attached instance did not expose script constants, enums, or internal classes")
+        return
+    dynamic_owner.dynamic_static_value = 13
+    if dynamic_owner.dynamic_static_value != 13:
+        _fail("attached instance did not preserve dynamic static-variable access")
+        return
+    var dynamic_owner_script: Variant = get_script()
+    var script_inner: Variant = dynamic_owner_script.ContainerItem.new(34)
+    var dynamic_static_callable: Callable = dynamic_owner_script._sum_static_arguments
+    dynamic_owner_script.dynamic_static_value = 21
+    if (
+        script_inner == null
+        or script_inner.value != 34
+        or dynamic_owner_script.INSTANCE_ENUM_VALUE != 13
+        or dynamic_owner_script.InstanceMode.get(&"IDLE") != 21
+        or dynamic_owner_script.dynamic_static_value != 21
+        or dynamic_owner_script._sum_static_arguments([13, 21]) != 34
+        or dynamic_static_callable.call([13, 21]) != 34
+    ):
+        _fail("compiled Script did not expose constants, static state, methods, or internal classes")
+        return
     var animation_storage_probe := get_node("AnimationStorageProbe")
     if (
         animation_storage_probe == null

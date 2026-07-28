@@ -7578,7 +7578,7 @@ void CodeGenerator::emit_attached_descriptor_definition(
     const std::string& base_script_path, const std::string& contract_hash, const bool tool_mode,
     const bool is_abstract, const std::vector<typed::Field>& fields,
     const std::vector<typed::Function>& functions, const std::vector<typed::Signal>& signals,
-    const std::vector<typed::Enum>& enums) const {
+    const std::vector<typed::Enum>& enums, const std::vector<typed::Class>& classes) const {
     source << "gdpp::runtime::AttachedScriptDescriptor " << native_name
            << "::_gdpp_descriptor() {\n"
            << "    gdpp::runtime::AttachedScriptDescriptor descriptor;\n"
@@ -7667,6 +7667,35 @@ void CodeGenerator::emit_attached_descriptor_definition(
         source << "        descriptor.properties.push_back(std::move(property));\n"
                << "    }\n";
     }
+    for (const auto& variable : fields) {
+        if (variable.is_constant || !variable.is_static)
+            continue;
+        const auto name = sanitize_identifier(variable.name);
+        source << "    {\n"
+               << "        gdpp::runtime::AttachedScriptStaticProperty property;\n"
+               << "        property.name = " << godot_string_name(variable.name) << ";\n"
+               << "        property.getter = []() -> godot::Variant {\n"
+               << "            gdpp::runtime::ScriptFunctionScope storage_scope("
+                  "gdpp::runtime::ScriptFaultPolicy::inherit_existing);\n"
+               << "            const auto value = " << native_name << "::_gdpp_get_" << name
+               << "();\n"
+               << "            if (storage_scope.failed()) return {};\n"
+               << "            return gdpp::runtime::to_variant(value);\n"
+               << "        };\n"
+               << "        property.setter = [](const godot::Variant &value) -> bool {\n"
+               << "            gdpp::runtime::ScriptFunctionScope storage_scope("
+                  "gdpp::runtime::ScriptFaultPolicy::inherit_existing);\n"
+               << "            const auto converted = "
+               << emit_conversion(variable.type, {TypeKind::variant, "Variant"}, "value",
+                                  &variable.span)
+               << ";\n"
+               << "            if (storage_scope.failed()) return false;\n"
+               << "            " << native_name << "::_gdpp_set_" << name << "(converted);\n"
+               << "            return !storage_scope.failed();\n"
+               << "        };\n"
+               << "        descriptor.static_properties.push_back(std::move(property));\n"
+               << "    }\n";
+    }
     for (const auto& function : functions) {
         if (function.name == "_static_init")
             continue;
@@ -7708,13 +7737,34 @@ void CodeGenerator::emit_attached_descriptor_definition(
                << (managed_constant_field(variable) ? name + "()" : name) << "); }});\n";
     }
     for (const auto& enumeration : enums) {
-        for (const auto& entry : enumeration.entries) {
-            const auto value = enumeration.name.empty() ? enum_identifier(entry.name)
-                                                        : sanitize_identifier(enumeration.name) +
-                                                              "::" + enum_identifier(entry.name);
-            source << "    descriptor.constants[" << godot_string_name(entry.name) << "] = int64_t{"
-                   << value << "};\n";
+        if (enumeration.name.empty()) {
+            for (const auto& entry : enumeration.entries) {
+                source << "    descriptor.constants[" << godot_string_name(entry.name)
+                       << "] = int64_t{" << enum_identifier(entry.name) << "};\n";
+            }
+            continue;
         }
+        source << "    {\n"
+               << "        godot::Dictionary values;\n";
+        for (const auto& entry : enumeration.entries) {
+            source << "        values[" << godot_string(entry.name) << "] = int64_t{"
+                   << sanitize_identifier(enumeration.name) << "::"
+                   << enum_identifier(entry.name) << "};\n";
+        }
+        source << "        values.make_read_only();\n"
+               << "        descriptor.constants[" << godot_string_name(enumeration.name)
+               << "] = values;\n"
+               << "    }\n";
+    }
+    for (const auto& inner_class : classes) {
+        const auto inner_source_path =
+            source_path + (source_path.find("::") == std::string::npos ? "::" : ".") +
+            inner_class.name;
+        source << "    descriptor.deferred_constants.push_back({"
+               << godot_string_name(inner_class.name)
+               << ", []() -> godot::Variant { return gdpp::runtime::to_variant("
+                  "gdpp::runtime::attached_script_resource("
+               << godot_string(inner_source_path) << ")); }});\n";
     }
     if (has_rpc_configuration(functions)) {
         source << "    {\n        godot::Dictionary rpc;\n";
@@ -8755,7 +8805,7 @@ void CodeGenerator::emit_inner_class_definition(const typed::Class& declaration,
         source, native_name, "res://" + current_source_path_ + "::" + source_name, {},
         native_base_type, base_script_path, current_script_contract_hash_, tool_mode,
         declaration.is_abstract, declaration.fields, declaration.functions, declaration.signals,
-        declaration.enums);
+        declaration.enums, declaration.classes);
     local_function_parameters_ = previous_function_parameters;
     local_functions_ = previous_functions;
     local_function_native_names_ = previous_function_native_names;
@@ -10095,7 +10145,8 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
             current_script_ && current_script_->globally_named ? current_script_->script_name
                                                                : std::string{},
             attached_native_base, attached_base_script_path, script_contract_hash, module.is_tool,
-            module.is_abstract, module.fields, module.functions, module.signals, module.enums);
+            module.is_abstract, module.fields, module.functions, module.signals, module.enums,
+            module.classes);
     }
     for (const auto& variable : module.fields) {
         if (variable.is_constant)

@@ -1430,6 +1430,42 @@ TEST_CASE("compiler flattens nested internal classes with inherited members") {
             std::string::npos);
 }
 
+TEST_CASE("attached descriptors expose the complete dynamic script member surface") {
+    const gdpp::Compiler compiler;
+    gdpp::CompileOptions options;
+    options.attached_script = true;
+    options.attached_native_base = "Node";
+    options.script_contract_hash = std::string(64, 'a');
+    const auto result =
+        compiler.compile("dynamic_members.gd",
+                         "extends Node\n"
+                         "enum { FIRST = 3 }\n"
+                         "enum Mode { IDLE = 5, ACTIVE = 8 }\n"
+                         "static var shared: int = 13\n"
+                         "class Payload:\n"
+                         "    var value: int\n"
+                         "    func _init(initial: int) -> void:\n"
+                         "        value = initial\n",
+                         options);
+
+    REQUIRE(result.success);
+    REQUIRE(result.unit.source.find(
+                "descriptor.constants[godot::StringName(\"FIRST\")] = "
+                "int64_t{_gdpp_enum_FIRST}") !=
+            std::string::npos);
+    REQUIRE(result.unit.source.find(
+                "descriptor.constants[godot::StringName(\"Mode\")] = values") !=
+            std::string::npos);
+    REQUIRE(result.unit.source.find("values.make_read_only()") != std::string::npos);
+    REQUIRE(result.unit.source.find(
+                "property.name = godot::StringName(\"shared\")") != std::string::npos);
+    REQUIRE(result.unit.source.find(
+                "GDPPNative_DynamicMembers::_gdpp_get_shared()") != std::string::npos);
+    REQUIRE(result.unit.source.find(
+                "gdpp::runtime::attached_script_resource(godot::String("
+                "\"res://dynamic_members.gd::Payload\"))") != std::string::npos);
+}
+
 TEST_CASE("compiler preserves explicit Variant exports and rejects untyped exports") {
     const gdpp::Compiler compiler;
     const auto wrong_type =

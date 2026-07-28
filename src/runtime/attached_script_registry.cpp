@@ -25,6 +25,7 @@ AttachedScriptDescriptor::operator=(const AttachedScriptDescriptor& other) {
     behavior_class = other.behavior_class;
     factory = other.factory;
     properties = other.properties;
+    static_properties = other.static_properties;
     methods = other.methods;
     method_dispatches = other.method_dispatches;
     signals = other.signals;
@@ -48,6 +49,7 @@ AttachedScriptDescriptor& AttachedScriptDescriptor::operator=(AttachedScriptDesc
     behavior_class = std::move(other.behavior_class);
     factory = other.factory;
     properties = std::move(other.properties);
+    static_properties = std::move(other.static_properties);
     methods = std::move(other.methods);
     method_dispatches = std::move(other.method_dispatches);
     signals = std::move(other.signals);
@@ -156,6 +158,11 @@ bool same_method_dispatch(const AttachedScriptMethodDispatch& left,
     return left.name == right.name && left.call == right.call;
 }
 
+bool same_static_property(const AttachedScriptStaticProperty& left,
+                          const AttachedScriptStaticProperty& right) {
+    return left.name == right.name && left.getter == right.getter && left.setter == right.setter;
+}
+
 template <typename Items, typename Equal>
 bool same_ordered_items(const Items& left, const Items& right, Equal&& equal) {
     if (left.size() != right.size())
@@ -176,6 +183,8 @@ bool same_identity(const AttachedScriptDescriptor& left, const AttachedScriptDes
            left.tool == right.tool && left.abstract == right.abstract &&
            left.editor_metadata_only == right.editor_metadata_only &&
            same_ordered_items(left.properties, right.properties, same_property) &&
+           same_ordered_items(left.static_properties, right.static_properties,
+                              same_static_property) &&
            same_ordered_items(left.methods, right.methods, same_method_info) &&
            same_ordered_items(left.method_dispatches, right.method_dispatches,
                               same_method_dispatch) &&
@@ -265,6 +274,24 @@ bool register_attached_script(AttachedScriptDescriptor descriptor, godot::String
                 return false;
             }
         }
+    }
+    if (!names_are_unique(
+            descriptor.static_properties,
+            [](const AttachedScriptStaticProperty& item) { return item.name; }, &duplicate)) {
+        set_error(error, "duplicate attached script static property: " + duplicate);
+        return false;
+    }
+    if (!descriptor.editor_metadata_only) {
+        for (const auto& property : descriptor.static_properties) {
+            if (!property.getter || !property.setter) {
+                set_error(error, "attached script static property has no runtime accessor: " +
+                                     godot::String{property.name});
+                return false;
+            }
+        }
+    } else if (!descriptor.static_properties.empty()) {
+        set_error(error, "editor-only attached metadata must not contain static property accessors");
+        return false;
     }
     if (!names_are_unique(
             descriptor.methods, [](const godot::MethodInfo& item) { return item.name; },
@@ -496,6 +523,8 @@ std::optional<AttachedScriptDescriptor> resolve_attached_script(const godot::Str
         }
         append_unique(resolved.properties, base->second.properties,
                       [](const AttachedScriptProperty& item) { return item.info.name; });
+        append_unique(resolved.static_properties, base->second.static_properties,
+                      [](const AttachedScriptStaticProperty& item) { return item.name; });
         append_unique(resolved.methods, base->second.methods,
                       [](const godot::MethodInfo& item) { return item.name; });
         append_unique(resolved.method_dispatches, base->second.method_dispatches,
@@ -543,6 +572,23 @@ materialize_attached_script_constants(const AttachedScriptDescriptor& descriptor
             result[constant.name] = constant.resolver();
     }
     return result;
+}
+
+bool get_attached_script_constant(const AttachedScriptDescriptor& descriptor,
+                                  const godot::StringName& name, godot::Variant& value) {
+    if (descriptor.constants.has(name)) {
+        value = descriptor.constants[name];
+        return true;
+    }
+    const auto found =
+        std::find_if(descriptor.deferred_constants.begin(), descriptor.deferred_constants.end(),
+                     [&](const AttachedScriptDeferredConstant& constant) {
+                         return constant.name == name;
+                     });
+    if (found == descriptor.deferred_constants.end() || !found->resolver)
+        return false;
+    value = found->resolver();
+    return true;
 }
 
 } // namespace gdpp::runtime
