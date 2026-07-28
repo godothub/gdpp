@@ -2268,6 +2268,8 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                     for (std::size_t index = 0; index < checked; ++index) {
                         const auto rule = feature.kind == IntrinsicKind::range
                                               ? IntrinsicArgumentRule::integer
+                                          : feature.kind == IntrinsicKind::print_debug
+                                              ? IntrinsicArgumentRule::any
                                               : feature.argument_rules[index];
                         const auto context = "argument " + std::to_string(index + 1) + " of '" +
                                              std::string{feature.name} + "'";

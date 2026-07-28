@@ -5735,7 +5735,7 @@ TEST_CASE("compiler lowers the complete GDScript debug utility family") {
     options.target_version = gdpp::GodotVersion::v4_4;
     const auto result = gdpp::Compiler{}.compile("debug_utilities.gd",
                                                  "func report(value) -> void:\n"
-                                                 "    print_debug(\"value=\", value)\n"
+                                                 "    print_debug(\"value=\", value, 1, 2, 3, 4)\n"
                                                  "    print_debug()\n"
                                                  "    print_stack()\n",
                                                  options);
