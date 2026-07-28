@@ -5730,6 +5730,23 @@ TEST_CASE("compiler lowers GDScript debug stack queries on the 4.4 baseline") {
     REQUIRE(result.unit.source.find("gdpp::runtime::get_stack()") != std::string::npos);
 }
 
+TEST_CASE("compiler lowers the complete GDScript debug utility family") {
+    gdpp::CompileOptions options;
+    options.target_version = gdpp::GodotVersion::v4_4;
+    const auto result = gdpp::Compiler{}.compile("debug_utilities.gd",
+                                                 "func report(value) -> void:\n"
+                                                 "    print_debug(\"value=\", value)\n"
+                                                 "    print_debug()\n"
+                                                 "    print_stack()\n",
+                                                 options);
+
+    REQUIRE(result.success);
+    REQUIRE(result.unit.source.find("gdpp::runtime::print_debug(") != std::string::npos);
+    REQUIRE(result.unit.source.find("gdpp::runtime::print_debug()") != std::string::npos);
+    REQUIRE(result.unit.source.find("gdpp::runtime::print_stack()") != std::string::npos);
+    REQUIRE(result.unit.source.find("godot::UtilityFunctions::print_debug") == std::string::npos);
+}
+
 TEST_CASE("warning ignores scope every semantic warning on a function") {
     const gdpp::Compiler compiler;
     const auto result = compiler.compile(

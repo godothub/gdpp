@@ -2312,6 +2312,9 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                         }
                     }
                     switch (feature.result_rule) {
+                    case IntrinsicResultRule::void_type:
+                        call_result = {TypeKind::void_type, "void"};
+                        break;
                     case IntrinsicResultRule::dynamic:
                         call_result = variant_type;
                         break;

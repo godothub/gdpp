@@ -730,8 +730,7 @@ godot::Variant binary_integer(const godot::Variant::Operator operation, const st
 
 void compound_assign(godot::Variant& target, const godot::Variant::Operator operation,
                      const godot::Variant& value, const ScriptSourceLocation location) {
-    if (target.get_type() == godot::Variant::INT &&
-        value.get_type() == godot::Variant::INT) {
+    if (target.get_type() == godot::Variant::INT && value.get_type() == godot::Variant::INT) {
         const auto left = *godot::VariantInternal::get_int(&target);
         const auto right = *godot::VariantInternal::get_int(&value);
         if (const auto result = evaluate_integer_operator(operation, left, right)) {
@@ -867,11 +866,34 @@ std::int64_t length(const godot::Variant& value) {
     return static_cast<std::int64_t>(result);
 }
 
-godot::Array get_stack() {
-    // Godot exposes GDScript stack frames only while its language debugger is active. Native AOT
-    // frames do not have GDScript VM stack records, so the compatible non-debug result is empty.
-    // Callers already use this contract to fall back to an unknown source location.
-    return {};
+godot::Array get_stack() { return attached_debug_stack(); }
+
+void print_debug_values(const godot::Array& values) {
+    godot::String message;
+    for (std::int64_t index = 0; index < values.size(); ++index)
+        message += static_cast<godot::String>(values[index]);
+    const auto stack = attached_debug_stack();
+    if (!stack.is_empty()) {
+        const godot::Dictionary frame = stack[0];
+        const godot::Variant line = frame.get("line", -1);
+        message += "\n   At: " + static_cast<godot::String>(frame.get("source", "")) + ":" +
+                   godot::String::num_int64(line.operator std::int64_t()) + ":" +
+                   static_cast<godot::String>(frame.get("function", "")) + "()";
+    }
+    godot::UtilityFunctions::print(message);
+}
+
+void print_stack() {
+    const auto stack = attached_debug_stack();
+    for (std::int64_t index = 0; index < stack.size(); ++index) {
+        const godot::Dictionary frame = stack[index];
+        const godot::Variant line = frame.get("line", -1);
+        godot::UtilityFunctions::print("Frame " + godot::String::num_int64(index) + " - " +
+                                       static_cast<godot::String>(frame.get("source", "")) + ":" +
+                                       godot::String::num_int64(line.operator std::int64_t()) +
+                                       " in function '" +
+                                       static_cast<godot::String>(frame.get("function", "")) + "'");
+    }
 }
 
 godot::Variant convert_value(const godot::Variant& value, const std::int64_t type) {

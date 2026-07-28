@@ -21,6 +21,8 @@ enum class IntrinsicKind : std::uint8_t {
     ordinal,
     color8,
     is_instance_of,
+    print_debug,
+    print_stack,
 };
 
 enum class IntrinsicArgumentRule : std::uint8_t {
@@ -32,6 +34,7 @@ enum class IntrinsicArgumentRule : std::uint8_t {
     resource_path,
 };
 enum class IntrinsicResultRule : std::uint8_t {
+    void_type,
     dynamic,
     boolean,
     integer,

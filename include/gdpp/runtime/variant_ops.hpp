@@ -429,6 +429,13 @@ template <typename... Arguments>
 }
 [[nodiscard]] std::int64_t length(const godot::Variant& value);
 [[nodiscard]] godot::Array get_stack();
+void print_debug_values(const godot::Array& values);
+template <typename... Arguments> void print_debug(Arguments&&... arguments) {
+    godot::Array values;
+    (values.push_back(to_variant(std::forward<Arguments>(arguments))), ...);
+    print_debug_values(values);
+}
+void print_stack();
 [[nodiscard]] godot::Variant convert_value(const godot::Variant& value, std::int64_t type);
 [[nodiscard]] bool type_exists(const godot::Variant& name);
 [[nodiscard]] godot::String character(std::int64_t code);

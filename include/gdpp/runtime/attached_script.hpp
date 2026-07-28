@@ -363,6 +363,10 @@ class ScriptDebugFrame final {
     std::uint64_t token_{0};
 };
 
+// Returns the current native AOT call stack in GDScript's top-first public Dictionary shape.
+// Release exports naturally return an empty Array because they do not emit ScriptDebugFrame.
+[[nodiscard]] godot::Array attached_debug_stack();
+
 void debug_breakpoint(const godot::String& source, const godot::StringName& function,
                       std::int32_t line, godot::Object* instance,
                       const godot::PackedStringArray& local_names, const godot::Array& local_values,

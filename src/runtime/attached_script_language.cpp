@@ -121,8 +121,7 @@ godot::String resolve_attached_script_resource_path(const godot::String& resourc
 
 ScriptDebugFrame::ScriptDebugFrame(const godot::String& source, const godot::StringName& function,
                                    const std::int32_t line, godot::Object* instance) {
-    auto* debugger = godot::EngineDebugger::get_singleton();
-    if (!debugger || !debugger->is_active() || !AttachedCompiledLanguage::get_singleton())
+    if (!AttachedCompiledLanguage::get_singleton())
         return;
     auto& state = thread_debug_state();
     token_ = state.next_token++;
@@ -149,6 +148,23 @@ void ScriptDebugFrame::set_line(const std::int32_t line) {
                                     [&](const auto& frame) { return frame.token == token_; });
     if (found != frames.rend())
         found->line = line;
+}
+
+godot::Array attached_debug_stack() {
+    godot::Array result;
+    const auto size = thread_debug_state().frames.size();
+    result.resize(static_cast<std::int64_t>(size));
+    for (std::size_t level = 0; level < size; ++level) {
+        const auto* frame = debug_frame_at(static_cast<std::int32_t>(level));
+        if (!frame)
+            continue;
+        godot::Dictionary entry;
+        entry["source"] = frame->source;
+        entry["function"] = frame->function;
+        entry["line"] = frame->line;
+        result[static_cast<std::int64_t>(level)] = entry;
+    }
+    return result;
 }
 
 void debug_breakpoint(const godot::String& source, const godot::StringName& function,

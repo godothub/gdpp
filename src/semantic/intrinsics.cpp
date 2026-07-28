@@ -80,6 +80,22 @@ constexpr auto features = std::array{
                      IntrinsicResultRule::resource,
                      "gdpp::runtime::load_resource",
                      true},
+    IntrinsicFeature{IntrinsicKind::print_debug,
+                     "print_debug",
+                     0,
+                     0,
+                     {},
+                     IntrinsicResultRule::void_type,
+                     "gdpp::runtime::print_debug",
+                     false},
+    IntrinsicFeature{IntrinsicKind::print_stack,
+                     "print_stack",
+                     0,
+                     0,
+                     {},
+                     IntrinsicResultRule::void_type,
+                     "gdpp::runtime::print_stack",
+                     false},
     IntrinsicFeature{IntrinsicKind::range,
                      "range",
                      0,
@@ -111,7 +127,9 @@ static_assert(
 
 } // namespace
 
-bool intrinsic_is_vararg(const IntrinsicKind kind) noexcept { return kind == IntrinsicKind::range; }
+bool intrinsic_is_vararg(const IntrinsicKind kind) noexcept {
+    return kind == IntrinsicKind::print_debug || kind == IntrinsicKind::range;
+}
 
 const IntrinsicRegistry& IntrinsicRegistry::latest() noexcept {
     static const IntrinsicRegistry registry;
