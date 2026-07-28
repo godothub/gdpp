@@ -49,6 +49,34 @@ class ExternalProjectE2ETest(unittest.TestCase):
                 )
         self.assertEqual(runner.call_count, 3)
 
+    def test_bootstrap_import_converges_successful_uid_scans(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary)
+
+            def import_run(*args, **kwargs):
+                log = kwargs["log"]
+                if log.name.endswith("-1.log"):
+                    log.write_text(
+                        'ERROR: Unrecognized UID: "uid://fresh".\n',
+                        encoding="utf-8",
+                    )
+                else:
+                    log.write_text("", encoding="utf-8")
+                return {"exit_code": 0, "timed_out": False, "log": str(log)}
+
+            with mock.patch.object(E2E, "run", side_effect=import_run) as runner:
+                result = E2E.run_bootstrap_import(
+                    Path("/godot"),
+                    Path("/project"),
+                    60,
+                    output,
+                    "import-bootstrap",
+                )
+
+        self.assertEqual(result["successful_attempt"], 2)
+        self.assertEqual(len(result["attempts"]), 2)
+        self.assertEqual(runner.call_count, 2)
+
     def test_import_gate_rejects_only_diagnostics_added_by_gdpp(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
