@@ -4,14 +4,10 @@
 - 在类型注解、构造、成员访问和类型判断中统一解析全局命名脚本、内部类及嵌套枚举。
 - 将脚本命名枚举保留为具有声明身份和标准 Dictionary 行为的只读字典值。
 - 为导出的 `Variant` 属性保留正确的 Inspector、存储和运行时元数据。
-- 将已编译 Script 资源保留为规范且有状态的对象，完整覆盖 `load`/`preload`、可空性、Script API、
-  属性、信号、对象传递、类型判断和构造。
-- 事务回滚和扩展终止时，所有生成的编译 Script 常量缓存都会切换到不触发物化的缺失状态，避免
-  预加载清理重新取得 Script 资源或让 Godot 对象跨过类注销阶段继续存活。
-- Attached 与非 Attached Script 的物化分支改为结构互斥，在保持 Clang、GCC 行为一致的同时，
-  消除严格 MSVC warning-as-error 构建中的不可达尾部分支。
-- 对没有公开 godot-cpp 访问器的 Godot 属性使用 Object 属性 ABI，并保持字段及静态初始化器中
-  调用接收者和参数的求值顺序。
+- 将已编译 Script 资源保留为规范且有状态的对象，完整覆盖 `load`/`preload`、可空性、Script API、属性、信号、对象传递、类型判断和构造。
+- 事务回滚和扩展终止时，所有生成的编译 Script 常量缓存都会切换到不触发物化的缺失状态，避免预加载清理重新取得 Script 资源或让 Godot 对象跨过类注销阶段继续存活。
+- Attached 与非 Attached Script 的物化分支改为结构互斥，在保持 Clang、GCC 行为一致的同时，消除严格 MSVC warning-as-error 构建中的不可达尾部分支。
+- 对没有公开 godot-cpp 访问器的 Godot 属性使用 Object 属性 ABI，并保持字段及静态初始化器中调用接收者和参数的求值顺序。
 
 ## 1.8.1
 
