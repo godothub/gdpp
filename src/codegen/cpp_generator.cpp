@@ -1567,7 +1567,7 @@ std::string CodeGenerator::container_cpp_argument(const std::string_view type_na
     case TypeKind::builtin:
         return "godot::" + type.name;
     case TypeKind::object:
-        return detail_namespace_ + "::ContainerObjectTag_" +
+        return "gdpp::runtime::container_tags::ContainerObjectTag_" +
                sanitize_identifier(container_object_tag_identity(type_name));
     case TypeKind::nil:
     case TypeKind::script_resource:
@@ -9035,22 +9035,30 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
     }
     if (!ordered_inner_classes.empty())
         header << '\n';
-    header << "namespace " << detail_namespace_ << " {\n";
     std::set<std::string> emitted_container_object_tags;
     for (const auto& type_name : native_types.container_objects) {
         const auto identity = container_object_tag_identity(type_name);
         if (!emitted_container_object_tags.insert(identity).second)
             continue;
-        header << "struct ContainerObjectTag_" << sanitize_identifier(identity) << " {\n"
+        const auto identifier = sanitize_identifier(identity);
+        header << "#ifndef GDPP_RUNTIME_CONTAINER_OBJECT_TAG_" << identifier << "\n"
+               << "#define GDPP_RUNTIME_CONTAINER_OBJECT_TAG_" << identifier << "\n"
+               << "namespace gdpp::runtime::container_tags {\n"
+               << "struct ContainerObjectTag_" << identifier << " {\n"
                << "    static godot::StringName get_class_static() { return "
                << godot_string_name(container_object_runtime_name(identity)) << "; }\n"
                << "    inline static constexpr const char *_gdpp_attached_script_path = "
                << escaped_string(
                       attached_script_source_path({TypeKind::object, std::string{identity}}))
                << ";\n"
-               << "};\n";
+               << "};\n"
+               << "} // namespace gdpp::runtime::container_tags\n"
+               << "#endif\n";
     }
-    header << "template <typename T> struct ScriptResource {\n"
+    if (!emitted_container_object_tags.empty())
+        header << '\n';
+    header << "namespace " << detail_namespace_ << " {\n"
+           << "template <typename T> struct ScriptResource {\n"
            << "private:\n"
            << "    struct MissingTag {};\n"
            << "    godot::Ref<godot::Script> _gdpp_resource;\n"

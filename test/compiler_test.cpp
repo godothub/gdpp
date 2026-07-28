@@ -666,7 +666,8 @@ TEST_CASE("compiler preserves typed container metadata in the native ABI") {
     REQUIRE(result.unit.header.find("struct ContainerObjectTag_Node") != std::string::npos);
     REQUIRE(result.unit.header.find("godot::StringName(\"Node\")") != std::string::npos);
     REQUIRE(result.unit.header.find(
-                "godot::TypedArray<typed_containers_gdpp_detail::ContainerObjectTag_Node> nodes") !=
+                "godot::TypedArray<gdpp::runtime::container_tags::ContainerObjectTag_Node> "
+                "nodes") !=
             std::string::npos);
     REQUIRE(result.unit.header.find("godot::TypedArray<int64_t> modes") != std::string::npos);
     REQUIRE(result.unit.header.find("godot::TypedDictionary<godot::String, int64_t> "
@@ -1004,23 +1005,23 @@ TEST_CASE("typed containers preserve internal class runtime identity without inc
                                     "\"res://inner_typed_containers.gd::Payload\"") !=
             std::string::npos);
     REQUIRE(result.unit.header.find(
-                "gdpp::runtime::ScriptTypedArray<inner_typed_containers_gdpp_detail::"
+                "gdpp::runtime::ScriptTypedArray<gdpp::runtime::container_tags::"
                 "ContainerObjectTag_GDPPNative_InnerTypedContainers__Payload> payloads") !=
             std::string::npos);
     REQUIRE(result.unit.header.find(
                 "gdpp::runtime::ScriptTypedDictionary<godot::String, "
-                "inner_typed_containers_gdpp_detail::"
+                "gdpp::runtime::container_tags::"
                 "ContainerObjectTag_GDPPNative_InnerTypedContainers__Payload> by_name") !=
             std::string::npos);
     REQUIRE(result.unit.header.find(
                 "godot::StringName(\"GDPPNative_InnerTypedContainers__Payload\")") ==
             std::string::npos);
-    REQUIRE(result.unit.source.find("ScriptTypedArray<inner_typed_containers_gdpp_detail::"
+    REQUIRE(result.unit.source.find("ScriptTypedArray<gdpp::runtime::container_tags::"
                                     "ContainerObjectTag_GDPPNative_InnerTypedContainers__Payload>"
                                     "(gdpp::runtime::to_variant(godot::Array()))") !=
             std::string::npos);
     REQUIRE(result.unit.source.find("ScriptTypedDictionary<godot::String, "
-                                    "inner_typed_containers_gdpp_detail::"
+                                    "gdpp::runtime::container_tags::"
                                     "ContainerObjectTag_GDPPNative_InnerTypedContainers__Payload>"
                                     "(gdpp::runtime::to_variant(([&]() -> godot::Dictionary") !=
             std::string::npos);

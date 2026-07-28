@@ -2031,10 +2031,10 @@ TEST_CASE("project compiler consumes runtime contracts reflected from ClassDB") 
     REQUIRE(source.find("godot::PROPERTY_HINT_FLAGS") != std::string::npos);
     REQUIRE(header.find("struct ContainerObjectTag_WaveformData") != std::string::npos);
     REQUIRE(header.find("godot::StringName(\"WaveformData\")") != std::string::npos);
-    REQUIRE(header.find("godot::TypedArray<waveform_consumer_gdpp_detail::"
+    REQUIRE(header.find("godot::TypedArray<gdpp::runtime::container_tags::"
                         "ContainerObjectTag_WaveformData>") != std::string::npos);
     REQUIRE(header.find("godot::TypedDictionary<godot::String, "
-                        "waveform_consumer_gdpp_detail::ContainerObjectTag_WaveformData>") !=
+                        "gdpp::runtime::container_tags::ContainerObjectTag_WaveformData>") !=
             std::string::npos);
     const auto lock = read_text(options.output_directory / "bridge.lock");
     REQUIRE(lock.find("classdb:WaveformData") != std::string::npos);
@@ -3140,6 +3140,52 @@ TEST_CASE("typed container object arguments participate in precise dependency in
             std::string::npos);
     REQUIRE(changed_header.find(native_class_for(changed, "item.gd")) != std::string::npos);
     REQUIRE(changed_header.find(initial_item_class) == std::string::npos);
+}
+
+TEST_CASE("typed script containers share one canonical ABI tag across generated units") {
+    const auto root = fixture_root("project-shared-container-abi");
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
+    write_text(root / "item.gd", "extends RefCounted\nclass_name SharedContainerItem\n");
+    write_text(root / "provider.gd",
+               "extends RefCounted\nclass_name SharedContainerProvider\n"
+               "static func items() -> Array[SharedContainerItem]:\n"
+               "    return []\n");
+    write_text(root / "consumer.gd",
+               "extends RefCounted\nclass_name SharedContainerConsumer\n"
+               "var items: Array[SharedContainerItem] = SharedContainerProvider.items()\n");
+    const auto options = project_options(root);
+
+    const auto result = gdpp::ProjectCompiler{}.compile(options);
+
+    REQUIRE(result.success);
+    const auto item_class = native_class_for(result, "item.gd");
+    const auto tag =
+        "gdpp::runtime::container_tags::ContainerObjectTag_" + item_class;
+    const auto guard = "GDPP_RUNTIME_CONTAINER_OBJECT_TAG_" + item_class;
+    const auto provider =
+        std::find_if(result.scripts.begin(), result.scripts.end(), [](const auto& script) {
+            return script.relative_path.filename() == "provider.gd";
+        });
+    const auto consumer =
+        std::find_if(result.scripts.begin(), result.scripts.end(), [](const auto& script) {
+            return script.relative_path.filename() == "consumer.gd";
+        });
+    REQUIRE(provider != result.scripts.end());
+    REQUIRE(consumer != result.scripts.end());
+    const auto provider_header =
+        read_text(options.output_directory / "generated" / provider->header_file_name);
+    const auto consumer_header =
+        read_text(options.output_directory / "generated" / consumer->header_file_name);
+    const auto consumer_source =
+        read_text(options.output_directory / "generated" / consumer->source_file_name);
+    REQUIRE(provider_header.find(tag) != std::string::npos);
+    REQUIRE(consumer_header.find(tag) != std::string::npos);
+    REQUIRE(provider_header.find(guard) != std::string::npos);
+    REQUIRE(consumer_header.find(guard) != std::string::npos);
+    REQUIRE(consumer_source.find("ScriptTypedArray<" + tag + ">") != std::string::npos);
+    REQUIRE(consumer_source.find("consumer_gdpp_detail::ContainerObjectTag_") ==
+            std::string::npos);
 }
 
 TEST_CASE("project cache treats inspector annotations as public ABI") {
