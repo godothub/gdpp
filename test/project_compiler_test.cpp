@@ -3587,9 +3587,10 @@ TEST_CASE("project compiler lowers cross-script constants enums and resource fac
     REQUIRE(base_header.find("static const int64_t& LIMIT();") != std::string::npos);
     REQUIRE(base_header.find("static const int64_t& MASK();") != std::string::npos);
     const auto& base_class = native_class_for(result, "base.gd");
-    REQUIRE(base_header.find("virtual void _gdpp_script_method__init("
+    REQUIRE(base_header.find("void _gdpp_script_method__init("
                              "godot::Variant _gdpp_argument_value = "
                              "gdpp::runtime::default_argument())") != std::string::npos);
+    REQUIRE(base_header.find("virtual void _gdpp_script_method__init(") == std::string::npos);
     REQUIRE(base_header.find("public gdpp::runtime::AttachedScriptBehavior") != std::string::npos);
     const auto consumer_header =
         read_text(options.output_directory / "generated/shared_consumer.gd.hpp");

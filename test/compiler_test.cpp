@@ -192,8 +192,10 @@ TEST_CASE("variadic initializers preserve default construction and pack new argu
 
     REQUIRE(result.success);
     REQUIRE(result.unit.header.find("GDPPNative_RestConstructor__Payload();") != std::string::npos);
-    REQUIRE(result.unit.header.find("virtual void _gdpp_script_method__init("
+    REQUIRE(result.unit.header.find("void _gdpp_script_method__init("
                                     "godot::Variant _gdpp_argument_base, godot::Array values)") !=
+            std::string::npos);
+    REQUIRE(result.unit.header.find("virtual void _gdpp_script_method__init(") ==
             std::string::npos);
     REQUIRE(result.unit.header.find("public gdpp::runtime::AttachedScriptBehavior") !=
             std::string::npos);

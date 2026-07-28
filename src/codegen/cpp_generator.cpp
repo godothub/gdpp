@@ -7850,7 +7850,8 @@ void CodeGenerator::emit_inner_class_declaration(const typed::Class& declaration
                 header << " const";
             header << " override;\n";
         }
-        header << "    " << (function.is_static ? "static " : "virtual ")
+        header << "    "
+               << (function.is_static ? "static " : function.name == "_init" ? "" : "virtual ")
                << function_return_type(function) << ' ' << function_native_name(function) << '(';
         for (std::size_t index = 0; index < function.parameters.size(); ++index) {
             if (index != 0)
@@ -9342,7 +9343,7 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
         header << "    ";
         if (function.is_static)
             header << "static ";
-        else
+        else if (function.name != "_init")
             header << "virtual ";
         header << function_return_type(function) << ' ' << function_native_name(function) << '(';
         for (std::size_t index = 0; index < function.parameters.size(); ++index) {
