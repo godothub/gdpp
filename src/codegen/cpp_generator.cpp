@@ -4719,7 +4719,8 @@ std::string CodeGenerator::emit_expression(const typed::Expression& expression) 
             };
             const bool intrinsic_has_location =
                 is_intrinsic && (callee.intrinsic == IntrinsicKind::dictionary_to_instance ||
-                                 callee.intrinsic == IntrinsicKind::instance_to_dictionary);
+                                 callee.intrinsic == IntrinsicKind::instance_to_dictionary ||
+                                 callee.intrinsic == IntrinsicKind::length);
             const auto finish_intrinsic_call = [&](std::string call) {
                 if (callee.intrinsic == IntrinsicKind::dictionary_to_instance) {
                     return emit_conversion(expression.type, {TypeKind::variant, "Variant"},

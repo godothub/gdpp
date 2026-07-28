@@ -6476,6 +6476,7 @@ TEST_CASE("runtime failure boundaries retain precise script source locations") {
                                                  "    target.value = keyed\n"
                                                  "    target[\"key\"] = property\n"
                                                  "    target.accept(property)\n"
+                                                 "    var measured := len(target)\n"
                                                  "    var converted: int = int(target)\n"
                                                  "    var typed: Array[int] = target\n"
                                                  "    for entry in target:\n"
@@ -6493,6 +6494,7 @@ TEST_CASE("runtime failure boundaries retain precise script source locations") {
     REQUIRE(source.find("gdpp::runtime::set_named(") != std::string::npos);
     REQUIRE(source.find("gdpp::runtime::set_key(") != std::string::npos);
     REQUIRE(source.find("gdpp::runtime::call_dynamic_at(") != std::string::npos);
+    REQUIRE(source.find("gdpp::runtime::length(") != std::string::npos);
     REQUIRE(source.find("gdpp::runtime::explicit_variant_cast<int64_t>(") != std::string::npos);
     REQUIRE(source.find("gdpp::runtime::strict_typed_storage<godot::TypedArray<int64_t>>(") !=
             std::string::npos);
@@ -6506,7 +6508,7 @@ TEST_CASE("runtime failure boundaries retain precise script source locations") {
     for (auto position = source.find(location); position != std::string::npos;
          position = source.find(location, position + location.size()))
         ++located_boundary_count;
-    REQUIRE(located_boundary_count >= std::size_t{12});
+    REQUIRE(located_boundary_count >= std::size_t{13});
 }
 
 TEST_CASE("compiler handles generated logical guard chains with bounded stack depth") {

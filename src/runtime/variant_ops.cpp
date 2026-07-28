@@ -911,9 +911,10 @@ godot::Array make_range(std::int64_t start, std::int64_t stop, std::int64_t step
     return result;
 }
 
-std::int64_t length(const godot::Variant& value) {
+std::int64_t length(const godot::Variant& value, const ScriptSourceLocation location) {
     godot::Variant target = value;
-    const auto result = call_dynamic_impl(target, godot::StringName("size"), nullptr, 0);
+    const auto result =
+        call_dynamic_impl(target, godot::StringName("size"), nullptr, 0, location);
     return static_cast<std::int64_t>(result);
 }
 

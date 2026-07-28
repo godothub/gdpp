@@ -453,6 +453,8 @@ void print_stack();
 [[nodiscard]] bool type_exists(const godot::Variant& name);
 [[nodiscard]] godot::String character(std::int64_t code);
 [[nodiscard]] std::int64_t ordinal(const godot::Variant& character);
+[[nodiscard]] std::int64_t length(const godot::Variant& value,
+                                  ScriptSourceLocation location = {});
 [[nodiscard]] godot::Color color8(std::int64_t red, std::int64_t green, std::int64_t blue,
                                   std::int64_t alpha = 255);
 [[nodiscard]] bool is_instance_of(const godot::Variant& value,
