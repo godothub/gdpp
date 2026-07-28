@@ -82,12 +82,12 @@ constexpr auto features = std::array{
                      true},
     IntrinsicFeature{IntrinsicKind::range,
                      "range",
-                     1,
+                     0,
                      3,
                      {IntrinsicArgumentRule::integer, IntrinsicArgumentRule::integer,
                       IntrinsicArgumentRule::integer},
                      IntrinsicResultRule::integer_array,
-                     "gdpp::runtime::make_range",
+                     "gdpp::runtime::make_range_checked",
                      false},
     IntrinsicFeature{IntrinsicKind::type_exists,
                      "type_exists",
@@ -110,6 +110,8 @@ static_assert(
     "intrinsic registry must remain sorted by name");
 
 } // namespace
+
+bool intrinsic_is_vararg(const IntrinsicKind kind) noexcept { return kind == IntrinsicKind::range; }
 
 const IntrinsicRegistry& IntrinsicRegistry::latest() noexcept {
     static const IntrinsicRegistry registry;

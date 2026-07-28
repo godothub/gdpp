@@ -53,6 +53,8 @@ struct IntrinsicFeature {
     bool is_constant{false};
 };
 
+[[nodiscard]] bool intrinsic_is_vararg(IntrinsicKind kind) noexcept;
+
 class IntrinsicRegistry final {
   public:
     [[nodiscard]] static const IntrinsicRegistry& latest() noexcept;

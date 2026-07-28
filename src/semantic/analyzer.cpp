@@ -2246,22 +2246,29 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                     return true;
                 };
                 const auto resolve_intrinsic = [&](const IntrinsicFeature& feature) {
+                    const bool is_vararg = intrinsic_is_vararg(feature.kind);
                     if (argument_count < feature.minimum_arguments ||
-                        argument_count > feature.maximum_arguments) {
+                        (!is_vararg && argument_count > feature.maximum_arguments)) {
                         diagnostics_.error(
                             feature.kind == IntrinsicKind::length ? "GDS4076" : "GDS4075",
                             std::string{feature.name} + " expects " +
-                                (feature.minimum_arguments == feature.maximum_arguments
+                                (is_vararg ? std::to_string(feature.minimum_arguments) +
+                                                 " or more argument(s)"
+                                 : feature.minimum_arguments == feature.maximum_arguments
                                      ? "exactly " + std::to_string(feature.minimum_arguments)
                                      : std::to_string(feature.minimum_arguments) + " to " +
                                            std::to_string(feature.maximum_arguments)) +
                                 " argument(s), got " + std::to_string(argument_count),
                             expression.span);
                     }
-                    const auto checked = std::min(
-                        argument_count, static_cast<std::size_t>(feature.maximum_arguments));
+                    const auto checked =
+                        is_vararg ? argument_count
+                                  : std::min(argument_count,
+                                             static_cast<std::size_t>(feature.maximum_arguments));
                     for (std::size_t index = 0; index < checked; ++index) {
-                        const auto rule = feature.argument_rules[index];
+                        const auto rule = feature.kind == IntrinsicKind::range
+                                              ? IntrinsicArgumentRule::integer
+                                              : feature.argument_rules[index];
                         const auto context = "argument " + std::to_string(index + 1) + " of '" +
                                              std::string{feature.name} + "'";
                         switch (rule) {
@@ -2337,7 +2344,7 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                                              call_result,
                                              feature.minimum_arguments,
                                              feature.maximum_arguments,
-                                             false,
+                                             is_vararg,
                                              true};
                     resolution.intrinsic = feature.kind;
                     model_.api_resolutions_.insert_or_assign(&callee, std::move(resolution));
@@ -4787,7 +4794,9 @@ SemanticAnalyzer::FlowResult SemanticAnalyzer::analyze_statement(const ast::Stat
             statement.condition()->operand_count() >= 1) {
             const auto* resolution = model_.api_resolution_of(*statement.condition()->operand(0));
             intrinsic_range = resolution && resolution->kind == ApiResolutionKind::intrinsic &&
-                              resolution->intrinsic == IntrinsicKind::range;
+                              resolution->intrinsic == IntrinsicKind::range &&
+                              statement.condition()->operand_count() >= 2 &&
+                              statement.condition()->operand_count() <= 4;
         }
         model_.iteration_plans_[&statement] =
             make_iteration_plan(iterable, inferred_element_type, intrinsic_range);

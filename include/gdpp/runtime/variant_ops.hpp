@@ -404,6 +404,29 @@ void free_object_at(const godot::Variant& value, ScriptSourceLocation location =
 [[nodiscard]] godot::Array make_range(std::int64_t stop);
 [[nodiscard]] godot::Array make_range(std::int64_t start, std::int64_t stop);
 [[nodiscard]] godot::Array make_range(std::int64_t start, std::int64_t stop, std::int64_t step);
+template <typename... Arguments>
+[[nodiscard]] godot::Array make_range_checked(Arguments&&... arguments) {
+    constexpr auto argument_count = sizeof...(Arguments);
+    if constexpr (argument_count == 1) {
+        auto values = std::forward_as_tuple(std::forward<Arguments>(arguments)...);
+        return make_range(static_cast<std::int64_t>(std::get<0>(values)));
+    } else if constexpr (argument_count == 2) {
+        auto values = std::forward_as_tuple(std::forward<Arguments>(arguments)...);
+        return make_range(static_cast<std::int64_t>(std::get<0>(values)),
+                          static_cast<std::int64_t>(std::get<1>(values)));
+    } else if constexpr (argument_count == 3) {
+        auto values = std::forward_as_tuple(std::forward<Arguments>(arguments)...);
+        return make_range(static_cast<std::int64_t>(std::get<0>(values)),
+                          static_cast<std::int64_t>(std::get<1>(values)),
+                          static_cast<std::int64_t>(std::get<2>(values)));
+    } else {
+        report_script_failure(
+            godot::String{"Error calling GDScript utility function \"range()\": Expected 1 to 3 "
+                          "arguments, got "} +
+            godot::String::num_int64(static_cast<std::int64_t>(argument_count)) + ".");
+        return {};
+    }
+}
 [[nodiscard]] std::int64_t length(const godot::Variant& value);
 [[nodiscard]] godot::Array get_stack();
 [[nodiscard]] godot::Variant convert_value(const godot::Variant& value, std::int64_t type);

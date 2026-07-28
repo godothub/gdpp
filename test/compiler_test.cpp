@@ -2953,6 +2953,24 @@ TEST_CASE("compiler lowers direct range loops without allocating a temporary Arr
     REQUIRE(result.unit.source.find("gdpp::runtime::iter_init") == std::string::npos);
 }
 
+TEST_CASE("compiler preserves GDScript range vararg runtime failures") {
+    const gdpp::Compiler compiler;
+    const auto result =
+        compiler.compile("range_vararg.gd", "func values(first) -> Array[int]:\n"
+                                            "    var zero := range()\n"
+                                            "    var excessive := range(first, 2, 3, 4)\n"
+                                            "    for value in range(1, 2, 3, 4):\n"
+                                            "        excessive.push_back(value)\n"
+                                            "    return zero + excessive\n");
+
+    REQUIRE(result.success);
+    REQUIRE(result.unit.source.find("gdpp::runtime::make_range_checked()") != std::string::npos);
+    REQUIRE(result.unit.source.find("gdpp::runtime::make_range_checked(") != std::string::npos);
+    REQUIRE(result.unit.source.find("gdpp::runtime::strict_builtin_storage<int64_t>") !=
+            std::string::npos);
+    REQUIRE(result.unit.source.find("_gdpp_range_start_") == std::string::npos);
+}
+
 TEST_CASE("compiler defines static script fields outside the generated header") {
     const gdpp::Compiler compiler;
     const auto result = compiler.compile("cache.gd", "class_name Cache\n"

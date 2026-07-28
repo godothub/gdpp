@@ -4332,6 +4332,10 @@ std::string CodeGenerator::emit_expression(const typed::Expression& expression) 
                 is_intrinsic ? nullptr : api_.find_utility_function(callee.resolved_owner);
             const auto emit_intrinsic_argument = [&](const std::size_t index) {
                 const auto& argument = *expression.operands[index];
+                if (callee.intrinsic == IntrinsicKind::range) {
+                    return emit_conversion({TypeKind::integer, "int"}, argument.type,
+                                           emit_expression(argument), &argument.span);
+                }
                 if (callee.intrinsic != IntrinsicKind::is_instance_of || index != 2)
                     return emit_expression(argument);
                 std::string type_name;
