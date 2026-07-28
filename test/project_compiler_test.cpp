@@ -3687,6 +3687,33 @@ TEST_CASE("project compiler rejects invalid _init declarations") {
     REQUIRE(has_code("GDS4066"));
 }
 
+TEST_CASE("project compiler preserves asynchronous initializer construction") {
+    const auto root = fixture_root("project-async-init");
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
+    write_text(root / "factory.gd", "extends RefCounted\n"
+                                    "class_name AsyncFactory\n"
+                                    "var initialized := false\n"
+                                    "func _init(completion: Signal) -> void:\n"
+                                    "    await completion\n"
+                                    "    initialized = true\n");
+    write_text(root / "consumer.gd", "extends Node\n"
+                                     "class_name AsyncFactoryConsumer\n"
+                                     "func create(completion: Signal):\n"
+                                     "    return await AsyncFactory.new(completion)\n");
+
+    const auto options = project_options(root);
+    const auto result = gdpp::ProjectCompiler{}.compile(options);
+
+    REQUIRE(result.success);
+    const auto factory = read_text(options.output_directory / "generated/async_factory.gd.hpp");
+    const auto consumer =
+        read_text(options.output_directory / "generated/async_factory_consumer.gd.cpp");
+    REQUIRE(factory.find("godot::Variant _gdpp_script_method__init(") != std::string::npos);
+    REQUIRE(consumer.find("gdpp::runtime::is_awaitable(") != std::string::npos);
+    REQUIRE(consumer.find(".instantiate(") != std::string::npos);
+}
+
 TEST_CASE("project compiler resolves autoloads and invalidates their cached symbol graph") {
     const auto root = fixture_root("project-autoload");
     std::error_code error;

@@ -2059,10 +2059,10 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
         // Godot classifies an ordinary function as a coroutine from the presence of `await`,
         // even when the operand is immediately available (`await 42`). The immediate path still
         // completes synchronously, but callers must consume it with `await` and the native ABI
-        // must remain Variant/FunctionState-compatible. Constructors are the sole exception:
-        // Godot permits a redundant immediate await in `_init` without making construction
-        // asynchronous, while a genuinely suspending constructor remains invalid below.
-        if (current_function_name_ != "_init" && current_function_name_ != "_static_init")
+        // must remain Variant/FunctionState-compatible. An asynchronous `_init` also marks
+        // `new()` as a coroutine call, while construction still returns the new object
+        // immediately and lets the initializer continuation finish in the background.
+        if (current_function_name_ != "_static_init")
             current_callable_suspends_ = true;
         if (!in_function_) {
             diagnostics_.error("GDS4090", "await expressions are only valid inside functions",
@@ -2073,9 +2073,6 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                 "await is not permitted in annotation arguments, which must be compile-time "
                 "constants",
                 expression.span);
-        }
-        if (can_suspend && current_function_name_ == "_init") {
-            diagnostics_.error("GDS4097", "_init cannot suspend on a signal", expression.span);
         }
         if (can_suspend && expected_return_.kind != TypeKind::void_type &&
             !allow_dynamic_await_return_) {
@@ -2897,6 +2894,7 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                                 script_symbols_->find_member(*target, "_init")) {
                             validate_script_call(*initializer, argument_types, expression,
                                                  expression.span);
+                            mark_coroutine_call(initializer->is_coroutine);
                         } else if (argument_count != 0) {
                             diagnostics_.error(
                                 "GDS4063",
@@ -2932,6 +2930,7 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                             if (initializer != inner->members.end()) {
                                 validate_script_call(*initializer, argument_types, expression,
                                                      expression.span);
+                                mark_coroutine_call(initializer->is_coroutine);
                             } else if (argument_count != 0) {
                                 diagnostics_.error("GDS4063",
                                                    "internal class new() received arguments but "
@@ -3046,6 +3045,7 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                                     script_symbols_->find_member(*script_owner, "_init")) {
                                 validate_script_call(*initializer, argument_types, expression,
                                                      expression.span);
+                                mark_coroutine_call(initializer->is_coroutine);
                             } else if (argument_count != 0) {
                                 diagnostics_.error(
                                     "GDS4063",
@@ -6613,8 +6613,8 @@ SemanticModel SemanticAnalyzer::analyze(const ast::Script& script) {
                 member.is_static = function.is_static;
                 member.is_vararg = function.rest_parameter.has_value();
                 member.is_abstract = function.is_abstract;
-                member.is_coroutine = function.name != "_init" && function.name != "_static_init" &&
-                                      contains_await_syntax(function);
+                member.is_coroutine =
+                    function.name != "_static_init" && contains_await_syntax(function);
                 member.has_explicit_type =
                     function.name == "_init" || function.return_type.has_value();
                 for (const auto& parameter : function.parameters) {

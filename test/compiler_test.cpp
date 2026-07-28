@@ -2516,11 +2516,11 @@ TEST_CASE("compiler supports structured awaits across instance and static corout
     REQUIRE(std::none_of(
         ignored.diagnostics.begin(), ignored.diagnostics.end(),
         [](const gdpp::Diagnostic& diagnostic) { return diagnostic.code == "GDS4093"; }));
-    REQUIRE(!initializer.success);
-    bool found_initializer_await = false;
-    for (const auto& diagnostic : initializer.diagnostics)
-        found_initializer_await = found_initializer_await || diagnostic.code == "GDS4097";
-    REQUIRE(found_initializer_await);
+    REQUIRE(initializer.success);
+    REQUIRE(initializer.unit.header.find("godot::Variant _gdpp_script_method__init()") !=
+            std::string::npos);
+    REQUIRE(initializer.unit.source.find("gdpp::runtime::begin_coroutine(this)") !=
+            std::string::npos);
 }
 
 TEST_CASE("compiler matches redundant await and internal class coroutine call contracts") {
