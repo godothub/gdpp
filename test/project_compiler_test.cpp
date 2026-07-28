@@ -811,8 +811,11 @@ TEST_CASE("project compiler includes complete owners for cross-script enum-only 
                                        "enum Mode { IDLE, READY }\n");
     write_text(root / "consumer.gd", "extends RefCounted\n"
                                      "class_name SharedEnumConsumer\n"
-                                     "func is_ready(mode: SharedEnumOwner.Mode) -> bool:\n"
-                                     "    return mode == SharedEnumOwner.Mode.READY\n");
+                                     "func is_ready(mode: int) -> bool:\n"
+                                     "    match mode:\n"
+                                     "        SharedEnumOwner.Mode.READY:\n"
+                                     "            return true\n"
+                                     "    return false\n");
 
     const auto options = project_options(root);
     const auto result = gdpp::ProjectCompiler{}.compile(options);
