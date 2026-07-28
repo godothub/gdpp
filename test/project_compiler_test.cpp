@@ -2589,22 +2589,19 @@ TEST_CASE("attached script object values materialize their native storage repres
     const auto root = fixture_root("project-attached-object-values");
     std::error_code error;
     std::filesystem::remove_all(root, error);
-    write_text(root / "project.godot",
-               "[application]\nconfig/name=\"Attached Object Values\"\n\n"
-               "[autoload]\nMain=\"*res://main.gd\"\n");
+    write_text(root / "project.godot", "[application]\nconfig/name=\"Attached Object Values\"\n\n"
+                                       "[autoload]\nMain=\"*res://main.gd\"\n");
     write_text(root / "main.gd", "class_name AppMain\nextends Node\n");
-    write_text(root / "style.gd",
-               "class_name ResourceStyle\n"
-               "extends Resource\n"
-               "func root() -> ResourceStyle:\n"
-               "    if resource_path.is_empty():\n"
-               "        return self\n"
-               "    var current: ResourceStyle = self\n"
-               "    return current\n");
-    write_text(root / "consumer.gd",
-               "extends Node\n"
-               "func application() -> AppMain:\n"
-               "    return Main\n");
+    write_text(root / "style.gd", "class_name ResourceStyle\n"
+                                  "extends Resource\n"
+                                  "func root() -> ResourceStyle:\n"
+                                  "    if resource_path.is_empty():\n"
+                                  "        return self\n"
+                                  "    var current: ResourceStyle = self\n"
+                                  "    return current\n");
+    write_text(root / "consumer.gd", "extends Node\n"
+                                     "func application() -> AppMain:\n"
+                                     "    return Main\n");
     const auto options = project_options(root);
 
     const auto result = gdpp::ProjectCompiler{}.compile(options);
@@ -2624,15 +2621,15 @@ TEST_CASE("attached script object values materialize their native storage repres
         read_text(options.output_directory / "generated" / style->source_file_name);
     const auto consumer_source =
         read_text(options.output_directory / "generated" / consumer->source_file_name);
-    REQUIRE(style_source.find(
-                "godot::Ref<godot::RefCounted>(godot::Object::cast_to<godot::RefCounted>("
-                "owner()))") != std::string::npos);
+    REQUIRE(
+        style_source.find("godot::Ref<godot::RefCounted>(godot::Object::cast_to<godot::RefCounted>("
+                          "owner()))") != std::string::npos);
     REQUIRE(style_source.find("godot::Ref<godot::RefCounted> current = owner();") ==
             std::string::npos);
-    REQUIRE(consumer_source.find(
-                "gdpp::runtime::ObjectStorage<godot::Object>(godot::Object::cast_to<"
-                "godot::Object>(gdpp::runtime::strict_attached_script_storage(") !=
-            std::string::npos);
+    REQUIRE(
+        consumer_source.find("gdpp::runtime::ObjectStorage<godot::Object>(godot::Object::cast_to<"
+                             "godot::Object>(gdpp::runtime::strict_attached_script_storage(") !=
+        std::string::npos);
     REQUIRE(consumer_source.find("gdpp::runtime::find_autoload(godot::StringName(\"Main\"))") !=
             std::string::npos);
 }
@@ -2943,11 +2940,9 @@ TEST_CASE("project compiler preserves isolated coroutine ABI families across des
         read_text(options.output_directory / "generated" / child->header_file_name);
     const auto child_source =
         read_text(options.output_directory / "generated" / child->source_file_name);
-    REQUIRE(suspending_header.find(
-                "virtual godot::Variant _gdpp_native_override_execute();") !=
+    REQUIRE(suspending_header.find("virtual godot::Variant _gdpp_native_override_execute();") !=
             std::string::npos);
-    REQUIRE(child_header.find(
-                "virtual godot::Variant _gdpp_native_override_execute() override;") !=
+    REQUIRE(child_header.find("virtual godot::Variant _gdpp_native_override_execute() override;") !=
             std::string::npos);
     REQUIRE(child_header.find("_gdpp_script_method_execute() override") == std::string::npos);
     REQUIRE(child_source.find("CoroutineFamilySuspending") != std::string::npos);
@@ -2958,15 +2953,13 @@ TEST_CASE("project compiler separates Godot virtual wrappers from attached corou
     const auto root = fixture_root("project-virtual-coroutine-override-family");
     std::error_code error;
     std::filesystem::remove_all(root, error);
-    write_text(root / "base.gd",
-               "extends Node\nclass_name VirtualCoroutineBase\n"
-               "signal resumed\n"
-               "func _ready() -> void:\n"
-               "    await resumed\n");
-    write_text(root / "child.gd",
-               "extends VirtualCoroutineBase\nclass_name VirtualCoroutineChild\n"
-               "func _ready() -> void:\n"
-               "    pass\n");
+    write_text(root / "base.gd", "extends Node\nclass_name VirtualCoroutineBase\n"
+                                 "signal resumed\n"
+                                 "func _ready() -> void:\n"
+                                 "    await resumed\n");
+    write_text(root / "child.gd", "extends VirtualCoroutineBase\nclass_name VirtualCoroutineChild\n"
+                                  "func _ready() -> void:\n"
+                                  "    pass\n");
     write_text(root / "grandchild.gd",
                "extends VirtualCoroutineChild\nclass_name VirtualCoroutineGrandchild\n"
                "func _ready() -> void:\n"
@@ -3001,16 +2994,13 @@ TEST_CASE("project compiler separates Godot virtual wrappers from attached corou
         read_text(options.output_directory / "generated" / grandchild->source_file_name);
     REQUIRE(base_header.find("virtual godot::Variant _gdpp_virtual_impl__ready();") !=
             std::string::npos);
-    REQUIRE(child_header.find(
-                "virtual void _gdpp_native_override__gdpp_virtual_impl__ready();") !=
+    REQUIRE(child_header.find("virtual void _gdpp_native_override__gdpp_virtual_impl__ready();") !=
             std::string::npos);
     REQUIRE(grandchild_header.find(
                 "virtual void _gdpp_native_override__gdpp_virtual_impl__ready() override;") !=
             std::string::npos);
-    REQUIRE(grandchild_source.find(
-                "VirtualCoroutineChild") != std::string::npos);
-    REQUIRE(grandchild_source.find(
-                "::_gdpp_native_override__gdpp_virtual_impl__ready()") !=
+    REQUIRE(grandchild_source.find("VirtualCoroutineChild") != std::string::npos);
+    REQUIRE(grandchild_source.find("::_gdpp_native_override__gdpp_virtual_impl__ready()") !=
             std::string::npos);
 }
 
@@ -3019,13 +3009,13 @@ TEST_CASE("project compiler normalizes widened override calls to the inherited r
     std::error_code error;
     std::filesystem::remove_all(root, error);
     write_text(root / "base.gd", "extends RefCounted\nclass_name WidenedOverrideBase\n"
-                                "func refresh(data: Dictionary) -> void:\n"
-                                "    pass\n");
+                                 "func refresh(data: Dictionary) -> void:\n"
+                                 "    pass\n");
     write_text(root / "child.gd", "extends WidenedOverrideBase\nclass_name WidenedOverrideChild\n"
-                                 "func refresh(data: Dictionary, force := false):\n"
-                                 "    pass\n"
-                                 "func invoke() -> void:\n"
-                                 "    refresh({}, true)\n");
+                                  "func refresh(data: Dictionary, force := false):\n"
+                                  "    pass\n"
+                                  "func invoke() -> void:\n"
+                                  "    refresh({}, true)\n");
     const auto options = project_options(root);
 
     const auto result = gdpp::ProjectCompiler{}.compile(options);
@@ -3043,17 +3033,52 @@ TEST_CASE("project compiler normalizes widened override calls to the inherited r
     REQUIRE(source.find("_gdpp_native_override_refresh(") != std::string::npos);
 }
 
+TEST_CASE("dynamic override results validate typed containers only at storage boundaries") {
+    const auto root = fixture_root("project-dynamic-container-return-storage");
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
+    write_text(root / "base.gd", "extends RefCounted\nclass_name DynamicContainerBase\n"
+                                 "func values() -> Array[Dictionary]:\n"
+                                 "    return []\n");
+    write_text(root / "child.gd", "extends DynamicContainerBase\nclass_name DynamicContainerChild\n"
+                                  "func values() -> Array:\n"
+                                  "    return [{\"value\": 7}]\n"
+                                  "func direct(base: DynamicContainerBase) -> int:\n"
+                                  "    var total := 0\n"
+                                  "    for item in base.values():\n"
+                                  "        total += item.value\n"
+                                  "    return total\n"
+                                  "func assigned(base: DynamicContainerBase) -> void:\n"
+                                  "    var result := base.values()\n"
+                                  "    print(result)\n");
+    const auto options = project_options(root);
+
+    const auto result = gdpp::ProjectCompiler{}.compile(options);
+
+    REQUIRE(result.success);
+    const auto child =
+        std::find_if(result.scripts.begin(), result.scripts.end(), [](const auto& script) {
+            return script.relative_path.filename() == "child.gd";
+        });
+    REQUIRE(child != result.scripts.end());
+    const auto source = read_text(options.output_directory / "generated" / child->source_file_name);
+    REQUIRE(source.find("strict_builtin_storage<godot::Array>") != std::string::npos);
+    REQUIRE(source.find("strict_typed_storage<godot::TypedArray<godot::Dictionary>>") !=
+            std::string::npos);
+    REQUIRE(source.find("_gdpp_array_iterable_") != std::string::npos);
+}
+
 TEST_CASE("project compiler preserves super as a compile-time receiver across suspension") {
     const auto root = fixture_root("project-super-await-receiver");
     std::error_code error;
     std::filesystem::remove_all(root, error);
     write_text(root / "base.gd", "extends Node\nclass_name SuperAwaitBase\n"
-                                "signal resumed\n"
-                                "func entered(area: Area2D) -> void:\n"
-                                "    await resumed\n");
-    write_text(root / "child.gd", "extends SuperAwaitBase\nclass_name SuperAwaitChild\n"
+                                 "signal resumed\n"
                                  "func entered(area: Area2D) -> void:\n"
-                                 "    await super.entered(area)\n");
+                                 "    await resumed\n");
+    write_text(root / "child.gd", "extends SuperAwaitBase\nclass_name SuperAwaitChild\n"
+                                  "func entered(area: Area2D) -> void:\n"
+                                  "    await super.entered(area)\n");
     const auto options = project_options(root);
 
     const auto result = gdpp::ProjectCompiler{}.compile(options);
@@ -3076,12 +3101,12 @@ TEST_CASE("project compiler never rebinds inherited object storage from a Varian
     std::error_code error;
     std::filesystem::remove_all(root, error);
     write_text(root / "base.gd", "extends Node2D\nclass_name DynamicObjectBase\n"
-                                "@onready var sprite := $Sprite2D as Sprite2D\n");
+                                 "@onready var sprite := $Sprite2D as Sprite2D\n");
     write_text(root / "child.gd", "extends DynamicObjectBase\nclass_name DynamicObjectChild\n"
-                                 "signal resumed\n"
-                                 "func update(texture: Texture2D) -> void:\n"
-                                 "    await resumed\n"
-                                 "    sprite.texture = texture\n");
+                                  "signal resumed\n"
+                                  "func update(texture: Texture2D) -> void:\n"
+                                  "    await resumed\n"
+                                  "    sprite.texture = texture\n");
     const auto options = project_options(root);
 
     const auto result = gdpp::ProjectCompiler{}.compile(options);
@@ -3255,10 +3280,9 @@ TEST_CASE("typed script containers share one canonical ABI tag across generated 
     std::error_code error;
     std::filesystem::remove_all(root, error);
     write_text(root / "item.gd", "extends RefCounted\nclass_name SharedContainerItem\n");
-    write_text(root / "provider.gd",
-               "extends RefCounted\nclass_name SharedContainerProvider\n"
-               "static func items() -> Array[SharedContainerItem]:\n"
-               "    return []\n");
+    write_text(root / "provider.gd", "extends RefCounted\nclass_name SharedContainerProvider\n"
+                                     "static func items() -> Array[SharedContainerItem]:\n"
+                                     "    return []\n");
     write_text(root / "consumer.gd",
                "extends RefCounted\nclass_name SharedContainerConsumer\n"
                "var items: Array[SharedContainerItem] = SharedContainerProvider.items()\n");
@@ -3268,8 +3292,7 @@ TEST_CASE("typed script containers share one canonical ABI tag across generated 
 
     REQUIRE(result.success);
     const auto item_class = native_class_for(result, "item.gd");
-    const auto tag =
-        "gdpp::runtime::container_tags::ContainerObjectTag_" + item_class;
+    const auto tag = "gdpp::runtime::container_tags::ContainerObjectTag_" + item_class;
     const auto guard = "GDPP_RUNTIME_CONTAINER_OBJECT_TAG_" + item_class;
     const auto provider =
         std::find_if(result.scripts.begin(), result.scripts.end(), [](const auto& script) {
@@ -3292,8 +3315,7 @@ TEST_CASE("typed script containers share one canonical ABI tag across generated 
     REQUIRE(provider_header.find(guard) != std::string::npos);
     REQUIRE(consumer_header.find(guard) != std::string::npos);
     REQUIRE(consumer_source.find("ScriptTypedArray<" + tag + ">") != std::string::npos);
-    REQUIRE(consumer_source.find("consumer_gdpp_detail::ContainerObjectTag_") ==
-            std::string::npos);
+    REQUIRE(consumer_source.find("consumer_gdpp_detail::ContainerObjectTag_") == std::string::npos);
 }
 
 TEST_CASE("project cache treats inspector annotations as public ABI") {

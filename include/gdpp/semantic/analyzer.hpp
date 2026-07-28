@@ -203,6 +203,10 @@ class SemanticModel final {
   private:
     friend class SemanticAnalyzer;
     std::unordered_map<const ast::Expression*, Type> expression_types_;
+    // A dynamic call can retain a narrow static type while carrying a wider runtime container.
+    // Keeping both types prevents native code generation from validating the value before
+    // GDScript reaches a real typed-storage boundary.
+    std::unordered_map<const ast::Expression*, Type> expression_storage_types_;
     std::unordered_set<const ast::Expression*> non_null_expressions_;
     std::unordered_map<const ast::VariableDeclaration*, Type> variable_types_;
     std::unordered_map<const ast::VariableDeclaration*, Type> property_types_;

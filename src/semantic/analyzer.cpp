@@ -317,6 +317,10 @@ Type SemanticModel::type_of(const ast::Expression& expression) const {
 }
 
 Type SemanticModel::storage_type_of(const ast::Expression& expression) const {
+    if (const auto storage = expression_storage_types_.find(&expression);
+        storage != expression_storage_types_.end()) {
+        return storage->second;
+    }
     const auto found = referenced_symbols_.find(&expression);
     if (found != referenced_symbols_.end() &&
         (found->second.kind == SymbolKind::local || found->second.kind == SymbolKind::parameter)) {
@@ -3325,6 +3329,14 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                     call_result = unknown_type;
                 }
             } while (false);
+            if (const auto* resolution = model_.api_resolution_of(*expression.operand(0));
+                resolution && resolution->kind == ApiResolutionKind::dynamic_method &&
+                is_explicitly_typed_container(call_result)) {
+                model_.expression_storage_types_.insert_or_assign(
+                    &expression,
+                    Type{call_result.kind,
+                         call_result.kind == TypeKind::array ? "Array" : "Dictionary"});
+            }
             return call_result;
         }();
         break;

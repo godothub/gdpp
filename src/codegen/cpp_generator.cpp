@@ -20,6 +20,16 @@ namespace {
 
 std::string indent(std::size_t level) { return std::string(level * 4, ' '); }
 
+const Type& emitted_type(const typed::Expression& expression) {
+    // Local identifiers convert their declared storage into the flow-refined semantic type inside
+    // emit_expression(). Dynamic call results are different: their wider container storage must
+    // remain observable until an actual assignment, parameter, or return boundary.
+    return expression.kind == typed::ExpressionKind::call &&
+                   expression.storage_type.kind != TypeKind::unknown
+               ? expression.storage_type
+               : expression.type;
+}
+
 std::string indent_block(const std::size_t level, std::string_view block) {
     if (block.empty())
         return {};
@@ -1830,8 +1840,8 @@ std::string CodeGenerator::emit_object_pointer_storage(const Type& target,
     }
     const std::string storage_prefix{"gdpp::runtime::ObjectStorage<"};
     if (target_cpp.rfind(storage_prefix, 0) == 0 && target_cpp.back() == '>') {
-        const auto object_cpp = target_cpp.substr(storage_prefix.size(),
-                                                  target_cpp.size() - storage_prefix.size() - 1);
+        const auto object_cpp =
+            target_cpp.substr(storage_prefix.size(), target_cpp.size() - storage_prefix.size() - 1);
         return target_cpp + "(godot::Object::cast_to<" + object_cpp + ">(" + value + "))";
     }
     if (target_cpp == "godot::Variant")
@@ -1945,8 +1955,9 @@ CodeGenerator::find_inherited_inner_function(const std::string_view base,
     return nullptr;
 }
 
-std::string CodeGenerator::typed_inner_method_implementation_name(
-    const std::string_view owner, const typed::Function& method) const {
+std::string
+CodeGenerator::typed_inner_method_implementation_name(const std::string_view owner,
+                                                      const typed::Function& method) const {
     const auto source_name = sanitize_identifier(method.name);
     if (!method.is_static && method.name != "_init") {
         const auto base = inner_base_names_.find(std::string{owner});
@@ -2183,8 +2194,7 @@ std::string CodeGenerator::emit_conversion(const Type& target, const Type& sourc
         return "(static_cast<void>(" + value + "))";
     if (target.is_dynamic())
         return source.is_dynamic() ? value : "gdpp::runtime::to_variant(" + value + ")";
-    if (attached_script_ && target.kind == TypeKind::object &&
-        value == self_object_expression()) {
+    if (attached_script_ && target.kind == TypeKind::object && value == self_object_expression()) {
         return emit_object_pointer_storage(target, std::move(value));
     }
     if (target == source)
@@ -2360,7 +2370,7 @@ std::string CodeGenerator::emit_parameter_initializer(const typed::Parameter& pa
             return {};
         }
         const auto native_name = parameter_native_name(parameter);
-        auto fallback = emit_conversion(parameter.type, parameter.default_value->type,
+        auto fallback = emit_conversion(parameter.type, emitted_type(*parameter.default_value),
                                         emit_expression(*parameter.default_value),
                                         &parameter.default_value->span);
         if (fallback == "{}") {
@@ -2370,8 +2380,8 @@ std::string CodeGenerator::emit_parameter_initializer(const typed::Parameter& pa
         }
         if (parameter.type.is_dynamic())
             fallback = "gdpp::runtime::to_variant(" + fallback + ")";
-        auto supplied = emit_conversion(parameter.type, {TypeKind::variant, "Variant"},
-                                        native_name, &parameter.span);
+        auto supplied = emit_conversion(parameter.type, {TypeKind::variant, "Variant"}, native_name,
+                                        &parameter.span);
         const auto storage_type = cpp_type(parameter.type);
         // Both branches must have the exact declared storage representation. A Godot object
         // default can be a native pointer while the supplied Variant conversion is ObjectStorage;
@@ -2407,7 +2417,7 @@ std::string CodeGenerator::emit_parameter_initializer(const typed::Parameter& pa
     if (parameter.default_value) {
         value = std::string{arguments} + ".size() > " + std::to_string(index) + " ? " + supplied +
                 " : " +
-                emit_conversion(parameter.type, parameter.default_value->type,
+                emit_conversion(parameter.type, emitted_type(*parameter.default_value),
                                 emit_expression(*parameter.default_value),
                                 &parameter.default_value->span);
     }
@@ -2855,8 +2865,8 @@ std::string CodeGenerator::emit_direct_builtin_assignment(std::string_view owner
     if (owner == "Transform2D" && index >= 0 && index < 2)
         return object + "[" + std::to_string(index) + "] = " + value;
     if (owner == "Plane" && index >= 0 && index < 3) {
-        return object + ".normal." + std::string{member} +
-               " = static_cast<godot::real_t>(" + value + ")";
+        return object + ".normal." + std::string{member} + " = static_cast<godot::real_t>(" +
+               value + ")";
     }
     if (owner == "Transform2D" && member == "origin")
         return object + ".set_origin(" + value + ")";
@@ -2865,16 +2875,13 @@ std::string CodeGenerator::emit_direct_builtin_assignment(std::string_view owner
     if ((owner == "Vector2i" || owner == "Vector3i" || owner == "Vector4i") && index >= 0) {
         return object + "." + std::string{member} + " = static_cast<int32_t>(" + value + ")";
     }
-    if ((owner == "Vector2" || owner == "Vector3" || owner == "Vector4" ||
-         owner == "Quaternion") &&
+    if ((owner == "Vector2" || owner == "Vector3" || owner == "Vector4" || owner == "Quaternion") &&
         index >= 0) {
-        return object + "." + std::string{member} +
-               " = static_cast<godot::real_t>(" + value + ")";
+        return object + "." + std::string{member} + " = static_cast<godot::real_t>(" + value + ")";
     }
     if (owner == "Plane" && member == "d")
         return object + ".d = static_cast<godot::real_t>(" + value + ")";
-    if (owner == "Color" &&
-        (member == "r" || member == "g" || member == "b" || member == "a")) {
+    if (owner == "Color" && (member == "r" || member == "g" || member == "b" || member == "a")) {
         return object + "." + std::string{member} + " = static_cast<float>(" + value + ")";
     }
     if (owner == "Color" &&
@@ -3040,14 +3047,12 @@ std::string CodeGenerator::emit_dynamic_assignment(const typed::Statement& state
     // whether the root must be rebound. Object references and shared containers are mutated
     // through their Variant identity. Dynamic and ordinary value storage must receive the
     // reconstructed root so Variant-held builtins and copy-valued members are preserved.
-    const auto& root_storage_type = root->storage_type.kind == TypeKind::unknown
-                                        ? root->type
-                                        : root->storage_type;
+    const auto& root_storage_type =
+        root->storage_type.kind == TypeKind::unknown ? root->type : root->storage_type;
     const auto root_ownership = root_storage_type.ownership();
-    const bool root_requires_writeback =
-        root->kind == typed::ExpressionKind::identifier &&
-        root_ownership != OwnershipKind::object_reference &&
-        root_ownership != OwnershipKind::shared_container;
+    const bool root_requires_writeback = root->kind == typed::ExpressionKind::identifier &&
+                                         root_ownership != OwnershipKind::object_reference &&
+                                         root_ownership != OwnershipKind::shared_container;
     if (root_requires_writeback) {
         auto converted =
             emit_conversion(root->type, {TypeKind::variant, "Variant"}, root_name, &root->span);
@@ -3411,7 +3416,7 @@ bool CodeGenerator::assignment_may_fail(const typed::Statement& statement) const
     const auto& destination =
         target.assignment_type.kind == TypeKind::unknown ? target.type : target.assignment_type;
     if (statement.operation == "=")
-        return conversion_may_fail(destination, statement.expression->type);
+        return conversion_may_fail(destination, emitted_type(*statement.expression));
     if (target.type.is_dynamic() || statement.expression->type.is_dynamic())
         return true;
     if (conversion_may_fail(destination, target.type))
@@ -4386,11 +4391,9 @@ std::string CodeGenerator::emit_expression(const typed::Expression& expression) 
                            native == callee.operands.at(0)->type.name;
                 });
             if (declaration != inner_declarations_.end()) {
-                const auto method =
-                    std::find_if(declaration->second->functions.begin(),
-                                 declaration->second->functions.end(), [&](const auto& candidate) {
-                                     return candidate.name == callee.value;
-                                 });
+                const auto method = std::find_if(
+                    declaration->second->functions.begin(), declaration->second->functions.end(),
+                    [&](const auto& candidate) { return candidate.name == callee.value; });
                 if (method != declaration->second->functions.end()) {
                     typed_inner_method = &*method;
                     typed_inner_method_owner = declaration->first;
@@ -4477,14 +4480,14 @@ std::string CodeGenerator::emit_expression(const typed::Expression& expression) 
             if (godot_constructor) {
                 if (const auto* argument = api_.argument(*godot_constructor, operand_index - 1)) {
                     return emit_api_argument(argument->type, argument->meta,
-                                             expression.operands[operand_index]->type,
+                                             emitted_type(*expression.operands[operand_index]),
                                              std::move(value));
                 }
             }
             if (godot_method) {
                 if (const auto* argument = api_.argument(*godot_method, operand_index - 1)) {
                     return emit_api_argument(argument->type, argument->meta,
-                                             expression.operands[operand_index]->type,
+                                             emitted_type(*expression.operands[operand_index]),
                                              std::move(value));
                 }
                 if (godot_method->is_vararg)
@@ -4493,24 +4496,24 @@ std::string CodeGenerator::emit_expression(const typed::Expression& expression) 
             if (expression.call_contract &&
                 operand_index - 1 < expression.call_contract->parameters.size()) {
                 return emit_conversion(expression.call_contract->parameters[operand_index - 1],
-                                       expression.operands[operand_index]->type, std::move(value),
-                                       &expression.operands[operand_index]->span);
+                                       emitted_type(*expression.operands[operand_index]),
+                                       std::move(value), &expression.operands[operand_index]->span);
             }
             if (script_method && operand_index - 1 < script_method->parameters.size()) {
                 return emit_conversion(script_method->parameters[operand_index - 1],
-                                       expression.operands[operand_index]->type, std::move(value),
-                                       &expression.operands[operand_index]->span);
+                                       emitted_type(*expression.operands[operand_index]),
+                                       std::move(value), &expression.operands[operand_index]->span);
             }
             if (local_parameters && operand_index - 1 < local_parameters->size()) {
                 return emit_conversion((*local_parameters)[operand_index - 1],
-                                       expression.operands[operand_index]->type, std::move(value),
-                                       &expression.operands[operand_index]->span);
+                                       emitted_type(*expression.operands[operand_index]),
+                                       std::move(value), &expression.operands[operand_index]->span);
             }
             if (constructor_function &&
                 operand_index - 1 < constructor_function->parameters.size()) {
                 return emit_conversion(constructor_function->parameters[operand_index - 1].type,
-                                       expression.operands[operand_index]->type, std::move(value),
-                                       &expression.operands[operand_index]->span);
+                                       emitted_type(*expression.operands[operand_index]),
+                                       std::move(value), &expression.operands[operand_index]->span);
             }
             return value;
         };
@@ -4560,7 +4563,7 @@ std::string CodeGenerator::emit_expression(const typed::Expression& expression) 
                     return "gdpp::runtime::to_variant(" + emit_expression(argument) + ")";
                 }
                 if (callee.intrinsic == IntrinsicKind::range) {
-                    return emit_conversion({TypeKind::integer, "int"}, argument.type,
+                    return emit_conversion({TypeKind::integer, "int"}, emitted_type(argument),
                                            emit_expression(argument), &argument.span);
                 }
                 if (callee.intrinsic != IntrinsicKind::is_instance_of || index != 2)
@@ -4606,9 +4609,9 @@ std::string CodeGenerator::emit_expression(const typed::Expression& expression) 
                         if (const auto* function =
                                 api_.find_utility_function(callee.resolved_owner)) {
                             if (const auto* record = api_.argument(*function, index - 1)) {
-                                argument = emit_api_argument(record->type, record->meta,
-                                                             expression.operands[index]->type,
-                                                             std::move(argument));
+                                argument = emit_api_argument(
+                                    record->type, record->meta,
+                                    emitted_type(*expression.operands[index]), std::move(argument));
                             } else if (function->is_vararg) {
                                 argument =
                                     "gdpp::runtime::variant_constructor_argument(" + argument + ")";
@@ -4648,7 +4651,7 @@ std::string CodeGenerator::emit_expression(const typed::Expression& expression) 
                     if (const auto* function = api_.find_utility_function(callee.resolved_owner)) {
                         if (const auto* record = api_.argument(*function, index - 1)) {
                             argument = emit_api_argument(record->type, record->meta,
-                                                         expression.operands[index]->type,
+                                                         emitted_type(*expression.operands[index]),
                                                          std::move(argument));
                         } else if (function->is_vararg) {
                             argument =
@@ -4809,9 +4812,10 @@ std::string CodeGenerator::emit_expression(const typed::Expression& expression) 
                                     "); if (script_function_failed()) return {}; "
                                     "return _gdpp_dynamic_result_" +
                                     suffix + "; }())";
-            return expression.coroutine_call || expression.type.is_dynamic()
+            const auto& result_storage = emitted_type(expression);
+            return expression.coroutine_call || result_storage.is_dynamic()
                        ? invocation
-                       : emit_conversion(expression.type, {TypeKind::variant, "Variant"},
+                       : emit_conversion(result_storage, {TypeKind::variant, "Variant"},
                                          invocation);
         }
         std::string invocation;
@@ -4832,8 +4836,7 @@ std::string CodeGenerator::emit_expression(const typed::Expression& expression) 
         } else if (callee.resolution == typed::ResolutionKind::script_super) {
             invocation = native_super_owner(callee.resolved_owner) + "::" + script_native_name;
         } else if (typed_inner_method && typed_inner_method->is_static) {
-            invocation =
-                inner_cpp_type(typed_inner_method_owner) + "::" + script_native_name;
+            invocation = inner_cpp_type(typed_inner_method_owner) + "::" + script_native_name;
         } else if (callee.resolution == typed::ResolutionKind::script_static_callable &&
                    !callee.resolved_owner.empty()) {
             invocation = callee.resolved_owner + "::" + script_native_name;
@@ -6320,20 +6323,21 @@ std::string CodeGenerator::emit_statement_body(const typed::Statement& statement
             const auto value_name = "_gdpp_return_value_" + std::to_string(temporary_counter_++);
             std::string value;
             if (current_coroutine_abi_ || in_callable_lambda_) {
-                value = current_return_type_.is_dynamic()
-                            ? emit_expression(*statement.expression)
-                            : emit_conversion(current_return_type_, statement.expression->type,
-                                              emit_expression(*statement.expression),
-                                              &statement.expression->span);
+                value =
+                    current_return_type_.is_dynamic()
+                        ? emit_expression(*statement.expression)
+                        : emit_conversion(current_return_type_, emitted_type(*statement.expression),
+                                          emit_expression(*statement.expression),
+                                          &statement.expression->span);
             } else {
-                value = emit_conversion(current_return_type_, statement.expression->type,
+                value = emit_conversion(current_return_type_, emitted_type(*statement.expression),
                                         emit_expression(*statement.expression),
                                         &statement.expression->span);
             }
             const bool value_may_fail =
                 expression_may_fail(*statement.expression) ||
                 (!current_return_type_.is_dynamic() &&
-                 conversion_may_fail(current_return_type_, statement.expression->type));
+                 conversion_may_fail(current_return_type_, emitted_type(*statement.expression)));
             std::string result = prefix + "const auto " + value_name + " = " + value + ";\n";
             if (value_may_fail)
                 result += emit_script_failure_return(indentation, in_async_continuation_);
@@ -6375,12 +6379,12 @@ std::string CodeGenerator::emit_statement_body(const typed::Statement& statement
                 prefix + "[[maybe_unused]] " + (statement.is_constant ? "const " : "") +
                 cpp_type(statement.declared_type) + " " + sanitize_identifier(statement.name) +
                 " = " +
-                emit_conversion(statement.declared_type, statement.expression->type,
+                emit_conversion(statement.declared_type, emitted_type(*statement.expression),
                                 emit_expression(*statement.expression),
                                 &statement.expression->span) +
                 ";\n";
             if (expression_may_fail(*statement.expression) ||
-                conversion_may_fail(statement.declared_type, statement.expression->type)) {
+                conversion_may_fail(statement.declared_type, emitted_type(*statement.expression))) {
                 result += emit_script_failure_return(indentation, in_async_continuation_);
             }
             return result;
@@ -6406,15 +6410,15 @@ std::string CodeGenerator::emit_statement_body(const typed::Statement& statement
                  ? std::string{"auto"}
                  : cpp_type(statement.declared_type)) +
             " " + sanitize_identifier(statement.name) +
-            (statement.expression
-                 ? " = " + emit_conversion(statement.declared_type, statement.expression->type,
-                                           emit_expression(*statement.expression),
-                                           &statement.expression->span)
-                 : "{}") +
+            (statement.expression ? " = " + emit_conversion(statement.declared_type,
+                                                            emitted_type(*statement.expression),
+                                                            emit_expression(*statement.expression),
+                                                            &statement.expression->span)
+                                  : "{}") +
             ";\n";
         if (statement.expression &&
             (expression_may_fail(*statement.expression) ||
-             conversion_may_fail(statement.declared_type, statement.expression->type))) {
+             conversion_may_fail(statement.declared_type, emitted_type(*statement.expression)))) {
             result += emit_script_failure_return(indentation, in_async_continuation_);
         }
         return result;
@@ -6552,7 +6556,7 @@ std::string CodeGenerator::emit_statement_body(const typed::Statement& statement
                 assigned = value_name;
             }
             const auto assigned_source_type =
-                statement.operation == "=" ? statement.expression->type
+                statement.operation == "=" ? emitted_type(*statement.expression)
                 : target.type.is_dynamic() || statement.expression->type.is_dynamic()
                     ? Type{TypeKind::variant, "Variant"}
                     : target.type;
@@ -6599,7 +6603,7 @@ std::string CodeGenerator::emit_statement_body(const typed::Statement& statement
         }
         const auto assignment_value = [&](std::string current, const Type& destination) {
             std::string value = emit_expression(*statement.expression);
-            Type source = statement.expression->type;
+            Type source = emitted_type(*statement.expression);
             if (statement.operation != "=") {
                 const auto suffix = std::to_string(temporary_counter_++);
                 const auto current_name = "_gdpp_property_current_" + suffix;
@@ -6741,17 +6745,17 @@ std::string CodeGenerator::emit_statement_body(const typed::Statement& statement
                 for (std::size_t chain_index = direct_chain.size(); chain_index > 1;
                      --chain_index) {
                     const auto* member = direct_chain[chain_index - 1];
-                    assignment_object = emit_direct_builtin_member(
-                        member->resolved_owner, std::move(assignment_object), member->value,
-                        &member->span);
+                    assignment_object = emit_direct_builtin_member(member->resolved_owner,
+                                                                   std::move(assignment_object),
+                                                                   member->value, &member->span);
                 }
                 auto current_value = root_name;
                 for (std::size_t chain_index = direct_chain.size(); chain_index > 0;
                      --chain_index) {
                     const auto* member = direct_chain[chain_index - 1];
-                    current_value = emit_direct_builtin_member(
-                        member->resolved_owner, std::move(current_value), member->value,
-                        &member->span);
+                    current_value =
+                        emit_direct_builtin_member(member->resolved_owner, std::move(current_value),
+                                                   member->value, &member->span);
                 }
                 auto value = assignment_value(std::move(current_value), target.assignment_type);
                 const auto assigned_name = "_gdpp_property_assigned_" + suffix;
@@ -6759,10 +6763,9 @@ std::string CodeGenerator::emit_statement_body(const typed::Statement& statement
                     index + ");\n" + nested_prefix + "const auto " + assigned_name + " = " + value +
                     ";\n" + emit_script_failure_return(indentation + 1, in_async_continuation_) +
                     nested_prefix +
-                    emit_direct_builtin_assignment(direct_chain.front()->resolved_owner,
-                                                   std::move(assignment_object),
-                                                   direct_chain.front()->value, assigned_name,
-                                                   &direct_chain.front()->span) +
+                    emit_direct_builtin_assignment(
+                        direct_chain.front()->resolved_owner, std::move(assignment_object),
+                        direct_chain.front()->value, assigned_name, &direct_chain.front()->span) +
                     ";\n";
                 const auto* setter = api_.find_method(root->resolved_owner, root->setter);
                 std::string setter_index;
@@ -6793,10 +6796,10 @@ std::string CodeGenerator::emit_statement_body(const typed::Statement& statement
                 const auto suffix = std::to_string(temporary_counter_++);
                 const auto receiver = "_gdpp_builtin_receiver_" + suffix;
                 const auto nested_prefix = indent(indentation + 1);
-                auto value = assignment_value(
-                    emit_direct_builtin_member(target.resolved_owner, receiver, target.value,
-                                               &target.span),
-                    target.assignment_type);
+                auto value =
+                    assignment_value(emit_direct_builtin_member(target.resolved_owner, receiver,
+                                                                target.value, &target.span),
+                                     target.assignment_type);
                 const auto assigned = "_gdpp_builtin_assigned_" + suffix;
                 return prefix + "{\n" + nested_prefix + "auto &&" + receiver + " = " +
                        emit_expression(parent) + ";\n" + nested_prefix + "const auto " + assigned +
@@ -7141,7 +7144,7 @@ std::string CodeGenerator::emit_statement_body(const typed::Statement& statement
             const auto argument_count = direct_range->operands.size() - 1;
             const auto integer_argument = [&](const std::size_t index) {
                 const auto& argument = *direct_range->operands.at(index);
-                return emit_conversion({TypeKind::integer, "int"}, argument.type,
+                return emit_conversion({TypeKind::integer, "int"}, emitted_type(argument),
                                        emit_expression(argument), &argument.span);
             };
             const auto start_value = argument_count == 1 ? std::string{"0"} : integer_argument(1);
@@ -7480,7 +7483,7 @@ void CodeGenerator::emit_attached_descriptor_definition(
             source << "        property.has_default = true;\n"
                    << "        property.default_value = gdpp::runtime::to_variant(";
             if (variable.initializer) {
-                source << emit_conversion(variable.type, variable.initializer->type,
+                source << emit_conversion(variable.type, emitted_type(*variable.initializer),
                                           emit_expression(*variable.initializer),
                                           &variable.initializer->span);
             } else {
@@ -8005,7 +8008,8 @@ void CodeGenerator::emit_inner_class_definition(const typed::Class& declaration,
                << "    if (!_gdpp_constant_" << name << "_ready()) {\n"
                << "        "
                << emit_storage_assignment(field.type, storage,
-                                          emit_conversion(field.type, field.initializer->type,
+                                          emit_conversion(field.type,
+                                                          emitted_type(*field.initializer),
                                                           emit_expression(*field.initializer),
                                                           &field.initializer->span))
                << ";\n"
@@ -8048,7 +8052,7 @@ void CodeGenerator::emit_inner_class_definition(const typed::Class& declaration,
                 source << "        "
                        << emit_storage_assignment(
                               field.type, "*value",
-                              emit_conversion(field.type, field.initializer->type,
+                              emit_conversion(field.type, emitted_type(*field.initializer),
                                               emit_expression(*field.initializer),
                                               &field.initializer->span))
                        << ";\n";
@@ -8071,7 +8075,7 @@ void CodeGenerator::emit_inner_class_definition(const typed::Class& declaration,
                 if (contains_preload(*field.initializer)) {
                     value = "_gdpp_preloaded_" + sanitize_identifier(field.name) + "()";
                 } else {
-                    value = emit_conversion(field.type, field.initializer->type,
+                    value = emit_conversion(field.type, emitted_type(*field.initializer),
                                             emit_expression(*field.initializer),
                                             &field.initializer->span);
                 }
@@ -8124,7 +8128,8 @@ void CodeGenerator::emit_inner_class_definition(const typed::Class& declaration,
         if (field.onready && field.initializer) {
             source << "    "
                    << emit_storage_assignment(field.type, sanitize_identifier(field.name),
-                                              emit_conversion(field.type, field.initializer->type,
+                                              emit_conversion(field.type,
+                                                              emitted_type(*field.initializer),
                                                               emit_expression(*field.initializer),
                                                               &field.initializer->span))
                    << ";\n"
@@ -8198,7 +8203,8 @@ void CodeGenerator::emit_inner_class_definition(const typed::Class& declaration,
             target += "()";
         source << prefix
                << emit_storage_assignment(field.type, std::move(target),
-                                          emit_conversion(field.type, field.initializer->type,
+                                          emit_conversion(field.type,
+                                                          emitted_type(*field.initializer),
                                                           emit_expression(*field.initializer),
                                                           &field.initializer->span))
                << ";\n"
@@ -8338,8 +8344,8 @@ void CodeGenerator::emit_inner_class_definition(const typed::Class& declaration,
             source << emit_script_failure_return(1, false);
         }
         if (field.getter && !field.getter->method.empty()) {
-            source << "    return "
-                   << local_function_implementation_name(field.getter->method) << "();\n";
+            source << "    return " << local_function_implementation_name(field.getter->method)
+                   << "();\n";
         } else if (field.getter) {
             current_return_type_ = field.type;
             in_function_body_ = true;
@@ -8870,12 +8876,11 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
             return false;
         auto* base_script = script_symbols_->base_of(*current_script_);
         while (base_script) {
-            const auto inherited =
-                std::find_if(base_script->members.begin(), base_script->members.end(),
-                             [&](const auto& member) {
-                                 return member.kind == ScriptMemberKind::function &&
-                                        !member.is_static && member.name == function.name;
-                             });
+            const auto inherited = std::find_if(
+                base_script->members.begin(), base_script->members.end(), [&](const auto& member) {
+                    return member.kind == ScriptMemberKind::function && !member.is_static &&
+                           member.name == function.name;
+                });
             if (inherited != base_script->members.end()) {
                 return same_native_method_abi(*declared, *inherited) &&
                        script_method_implementation_name(*current_script_, *declared) ==
@@ -9462,7 +9467,7 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
             source << "const " << cpp_type(variable.type) << ' ' << unit.class_name << "::" << name
                    << " = ";
             if (variable.initializer && !variable.onready) {
-                source << emit_conversion(variable.type, variable.initializer->type,
+                source << emit_conversion(variable.type, emitted_type(*variable.initializer),
                                           emit_expression(*variable.initializer),
                                           &variable.initializer->span);
             } else {
@@ -9494,7 +9499,7 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
                << "        ";
         std::string constant_value;
         if (variable.initializer && !variable.onready) {
-            constant_value = emit_conversion(variable.type, variable.initializer->type,
+            constant_value = emit_conversion(variable.type, emitted_type(*variable.initializer),
                                              emit_expression(*variable.initializer),
                                              &variable.initializer->span);
         } else {
@@ -9545,7 +9550,7 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
                 source << "        "
                        << emit_storage_assignment(
                               variable.type, "*value",
-                              emit_conversion(variable.type, variable.initializer->type,
+                              emit_conversion(variable.type, emitted_type(*variable.initializer),
                                               emit_expression(*variable.initializer),
                                               &variable.initializer->span))
                        << ";\n";
@@ -9574,7 +9579,7 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
                 if (contains_preload(*variable.initializer)) {
                     value = "_gdpp_preloaded_" + sanitize_identifier(variable.name) + "()";
                 } else {
-                    value = emit_conversion(variable.type, variable.initializer->type,
+                    value = emit_conversion(variable.type, emitted_type(*variable.initializer),
                                             emit_expression(*variable.initializer),
                                             &variable.initializer->span);
                 }
@@ -9647,7 +9652,7 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
                 source << "    "
                        << emit_storage_assignment(
                               field.type, sanitize_identifier(field.name),
-                              emit_conversion(field.type, field.initializer->type,
+                              emit_conversion(field.type, emitted_type(*field.initializer),
                                               emit_expression(*field.initializer),
                                               &field.initializer->span))
                        << ";\n"
@@ -9814,7 +9819,8 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
             target += "()";
         source << prefix
                << emit_storage_assignment(variable.type, std::move(target),
-                                          emit_conversion(variable.type, variable.initializer->type,
+                                          emit_conversion(variable.type,
+                                                          emitted_type(*variable.initializer),
                                                           emit_expression(*variable.initializer),
                                                           &variable.initializer->span))
                << ";\n"
@@ -10018,9 +10024,8 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
         }
         if (variable.setter) {
             if (!variable.setter->method.empty()) {
-                source << "    "
-                       << local_function_implementation_name(variable.setter->method) << '('
-                       << setter_parameter << ");\n";
+                source << "    " << local_function_implementation_name(variable.setter->method)
+                       << '(' << setter_parameter << ");\n";
             } else {
                 current_return_type_ = {TypeKind::void_type, "void"};
                 in_function_body_ = true;
@@ -10212,7 +10217,7 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
                     source << "    "
                            << emit_storage_assignment(
                                   field.type, sanitize_identifier(field.name),
-                                  emit_conversion(field.type, field.initializer->type,
+                                  emit_conversion(field.type, emitted_type(*field.initializer),
                                                   emit_expression(*field.initializer),
                                                   &field.initializer->span))
                            << ";\n"
@@ -10268,7 +10273,7 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
                 source << "    "
                        << emit_storage_assignment(
                               field.type, sanitize_identifier(field.name),
-                              emit_conversion(field.type, field.initializer->type,
+                              emit_conversion(field.type, emitted_type(*field.initializer),
                                               emit_expression(*field.initializer),
                                               &field.initializer->span))
                        << ";\n";
