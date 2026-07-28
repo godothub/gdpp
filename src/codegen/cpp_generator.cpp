@@ -1981,8 +1981,14 @@ CodeGenerator::script_method_implementation_name(const ScriptClassSymbol& owner,
     const auto script_native_name = script_method_native_name(owner, method);
     const auto* engine_method =
         method.is_static ? nullptr : api_.find_method(owner.godot_base_type, method.name);
-    if (!engine_method || !engine_method->is_virtual)
-        return script_native_name;
+    if (!engine_method || !engine_method->is_virtual) {
+        // Generated behavior classes inherit godot-cpp's Wrapped implementation. A legal
+        // GDScript method such as `_get`, `_set`, `_notification`, `_to_string`, `get_class` or
+        // any future engine member must never hide a C++ hook used by GDCLASS. Keep ABI-mismatch
+        // symbols, which are already isolated, and namespace every ordinary script method.
+        return script_native_name == source_name ? "_gdpp_script_method_" + source_name
+                                                 : script_native_name;
+    }
     return script_native_name == source_name
                ? "_gdpp_virtual_impl_" + source_name
                : "_gdpp_native_override__gdpp_virtual_impl_" + source_name;
@@ -2073,7 +2079,8 @@ CodeGenerator::inner_method_implementation_name(const ScriptInnerClassSymbol& ow
     const auto* engine_method =
         method.is_static ? nullptr : api_.find_method(owner.godot_base_type, method.name);
     if (!engine_method || !engine_method->is_virtual)
-        return script_native_name;
+        return script_native_name == source_name ? "_gdpp_script_method_" + source_name
+                                                 : script_native_name;
     return script_native_name == source_name
                ? "_gdpp_virtual_impl_" + source_name
                : "_gdpp_native_override__gdpp_virtual_impl_" + source_name;
@@ -4280,14 +4287,23 @@ std::string CodeGenerator::emit_expression(const typed::Expression& expression) 
         }
         const auto script_native_name = [&]() {
             if (script_method && inner_method_owner) {
-                return callee.resolution == typed::ResolutionKind::script_super
-                           ? inner_method_implementation_name(*inner_method_owner, *script_method)
-                           : inner_method_native_name(*inner_method_owner, *script_method);
+                return inner_method_implementation_name(*inner_method_owner, *script_method);
             }
             if (script_method && script_method_owner) {
-                return callee.resolution == typed::ResolutionKind::script_super
-                           ? script_method_implementation_name(*script_method_owner, *script_method)
-                           : script_method_native_name(*script_method_owner, *script_method);
+                return script_method_implementation_name(*script_method_owner, *script_method);
+            }
+            if (callee.resolution == typed::ResolutionKind::script_super) {
+                if (!callee.getter.empty())
+                    return sanitize_identifier(callee.value);
+                const auto* engine_method =
+                    api_.find_method(current_godot_base_type_, callee.value);
+                return engine_method && engine_method->is_virtual
+                           ? "_gdpp_virtual_impl_" + sanitize_identifier(callee.value)
+                           : "_gdpp_script_method_" + sanitize_identifier(callee.value);
+            }
+            if (const auto local = local_function_native_names_.find(callee.value);
+                local != local_function_native_names_.end()) {
+                return local->second;
             }
             return sanitize_identifier(callee.value);
         }();
@@ -4695,6 +4711,9 @@ std::string CodeGenerator::emit_expression(const typed::Expression& expression) 
             invocation = callee.resolved_owner + "::" + script_native_name;
         } else if (explicit_self_script_call && script_method) {
             invocation = "this->" + script_native_name;
+        } else if (local_function ||
+                   (script_method && callee.kind == typed::ExpressionKind::identifier)) {
+            invocation = script_native_name;
         } else if (callee.kind == typed::ExpressionKind::member &&
                    callee.resolution == typed::ResolutionKind::godot_method &&
                    callee.operands.at(0)->type.kind == TypeKind::script_resource) {
@@ -7443,11 +7462,13 @@ void CodeGenerator::emit_inner_class_declaration(const typed::Class& declaration
     const auto* previous_inner_script = current_inner_script_;
     const auto previous_function_parameters = local_function_parameters_;
     const auto previous_functions = local_functions_;
+    const auto previous_function_native_names = local_function_native_names_;
     const auto previous_native_class_name = current_native_class_name_;
     const auto previous_godot_base_type = current_godot_base_type_;
     const auto previous_attached_godot_base_type = attached_godot_base_type_;
     local_function_parameters_.clear();
     local_functions_.clear();
+    local_function_native_names_.clear();
     current_native_class_name_ = native_name;
     for (const auto& function : declaration.functions) {
         local_functions_.emplace(function.name, &function);
@@ -7507,11 +7528,15 @@ void CodeGenerator::emit_inner_class_declaration(const typed::Class& declaration
         const auto script_native =
             inherited && !same_abi ? "_gdpp_native_override_" + source_symbol : source_symbol;
         if (!engine_virtual_for(function))
-            return script_native;
+            return script_native == source_symbol ? "_gdpp_script_method_" + source_symbol
+                                                  : script_native;
         return script_native == source_symbol
                    ? "_gdpp_virtual_impl_" + source_symbol
                    : "_gdpp_native_override__gdpp_virtual_impl_" + source_symbol;
     };
+    for (const auto& function : declaration.functions)
+        local_function_native_names_.insert_or_assign(function.name,
+                                                      function_native_name(function));
     const bool has_static_initialization =
         requires_static_initialization(declaration.fields, declaration.functions);
     header << "class " << native_name << " : public " << base_cpp << " {\n"
@@ -7664,6 +7689,7 @@ void CodeGenerator::emit_inner_class_declaration(const typed::Class& declaration
     header << "};\n\n";
     local_function_parameters_ = previous_function_parameters;
     local_functions_ = previous_functions;
+    local_function_native_names_ = previous_function_native_names;
     current_native_class_name_ = previous_native_class_name;
     current_godot_base_type_ = previous_godot_base_type;
     attached_godot_base_type_ = previous_attached_godot_base_type;
@@ -7678,6 +7704,7 @@ void CodeGenerator::emit_inner_class_definition(const typed::Class& declaration,
     const auto* previous_inner_script = current_inner_script_;
     const auto previous_function_parameters = local_function_parameters_;
     const auto previous_functions = local_functions_;
+    const auto previous_function_native_names = local_function_native_names_;
     const auto previous_native_class_name = current_native_class_name_;
     const auto previous_godot_base_type = current_godot_base_type_;
     const auto previous_attached_godot_base_type = attached_godot_base_type_;
@@ -7687,6 +7714,7 @@ void CodeGenerator::emit_inner_class_definition(const typed::Class& declaration,
     const auto previous_debug_members = current_debug_members_;
     local_function_parameters_.clear();
     local_functions_.clear();
+    local_function_native_names_.clear();
     current_native_class_name_ = native_name;
     current_debug_source_ = "res://" + current_source_path_ + "::" + source_name;
     current_debug_function_.clear();
@@ -7788,11 +7816,15 @@ void CodeGenerator::emit_inner_class_definition(const typed::Class& declaration,
         const auto script_native =
             inherited && !same_abi ? "_gdpp_native_override_" + source_symbol : source_symbol;
         if (!engine_virtual_for(function))
-            return script_native;
+            return script_native == source_symbol ? "_gdpp_script_method_" + source_symbol
+                                                  : script_native;
         return script_native == source_symbol
                    ? "_gdpp_virtual_impl_" + source_symbol
                    : "_gdpp_native_override__gdpp_virtual_impl_" + source_symbol;
     };
+    for (const auto& function : declaration.functions)
+        local_function_native_names_.insert_or_assign(function.name,
+                                                      function_native_name(function));
     const bool has_static_initialization =
         requires_static_initialization(declaration.fields, declaration.functions);
     const bool has_static_initializer =
@@ -7818,7 +7850,7 @@ void CodeGenerator::emit_inner_class_definition(const typed::Class& declaration,
             }
         }
         if (has_static_initializer)
-            source << "            _static_init();\n";
+            source << "            _gdpp_script_method__static_init();\n";
         source << "        },\n"
                << "        []() {\n";
         for (const auto& field : declaration.fields) {
@@ -8424,6 +8456,7 @@ void CodeGenerator::emit_inner_class_definition(const typed::Class& declaration,
         declaration.enums);
     local_function_parameters_ = previous_function_parameters;
     local_functions_ = previous_functions;
+    local_function_native_names_ = previous_function_native_names;
     current_native_class_name_ = previous_native_class_name;
     current_godot_base_type_ = previous_godot_base_type;
     attached_godot_base_type_ = previous_attached_godot_base_type;
@@ -8505,6 +8538,7 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
     container_enum_types_.clear();
     local_function_parameters_.clear();
     local_functions_.clear();
+    local_function_native_names_.clear();
     constructor_functions_.clear();
     for (const auto& function : module.functions) {
         local_functions_.emplace(function.name, &function);
@@ -8759,10 +8793,12 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
                                            sanitize_identifier(function.name);
     };
     const auto function_native_name = [&](const typed::Function& function) {
-        if (!current_script_ || function.is_static)
+        const auto isolated_source_name =
+            "_gdpp_script_method_" + sanitize_identifier(function.name);
+        if (!current_script_)
             return virtual_method_for(function)
                        ? "_gdpp_virtual_impl_" + sanitize_identifier(function.name)
-                       : sanitize_identifier(function.name);
+                       : isolated_source_name;
         const auto member =
             std::find_if(current_script_->members.begin(), current_script_->members.end(),
                          [&](const auto& candidate) {
@@ -8773,8 +8809,11 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
             return script_method_implementation_name(*current_script_, *member);
         return virtual_method_for(function)
                    ? "_gdpp_virtual_impl_" + sanitize_identifier(function.name)
-                   : sanitize_identifier(function.name);
+                   : isolated_source_name;
     };
+    for (const auto& function : module.functions)
+        local_function_native_names_.insert_or_assign(function.name,
+                                                      function_native_name(function));
     const auto function_parameter_type = [&](const typed::Function& function,
                                              const std::size_t index) {
         return cpp_type(function.parameters[index].type);
@@ -9289,7 +9328,7 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
             }
         }
         if (has_static_initializer)
-            source << "            _static_init();\n";
+            source << "            _gdpp_script_method__static_init();\n";
         source << "        },\n"
                << "        []() {\n";
         for (const auto& variable : module.fields) {
@@ -9560,7 +9599,7 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
         if (default_calls_initializer) {
             if (!module.is_tool)
                 source << "    if (gdpp_editor_hint) return;\n";
-            source << "    _init(";
+            source << "    _gdpp_script_method__init(";
             for (std::size_t index = 0; index < initializer->parameters.size(); ++index) {
                 if (index != 0)
                     source << ", ";
@@ -9607,7 +9646,7 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
             emit_rpc_configurations(source, module.functions, 1);
         if (!module.is_tool)
             source << "    if (gdpp_editor_hint) return;\n";
-        source << "    _init(";
+        source << "    _gdpp_script_method__init(";
         for (std::size_t index = 0; index < initializer->parameters.size(); ++index) {
             if (index != 0)
                 source << ", ";

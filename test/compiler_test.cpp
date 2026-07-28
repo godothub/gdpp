@@ -36,7 +36,8 @@ TEST_CASE("compiler generates bindable GDExtension C++") {
     REQUIRE_EQ(result.unit.symbol_file_name, std::string{"counter.gd.symbols"});
     REQUIRE(result.unit.symbol_map.rfind("GDPP_SYMBOL_MAP 1\n", 0) == 0);
     REQUIRE(result.unit.symbol_map.find("source \"res://counter.gd\"") != std::string::npos);
-    REQUIRE(result.unit.symbol_map.find("method \"increment\" \"GDPPNative_Counter::increment\"") !=
+    REQUIRE(result.unit.symbol_map.find(
+                "method \"increment\" \"GDPPNative_Counter::_gdpp_script_method_increment\"") !=
             std::string::npos);
     REQUIRE(result.unit.symbol_map.find("variant_callback \"increment\" "
                                         "\"GDPPNative_Counter::_gdpp_variant_call_increment\"") !=
@@ -191,8 +192,8 @@ TEST_CASE("variadic initializers preserve default construction and pack new argu
 
     REQUIRE(result.success);
     REQUIRE(result.unit.header.find("GDPPNative_RestConstructor__Payload();") != std::string::npos);
-    REQUIRE(result.unit.header.find(
-                "virtual void _init(godot::Variant _gdpp_argument_base, godot::Array values)") !=
+    REQUIRE(result.unit.header.find("virtual void _gdpp_script_method__init("
+                                    "godot::Variant _gdpp_argument_base, godot::Array values)") !=
             std::string::npos);
     REQUIRE(result.unit.header.find("public gdpp::runtime::AttachedScriptBehavior") !=
             std::string::npos);
@@ -391,7 +392,8 @@ TEST_CASE("compiler emits nil fallthrough only for dynamic functions that need i
                                                                "    return value\n");
 
     REQUIRE(result.success);
-    REQUIRE(result.unit.source.find("GDPPNative_DynamicReturns::side_effect") != std::string::npos);
+    REQUIRE(result.unit.source.find("GDPPNative_DynamicReturns::_gdpp_script_method_side_effect") !=
+            std::string::npos);
     REQUIRE(result.unit.source.find("print(_gdpp_utility_argument_") != std::string::npos);
     REQUIRE(result.unit.source.find("    return {};\n}") != std::string::npos);
     REQUIRE(result.unit.source.find("return value;\n    return {};") == std::string::npos);
@@ -459,8 +461,8 @@ TEST_CASE("compiler stores packed arrays with GDScript shared identity") {
     REQUIRE(result.success);
     const std::string storage = "gdpp::runtime::SharedPackedArray<godot::PackedByteArray>";
     REQUIRE(result.unit.header.find(storage + " bytes") != std::string::npos);
-    REQUIRE(result.unit.header.find(storage + " forward(" + storage + " values)") !=
-            std::string::npos);
+    REQUIRE(result.unit.header.find(storage + " _gdpp_script_method_forward(" + storage +
+                                    " values)") != std::string::npos);
     REQUIRE(result.unit.source.find(storage + " alias = values") != std::string::npos);
 }
 
@@ -667,8 +669,8 @@ TEST_CASE("compiler preserves typed container metadata in the native ABI") {
                 "godot::TypedArray<typed_containers_gdpp_detail::ContainerObjectTag_Node> nodes") !=
             std::string::npos);
     REQUIRE(result.unit.header.find("godot::TypedArray<int64_t> modes") != std::string::npos);
-    REQUIRE(result.unit.header.find("godot::TypedDictionary<godot::String, int64_t> summarize(") !=
-            std::string::npos);
+    REQUIRE(result.unit.header.find("godot::TypedDictionary<godot::String, int64_t> "
+                                    "_gdpp_script_method_summarize(") != std::string::npos);
     REQUIRE(result.unit.source.find(
                 "-> godot::TypedArray<int64_t> { godot::TypedArray<int64_t> _gdpp_array_") !=
             std::string::npos);
@@ -1045,9 +1047,11 @@ TEST_CASE("compiler topologically lowers internal class inheritance and super ca
                std::string{"GDPPNative_InnerInheritance__Derived"});
     REQUIRE(result.unit.header.find("class GDPPNative_InnerInheritance__Derived : public "
                                     "GDPPNative_InnerInheritance__Base") != std::string::npos);
-    REQUIRE(result.unit.header.find("virtual int64_t value() override") != std::string::npos);
-    REQUIRE(result.unit.source.find("GDPPNative_InnerInheritance__Base::value()") !=
+    REQUIRE(result.unit.header.find("virtual int64_t _gdpp_script_method_value() override") !=
             std::string::npos);
+    REQUIRE(
+        result.unit.source.find("GDPPNative_InnerInheritance__Base::_gdpp_script_method_value()") !=
+        std::string::npos);
 }
 
 TEST_CASE("static lambdas support defaults without binding an instance owner") {
@@ -1174,8 +1178,10 @@ TEST_CASE("compiler lowers awaited function and lambda defaults through one cont
             std::string::npos);
     REQUIRE(result.unit.source.find(".size() > 0", commit) != std::string::npos);
     REQUIRE(result.unit.source.find("std::make_shared<int64_t>()") != std::string::npos);
-    REQUIRE(result.unit.header.find("godot::Variant default_only(") != std::string::npos);
-    REQUIRE(result.unit.header.find("godot::Variant await_default_only()") != std::string::npos);
+    REQUIRE(result.unit.header.find("godot::Variant _gdpp_script_method_default_only(") !=
+            std::string::npos);
+    REQUIRE(result.unit.header.find("godot::Variant _gdpp_script_method_await_default_only()") !=
+            std::string::npos);
     REQUIRE(result.unit.source.find("unlowered await expression") == std::string::npos);
     REQUIRE(result.unit.source.find("unsupported structured await") == std::string::npos);
 }
@@ -1731,7 +1737,7 @@ TEST_CASE("tool scripts execute initialization paths inside the editor") {
     REQUIRE(result.unit.source.find("if (gdpp::runtime::is_editor_hint()) return;") ==
             std::string::npos);
     REQUIRE(result.unit.source.find("    _gdpp_preload_resources();") != std::string::npos);
-    REQUIRE(result.unit.source.find("    _init();") != std::string::npos);
+    REQUIRE(result.unit.source.find("    _gdpp_script_method__init();") != std::string::npos);
 }
 
 TEST_CASE("compiler preserves static unload as an explicit generated lifecycle contract") {
@@ -2405,7 +2411,8 @@ TEST_CASE("compiler preserves dynamic coroutine return values through the native
                                                                  "    return 42\n");
 
     REQUIRE(result.success);
-    REQUIRE(result.unit.header.find("godot::Variant spawn()") != std::string::npos);
+    REQUIRE(result.unit.header.find("godot::Variant _gdpp_script_method_spawn()") !=
+            std::string::npos);
     REQUIRE(result.unit.source.find("gdpp::runtime::begin_coroutine(this)") != std::string::npos);
     REQUIRE(result.unit.source.find("const auto _gdpp_return_value_") != std::string::npos);
     REQUIRE(result.unit.source.find("gdpp::runtime::complete_coroutine(_gdpp_coroutine_state, "
@@ -2444,10 +2451,12 @@ TEST_CASE("compiler supports structured awaits across instance and static corout
             std::string::npos);
     REQUIRE(nested.unit.source.find("gdpp::runtime::iter_next") != std::string::npos);
     REQUIRE(non_void.success);
-    REQUIRE(non_void.unit.header.find("godot::Variant run()") != std::string::npos);
+    REQUIRE(non_void.unit.header.find("godot::Variant _gdpp_script_method_run()") !=
+            std::string::npos);
     REQUIRE(non_void.unit.source.find("gdpp::runtime::coroutine_result(") != std::string::npos);
     REQUIRE(static_await.success);
-    REQUIRE(static_await.unit.header.find("static godot::Variant run(godot::Signal resumed)") !=
+    REQUIRE(static_await.unit.header.find(
+                "static godot::Variant _gdpp_script_method_run(godot::Signal resumed)") !=
             std::string::npos);
     REQUIRE(static_await.unit.source.find("gdpp::runtime::begin_coroutine(nullptr)") !=
             std::string::npos);
@@ -2507,10 +2516,12 @@ TEST_CASE("compiler matches redundant await and internal class coroutine call co
     REQUIRE(std::any_of(direct.diagnostics.begin(), direct.diagnostics.end(),
                         [](const auto& diagnostic) { return diagnostic.code == "GDS4132"; }));
     REQUIRE(awaited.success);
-    REQUIRE(awaited.unit.header.find("godot::Variant immediate()") != std::string::npos);
-    REQUIRE(inner.success);
-    REQUIRE(inner.unit.source.find("GDPPNative_InnerCoroutine__Probe::forward") !=
+    REQUIRE(awaited.unit.header.find("godot::Variant _gdpp_script_method_immediate()") !=
             std::string::npos);
+    REQUIRE(inner.success);
+    REQUIRE(
+        inner.unit.source.find("GDPPNative_InnerCoroutine__Probe::_gdpp_script_method_forward") !=
+        std::string::npos);
     REQUIRE(inner.unit.source.find("gdpp::runtime::await_signal") != std::string::npos);
     REQUIRE(std::none_of(inner.diagnostics.begin(), inner.diagnostics.end(),
                          [](const auto& diagnostic) { return diagnostic.code == "GDS4093"; }));
@@ -2875,8 +2886,8 @@ TEST_CASE("typed container subscripts preserve Godot runtime failure boundaries"
     REQUIRE(result.success);
     const auto& source = result.unit.source;
     const auto section = [&](const std::string& function, const std::string& next) {
-        const auto begin = source.find("::" + function + "(");
-        const auto end = source.find("::" + next + "(", begin + 1);
+        const auto begin = source.find("::_gdpp_script_method_" + function + "(");
+        const auto end = source.find("::_gdpp_script_method_" + next + "(", begin + 1);
         REQUIRE(begin != std::string::npos);
         REQUIRE(end != std::string::npos);
         return source.substr(begin, end - begin);
@@ -2907,7 +2918,8 @@ TEST_CASE("typed container subscripts preserve Godot runtime failure boundaries"
     REQUIRE(dictionary_compound.find("gdpp::runtime::strict_builtin_storage<int64_t>(",
                                      dictionary_binary) == std::string::npos);
 
-    const auto dictionary_read = source.substr(source.find("::read_dictionary("));
+    const auto dictionary_read =
+        source.substr(source.find("::_gdpp_script_method_read_dictionary("));
     REQUIRE(dictionary_read.find("gdpp::runtime::checked_dictionary_get(") != std::string::npos);
 }
 
@@ -3022,7 +3034,7 @@ TEST_CASE("compiler defines static script fields outside the generated header") 
     REQUIRE(result.unit.source.find("_gdpp_static_initialization().run(") != std::string::npos);
     REQUIRE(result.unit.source.find("static thread_local bool active = false") ==
             std::string::npos);
-    const auto increment = result.unit.source.find("::increment() {");
+    const auto increment = result.unit.source.find("::_gdpp_script_method_increment() {");
     REQUIRE(increment != std::string::npos);
     REQUIRE(result.unit.source.find("_gdpp_ensure_static_initialized();", increment) !=
             std::string::npos);
@@ -3054,10 +3066,12 @@ TEST_CASE("compiler preserves owner-free static fields methods lambdas and super
                                               "    return Child.total\n");
 
     REQUIRE(result.success);
-    REQUIRE(result.unit.header.find("static int64_t score()") != std::string::npos);
-    REQUIRE(result.unit.source.find("_gdpp_static_total_storage()") != std::string::npos);
-    REQUIRE(result.unit.source.find("GDPPNative_StaticContext__Parent::score()") !=
+    REQUIRE(result.unit.header.find("static int64_t _gdpp_script_method_score()") !=
             std::string::npos);
+    REQUIRE(result.unit.source.find("_gdpp_static_total_storage()") != std::string::npos);
+    REQUIRE(
+        result.unit.source.find("GDPPNative_StaticContext__Parent::_gdpp_script_method_score()") !=
+        std::string::npos);
     REQUIRE(result.unit.source.find("make_local_callable<") != std::string::npos);
     REQUIRE(result.unit.source.find(">(nullptr") != std::string::npos);
     REQUIRE(result.unit.source.find("GDPPNative_StaticContext__Child::_gdpp_set_total(") !=
@@ -3225,10 +3239,12 @@ TEST_CASE("compiler emits guarded native stubs for abstract method contracts") {
 
     REQUIRE(root.success);
     REQUIRE(root.unit.is_abstract);
-    REQUIRE(root.unit.header.find("virtual godot::String execute(int64_t value);") !=
+    REQUIRE(root.unit.header.find(
+                "virtual godot::String _gdpp_script_method_execute(int64_t value);") !=
             std::string::npos);
     REQUIRE(root.unit.header.find("execute(int64_t value) = 0") == std::string::npos);
-    REQUIRE(root.unit.source.find("GDPPNative_WorkContract::execute(") != std::string::npos);
+    REQUIRE(root.unit.source.find("GDPPNative_WorkContract::_gdpp_script_method_execute(") !=
+            std::string::npos);
     REQUIRE(root.unit.source.find("Cannot call abstract function 'execute'.") != std::string::npos);
     REQUIRE(root.unit.source.find("&GDPPNative_WorkContract::_gdpp_variant_call_execute") !=
             std::string::npos);
@@ -3236,14 +3252,18 @@ TEST_CASE("compiler emits guarded native stubs for abstract method contracts") {
     REQUIRE(inner.success);
     REQUIRE_EQ(inner.unit.abstract_inner_class_names.size(), std::size_t{1});
     REQUIRE(inner.unit.abstract_inner_class_names.front().find("__Contract") != std::string::npos);
-    REQUIRE(inner.unit.header.find("virtual godot::String execute(int64_t value);") !=
+    REQUIRE(inner.unit.header.find(
+                "virtual godot::String _gdpp_script_method_execute(int64_t value);") !=
             std::string::npos);
-    REQUIRE(inner.unit.header.find("virtual godot::String execute(int64_t value) override;") !=
+    REQUIRE(inner.unit.header.find(
+                "virtual godot::String _gdpp_script_method_execute(int64_t value) override;") !=
             std::string::npos);
     REQUIRE(inner.unit.header.find("execute(int64_t value) = 0") == std::string::npos);
-    REQUIRE(inner.unit.source.find("GDPPNative_InnerContract__Contract::execute(") !=
+    REQUIRE(inner.unit.source.find(
+                "GDPPNative_InnerContract__Contract::_gdpp_script_method_execute(") !=
             std::string::npos);
-    REQUIRE(inner.unit.source.find("GDPPNative_InnerContract__Implementation::execute(") !=
+    REQUIRE(inner.unit.source.find(
+                "GDPPNative_InnerContract__Implementation::_gdpp_script_method_execute(") !=
             std::string::npos);
 }
 
@@ -3787,7 +3807,8 @@ TEST_CASE("compiler generates typed named and anonymous enum constants") {
     REQUIRE(result.unit.header.find("struct State") != std::string::npos);
     REQUIRE(result.unit.header.find("_gdpp_enum_RUN = 8") != std::string::npos);
     REQUIRE(result.unit.header.find("_gdpp_enum_MAX_LIVES = 5") != std::string::npos);
-    REQUIRE(result.unit.header.find("int64_t choose(int64_t value)") != std::string::npos);
+    REQUIRE(result.unit.header.find("int64_t _gdpp_script_method_choose(int64_t value)") !=
+            std::string::npos);
     REQUIRE(result.unit.source.find("State::_gdpp_enum_RUN") != std::string::npos);
     REQUIRE(result.unit.source.find("bind_integer_constant") != std::string::npos);
     REQUIRE(result.unit.source.find("IDLE:0,WALK:4,RUN:8") != std::string::npos);
@@ -4137,7 +4158,7 @@ TEST_CASE("compiler lowers Dictionary named access through its keyed native ABI"
     REQUIRE(result.unit.source.find("gdpp::runtime::get_named") == std::string::npos);
     REQUIRE(result.unit.source.find("gdpp::runtime::set_named") == std::string::npos);
     REQUIRE(result.unit.source.find("gdpp::runtime::bound_method_at(") == std::string::npos);
-    const auto read_source = result.unit.source.find("::read_source(");
+    const auto read_source = result.unit.source.find("::_gdpp_script_method_read_source(");
     const auto receiver = result.unit.source.find("_gdpp_dictionary_read_receiver_", read_source);
     const auto receiver_fault = result.unit.source.find("if (script_function_failed())", receiver);
     const auto receiver_lookup =
@@ -4843,7 +4864,8 @@ TEST_CASE("compound property writes evaluate receivers current values and right 
                                          "    take_probe().score += next_delta()\n");
 
     REQUIRE(result.success);
-    const auto begin = result.unit.source.find("void GDPPNative_CompoundReceiverOrder::apply()");
+    const auto begin = result.unit.source.find(
+        "void GDPPNative_CompoundReceiverOrder::_gdpp_script_method_apply()");
     const auto end = result.unit.source.find(
         "void GDPPNative_CompoundReceiverOrder::_gdpp_variant_call_take_node", begin);
     REQUIRE(begin != std::string::npos);
@@ -5232,9 +5254,10 @@ TEST_CASE("static constructors are validated and run through the class initializ
     REQUIRE(valid.unit.source.find("static thread_local bool editor_value{}") != std::string::npos);
     const auto valid_guard = valid.unit.source.find("::_gdpp_ensure_static_initialized() {");
     REQUIRE(valid_guard != std::string::npos);
-    REQUIRE(valid.unit.source.find("            _static_init();", valid_guard) !=
-            std::string::npos);
-    const auto static_initializer = valid.unit.source.find("::_static_init() {");
+    REQUIRE(valid.unit.source.find("            _gdpp_script_method__static_init();",
+                                   valid_guard) != std::string::npos);
+    const auto static_initializer =
+        valid.unit.source.find("::_gdpp_script_method__static_init() {");
     REQUIRE(static_initializer != std::string::npos);
     REQUIRE(valid.unit.source.find("ScriptFaultPolicy::inherit_existing", static_initializer) !=
             std::string::npos);
@@ -5249,7 +5272,8 @@ TEST_CASE("static constructors are validated and run through the class initializ
     REQUIRE(tool.success);
     const auto tool_guard = tool.unit.source.find("::_gdpp_ensure_static_initialized() {");
     REQUIRE(tool_guard != std::string::npos);
-    REQUIRE(tool.unit.source.find("            _static_init();", tool_guard) != std::string::npos);
+    REQUIRE(tool.unit.source.find("            _gdpp_script_method__static_init();", tool_guard) !=
+            std::string::npos);
     REQUIRE(tool.unit.source.find("editor_value") == std::string::npos);
     const auto tool_bind = tool.unit.source.find("::_bind_methods() {");
     const auto tool_bind_end = tool.unit.source.find("}\n\n", tool_bind);
@@ -5649,7 +5673,7 @@ TEST_CASE("third-party GDExtension singletons resolve through Engine at runtime"
     REQUIRE(result.unit.source.find("gdpp::runtime::call_dynamic") != std::string::npos);
     REQUIRE(result.unit.source.find("static const godot::StringName _gdpp_dynamic_method_") !=
             std::string::npos);
-    const auto singleton = result.unit.source.find("::singleton(");
+    const auto singleton = result.unit.source.find("::_gdpp_script_method_singleton(");
     const auto lookup = result.unit.source.find("find_engine_singleton_at(", singleton);
     const auto failure = result.unit.source.find("if (script_function_failed())", lookup);
     const auto returned = result.unit.source.find("return _gdpp_return_value_", failure);
@@ -5941,7 +5965,7 @@ TEST_CASE("compiler contains fatal expression faults and preserves Godot assignm
     REQUIRE(result.success);
     const auto& source = result.unit.source;
 
-    const auto direct = source.find("::direct()");
+    const auto direct = source.find("::_gdpp_script_method_direct()");
     const auto bounds = source.find("gdpp::runtime::checked_array_get", direct);
     const auto bounds_failure = source.find("script_function_failed()", bounds);
     const auto right = source.find("godot::String(\"right\")", bounds);
@@ -5950,22 +5974,22 @@ TEST_CASE("compiler contains fatal expression faults and preserves Godot assignm
     REQUIRE(bounds < bounds_failure);
     REQUIRE(bounds_failure < right);
 
-    const auto callee = source.find("::callee()");
-    const auto caller = source.find("::caller()");
+    const auto callee = source.find("::_gdpp_script_method_callee()");
+    const auto caller = source.find("::_gdpp_script_method_caller()");
     REQUIRE(source.find("gdpp::runtime::ScriptFunctionScope", callee) < caller);
     REQUIRE(source.find("gdpp::runtime::ScriptFunctionScope", caller) != std::string::npos);
-    const auto callee_call = source.find("callee()", caller + 1);
+    const auto callee_call = source.find("_gdpp_script_method_callee()", caller + 1);
     const auto caller_after = source.find("godot::String(\"after\")", callee_call);
     REQUIRE(callee_call < caller_after);
 
-    const auto logical = source.find("::logical(");
+    const auto logical = source.find("::_gdpp_script_method_logical(");
     const auto logical_bounds = source.find("gdpp::runtime::checked_array_get", logical);
     const auto logical_failure = source.find("script_function_failed()", logical_bounds);
     const auto logical_right = source.find("godot::String(\"logical-right\")", logical_bounds);
     REQUIRE(logical_bounds < logical_failure);
     REQUIRE(logical_failure < logical_right);
 
-    const auto conditional = source.find("::conditional(");
+    const auto conditional = source.find("::_gdpp_script_method_conditional(");
     const auto condition_bounds = source.find("gdpp::runtime::checked_array_get", conditional);
     const auto condition_failure = source.find("script_function_failed()", condition_bounds);
     const auto selected = source.find("godot::String(\"selected\")", condition_bounds);
@@ -5974,10 +5998,10 @@ TEST_CASE("compiler contains fatal expression faults and preserves Godot assignm
     REQUIRE(condition_failure < selected);
     REQUIRE(condition_failure < fallback);
 
-    const auto assignment = source.find("::assign()");
-    const auto target_call = source.find("target(", assignment + 1);
+    const auto assignment = source.find("::_gdpp_script_method_assign()");
+    const auto target_call = source.find("_gdpp_script_method_target(", assignment + 1);
     const auto rhs_call = source.find("godot::String(\"rhs\")", target_call);
-    const auto index_call = source.find("index()", rhs_call);
+    const auto index_call = source.find("_gdpp_script_method_index()", rhs_call);
     const auto write = source.find("gdpp::runtime::checked_array_set", index_call);
     REQUIRE(assignment != std::string::npos);
     REQUIRE(target_call < rhs_call);
@@ -6002,9 +6026,9 @@ TEST_CASE("compiler polls script faults only at statically fallible expression b
 
     REQUIRE(result.success);
     const auto& source = result.unit.source;
-    const auto pure = source.find("::pure(");
-    const auto converted = source.find("::converted_argument(", pure);
-    const auto fallible = source.find("::fallible(", converted);
+    const auto pure = source.find("::_gdpp_script_method_pure(");
+    const auto converted = source.find("::_gdpp_script_method_converted_argument(", pure);
+    const auto fallible = source.find("::_gdpp_script_method_fallible(", converted);
     REQUIRE(pure != std::string::npos);
     REQUIRE(converted != std::string::npos);
     REQUIRE(fallible != std::string::npos);
@@ -6045,7 +6069,7 @@ TEST_CASE("specialized calls stop argument evaluation at the first fatal fault")
     const auto& source = result.unit.source;
     const auto require_stopped_call = [&](const std::string& method, const std::string& last_marker,
                                           const std::string& invocation) {
-        const auto start = source.find("::" + method + "(");
+        const auto start = source.find("::_gdpp_script_method_" + method + "(");
         const auto bounds = source.find("gdpp::runtime::checked_array_get", start);
         const auto failure = source.find("script_function_failed()", bounds);
         const auto last = source.find("godot::String(\"" + last_marker + "\")", bounds);
@@ -6117,7 +6141,8 @@ TEST_CASE("compiler handles generated logical guard chains with bounded stack de
 
     REQUIRE(result.success);
     REQUIRE(result.metrics.ast_expression_count >= operand_count);
-    REQUIRE(result.unit.source.find("bool GDPPNative_LargeLogicalChain::validate()") !=
+    REQUIRE(result.unit.source.find(
+                "bool GDPPNative_LargeLogicalChain::_gdpp_script_method_validate()") !=
             std::string::npos);
 }
 
@@ -6168,7 +6193,8 @@ TEST_CASE("compiler owns enough worker stack for deeply nested postfix semantics
 
     REQUIRE(result.success);
     REQUIRE(result.metrics.ast_expression_count >= access_count * 2U);
-    REQUIRE(result.unit.source.find("GDPPNative_NestedPostfix::lookup") != std::string::npos);
+    REQUIRE(result.unit.source.find("GDPPNative_NestedPostfix::_gdpp_script_method_lookup") !=
+            std::string::npos);
 }
 
 TEST_CASE("instance Godot methods cannot be called through type references") {
