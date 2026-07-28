@@ -13,6 +13,35 @@ func _stable_text(value: Variant, kind: Variant.Type) -> String:
     return str(value)
 
 
+func _synthetic_builtin_members(
+    vector: Vector2,
+    vector_i: Vector2i,
+    transform: Transform2D,
+    plane: Plane,
+    color: Color,
+) -> Array:
+    vector.x = vector.y
+    vector_i.x = vector_i.y
+    transform.x = transform.y
+    plane.x = plane.y
+    plane.d = plane.z
+    color.r = color.g
+    color.r8 = color.g8
+    color.h = color.s
+    color.ok_hsl_h = color.ok_hsl_s
+    return [
+        vector.x,
+        vector_i.x,
+        transform.x,
+        plane.x,
+        plane.d,
+        color.r,
+        color.r8,
+        color.h,
+        color.ok_hsl_h,
+    ]
+
+
 func run() -> String:
     var values: Array[Variant] = [
         null,

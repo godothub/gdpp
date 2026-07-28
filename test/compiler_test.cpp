@@ -2841,6 +2841,47 @@ TEST_CASE("compiler preserves typed subscript and builtin component scalar seman
     REQUIRE(result.unit.source.find("gdpp::runtime::binary") == std::string::npos);
 }
 
+TEST_CASE("compiler maps every synthetic builtin member through its native ABI") {
+    const gdpp::Compiler compiler;
+    const auto result = compiler.compile(
+        "synthetic_builtin_members.gd",
+        "func update(vector: Vector2, vector_i: Vector2i, transform: Transform2D, "
+        "plane: Plane, color: Color) -> Array:\n"
+        "    vector.x = vector.y\n"
+        "    vector_i.x = vector_i.y\n"
+        "    transform.x = transform.y\n"
+        "    plane.x = plane.y\n"
+        "    plane.d = plane.z\n"
+        "    color.r = color.g\n"
+        "    color.r8 = color.g8\n"
+        "    color.h = color.s\n"
+        "    color.ok_hsl_h = color.ok_hsl_s\n"
+        "    return [vector.x, vector_i.x, transform.x, plane.x, plane.d, color.r, "
+        "color.r8, color.h, color.ok_hsl_h]\n");
+
+    REQUIRE(result.success);
+    const auto& source = result.unit.source;
+    REQUIRE(source.find(".x = static_cast<godot::real_t>(") != std::string::npos);
+    REQUIRE(source.find(".x = static_cast<int32_t>(") != std::string::npos);
+    REQUIRE(source.find("[0] = ") != std::string::npos);
+    REQUIRE(source.find("transform[1]") != std::string::npos);
+    REQUIRE(source.find(".normal.x = static_cast<godot::real_t>(") != std::string::npos);
+    REQUIRE(source.find("plane.normal.y") != std::string::npos);
+    REQUIRE(source.find(".d = static_cast<godot::real_t>(") != std::string::npos);
+    REQUIRE(source.find(".r = static_cast<float>(") != std::string::npos);
+    REQUIRE(source.find(".get_g8()") != std::string::npos);
+    REQUIRE(source.find(".set_r8(static_cast<int32_t>(") != std::string::npos);
+    REQUIRE(source.find(".get_s()") != std::string::npos);
+    REQUIRE(source.find(".set_h(static_cast<float>(") != std::string::npos);
+    REQUIRE(source.find("gdpp::runtime::get_builtin_member(") != std::string::npos);
+    REQUIRE(source.find("gdpp::runtime::set_builtin_member(") != std::string::npos);
+    REQUIRE(source.find("godot::StringName(\"ok_hsl_h\")") != std::string::npos);
+    REQUIRE(source.find("godot::StringName(\"ok_hsl_s\")") != std::string::npos);
+    REQUIRE(source.find("color.h") == std::string::npos);
+    REQUIRE(source.find("color.r8") == std::string::npos);
+    REQUIRE(source.find("color.ok_hsl_h") == std::string::npos);
+}
+
 TEST_CASE("compiler contains invalid native sequence indexes instead of dereferencing them") {
     const gdpp::Compiler compiler;
     const auto result = compiler.compile(

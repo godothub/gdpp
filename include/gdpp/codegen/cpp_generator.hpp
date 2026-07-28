@@ -149,12 +149,15 @@ class CodeGenerator final {
                                                       std::string value) const;
     [[nodiscard]] std::string managed_storage_empty_value(const Type& type,
                                                           std::string_view storage) const;
-    [[nodiscard]] std::string emit_direct_builtin_member(std::string_view owner, std::string object,
-                                                         std::string_view member) const;
+    [[nodiscard]] std::string emit_direct_builtin_member(
+        std::string_view owner, std::string object, std::string_view member,
+        const SourceSpan* source_span = nullptr) const;
     [[nodiscard]] std::string emit_direct_builtin_assignment(std::string_view owner,
                                                              std::string object,
                                                              std::string_view member,
-                                                             std::string value) const;
+                                                             std::string value,
+                                                             const SourceSpan* source_span =
+                                                                 nullptr) const;
     [[nodiscard]] std::string emit_dynamic_assignment(const typed::Statement& statement,
                                                       std::size_t indent) const;
     [[nodiscard]] std::string emit_dictionary_member_assignment(const typed::Statement& statement,

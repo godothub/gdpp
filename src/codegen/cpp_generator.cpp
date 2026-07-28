@@ -2773,7 +2773,8 @@ std::string CodeGenerator::managed_storage_empty_value(const Type& type,
 }
 
 std::string CodeGenerator::emit_direct_builtin_member(std::string_view owner, std::string object,
-                                                      std::string_view member) const {
+                                                      std::string_view member,
+                                                      const SourceSpan* source_span) const {
     const auto component_index = [](std::string_view name) -> int {
         if (name == "x")
             return 0;
@@ -2789,11 +2790,26 @@ std::string CodeGenerator::emit_direct_builtin_member(std::string_view owner, st
         result = object + ".get_column(" + std::to_string(index) + ")";
     else if (owner == "Projection" && index >= 0)
         result = object + "[" + std::to_string(index) + "]";
+    else if (owner == "Transform2D" && index >= 0 && index < 2)
+        result = object + "[" + std::to_string(index) + "]";
+    else if (owner == "Plane" && index >= 0 && index < 3)
+        result = object + ".normal." + std::string{member};
     else if (owner == "Transform2D" && member == "origin")
         result = object + ".get_origin()";
     else if ((owner == "Rect2" || owner == "Rect2i" || owner == "AABB") && member == "end")
         result = object + ".get_end()";
-    else
+    else if (owner == "Color" &&
+             (member == "r8" || member == "g8" || member == "b8" || member == "a8" ||
+              member == "h" || member == "s" || member == "v"))
+        result = object + ".get_" + std::string{member} + "()";
+    else if (owner == "Color" &&
+             (member == "ok_hsl_h" || member == "ok_hsl_s" || member == "ok_hsl_l")) {
+        const auto* location_span = source_span ? source_span : current_expression_span_;
+        const auto location = location_span ? script_location(*location_span)
+                                            : "gdpp::runtime::ScriptSourceLocation{}";
+        result = "gdpp::runtime::get_builtin_member(" + object + ", " +
+                 godot_string_name(std::string{member}) + ", " + location + ")";
+    } else
         result = object + "." + sanitize_identifier(std::string{member});
     if (const auto* property = api_.find_property(owner, member))
         return emit_api_return(api_.property_getter_type(*property), std::move(result));
@@ -2803,7 +2819,8 @@ std::string CodeGenerator::emit_direct_builtin_member(std::string_view owner, st
 std::string CodeGenerator::emit_direct_builtin_assignment(std::string_view owner,
                                                           std::string object,
                                                           std::string_view member,
-                                                          std::string value) const {
+                                                          std::string value,
+                                                          const SourceSpan* source_span) const {
     const auto component_index = [](std::string_view name) -> int {
         if (name == "x")
             return 0;
@@ -2818,10 +2835,47 @@ std::string CodeGenerator::emit_direct_builtin_assignment(std::string_view owner
         return object + ".set_column(" + std::to_string(index) + ", " + value + ")";
     if (owner == "Projection" && index >= 0)
         return object + "[" + std::to_string(index) + "] = " + value;
+    if (owner == "Transform2D" && index >= 0 && index < 2)
+        return object + "[" + std::to_string(index) + "] = " + value;
+    if (owner == "Plane" && index >= 0 && index < 3) {
+        return object + ".normal." + std::string{member} +
+               " = static_cast<godot::real_t>(" + value + ")";
+    }
     if (owner == "Transform2D" && member == "origin")
         return object + ".set_origin(" + value + ")";
     if ((owner == "Rect2" || owner == "Rect2i" || owner == "AABB") && member == "end")
         return object + ".set_end(" + value + ")";
+    if ((owner == "Vector2i" || owner == "Vector3i" || owner == "Vector4i") && index >= 0) {
+        return object + "." + std::string{member} + " = static_cast<int32_t>(" + value + ")";
+    }
+    if ((owner == "Vector2" || owner == "Vector3" || owner == "Vector4" ||
+         owner == "Quaternion") &&
+        index >= 0) {
+        return object + "." + std::string{member} +
+               " = static_cast<godot::real_t>(" + value + ")";
+    }
+    if (owner == "Plane" && member == "d")
+        return object + ".d = static_cast<godot::real_t>(" + value + ")";
+    if (owner == "Color" &&
+        (member == "r" || member == "g" || member == "b" || member == "a")) {
+        return object + "." + std::string{member} + " = static_cast<float>(" + value + ")";
+    }
+    if (owner == "Color" &&
+        (member == "r8" || member == "g8" || member == "b8" || member == "a8")) {
+        return object + ".set_" + std::string{member} + "(static_cast<int32_t>(" + value + "))";
+    }
+    if (owner == "Color" && (member == "h" || member == "s" || member == "v")) {
+        return object + ".set_" + std::string{member} + "(static_cast<float>(" + value + "))";
+    }
+    if (owner == "Color" &&
+        (member == "ok_hsl_h" || member == "ok_hsl_s" || member == "ok_hsl_l")) {
+        const auto* location_span = source_span ? source_span : current_expression_span_;
+        const auto location = location_span ? script_location(*location_span)
+                                            : "gdpp::runtime::ScriptSourceLocation{}";
+        return "gdpp::runtime::set_builtin_member(" + object + ", " +
+               godot_string_name(std::string{member}) + ", gdpp::runtime::to_variant(" + value +
+               "), " + location + ")";
+    }
     return object + "." + sanitize_identifier(std::string{member}) + " = " + value;
 }
 
@@ -5098,7 +5152,8 @@ std::string CodeGenerator::emit_expression(const typed::Expression& expression) 
         }
         if (expression.resolution == typed::ResolutionKind::godot_property &&
             expression.direct_access && expression.operands.at(0)->type.kind == TypeKind::builtin) {
-            return emit_direct_builtin_member(expression.resolved_owner, object, expression.value);
+            return emit_direct_builtin_member(expression.resolved_owner, object, expression.value,
+                                              &expression.span);
         }
         return finish_object_access(
             receiver_name + connector +
@@ -6656,14 +6711,16 @@ std::string CodeGenerator::emit_statement_body(const typed::Statement& statement
                      --chain_index) {
                     const auto* member = direct_chain[chain_index - 1];
                     assignment_object = emit_direct_builtin_member(
-                        member->resolved_owner, std::move(assignment_object), member->value);
+                        member->resolved_owner, std::move(assignment_object), member->value,
+                        &member->span);
                 }
                 auto current_value = root_name;
                 for (std::size_t chain_index = direct_chain.size(); chain_index > 0;
                      --chain_index) {
                     const auto* member = direct_chain[chain_index - 1];
                     current_value = emit_direct_builtin_member(
-                        member->resolved_owner, std::move(current_value), member->value);
+                        member->resolved_owner, std::move(current_value), member->value,
+                        &member->span);
                 }
                 auto value = assignment_value(std::move(current_value), target.assignment_type);
                 const auto assigned_name = "_gdpp_property_assigned_" + suffix;
@@ -6673,7 +6730,8 @@ std::string CodeGenerator::emit_statement_body(const typed::Statement& statement
                     nested_prefix +
                     emit_direct_builtin_assignment(direct_chain.front()->resolved_owner,
                                                    std::move(assignment_object),
-                                                   direct_chain.front()->value, assigned_name) +
+                                                   direct_chain.front()->value, assigned_name,
+                                                   &direct_chain.front()->span) +
                     ";\n";
                 const auto* setter = api_.find_method(root->resolved_owner, root->setter);
                 std::string setter_index;
@@ -6705,7 +6763,8 @@ std::string CodeGenerator::emit_statement_body(const typed::Statement& statement
                 const auto receiver = "_gdpp_builtin_receiver_" + suffix;
                 const auto nested_prefix = indent(indentation + 1);
                 auto value = assignment_value(
-                    emit_direct_builtin_member(target.resolved_owner, receiver, target.value),
+                    emit_direct_builtin_member(target.resolved_owner, receiver, target.value,
+                                               &target.span),
                     target.assignment_type);
                 const auto assigned = "_gdpp_builtin_assigned_" + suffix;
                 return prefix + "{\n" + nested_prefix + "auto &&" + receiver + " = " +
@@ -6714,7 +6773,7 @@ std::string CodeGenerator::emit_statement_body(const typed::Statement& statement
                        emit_script_failure_return(indentation + 1, in_async_continuation_) +
                        nested_prefix +
                        emit_direct_builtin_assignment(target.resolved_owner, receiver, target.value,
-                                                      assigned) +
+                                                      assigned, &target.span) +
                        ";\n" + prefix + "}\n";
             }
         }

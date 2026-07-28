@@ -779,6 +779,23 @@ call_dynamic_at(const ScriptSourceLocation location, godot::Variant& target,
 void set_named(godot::Variant& target, const godot::StringName& name, const godot::Variant& value,
                ScriptSourceLocation location = {});
 
+template <typename Builtin>
+[[nodiscard]] godot::Variant get_builtin_member(const Builtin& target,
+                                                const godot::StringName& name,
+                                                const ScriptSourceLocation location = {}) {
+    return get_named(godot::Variant(target), name, location);
+}
+
+template <typename Builtin>
+void set_builtin_member(Builtin& target, const godot::StringName& name,
+                        const godot::Variant& value,
+                        const ScriptSourceLocation location = {}) {
+    godot::Variant storage{target};
+    set_named(storage, name, value, location);
+    if (!script_function_failed())
+        target = static_cast<Builtin>(storage);
+}
+
 [[nodiscard]] godot::Variant get_key(const godot::Variant& target, const godot::Variant& key,
                                      ScriptSourceLocation location = {});
 void set_key(godot::Variant& target, const godot::Variant& key, const godot::Variant& value,
