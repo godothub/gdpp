@@ -43,7 +43,9 @@ class AttachedScriptInstance final {
         if (behavior.is_valid())
             behavior->detach_owner();
         std::lock_guard<std::mutex> lock{instances_mutex()};
-        instances().erase(owner);
+        const auto found = instances().find(owner);
+        if (found != instances().end() && found->second == this)
+            instances().erase(found);
     }
 
     static std::mutex& instances_mutex() {
@@ -514,12 +516,17 @@ void* AttachedCompiledScript::_instance_create(godot::Object* object) const {
 
     godot::Ref<AttachedCompiledScript> script{const_cast<AttachedCompiledScript*>(this)};
     auto* instance = memnew(AttachedScriptInstance(object, std::move(script), *metadata, behavior));
+    bool inserted = false;
     {
         std::lock_guard<std::mutex> lock{AttachedScriptInstance::instances_mutex()};
-        if (!AttachedScriptInstance::instances().emplace(object, instance).second) {
-            godot::memdelete(instance);
-            return nullptr;
-        }
+        inserted = AttachedScriptInstance::instances().emplace(object, instance).second;
+    }
+    if (!inserted) {
+        // Destruction detaches the speculative behavior and must run without the registry mutex.
+        // It also verifies pointer identity before erasing so the incumbent instance remains
+        // authoritative when a duplicate attachment races with teardown or editor reload.
+        godot::memdelete(instance);
+        return nullptr;
     }
     if (behavior.is_null()) {
         instance->godot_instance_handle = godot::gdextension_interface::script_instance_create3(
