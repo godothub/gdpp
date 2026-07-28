@@ -1994,6 +1994,15 @@ CodeGenerator::script_method_implementation_name(const ScriptClassSymbol& owner,
                : "_gdpp_native_override__gdpp_virtual_impl_" + source_name;
 }
 
+std::string
+CodeGenerator::local_function_implementation_name(const std::string_view source_name) const {
+    if (const auto method = local_function_native_names_.find(std::string{source_name});
+        method != local_function_native_names_.end()) {
+        return method->second;
+    }
+    return "_gdpp_script_method_" + sanitize_identifier(std::string{source_name});
+}
+
 const ScriptInnerClassSymbol*
 CodeGenerator::inner_base_of(const ScriptInnerClassSymbol& owner) const noexcept {
     if (!script_symbols_ || owner.base_class_name.empty())
@@ -8245,7 +8254,8 @@ void CodeGenerator::emit_inner_class_definition(const typed::Class& declaration,
             source << emit_script_failure_return(1, false);
         }
         if (field.getter && !field.getter->method.empty()) {
-            source << "    return " << sanitize_identifier(field.getter->method) << "();\n";
+            source << "    return "
+                   << local_function_implementation_name(field.getter->method) << "();\n";
         } else if (field.getter) {
             current_return_type_ = field.type;
             in_function_body_ = true;
@@ -8278,7 +8288,8 @@ void CodeGenerator::emit_inner_class_definition(const typed::Class& declaration,
                    << "    if (script_function_failed()) return;\n";
         }
         if (field.setter && !field.setter->method.empty()) {
-            source << "    " << sanitize_identifier(field.setter->method) << "(value);\n";
+            source << "    " << local_function_implementation_name(field.setter->method)
+                   << "(value);\n";
         } else if (field.setter) {
             current_return_type_ = {TypeKind::void_type, "void"};
             in_function_body_ = true;
@@ -9886,7 +9897,8 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
         }
         if (variable.getter) {
             if (!variable.getter->method.empty()) {
-                source << "    return " << sanitize_identifier(variable.getter->method) << "();\n";
+                source << "    return "
+                       << local_function_implementation_name(variable.getter->method) << "();\n";
             } else {
                 current_return_type_ = variable.type;
                 in_function_body_ = true;
@@ -9922,7 +9934,8 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
         }
         if (variable.setter) {
             if (!variable.setter->method.empty()) {
-                source << "    " << sanitize_identifier(variable.setter->method) << '('
+                source << "    "
+                       << local_function_implementation_name(variable.setter->method) << '('
                        << setter_parameter << ");\n";
             } else {
                 current_return_type_ = {TypeKind::void_type, "void"};

@@ -4569,14 +4569,51 @@ TEST_CASE("compiler generates validated method-bound property accessors") {
                                      "    return active\n");
 
     REQUIRE(result.success);
-    REQUIRE(result.unit.source.find("return is_active();") != std::string::npos);
-    REQUIRE(result.unit.source.find("set_active(value);") != std::string::npos);
+    REQUIRE(result.unit.source.find("return _gdpp_script_method_is_active();") !=
+            std::string::npos);
+    REQUIRE(result.unit.source.find("_gdpp_script_method_set_active(value);") !=
+            std::string::npos);
+    REQUIRE(result.unit.source.find("return is_active();") == std::string::npos);
+    REQUIRE(result.unit.source.find("    set_active(value);") == std::string::npos);
     REQUIRE(result.unit.source.find("active = std::move(_gdpp_assignment_result_") !=
             std::string::npos);
     REQUIRE(result.unit.source.find(" = false;") != std::string::npos);
     REQUIRE(result.unit.source.find("_gdpp_set_active(std::move(_gdpp_assignment_result_") !=
             std::string::npos);
     REQUIRE(result.unit.source.find(" = _gdpp_get_active();") != std::string::npos);
+}
+
+TEST_CASE("compiler isolates every method-bound property accessor target") {
+    const gdpp::Compiler compiler;
+    const auto result =
+        compiler.compile("isolated_bound_accessors.gd",
+                         "class_name IsolatedBoundAccessors\n"
+                         "extends Node\n"
+                         "static var shared: bool = true: set = set_shared, get = is_shared\n"
+                         "static func set_shared(value: bool) -> void:\n"
+                         "    shared = value\n"
+                         "static func is_shared() -> bool:\n"
+                         "    return shared\n"
+                         "class State:\n"
+                         "    var active: bool = true: set = set_active, get = is_active\n"
+                         "    func set_active(value: bool) -> void:\n"
+                         "        active = value\n"
+                         "    func is_active() -> bool:\n"
+                         "        return active\n");
+
+    REQUIRE(result.success);
+    REQUIRE(result.unit.source.find("return _gdpp_script_method_is_shared();") !=
+            std::string::npos);
+    REQUIRE(result.unit.source.find("_gdpp_script_method_set_shared(value);") !=
+            std::string::npos);
+    REQUIRE(result.unit.source.find("return _gdpp_script_method_is_active();") !=
+            std::string::npos);
+    REQUIRE(result.unit.source.find("_gdpp_script_method_set_active(value);") !=
+            std::string::npos);
+    REQUIRE(result.unit.source.find("return is_shared();") == std::string::npos);
+    REQUIRE(result.unit.source.find("    set_shared(value);") == std::string::npos);
+    REQUIRE(result.unit.source.find("return is_active();") == std::string::npos);
+    REQUIRE(result.unit.source.find("    set_active(value);") == std::string::npos);
 }
 
 TEST_CASE("compiler preserves coroutine property accessor ABI") {
@@ -4633,7 +4670,9 @@ TEST_CASE("compiler preserves coroutine property accessor ABI") {
     REQUIRE(bound_accessors.success);
     REQUIRE(bound_accessors.unit.header.find("godot::Variant _gdpp_get_value()") !=
             std::string::npos);
-    REQUIRE(bound_accessors.unit.source.find("return read_value();") != std::string::npos);
+    REQUIRE(bound_accessors.unit.source.find(
+                "return _gdpp_script_method_read_value();") != std::string::npos);
+    REQUIRE(bound_accessors.unit.source.find("return read_value();") == std::string::npos);
     REQUIRE(static_accessors.success);
     REQUIRE(static_accessors.unit.header.find("static godot::Variant _gdpp_get_value()") !=
             std::string::npos);

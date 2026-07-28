@@ -254,6 +254,8 @@ class CodeGenerator final {
     [[nodiscard]] std::string
     script_method_implementation_name(const ScriptClassSymbol& owner,
                                       const ScriptMemberSymbol& method) const;
+    [[nodiscard]] std::string
+    local_function_implementation_name(std::string_view source_name) const;
     [[nodiscard]] const ScriptInnerClassSymbol*
     inner_base_of(const ScriptInnerClassSymbol& owner) const noexcept;
     [[nodiscard]] InnerMethodDeclaration
