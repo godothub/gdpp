@@ -1290,6 +1290,19 @@ TEST_CASE("compiler routes native script identity through the compatibility runt
                 "gdpp::runtime::script_identity(this, _gdpp_source_path)") != std::string::npos);
 }
 
+TEST_CASE("compiler uses godot-cpp escaped names for engine methods") {
+    const gdpp::Compiler compiler;
+    const auto result = compiler.compile(
+        "script_factory.gd", "extends Node\n"
+                             "@export var factory: GDScript\n"
+                             "func create(first: Variant, second: Variant) -> Variant:\n"
+                             "    return factory.new(first, second)\n");
+
+    REQUIRE(result.success);
+    REQUIRE(result.unit.source.find("->new_(") != std::string::npos);
+    REQUIRE(result.unit.source.find("->_gdpp_id_6e6577(") == std::string::npos);
+}
+
 TEST_CASE("compiler selects the Godot Node template for implicit get_node calls") {
     const gdpp::Compiler compiler;
     const auto result =

@@ -1223,6 +1223,22 @@ bool has_direct_cpp_binary_operator(const std::string_view operation, const Type
     return false;
 }
 
+std::string godot_cpp_method_identifier(const std::string_view source_name) {
+    // These are public godot-cpp wrapper names, not GDPP-owned symbols. Match the binding
+    // generator's stable escape table instead of applying the compiler's injective encoding for
+    // customer identifiers.
+    static const std::unordered_map<std::string_view, std::string_view> escaped{
+        {"class", "_class"},       {"char", "_char"},        {"short", "_short"},
+        {"bool", "_bool"},         {"int", "_int"},          {"default", "_default"},
+        {"case", "_case"},         {"switch", "_switch"},    {"export", "_export"},
+        {"template", "_template"}, {"new", "new_"},           {"operator", "_operator"},
+        {"typeof", "type_of"},     {"typename", "type_name"}, {"enum", "_enum"},
+    };
+    if (const auto found = escaped.find(source_name); found != escaped.end())
+        return std::string{found->second};
+    return std::string{source_name};
+}
+
 } // namespace
 
 std::string CodeGenerator::sanitize_identifier(const std::string& value) {
@@ -4472,7 +4488,9 @@ std::string CodeGenerator::emit_expression(const typed::Expression& expression) 
                     return local->second;
                 }
             }
-            return sanitize_identifier(callee.value);
+            return callee.resolution == typed::ResolutionKind::godot_method
+                       ? godot_cpp_method_identifier(callee.value)
+                       : sanitize_identifier(callee.value);
         }();
         const std::vector<Type>* local_parameters = nullptr;
         const typed::Function* local_function = nullptr;
@@ -5028,7 +5046,7 @@ std::string CodeGenerator::emit_expression(const typed::Expression& expression) 
             !expression.operands.empty() &&
             expression.operands.at(0)->type.kind == TypeKind::script_resource) {
             return emit_expression(*expression.operands.at(0)) + ".resource()->" +
-                   sanitize_identifier(expression.value);
+                   godot_cpp_method_identifier(expression.value);
         }
         if (expression.resolution == typed::ResolutionKind::enum_member &&
             !expression.resolved_owner.empty()) {
