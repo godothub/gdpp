@@ -1344,6 +1344,7 @@ ProjectCompileResult ProjectCompiler::compile_impl(const ProjectCompileOptions& 
     // one deterministic graph. The regular compiler reparses each unit later and remains the
     // authority for full language diagnostics.
     std::unordered_map<std::string, std::size_t> script_classes;
+    std::unordered_map<std::string, std::size_t> autoload_classes;
     std::unordered_map<std::string, std::size_t> native_class_names;
     std::unordered_map<std::string, std::size_t> script_paths;
     const auto script_progress_total = std::max<std::size_t>(inputs.size(), 1);
@@ -1583,6 +1584,8 @@ ProjectCompileResult ProjectCompiler::compile_impl(const ProjectCompileOptions& 
                                                   inputs[owner->second].relative)});
             }
         }
+        if (!input.autoload_name.empty())
+            autoload_classes.emplace(input.autoload_name, index);
         script_paths.emplace(input.relative, index);
         report_project_progress(options, ProjectCompilePhase::parse, index + 1,
                                 script_progress_total);
@@ -1783,9 +1786,10 @@ ProjectCompileResult ProjectCompiler::compile_impl(const ProjectCompileOptions& 
             return path->second;
         return std::nullopt;
     };
-    // An internal class may inherit either a globally named script or a script resource held by
-    // a lexical preload constant. Resolve that source-language identity before semantic analysis
-    // so the frontend and generated C++ share one explicit native inheritance graph.
+    // An internal class may inherit a globally named script, an autoload, a script resource held
+    // by a lexical preload constant, or an internal class owned by any of those scripts. Resolve
+    // that source-language identity before semantic analysis so the frontend and generated C++
+    // share one explicit native inheritance graph.
     for (auto& input : inputs) {
         for (auto& inner : input.inner_classes) {
             if (inner.base_class_name.empty())
@@ -1806,12 +1810,37 @@ ProjectCompileResult ProjectCompiler::compile_impl(const ProjectCompileOptions& 
             }
 
             std::optional<std::size_t> script_base;
+            std::string inner_base_name;
+            const auto qualified_separator = inner.base_class_name.find('.');
+            if (qualified_separator != std::string::npos) {
+                const auto owner_name = inner.base_class_name.substr(0, qualified_separator);
+                const auto member_name = inner.base_class_name.substr(qualified_separator + 1);
+                if (const auto global = script_classes.find(owner_name);
+                    global != script_classes.end()) {
+                    script_base = global->second;
+                } else if (const auto autoload = autoload_classes.find(owner_name);
+                           autoload != autoload_classes.end()) {
+                    script_base = autoload->second;
+                }
+                if (script_base) {
+                    const auto& owner = inputs[*script_base];
+                    const auto base =
+                        std::find_if(owner.inner_classes.begin(), owner.inner_classes.end(),
+                                     [&](const ScriptInnerClassSymbol& candidate) {
+                                         return candidate.name == member_name;
+                                     });
+                    if (base == owner.inner_classes.end())
+                        script_base.reset();
+                    else
+                        inner_base_name = base->name;
+                }
+            }
             const auto alias = std::find_if(
                 input.script.variables.begin(), input.script.variables.end(),
                 [&](const ast::VariableDeclaration& variable) {
                     return variable.is_constant && variable.name == inner.base_class_name;
                 });
-            if (alias != input.script.variables.end()) {
+            if (!script_base && alias != input.script.variables.end()) {
                 if (const auto path = direct_preload_path(alias->initializer.get()))
                     script_base = resolve_script_input(input, *path);
             }
@@ -1824,7 +1853,20 @@ ProjectCompileResult ProjectCompiler::compile_impl(const ProjectCompileOptions& 
             if (!script_base)
                 continue;
             inner.base_script_path = inputs[*script_base].relative;
-            inner.base_class_name.clear();
+            inner.base_class_name = std::move(inner_base_name);
+            if (!inner.base_class_name.empty()) {
+                const auto& base_owner = inputs[*script_base];
+                const auto base =
+                    std::find_if(base_owner.inner_classes.begin(), base_owner.inner_classes.end(),
+                                 [&](const ScriptInnerClassSymbol& candidate) {
+                                     return candidate.name == inner.base_class_name;
+                                 });
+                if (base != base_owner.inner_classes.end()) {
+                    inner.godot_base_type = base->godot_base_type;
+                    inner.attached_native_base = base->attached_native_base;
+                    inner.external_base_name = base->external_base_name;
+                }
+            }
         }
     }
 
@@ -1853,10 +1895,14 @@ ProjectCompileResult ProjectCompiler::compile_impl(const ProjectCompileOptions& 
             const auto separator = type.name.find('.');
             if (separator == std::string::npos)
                 return;
-            const auto owner = script_classes.find(type.name.substr(0, separator));
-            if (owner == script_classes.end())
+            const auto owner_name = type.name.substr(0, separator);
+            const auto global = script_classes.find(owner_name);
+            const auto autoload = autoload_classes.find(owner_name);
+            if (global == script_classes.end() && autoload == autoload_classes.end())
                 return;
-            const auto& enumerations = inputs[owner->second].enums;
+            const auto owner_index =
+                global != script_classes.end() ? global->second : autoload->second;
+            const auto& enumerations = inputs[owner_index].enums;
             const auto found = std::find_if(
                 enumerations.begin(), enumerations.end(), [&](const ScriptEnumSymbol& enumeration) {
                     return enumeration.name == type.name.substr(separator + 1);
@@ -2039,9 +2085,23 @@ ProjectCompileResult ProjectCompiler::compile_impl(const ProjectCompileOptions& 
                 continue;
             if (!self(self, dependency->second))
                 return false;
-            inner.godot_base_type = inputs[dependency->second].semantic_base_type;
-            inner.attached_native_base = inputs[dependency->second].attached_native_base;
-            inner.external_base_name = inputs[dependency->second].external_base_name;
+            if (inner.base_class_name.empty()) {
+                inner.godot_base_type = inputs[dependency->second].semantic_base_type;
+                inner.attached_native_base = inputs[dependency->second].attached_native_base;
+                inner.external_base_name = inputs[dependency->second].external_base_name;
+            } else {
+                const auto& base_owner = inputs[dependency->second];
+                const auto base =
+                    std::find_if(base_owner.inner_classes.begin(), base_owner.inner_classes.end(),
+                                 [&](const ScriptInnerClassSymbol& candidate) {
+                                     return candidate.name == inner.base_class_name;
+                                 });
+                if (base != base_owner.inner_classes.end()) {
+                    inner.godot_base_type = base->godot_base_type;
+                    inner.attached_native_base = base->attached_native_base;
+                    inner.external_base_name = base->external_base_name;
+                }
+            }
         }
         for (std::size_t pass = 0; pass < inputs[index].inner_classes.size(); ++pass) {
             bool changed = false;
@@ -2371,7 +2431,6 @@ ProjectCompileResult ProjectCompiler::compile_impl(const ProjectCompileOptions& 
                 type = {TypeKind::object, native_script_names[exact_alias->second]};
                 return;
             }
-
             std::size_t owner_index = input_index;
             std::string member_name = type.name;
             if (const auto separator = type.name.find('.'); separator != std::string::npos) {
@@ -2382,6 +2441,9 @@ ProjectCompileResult ProjectCompiler::compile_impl(const ProjectCompileOptions& 
                 } else if (const auto global = script_classes.find(owner_name);
                            global != script_classes.end()) {
                     owner_index = global->second;
+                } else if (const auto autoload = autoload_classes.find(owner_name);
+                           autoload != autoload_classes.end()) {
+                    owner_index = autoload->second;
                 } else if (owner_name != input.script_class_name) {
                     const bool local_inner_owner =
                         std::any_of(input.inner_classes.begin(), input.inner_classes.end(),
@@ -2478,6 +2540,7 @@ ProjectCompileResult ProjectCompiler::compile_impl(const ProjectCompileOptions& 
         }
         script_symbols.add(std::move(symbol));
     }
+    script_symbols.canonicalize_project_types();
     for (const auto& bridge : bridge_load.bridges) {
         for (const auto& type : bridge.classes) {
             ExternalClassSymbol external;

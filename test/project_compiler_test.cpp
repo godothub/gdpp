@@ -1063,6 +1063,88 @@ TEST_CASE("project compiler lowers internal classes derived from preloaded scrip
     REQUIRE(base_position < inner_position);
 }
 
+TEST_CASE("project compiler resolves inherited and cross-script internal class identities") {
+    const auto root = fixture_root("project-cross-script-internal-class-identities");
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
+    write_text(root / "library.gd", "extends RefCounted\n"
+                                    "class_name InternalClassLibrary\n"
+                                    "class Payload:\n"
+                                    "    var strength: int = 41\n"
+                                    "    func value() -> int:\n"
+                                    "        return strength\n");
+    write_text(root / "derived.gd", "extends RefCounted\n"
+                                    "class_name InternalClassDerived\n"
+                                    "class Tool extends InternalClassLibrary.Payload:\n"
+                                    "    func answer() -> int:\n"
+                                    "        strength += 1\n"
+                                    "        return super.value()\n");
+    write_text(root / "consumer.gd", "extends InternalClassLibrary\n"
+                                     "class_name InternalClassConsumer\n"
+                                     "var payload: Payload = Payload.new()\n"
+                                     "var payloads: Array[Payload] = []\n"
+                                     "func answer() -> int:\n"
+                                     "    return payload.value()\n");
+
+    const auto options = project_options(root);
+    const auto result = gdpp::ProjectCompiler{}.compile(options);
+
+    REQUIRE(result.success);
+    const auto library =
+        std::find_if(result.scripts.begin(), result.scripts.end(), [](const auto& script) {
+            return script.relative_path == std::filesystem::path{"library.gd"};
+        });
+    const auto derived =
+        std::find_if(result.scripts.begin(), result.scripts.end(), [](const auto& script) {
+            return script.relative_path == std::filesystem::path{"derived.gd"};
+        });
+    REQUIRE(library != result.scripts.end());
+    REQUIRE(derived != result.scripts.end());
+    REQUIRE_EQ(library->inner_class_names.size(), std::size_t{1});
+    REQUIRE_EQ(derived->inner_class_names.size(), std::size_t{1});
+    REQUIRE_EQ(derived->dependencies, std::vector<std::string>{"library.gd"});
+    const auto derived_header =
+        read_text(options.output_directory / "generated" / derived->header_file_name);
+    REQUIRE(derived_header.find("#include \"" + library->header_file_name + "\"") !=
+            std::string::npos);
+    REQUIRE(derived_header.find("class " + derived->inner_class_names.front() + " : public " +
+                                library->inner_class_names.front()) != std::string::npos);
+}
+
+TEST_CASE("project compiler canonicalizes autoload enums and serializable project exports") {
+    const auto root = fixture_root("project-autoload-enum-export-types");
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
+    write_text(root / "project.godot", "[application]\nconfig/name=\"autoload enum exports\"\n"
+                                       "[autoload]\nPalette=\"*res://palette.gd\"\n");
+    write_text(root / "palette.gd", "extends Node\n"
+                                    "enum SortOptions { HUE, VALUE }\n"
+                                    "func selected() -> SortOptions:\n"
+                                    "    return SortOptions.VALUE\n");
+    write_text(root / "resource_value.gd", "extends Resource\n"
+                                           "class_name ExportedResourceValue\n");
+    write_text(root / "node_value.gd", "extends Node\n"
+                                       "class_name ExportedNodeValue\n");
+    write_text(root / "consumer.gd",
+               "extends Node\n"
+               "class_name AutoloadEnumConsumer\n"
+               "@export var resource_value: ExportedResourceValue\n"
+               "@export var node_value: ExportedNodeValue\n"
+               "func accept(value: Palette.SortOptions) -> Palette.SortOptions:\n"
+               "    return value\n"
+               "func current() -> Palette.SortOptions:\n"
+               "    return accept(Palette.selected())\n");
+
+    const auto result = gdpp::ProjectCompiler{}.compile(project_options(root));
+
+    REQUIRE(result.success);
+    REQUIRE(std::none_of(result.diagnostics.begin(), result.diagnostics.end(),
+                         [](const gdpp::ProjectDiagnostic& diagnostic) {
+                             return diagnostic.diagnostic.code == "GDS4002" ||
+                                    diagnostic.diagnostic.code == "GDS4035";
+                         }));
+}
+
 TEST_CASE("project compiler exposes preloaded scripts as typed namespaces") {
     const auto root = fixture_root("project-script-resource-namespaces");
     std::error_code error;

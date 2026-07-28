@@ -2043,13 +2043,7 @@ CodeGenerator::local_function_implementation_name(const std::string_view source_
 
 const ScriptInnerClassSymbol*
 CodeGenerator::inner_base_of(const ScriptInnerClassSymbol& owner) const noexcept {
-    if (!script_symbols_ || owner.base_class_name.empty())
-        return nullptr;
-    const auto* script_owner = script_symbols_->owner_of(owner);
-    if (!script_owner)
-        script_owner = current_script_;
-    return script_owner ? script_symbols_->find_inner(*script_owner, owner.base_class_name)
-                        : nullptr;
+    return script_symbols_ ? script_symbols_->inner_base_of(owner) : nullptr;
 }
 
 CodeGenerator::InnerMethodDeclaration
@@ -7892,10 +7886,17 @@ void CodeGenerator::emit_inner_class_definition(const typed::Class& declaration,
     const auto base_cpp = !native_inner_base.empty() ? native_inner_base
                           : native_script_base       ? native_script_base->native_class_name
                                                      : "gdpp::runtime::AttachedScriptBehavior";
-    const auto base_script_path = !native_inner_base.empty()
-                                      ? "res://" + current_source_path_ + "::" + source_base
-                                  : native_script_base ? "res://" + native_script_base->path
-                                                       : std::string{};
+    const auto base_script_path = [&]() {
+        if (!native_inner_base.empty()) {
+            if (current_inner_script_ && !current_inner_script_->base_script_path.empty() &&
+                !current_inner_script_->base_class_name.empty()) {
+                return "res://" + current_inner_script_->base_script_path +
+                       "::" + current_inner_script_->base_class_name;
+            }
+            return "res://" + current_source_path_ + "::" + source_base;
+        }
+        return native_script_base ? "res://" + native_script_base->path : std::string{};
+    }();
     const auto native_base_type = inner_attached_native_base_type(source_name);
     const auto engine_virtual_for = [&](const typed::Function& function) {
         static_cast<void>(function);
@@ -8732,9 +8733,17 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
             constructor_functions_.emplace(native_name, &*initializer);
         }
         if (!api_.find_class(declaration->base_type)) {
-            const auto resolved = resolve_inner_base(qualified, declaration->base_type);
+            std::string resolved;
+            if (script_symbols_ && current_script_) {
+                if (const auto* symbol = script_symbols_->find_inner(*current_script_, qualified)) {
+                    if (const auto* base = script_symbols_->inner_base_of(*symbol))
+                        resolved = base->native_class_name;
+                }
+            }
+            if (resolved.empty())
+                resolved = resolve_inner_base(qualified, declaration->base_type);
             if (!resolved.empty())
-                inner_base_names_.emplace(qualified, resolved);
+                inner_base_names_.emplace(qualified, std::move(resolved));
         }
         inner_ref_types_.insert(qualified);
     }
@@ -8936,6 +8945,10 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
     if (script_symbols_ && current_script_) {
         for (const auto& inner : current_script_->inner_classes) {
             const auto* script_base = script_symbols_->base_of(inner);
+            if (!script_base) {
+                if (const auto* inner_base = script_symbols_->inner_base_of(inner))
+                    script_base = script_symbols_->owner_of(*inner_base);
+            }
             if (script_base && script_base != current_script_ &&
                 included_script_headers.insert(script_base->header_file_name).second) {
                 header << "#include \"" << script_base->header_file_name << "\"\n";

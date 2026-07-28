@@ -262,7 +262,10 @@ ProjectEnumLookup find_project_enum(const ScriptSymbolTable* symbols, const std:
     const auto separator = name.find('.');
     if (separator == std::string::npos || name.find('.', separator + 1) != std::string::npos)
         return {};
-    const auto* owner = symbols->find_class(name.substr(0, separator));
+    const auto owner_name = name.substr(0, separator);
+    const auto* owner = symbols->find_class(owner_name);
+    if (!owner)
+        owner = symbols->find_autoload(owner_name);
     if (!owner)
         return {};
     return {owner, nullptr, symbols->find_enum(*owner, name.substr(separator + 1)),
@@ -771,6 +774,12 @@ SemanticAnalyzer::find_inner_class(const std::string& name) const noexcept {
     if (script_symbols_ && current_script_) {
         if (const auto* current = script_symbols_->find_inner(*current_script_, name))
             return current;
+        std::unordered_set<const ScriptClassSymbol*> visited;
+        for (auto* base = script_symbols_->base_of(*current_script_);
+             base && visited.insert(base).second; base = script_symbols_->base_of(*base)) {
+            if (const auto* inherited = script_symbols_->find_inner(*base, name))
+                return inherited;
+        }
     }
     return script_symbols_ ? script_symbols_->find_inner_native(name) : nullptr;
 }
@@ -786,15 +795,13 @@ SemanticAnalyzer::find_script_class(const std::string& name) const noexcept {
 
 const ScriptInnerClassSymbol*
 SemanticAnalyzer::inner_base_of(const ScriptInnerClassSymbol& owner) const noexcept {
-    if (owner.base_class_name.empty())
-        return nullptr;
-    if (const auto found = local_inner_classes_.find(owner.base_class_name);
-        found != local_inner_classes_.end()) {
-        return &found->second;
+    if (!owner.base_class_name.empty() && owner.base_script_path.empty()) {
+        if (const auto found = local_inner_classes_.find(owner.base_class_name);
+            found != local_inner_classes_.end()) {
+            return &found->second;
+        }
     }
-    return script_symbols_ && current_script_
-               ? script_symbols_->find_inner(*current_script_, owner.base_class_name)
-               : nullptr;
+    return script_symbols_ ? script_symbols_->inner_base_of(owner) : nullptr;
 }
 
 const ScriptClassSymbol*
@@ -998,9 +1005,12 @@ Type SemanticAnalyzer::type_from_name(const std::string& name, SourceSpan span) 
     if (const auto separator = name.find('.'); separator != std::string::npos) {
         const auto owner_name = name.substr(0, separator);
         const auto alias = script_resource_aliases_.find(owner_name);
-        const auto* owner = alias != script_resource_aliases_.end() ? alias->second
-                            : script_symbols_ ? script_symbols_->find_class(owner_name)
-                                              : nullptr;
+        const auto* owner = alias != script_resource_aliases_.end() ? alias->second : nullptr;
+        if (!owner && script_symbols_) {
+            owner = script_symbols_->find_class(owner_name);
+            if (!owner)
+                owner = script_symbols_->find_autoload(owner_name);
+        }
         if (owner) {
             const auto member_name = name.substr(separator + 1);
             record_script_dependency(owner);
@@ -1066,13 +1076,21 @@ Type SemanticAnalyzer::type_from_name(const std::string& name, SourceSpan span) 
     const auto type = parsed_type;
     const auto* project_type = find_script_class(name);
     const auto* external_type = script_symbols_ ? script_symbols_->find_external(name) : nullptr;
+    const auto* inner_type = find_inner_class(name);
     if (external_type)
         model_.referenced_extension_abis_.insert(external_type->provider_abi);
     record_script_dependency(project_type);
-    if (type.kind == TypeKind::object && !api_.find_class(name) && !find_inner_class(name) &&
-        !project_type && !external_type) {
+    if (type.kind == TypeKind::object && !api_.find_class(name) && !inner_type && !project_type &&
+        !external_type) {
         diagnostics_.error("GDS4059", "unknown Godot or project script type '" + name + "'", span);
     }
+    if (type.kind == TypeKind::object && inner_type && !inner_type->native_class_name.empty()) {
+        if (script_symbols_)
+            record_script_dependency(script_symbols_->owner_of(*inner_type));
+        return {TypeKind::object, inner_type->native_class_name};
+    }
+    if (type.kind == TypeKind::object && project_type)
+        return {TypeKind::object, project_type->native_class_name};
     return type;
 }
 
@@ -6162,14 +6180,22 @@ void SemanticAnalyzer::validate_annotations(const ast::VariableDeclaration& vari
         diagnostics_.error("GDS4025", "exported fields require a concrete serializable type",
                            variable.span);
     }
-    const auto* script_type = script_symbols_ && type.kind == TypeKind::object
-                                  ? script_symbols_->find_global(type.name)
-                                  : nullptr;
+    const ScriptClassSymbol* script_type = nullptr;
+    const ScriptInnerClassSymbol* inner_type = nullptr;
+    if (script_symbols_ && type.kind == TypeKind::object) {
+        script_type = script_symbols_->find_global(type.name);
+        if (!script_type)
+            script_type = script_symbols_->find_native_class(type.name);
+        inner_type = script_symbols_->find_inner_native(type.name);
+    }
     const bool script_serializable =
         script_type && (api_.inherits(script_type->godot_base_type, "Node") ||
                         api_.inherits(script_type->godot_base_type, "Resource"));
+    const bool inner_serializable =
+        inner_type && (api_.inherits(inner_type->godot_base_type, "Node") ||
+                       api_.inherits(inner_type->godot_base_type, "Resource"));
     if (!unchecked_export && type.kind == TypeKind::object && !api_.inherits(type.name, "Node") &&
-        !api_.inherits(type.name, "Resource") && !script_serializable) {
+        !api_.inherits(type.name, "Resource") && !script_serializable && !inner_serializable) {
         diagnostics_.error("GDS4035", "exported object fields must derive from Node or Resource",
                            variable.span);
     }

@@ -67,8 +67,10 @@ struct ScriptInnerClassSymbol {
     std::string attached_native_base{"RefCounted"};
     std::string external_base_name;
     std::string base_class_name;
-    // Project path of a top-level script used as this internal class's direct base. This is
-    // distinct from base_class_name, which identifies another internal class in the same unit.
+    // Project path of the script that owns this internal class's direct base. When
+    // base_class_name is empty the top-level script itself is the base; otherwise it identifies
+    // an internal class in that script. Keeping both identities makes cross-script internal
+    // inheritance explicit without flattening it into a native Godot base.
     std::string base_script_path;
     std::vector<ScriptMemberSymbol> members;
     std::vector<ScriptEnumSymbol> enums;
@@ -112,6 +114,10 @@ class ScriptSymbolTable final {
     void add(ScriptClassSymbol symbol);
     void add_external(ExternalClassSymbol symbol);
     void add_resource_alias(std::string reference, std::string project_path);
+    // Resolve source-level project type spellings after every script has been registered.
+    // Public source ABIs retain stable GDScript identities, while the semantic graph uses the
+    // exact generated native identity required by typed containers and cross-unit calls.
+    void canonicalize_project_types();
     bool set_coroutine(const std::string& path, const std::string& inner_class,
                        const std::string& method, bool coroutine);
     bool set_parameter_type(const std::string& path, const std::string& inner_class,

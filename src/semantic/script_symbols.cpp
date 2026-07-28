@@ -40,6 +40,97 @@ void ScriptSymbolTable::add_resource_alias(std::string reference, std::string pr
     resource_aliases_.insert_or_assign(std::move(reference), std::move(project_path));
 }
 
+void ScriptSymbolTable::canonicalize_project_types() {
+    const auto canonicalize = [&](const auto& self, Type& type,
+                                  const ScriptClassSymbol& lexical_owner) -> void {
+        if (const auto container = describe_container_type(type)) {
+            std::vector<Type> arguments;
+            arguments.reserve(container->arguments.size());
+            for (const auto& argument : container->arguments) {
+                auto resolved = type_from_annotation(argument);
+                self(self, resolved, lexical_owner);
+                arguments.push_back(std::move(resolved));
+            }
+            std::string name =
+                container->kind == ContainerTypeKind::array ? "Array[" : "Dictionary[";
+            for (std::size_t index = 0; index < arguments.size(); ++index) {
+                if (index != 0)
+                    name += ", ";
+                name += arguments[index].name;
+            }
+            name += ']';
+            type = {type.kind, std::move(name)};
+            return;
+        }
+        if (type.kind != TypeKind::object && type.kind != TypeKind::enumeration)
+            return;
+
+        if (const auto* script = find_class(type.name)) {
+            type = {TypeKind::object, script->native_class_name};
+            return;
+        }
+        const auto resolve_inner = [&](const ScriptClassSymbol& owner, const std::string& name) {
+            if (const auto* inner = find_inner(owner, name))
+                return inner;
+            std::unordered_set<const ScriptClassSymbol*> visited;
+            for (auto* base = base_of(owner); base && visited.insert(base).second;
+                 base = base_of(*base)) {
+                if (const auto* inherited = find_inner(*base, name))
+                    return inherited;
+            }
+            return static_cast<const ScriptInnerClassSymbol*>(nullptr);
+        };
+        if (const auto* inner = resolve_inner(lexical_owner, type.name)) {
+            type = {TypeKind::object, inner->native_class_name};
+            return;
+        }
+        const auto separator = type.name.find('.');
+        if (separator == std::string::npos)
+            return;
+        const auto owner_name = type.name.substr(0, separator);
+        const auto member_name = type.name.substr(separator + 1);
+        auto* owner = find_class(owner_name);
+        if (!owner)
+            owner = find_autoload(owner_name);
+        if (!owner)
+            return;
+        if (const auto* inner = resolve_inner(*owner, member_name)) {
+            type = {TypeKind::object, inner->native_class_name};
+            return;
+        }
+        if (const auto* enumeration = find_enum(*owner, member_name)) {
+            type = {TypeKind::enumeration, owner->native_class_name + "::" + enumeration->name};
+            return;
+        }
+        const auto enum_separator = member_name.rfind('.');
+        if (enum_separator == std::string::npos)
+            return;
+        if (const auto* inner = resolve_inner(*owner, member_name.substr(0, enum_separator))) {
+            const auto enum_name = member_name.substr(enum_separator + 1);
+            const auto enumeration = std::find_if(
+                inner->enums.begin(), inner->enums.end(),
+                [&](const ScriptEnumSymbol& candidate) { return candidate.name == enum_name; });
+            if (enumeration != inner->enums.end()) {
+                type = {TypeKind::enumeration, inner->native_class_name + "::" + enumeration->name};
+            }
+        }
+    };
+    for (auto& script : classes_) {
+        for (auto& member : script.members) {
+            canonicalize(canonicalize, member.type, script);
+            for (auto& parameter : member.parameters)
+                canonicalize(canonicalize, parameter, script);
+        }
+        for (auto& inner : script.inner_classes) {
+            for (auto& member : inner.members) {
+                canonicalize(canonicalize, member.type, script);
+                for (auto& parameter : member.parameters)
+                    canonicalize(canonicalize, parameter, script);
+            }
+        }
+    }
+}
+
 bool ScriptSymbolTable::set_coroutine(const std::string& path, const std::string& inner_class,
                                       const std::string& method, const bool coroutine) {
     const auto found = paths_.find(path);
@@ -89,8 +180,7 @@ bool ScriptSymbolTable::set_parameter_type(const std::string& path, const std::s
     return true;
 }
 
-bool ScriptSymbolTable::set_variable_type(const std::string& path,
-                                          const std::string& inner_class,
+bool ScriptSymbolTable::set_variable_type(const std::string& path, const std::string& inner_class,
                                           const std::string& variable, Type type) {
     const auto found = paths_.find(path);
     if (found == paths_.end())
@@ -105,8 +195,7 @@ bool ScriptSymbolTable::set_variable_type(const std::string& path,
         members = &inner->members;
     }
     const auto member = std::find_if(members->begin(), members->end(), [&](const auto& item) {
-        return (item.kind == ScriptMemberKind::field ||
-                item.kind == ScriptMemberKind::constant) &&
+        return (item.kind == ScriptMemberKind::field || item.kind == ScriptMemberKind::constant) &&
                item.name == variable;
     });
     if (member == members->end() || member->type == type)
@@ -295,7 +384,9 @@ const ScriptClassSymbol* ScriptSymbolTable::base_of(const ScriptClassSymbol& own
 
 const ScriptClassSymbol*
 ScriptSymbolTable::base_of(const ScriptInnerClassSymbol& owner) const noexcept {
-    return owner.base_script_path.empty() ? nullptr : find_path(owner.base_script_path);
+    return owner.base_script_path.empty() || !owner.base_class_name.empty()
+               ? nullptr
+               : find_path(owner.base_script_path);
 }
 
 const ScriptInnerClassSymbol*
@@ -308,8 +399,11 @@ ScriptSymbolTable::inner_base_of(const ScriptInnerClassSymbol& owner) const noex
         canonical = find_inner_native(owner.native_class_name);
         script_owner = canonical ? owner_of(*canonical) : nullptr;
     }
-    return script_owner && canonical ? find_inner(*script_owner, canonical->base_class_name)
-                                     : nullptr;
+    if (!canonical)
+        return nullptr;
+    if (!canonical->base_script_path.empty())
+        script_owner = find_path(canonical->base_script_path);
+    return script_owner ? find_inner(*script_owner, canonical->base_class_name) : nullptr;
 }
 
 const ScriptMemberSymbol* ScriptSymbolTable::find_member(const ScriptClassSymbol& owner,
