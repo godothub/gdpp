@@ -159,6 +159,9 @@ class GodotApi final {
     [[nodiscard]] const GodotClassConstantRecord*
     find_class_enum_value(std::string_view owner, std::string_view enum_name, std::string_view name,
                           bool include_inherited = true) const noexcept;
+    [[nodiscard]] const GodotClassRecord*
+    find_class_enum_owner(std::string_view owner, std::string_view enum_name,
+                          bool include_inherited = true) const noexcept;
     [[nodiscard]] bool has_class_enum(std::string_view owner, std::string_view enum_name,
                                       bool include_inherited = true) const noexcept;
     [[nodiscard]] const GodotSingletonRecord* find_singleton(std::string_view name) const noexcept;

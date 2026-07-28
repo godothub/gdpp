@@ -491,8 +491,9 @@ GodotApi::find_class_enum_value(std::string_view owner, std::string_view enum_na
     return nullptr;
 }
 
-bool GodotApi::has_class_enum(std::string_view owner, std::string_view enum_name,
-                              bool include_inherited) const noexcept {
+const GodotClassRecord*
+GodotApi::find_class_enum_owner(std::string_view owner, std::string_view enum_name,
+                                bool include_inherited) const noexcept {
     for (std::size_t depth = 0; !owner.empty() && depth < class_count(); ++depth) {
         const auto first =
             std::lower_bound(class_constants_, class_constants_ + class_constant_count_, owner,
@@ -503,7 +504,7 @@ bool GodotApi::has_class_enum(std::string_view owner, std::string_view enum_name
                                    std::string_view{current->owner} == owner;
              ++current) {
             if (std::string_view{current->enum_name} == enum_name)
-                return true;
+                return find_class(owner);
         }
         if (!include_inherited)
             break;
@@ -512,7 +513,12 @@ bool GodotApi::has_class_enum(std::string_view owner, std::string_view enum_name
             break;
         owner = type->inherits;
     }
-    return false;
+    return nullptr;
+}
+
+bool GodotApi::has_class_enum(std::string_view owner, std::string_view enum_name,
+                              bool include_inherited) const noexcept {
+    return find_class_enum_owner(owner, enum_name, include_inherited) != nullptr;
 }
 
 const GodotSingletonRecord* GodotApi::find_singleton(std::string_view name) const noexcept {

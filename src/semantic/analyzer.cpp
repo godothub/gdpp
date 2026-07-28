@@ -995,12 +995,15 @@ Type SemanticAnalyzer::type_from_name(const std::string& name, SourceSpan span) 
     }
     if (api_.has_global_enum(name))
         return {TypeKind::enumeration, name};
-    if (api_.has_class_enum(base_type_, name))
-        return {TypeKind::enumeration, base_type_ + "." + name};
+    if (const auto* owner = api_.find_class_enum_owner(base_type_, name))
+        return {TypeKind::enumeration, std::string{owner->name} + "." + name};
     if (const auto separator = name.rfind('.');
-        separator != std::string::npos &&
-        api_.has_class_enum(name.substr(0, separator), name.substr(separator + 1))) {
-        return {TypeKind::enumeration, name};
+        separator != std::string::npos) {
+        if (const auto* owner = api_.find_class_enum_owner(
+                name.substr(0, separator), name.substr(separator + 1))) {
+            return {TypeKind::enumeration,
+                    std::string{owner->name} + "." + name.substr(separator + 1)};
+        }
     }
     if (const auto project_enum = find_project_enum(script_symbols_, name);
         project_enum.enumeration) {
@@ -1889,6 +1892,16 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
             model_.api_resolutions_.emplace(
                 &expression, ApiResolution{ApiResolutionKind::global_enum_type, expression.value(),
                                            "", "", result, 0, 0, false, true});
+        } else if (const auto* enum_owner =
+                       api_.find_class_enum_owner(base_type_, expression.value())) {
+            result = {TypeKind::enumeration,
+                      std::string{enum_owner->name} + "." + expression.value()};
+            model_.api_resolutions_.emplace(
+                &expression,
+                ApiResolution{ApiResolutionKind::global_enum_type,
+                              "godot::" + std::string{enum_owner->name} + "::" +
+                                  expression.value(),
+                              "", "", result, 0, 0, false, true});
         } else if (const auto* enum_value = api_.find_global_enum_value(expression.value())) {
             result = {TypeKind::integer, "int"};
             model_.api_resolutions_.emplace(&expression,

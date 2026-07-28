@@ -4081,6 +4081,23 @@ TEST_CASE("compiler resolves inherited engine constants and qualified class enum
             std::string::npos);
 }
 
+TEST_CASE("compiler resolves unqualified inherited engine enum types before dynamic globals") {
+    gdpp::CompileOptions options;
+    options.target_version = gdpp::GodotVersion::v4_7;
+    const gdpp::Compiler compiler;
+    const auto result = compiler.compile(
+        "inherited_engine_enum.gd",
+        "extends SubViewport\n"
+        "func disable_processing(toggle: bool) -> void:\n"
+        "    set_process_mode(ProcessMode.PROCESS_MODE_DISABLED if toggle "
+        "else ProcessMode.PROCESS_MODE_INHERIT)\n",
+        options);
+
+    REQUIRE(result.success);
+    REQUIRE(result.unit.source.find("find_engine_singleton") == std::string::npos);
+    REQUIRE(result.unit.source.find("godot::Node::ProcessMode") != std::string::npos);
+}
+
 TEST_CASE("compiler rejects invalid enum declarations and members") {
     const gdpp::Compiler compiler;
     const auto duplicate = compiler.compile("duplicate.gd", "enum State { IDLE, IDLE }\n");

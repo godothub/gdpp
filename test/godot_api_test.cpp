@@ -72,6 +72,7 @@ TEST_CASE("Godot API lookup follows inherited class constants and named enums") 
     const auto* ready = api.find_class_constant("Button", "NOTIFICATION_READY");
     const auto* process_mode =
         api.find_class_enum_value("Node", "ProcessMode", "PROCESS_MODE_INHERIT");
+    const auto* inherited_process_mode = api.find_class_enum_owner("SubViewport", "ProcessMode");
     REQUIRE(transform_changed != nullptr);
     REQUIRE_EQ(std::string_view{transform_changed->owner}, std::string_view{"Node3D"});
     REQUIRE_EQ(transform_changed->value, std::int64_t{2000});
@@ -79,6 +80,8 @@ TEST_CASE("Godot API lookup follows inherited class constants and named enums") 
     REQUIRE_EQ(std::string_view{ready->owner}, std::string_view{"Node"});
     REQUIRE_EQ(ready->value, std::int64_t{13});
     REQUIRE(api.has_class_enum("Node", "ProcessMode"));
+    REQUIRE(inherited_process_mode != nullptr);
+    REQUIRE_EQ(std::string_view{inherited_process_mode->name}, std::string_view{"Node"});
     REQUIRE(process_mode != nullptr);
     REQUIRE_EQ(process_mode->value, std::int64_t{0});
 }
