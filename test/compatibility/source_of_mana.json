@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "godot": {
+    "target": "4.7",
+    "engine": "4.7.1"
+  },
+  "repository": {
+    "name": "sourceofmana/sourceofmana",
+    "url": "https://github.com/sourceofmana/sourceofmana.git",
+    "branch": "master",
+    "checkout": "full",
+    "license_file": "LICENSE.md",
+    "license": "MIT and CC-BY-SA-4.0",
+    "required_files": [
+      "addons/discord_gd/classes/message.gd",
+      "sources/effects/Projectile.gd"
+    ]
+  },
+  "projects": [
+    {
+      "path": ".",
+      "minimum_isolated_successes": 0,
+      "run_isolated": false,
+      "require_project_native_success": true
+    }
+  ]
+}

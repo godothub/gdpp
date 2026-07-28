@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "godot": {
+    "target": "4.6",
+    "engine": "4.6.3"
+  },
+  "repository": {
+    "name": "Orama-Interactive/Pixelorama",
+    "url": "https://github.com/Orama-Interactive/Pixelorama.git",
+    "branch": "master",
+    "checkout": "full",
+    "license_file": "LICENSE",
+    "license": "MIT",
+    "required_files": [
+      "addons/aimg_io/editor_plugin.gd",
+      "src/Main.gd"
+    ]
+  },
+  "projects": [
+    {
+      "path": ".",
+      "minimum_isolated_successes": 0,
+      "run_isolated": false,
+      "require_project_native_success": true
+    }
+  ]
+}

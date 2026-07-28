@@ -1,20 +1,19 @@
 {
   "schema_version": 1,
   "godot": {
-    "target": "4.7",
-    "engine": "4.7.1"
+    "target": "4.6",
+    "engine": "4.6.3"
   },
   "repository": {
-    "name": "godothub/konado",
-    "url": "https://github.com/godothub/konado.git",
+    "name": "gdquest-demos/godot-open-rpg",
+    "url": "https://github.com/gdquest-demos/godot-open-rpg.git",
     "branch": "main",
     "checkout": "full",
     "license_file": "LICENSE",
-    "license": "MulanPSL-2.0",
+    "license": "MIT",
     "required_files": [
-      "addons/konado/editor/ks_editor/ks_syntax_highlighter.gd",
-      "addons/konado/scripts/dialogue/knd_dialogue_manager.gd",
-      "tests/i18n/test_knd_i18n.gd"
+      "addons/dialogic/Core/DialogicGameHandler.gd",
+      "src/field/gameboard/gameboard.gd"
     ]
   },
   "projects": [
