@@ -493,6 +493,15 @@ class ReleasePackagingTest(unittest.TestCase):
         self.assertIn("tools/update_godot_frontend.py", workflow)
         self.assertIn("test/compatibility/godot_frontend_4_7.json", workflow)
         self.assertIn("tools/run_external_project_e2e.py", workflow)
+        self.assertEqual(workflow.count("tools/run_external_project_e2e.py"), 1)
+        self.assertEqual(
+            workflow.count("Import, AOT build, export, audit and launch"),
+            1,
+        )
+        self.assertNotRegex(
+            workflow,
+            r"if:\s*\$\{\{[^}]*matrix\.(?:id|name)[^}]*\}\}",
+        )
         expected_engines = {
             "konado.json": "4.7.1",
             "pixelorama.json": "4.6.3",
