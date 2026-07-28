@@ -6124,6 +6124,49 @@ TEST_CASE("compiler sequences every eager binary operand before evaluation") {
                                     "mark_variant(") == std::string::npos);
 }
 
+TEST_CASE("compiler delegates non-native static operator pairs to Godot Variant semantics") {
+    const gdpp::Compiler compiler;
+    const auto result =
+        compiler.compile("static_variant_operators.gd",
+                         "extends Node\n"
+                         "func describe(node: Node) -> String:\n"
+                         "    return \"node '%s'\" % node\n"
+                         "func compare_names(left: StringName, right: StringName) -> bool:\n"
+                         "    return left >= right\n");
+
+    REQUIRE(result.success);
+    const auto& source = result.unit.source;
+    REQUIRE(source.find("gdpp::runtime::binary(godot::Variant::OP_MODULE") != std::string::npos);
+    REQUIRE(source.find("gdpp::runtime::binary(godot::Variant::OP_GREATER_EQUAL") !=
+            std::string::npos);
+    REQUIRE(source.find("_gdpp_binary_left_") != std::string::npos);
+    REQUIRE(source.find("_gdpp_binary_right_") != std::string::npos);
+    REQUIRE(source.find("_gdpp_binary_left_") < source.find("_gdpp_binary_right_"));
+}
+
+TEST_CASE("compiler applies Variant semantics to non-native compound operator pairs") {
+    const gdpp::Compiler compiler;
+    const auto result = compiler.compile(
+        "static_variant_compound.gd",
+        "extends RefCounted\n"
+        "var bytes: PackedByteArray = PackedByteArray()\n"
+        "func append_field(value: PackedByteArray) -> void:\n"
+        "    bytes += value\n"
+        "func append_element(values: Array[PackedByteArray], value: PackedByteArray) -> void:\n"
+        "    values[0] += value\n");
+
+    REQUIRE(result.success);
+    const auto& source = result.unit.source;
+    const auto first = source.find("gdpp::runtime::binary(godot::Variant::OP_ADD");
+    REQUIRE(first != std::string::npos);
+    REQUIRE(source.find("gdpp::runtime::binary(godot::Variant::OP_ADD", first + 1) !=
+            std::string::npos);
+    REQUIRE(source.find("_gdpp_property_current_") != std::string::npos);
+    REQUIRE(source.find("_gdpp_subscript_current_") != std::string::npos);
+    REQUIRE(source.find("return (_gdpp_property_current_") == std::string::npos);
+    REQUIRE(source.find("(_gdpp_subscript_current_") == std::string::npos);
+}
+
 TEST_CASE("compiler contains fatal expression faults and preserves Godot assignment order") {
     const gdpp::Compiler compiler;
     const auto result =
