@@ -321,6 +321,26 @@ def hash_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+def customer_worktree_state(project: Path) -> bytes:
+    result = subprocess.run(
+        [
+            "git",
+            "status",
+            "--porcelain=v1",
+            "-z",
+            "--untracked-files=all",
+            "--",
+            ".",
+            ":(exclude)addons/gdpp",
+        ],
+        cwd=project,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=True,
+    )
+    return result.stdout
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--manifest", type=Path, required=True)
@@ -402,6 +422,10 @@ def main() -> int:
             log=import_log,
         )
         assert_clean_log(import_log, "Godot import")
+        customer_state = customer_worktree_state(project)
+        report["customer_worktree_sha256_before_export"] = hashlib.sha256(
+            customer_state
+        ).hexdigest()
 
         state = output / "extension-state.json"
         report["phases"]["immutability_snapshot"] = run(
@@ -436,6 +460,12 @@ def main() -> int:
             log=export_log,
         )
         assert_clean_log(export_log, "GDPP AOT export")
+        customer_state_after_export = customer_worktree_state(project)
+        report["customer_worktree_sha256_after_export"] = hashlib.sha256(
+            customer_state_after_export
+        ).hexdigest()
+        if customer_state_after_export != customer_state:
+            fail("GDPP export modified customer project files outside addons/gdpp")
         export_text = export_log.read_text(encoding="utf-8", errors="replace")
         if "GDPP_AOT_SUMMARY scenes=" not in export_text:
             fail("export did not report a completed GDPP AOT project build")
