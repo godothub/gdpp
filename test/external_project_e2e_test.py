@@ -18,14 +18,35 @@ SPEC.loader.exec_module(E2E)
 
 
 class ExternalProjectE2ETest(unittest.TestCase):
-    def test_runner_stabilizes_fresh_imports_before_enforcing_clean_logs(self) -> None:
-        source = MODULE_PATH.read_text(encoding="utf-8")
-        self.assertIn('"import_bootstrap"', source)
-        self.assertIn('output / "import-bootstrap.log"', source)
-        self.assertLess(
-            source.index('"import_bootstrap"'),
-            source.index('assert_clean_log(import_log, "Godot import")'),
-        )
+    def test_import_gate_rejects_only_diagnostics_added_by_gdpp(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            baseline = root / "baseline.log"
+            baseline.write_text(
+                "SCRIPT ERROR: existing customer failure\n"
+                "WARNING: ObjectDB instances leaked at exit\n",
+                encoding="utf-8",
+            )
+            baseline_diagnostics = set(E2E.diagnostic_fingerprints(baseline))
+            unchanged = root / "unchanged.log"
+            unchanged.write_text(
+                "\x1b[31mSCRIPT ERROR: existing customer failure\x1b[0m\n"
+                "WARNING: ObjectDB instances leaked at exit\n",
+                encoding="utf-8",
+            )
+            E2E.assert_no_new_diagnostics(
+                unchanged, baseline_diagnostics, "Godot import"
+            )
+            regressed = root / "regressed.log"
+            regressed.write_text(
+                unchanged.read_text(encoding="utf-8")
+                + "ERROR: GDPP introduced a failure\n",
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(RuntimeError, "introduced a diagnostic"):
+                E2E.assert_no_new_diagnostics(
+                    regressed, baseline_diagnostics, "Godot import"
+                )
 
     def test_enable_plugin_preserves_existing_multiline_entries(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

@@ -12,6 +12,7 @@ import shutil
 import subprocess
 import sys
 import time
+from collections import Counter
 from pathlib import Path
 
 
@@ -23,6 +24,7 @@ FORBIDDEN_DIAGNOSTICS = re.compile(
     r"Resource still in use",
     re.MULTILINE | re.IGNORECASE,
 )
+ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 
 
 def fail(message: str) -> None:
@@ -103,6 +105,22 @@ def assert_clean_log(log: Path, phase: str) -> None:
     if match:
         line = content.count("\n", 0, match.start()) + 1
         fail(f"{phase} emitted a forbidden diagnostic at {log}:{line}")
+
+
+def diagnostic_fingerprints(log: Path) -> list[str]:
+    fingerprints: list[str] = []
+    for line in log.read_text(encoding="utf-8", errors="replace").splitlines():
+        normalized = ANSI_ESCAPE.sub("", line)
+        if FORBIDDEN_DIAGNOSTICS.search(normalized):
+            fingerprints.append(" ".join(normalized.split()))
+    return fingerprints
+
+
+def assert_no_new_diagnostics(log: Path, baseline: set[str], phase: str) -> None:
+    current = set(diagnostic_fingerprints(log))
+    added = sorted(current - baseline)
+    if added:
+        fail(f"{phase} introduced a diagnostic not present in the pristine project: {added[0]}")
 
 
 def git_output(project: Path, arguments: list[str]) -> str:
@@ -391,10 +409,6 @@ def main() -> int:
         if not project_file.is_file():
             fail(f"Godot project is missing: {project_file}")
 
-        installed_addon = install_addon(addon_source, project, manifest["godot"]["target"])
-        enable_plugin(project_file)
-        preset, product = append_export_preset(project, args.host, output / "product")
-
         validation_log = output / "godot-contract.log"
         report["phases"]["godot_contract"] = run(
             [
@@ -414,6 +428,32 @@ def main() -> int:
             log=validation_log,
         )
 
+        baseline_bootstrap_log = output / "baseline-import-bootstrap.log"
+        report["phases"]["baseline_import_bootstrap"] = run(
+            [str(godot), "--headless", "--editor", "--path", str(project), "--import"],
+            cwd=project,
+            timeout=args.import_timeout,
+            log=baseline_bootstrap_log,
+        )
+        baseline_import_log = output / "baseline-import.log"
+        report["phases"]["baseline_import"] = run(
+            [str(godot), "--headless", "--editor", "--path", str(project), "--import"],
+            cwd=project,
+            timeout=args.import_timeout,
+            log=baseline_import_log,
+        )
+        baseline_diagnostics = set(diagnostic_fingerprints(baseline_import_log))
+        report["baseline_diagnostics"] = [
+            {"message": message, "count": count}
+            for message, count in sorted(
+                Counter(diagnostic_fingerprints(baseline_import_log)).items()
+            )
+        ]
+
+        installed_addon = install_addon(addon_source, project, manifest["godot"]["target"])
+        enable_plugin(project_file)
+        preset, product = append_export_preset(project, args.host, output / "product")
+
         bootstrap_import_log = output / "import-bootstrap.log"
         report["phases"]["import_bootstrap"] = run(
             [str(godot), "--headless", "--editor", "--path", str(project), "--import"],
@@ -422,9 +462,9 @@ def main() -> int:
             log=bootstrap_import_log,
         )
 
-        # A fresh Godot checkout can load project settings, editor plugins, and the project theme
-        # before their imported artifacts exist. The first pass materializes that cache; the
-        # second pass is the authoritative customer-visible steady state and must be clean.
+        # The pristine two-pass baseline separates customer-project diagnostics from changes
+        # introduced by installing GDPP. Fresh-import transients disappear before either
+        # authoritative pass, and any new stable diagnostic remains a release blocker.
         import_log = output / "import.log"
         report["phases"]["import"] = run(
             [str(godot), "--headless", "--editor", "--path", str(project), "--import"],
@@ -432,7 +472,7 @@ def main() -> int:
             timeout=args.import_timeout,
             log=import_log,
         )
-        assert_clean_log(import_log, "Godot import")
+        assert_no_new_diagnostics(import_log, baseline_diagnostics, "Godot import")
         customer_state = customer_worktree_state(project)
         report["customer_worktree_sha256_before_export"] = hashlib.sha256(
             customer_state
