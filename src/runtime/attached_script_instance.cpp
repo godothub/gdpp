@@ -717,6 +717,47 @@ godot::Object* cast_attached_script(const godot::Variant& value, const godot::St
     return is_attached_script_instance(object, source_path) ? object : nullptr;
 }
 
+void detach_all_attached_script_instances() {
+    // ScriptInstance::free erases its payload from `instances()`. Never hold the registry mutex
+    // while asking Godot to clear an instance, because the callback must acquire the same mutex.
+    // Taking one owner at a time also tolerates arbitrary customer destructor order and keeps raw
+    // pointers inside the shortest possible main-thread shutdown window.
+    for (;;) {
+        godot::Object* owner = nullptr;
+        AttachedScriptInstance* expected = nullptr;
+        {
+            std::lock_guard<std::mutex> lock{AttachedScriptInstance::instances_mutex()};
+            if (AttachedScriptInstance::instances().empty())
+                break;
+            const auto entry = AttachedScriptInstance::instances().begin();
+            owner = entry->first;
+            expected = entry->second;
+        }
+
+        if (const auto object_set_script_instance = object_set_script_instance_interface()) {
+            object_set_script_instance(owner->_owner, nullptr);
+        } else {
+            // Godot 4.4 predates object_set_script_instance(). Object::set_script() is its
+            // supported teardown path and synchronously invokes the ScriptInstance free callback.
+            owner->set_script(godot::Variant{});
+        }
+
+        std::lock_guard<std::mutex> lock{AttachedScriptInstance::instances_mutex()};
+        const auto remaining = AttachedScriptInstance::instances().find(owner);
+        if (remaining != AttachedScriptInstance::instances().end() &&
+            remaining->second == expected) {
+            godot::UtilityFunctions::push_error(
+                "GDPP: Godot did not release a compiled ScriptInstance during extension "
+                "shutdown");
+            break;
+        }
+    }
+
+    pending_construction = nullptr;
+    std::lock_guard<std::mutex> lock{native_bind_mutex()};
+    native_bind_cache().clear();
+}
+
 godot::Ref<godot::Script> strict_gdscript_storage(const godot::Variant& value,
                                                   const ScriptSourceLocation& location) {
     if (script_function_failed())

@@ -1935,6 +1935,21 @@ TEST_CASE("project compiler attaches scripts to third-party GDExtension instance
             std::string::npos);
     REQUIRE(registration.find("register_attached_script_resource_loader") != std::string::npos);
     REQUIRE(registration.find("unregister_attached_script_resource_loader") != std::string::npos);
+    const auto detach_instances =
+        registration.find("detach_all_attached_script_instances");
+    const auto unregister_loader =
+        registration.find("unregister_attached_script_resource_loader");
+    const auto unregister_language =
+        registration.find("AttachedCompiledLanguage::unregister_singleton");
+    const auto unregister_descriptors =
+        registration.find("unregister_all_attached_scripts");
+    REQUIRE(detach_instances != std::string::npos);
+    REQUIRE(unregister_loader != std::string::npos);
+    REQUIRE(unregister_language != std::string::npos);
+    REQUIRE(unregister_descriptors != std::string::npos);
+    REQUIRE(detach_instances < unregister_loader);
+    REQUIRE(unregister_loader < unregister_language);
+    REQUIRE(unregister_language < unregister_descriptors);
     REQUIRE(registration.find("unregister_attached_script_resource_loader") <
             registration.find("unregister_all_attached_scripts"));
     REQUIRE(registration.find("GDREGISTER_CLASS(gdpp::runtime::CoroutineFunctionState)") !=

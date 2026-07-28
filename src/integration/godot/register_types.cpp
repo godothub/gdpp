@@ -27,6 +27,7 @@ void initialize_gdpp(godot::ModuleInitializationLevel level) {
 void uninitialize_gdpp(godot::ModuleInitializationLevel level) {
     if (level != godot::MODULE_INITIALIZATION_LEVEL_SCENE)
         return;
+    gdpp::runtime::detach_all_attached_script_instances();
     gdpp::runtime::AttachedCompiledLanguage::unregister_singleton();
     gdpp::runtime::unregister_all_attached_scripts();
 }

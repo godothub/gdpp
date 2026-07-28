@@ -345,6 +345,10 @@ bool register_attached_script(AttachedScriptDescriptor descriptor, godot::String
 }
 
 void unregister_all_attached_scripts() {
+    // Descriptor and canonical Script resources are valid only while every live ScriptInstance
+    // can still dispatch into this library. This also makes temporary editor metadata resets safe
+    // during repeated exports and extension reloads.
+    detach_all_attached_script_instances();
     std::lock_guard<std::mutex> lock{registry_mutex()};
     script_resources().clear();
     behavior_registry().clear();

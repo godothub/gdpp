@@ -1020,7 +1020,8 @@ std::string generated_registration(const std::vector<CompiledProjectScript>& scr
         }
     }
     if (has_attached_scripts) {
-        output << "    gdpp::runtime::unregister_attached_script_resource_loader();\n"
+        output << "    gdpp::runtime::detach_all_attached_script_instances();\n"
+               << "    gdpp::runtime::unregister_attached_script_resource_loader();\n"
                << "    gdpp::runtime::AttachedCompiledLanguage::unregister_singleton();\n"
                << "    gdpp::runtime::unregister_all_attached_scripts();\n";
     }

@@ -212,6 +212,12 @@ set_attached_editor_storage_state(godot::Object* object,
                                   const godot::PackedStringArray& stored_properties);
 [[nodiscard]] godot::Object* cast_attached_script(const godot::Variant& value,
                                                   const godot::String& source_path);
+// Scene-level extension teardown can run while customer-owned Objects are still alive (for
+// example, project singletons or objects intentionally retained until engine shutdown). Godot
+// must not keep ScriptInstance callbacks or behavior objects owned by a library whose classes are
+// about to be unregistered. Detach every live compiled ScriptInstance first; the provider Object
+// itself remains under its original Godot ownership policy.
+void detach_all_attached_script_instances();
 // A source-level GDScript value may refer either to an interpreted GDScript resource or to the
 // canonical AttachedCompiledScript that replaces it in a binary-only export. Keep the public
 // annotation and reflection contract as GDScript while accepting exactly those two providers at
