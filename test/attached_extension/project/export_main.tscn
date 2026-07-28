@@ -49,11 +49,12 @@ script = ExtResource("5_onready_inheritance")
 [node name="InnerOnreadyProbe" type="Node" parent="."]
 script = ExtResource("6_inner_onready")
 
-[node name="AnimationStorageProbe" type="AnimationPlayer" parent="."]
+[node name="AnimationStorageProbe" type="AnimationPlayer" parent="." node_paths=PackedStringArray("linked_node")]
 libraries = {
 &"": SubResource("AnimationLibrary_storage_probe")
 }
 script = ExtResource("8_animation_storage")
+linked_node = NodePath("..")
 
 [node name="MessageDispatchProbe" type="Node" parent="."]
 script = ExtResource("7_message_dispatch")

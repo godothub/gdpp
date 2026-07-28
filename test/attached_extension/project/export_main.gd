@@ -123,6 +123,9 @@ func _verify_export_runtime() -> void:
     ):
         _fail("native compatibility storage was lost while attaching the compiled script")
         return
+    if not animation_storage_probe.call(&"has_serialized_node_reference"):
+        _fail("serialized script Node reference was not resolved after AOT attachment")
+        return
     var uppercase: Callable = "gdpp".to_upper
     if uppercase.call() != "GDPP":
         _fail("bound builtin method Callable lost its receiver or result")

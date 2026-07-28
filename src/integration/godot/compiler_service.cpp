@@ -322,8 +322,22 @@ std::string reflected_type_name(const godot::Dictionary& info, const bool allow_
     return native_string(godot::Variant::get_type_name(type));
 }
 
+using ProjectScriptNativeBases = std::unordered_map<std::string, std::string>;
+
+std::string reflected_object_native_base(const Type& type,
+                                         const ProjectScriptNativeBases& script_native_bases) {
+    if (type.kind != TypeKind::object)
+        return {};
+    if (const auto found = script_native_bases.find(type.name);
+        found != script_native_bases.end()) {
+        return found->second;
+    }
+    return type.name;
+}
+
 godot::PropertyInfo script_property_info(const Type& type, const godot::StringName& name,
-                                         const std::uint32_t usage) {
+                                         const std::uint32_t usage,
+                                         const ProjectScriptNativeBases& script_native_bases) {
     godot::PropertyInfo info;
     info.name = name;
     info.usage = usage;
@@ -340,12 +354,31 @@ godot::PropertyInfo script_property_info(const Type& type, const godot::StringNa
         info.usage |= godot::PROPERTY_USAGE_NIL_IS_VARIANT;
     } else if (type.kind == TypeKind::object || type.kind == TypeKind::script_resource) {
         info.class_name = godot::StringName{type.name.c_str()};
+        if (type.kind == TypeKind::object) {
+            const auto native_base = reflected_object_native_base(type, script_native_bases);
+            const godot::StringName native_base_name{native_base.c_str()};
+            const auto* class_db = godot::ClassDBSingleton::get_singleton();
+            const auto inherits = [&](const char* base) {
+                const godot::StringName base_name{base};
+                return native_base_name == base_name ||
+                       (class_db && class_db->class_exists(native_base_name) &&
+                        class_db->is_parent_class(native_base_name, base_name));
+            };
+            if (inherits("Node")) {
+                info.hint = godot::PROPERTY_HINT_NODE_TYPE;
+                info.hint_string = godot::String{type.name.c_str()};
+            } else if (inherits("Resource")) {
+                info.hint = godot::PROPERTY_HINT_RESOURCE_TYPE;
+                info.hint_string = godot::String{type.name.c_str()};
+            }
+        }
     }
     return info;
 }
 
 godot::Dictionary editor_script_descriptor(const CompiledProjectScript& script,
-                                           const godot::String& source_path) {
+                                           const godot::String& source_path,
+                                           const ProjectScriptNativeBases& script_native_bases) {
     godot::Dictionary descriptor;
     descriptor["source_path"] = source_path;
     descriptor["global_name"] = godot::StringName{script.global_name.c_str()};
@@ -371,7 +404,8 @@ godot::Dictionary editor_script_descriptor(const CompiledProjectScript& script,
                 usage |= godot::PROPERTY_USAGE_EDITOR;
             godot::Dictionary property;
             property["info"] = static_cast<godot::Dictionary>(
-                script_property_info(member.type, godot::StringName{member.name.c_str()}, usage));
+                script_property_info(member.type, godot::StringName{member.name.c_str()}, usage,
+                                     script_native_bases));
             // The target behavior constructor owns source-level defaults. This temporary editor
             // instance only needs the serialization surface while stored values are copied.
             property["has_default"] = false;
@@ -387,7 +421,8 @@ godot::Dictionary editor_script_descriptor(const CompiledProjectScript& script,
                                                           ? Type{TypeKind::void_type, "void"}
                                                           : member.type,
                                                       godot::StringName{},
-                                                      godot::PROPERTY_USAGE_DEFAULT),
+                                                      godot::PROPERTY_USAGE_DEFAULT,
+                                                      script_native_bases),
                                  godot::StringName{member.name.c_str()}};
         for (std::size_t index = 0; index < member.parameters.size(); ++index) {
             const auto argument_name = index < member.parameter_names.size()
@@ -395,7 +430,7 @@ godot::Dictionary editor_script_descriptor(const CompiledProjectScript& script,
                                            : "argument_" + std::to_string(index);
             method.arguments.push_back(script_property_info(
                 member.parameters[index], godot::StringName{argument_name.c_str()},
-                godot::PROPERTY_USAGE_DEFAULT));
+                godot::PROPERTY_USAGE_DEFAULT, script_native_bases));
             if (index < member.default_parameters.size() && member.default_parameters[index])
                 method.default_arguments.push_back(godot::Variant{});
         }
@@ -1897,6 +1932,18 @@ godot::Dictionary GDPPCompiler::compile_project(
     godot::Dictionary attached_script_bases;
     godot::Dictionary script_contract_hashes;
     godot::Array editor_script_descriptors;
+    ProjectScriptNativeBases script_native_bases;
+    script_native_bases.reserve(result.scripts.size() * 3U);
+    for (const auto& script : result.scripts) {
+        const auto relative_path = generic_path_to_utf8(script.relative_path);
+        script_native_bases.insert_or_assign(relative_path, script.attached_native_base);
+        script_native_bases.insert_or_assign("res://" + relative_path,
+                                             script.attached_native_base);
+        if (!script.global_name.empty()) {
+            script_native_bases.insert_or_assign(script.global_name,
+                                                 script.attached_native_base);
+        }
+    }
     for (const auto& script : result.scripts) {
         const auto relative_path = generic_path_to_utf8(script.relative_path);
         scripts.push_back(godot::String::utf8(relative_path.c_str()));
@@ -1905,8 +1952,8 @@ godot::Dictionary GDPPCompiler::compile_project(
             godot::String{script.class_name.c_str()};
         script_contract_hashes[godot::String{resource_path.c_str()}] =
             godot::String{script.public_abi_hash.c_str()};
-        editor_script_descriptors.push_back(
-            editor_script_descriptor(script, godot::String{resource_path.c_str()}));
+        editor_script_descriptors.push_back(editor_script_descriptor(
+            script, godot::String{resource_path.c_str()}, script_native_bases));
         if (script.is_attached) {
             attached_script_bases[godot::String{resource_path.c_str()}] =
                 godot::String{script.attached_native_base.c_str()};

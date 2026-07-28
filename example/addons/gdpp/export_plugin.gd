@@ -1405,7 +1405,32 @@ func _storage_property_values(
     serialized_properties: Variant = null
 ) -> Dictionary:
     if serialized_properties is Dictionary:
-        return (serialized_properties as Dictionary).duplicate()
+        var values := (serialized_properties as Dictionary).duplicate()
+        # SceneState intentionally exposes serialized Object references as NodePath values and
+        # may retain null sentinels written by older scene schemas for non-null scalar fields.
+        # GDScript resolves those encodings before populating the instance. Read only those
+        # indirect values back from the live source object; all ordinary serialized values remain
+        # untouched, so export does not introduce additional custom-accessor observations.
+        var source_script := source.get_script() as Script
+        if source_script == null:
+            return values
+        for property: Dictionary in source_script.get_script_property_list():
+            var property_name := str(property.get("name", ""))
+            var usage := int(property.get("usage", 0))
+            var property_type := int(property.get("type", TYPE_NIL))
+            if (
+                property_name.is_empty()
+                or (usage & PROPERTY_USAGE_STORAGE) == 0
+                or not values.has(property_name)
+            ):
+                continue
+            var serialized_value: Variant = values[property_name]
+            if (
+                (serialized_value is NodePath and property_type == TYPE_OBJECT)
+                or (serialized_value == null and property_type != TYPE_NIL)
+            ):
+                values[property_name] = source.get(property_name)
+        return values
     var values: Dictionary = {}
     for property: Dictionary in source.get_property_list():
         var property_name := str(property.get("name", ""))
