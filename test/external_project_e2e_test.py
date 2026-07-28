@@ -97,6 +97,30 @@ class ExternalProjectE2ETest(unittest.TestCase):
                 E2E.assert_no_new_diagnostics(
                     repeated, baseline_diagnostics, "Godot import"
                 )
+            bootstrap = root / "bootstrap.log"
+            bootstrap.write_text(
+                "SCRIPT ERROR: existing customer failure\n"
+                "SCRIPT ERROR: existing customer failure\n",
+                encoding="utf-8",
+            )
+            envelope = E2E.diagnostic_envelope(baseline, bootstrap)
+            self.assertEqual(
+                envelope["SCRIPT ERROR: existing customer failure"],
+                2,
+            )
+            E2E.assert_no_new_diagnostics(repeated, envelope, "Godot import")
+            bootstrap_regression = root / "bootstrap-regression.log"
+            bootstrap_regression.write_text(
+                bootstrap.read_text(encoding="utf-8")
+                + "ERROR: GDPP bootstrap failure\n",
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(RuntimeError, "introduced a diagnostic"):
+                E2E.assert_no_new_diagnostics(
+                    bootstrap_regression,
+                    E2E.diagnostic_envelope(bootstrap),
+                    "Godot bootstrap import",
+                )
         source = MODULE_PATH.read_text(encoding="utf-8")
         self.assertIn(
             "baseline_export_diagnostics",

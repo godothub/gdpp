@@ -154,6 +154,20 @@ def diagnostic_fingerprints(log: Path) -> list[str]:
     return fingerprints
 
 
+def diagnostic_envelope(*logs: Path) -> Counter[str]:
+    # Editor imports execute customer @tool plugins while the resource scan is converging. The
+    # number of times an existing customer diagnostic is emitted can vary between the bootstrap
+    # and settled pass even with identical project bytes. Preserve the highest pristine count for
+    # each exact fingerprint; a new signature still fails closed, while scan scheduling alone
+    # cannot make a moving-project gate flaky.
+    envelope: Counter[str] = Counter()
+    for log in logs:
+        current = Counter(diagnostic_fingerprints(log))
+        for message, count in current.items():
+            envelope[message] = max(envelope[message], count)
+    return envelope
+
+
 def assert_no_new_diagnostics(
     log: Path,
     baseline: Counter[str],
@@ -621,6 +635,14 @@ def main() -> int:
             output,
             "baseline-import-bootstrap",
         )
+        baseline_bootstrap_attempt = report["phases"]["baseline_import_bootstrap"][
+            "successful_attempt"
+        ]
+        baseline_bootstrap_log = Path(
+            report["phases"]["baseline_import_bootstrap"]["attempts"][
+                baseline_bootstrap_attempt - 1
+            ]["log"]
+        )
         baseline_import_log = output / "baseline-import.log"
         report["phases"]["baseline_import"] = run(
             [str(godot), "--headless", "--editor", "--path", str(project), "--import"],
@@ -628,9 +650,15 @@ def main() -> int:
             timeout=args.import_timeout,
             log=baseline_import_log,
         )
-        baseline_import_diagnostics, report["baseline_import_diagnostics"] = (
-            report_diagnostics(baseline_import_log)
+        _, report["baseline_import_diagnostics"] = report_diagnostics(baseline_import_log)
+        baseline_import_envelope = diagnostic_envelope(
+            baseline_bootstrap_log,
+            baseline_import_log,
         )
+        report["baseline_import_diagnostic_envelope"] = [
+            {"message": message, "maximum_pristine_count": count}
+            for message, count in sorted(baseline_import_envelope.items())
+        ]
 
         preset, baseline_product = append_export_preset(
             project,
@@ -691,6 +719,15 @@ def main() -> int:
             output,
             "import-bootstrap",
         )
+        import_bootstrap_attempt = report["phases"]["import_bootstrap"]["successful_attempt"]
+        import_bootstrap_log = Path(
+            report["phases"]["import_bootstrap"]["attempts"][import_bootstrap_attempt - 1]["log"]
+        )
+        assert_no_new_diagnostics(
+            import_bootstrap_log,
+            diagnostic_envelope(baseline_bootstrap_log),
+            "Godot bootstrap import",
+        )
 
         # The pristine two-pass baseline separates customer-project diagnostics from changes
         # introduced by installing GDPP. Fresh-import transients disappear before either
@@ -702,7 +739,7 @@ def main() -> int:
             timeout=args.import_timeout,
             log=import_log,
         )
-        assert_no_new_diagnostics(import_log, baseline_import_diagnostics, "Godot import")
+        assert_no_new_diagnostics(import_log, baseline_import_envelope, "Godot import")
         customer_state = customer_worktree_state(project)
         report["customer_worktree_sha256_before_export"] = hashlib.sha256(
             customer_state
