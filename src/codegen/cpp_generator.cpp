@@ -1513,6 +1513,27 @@ Type CodeGenerator::container_argument_type(const std::string_view type_name) co
             }
         }
     }
+    if (const auto separator = name.rfind("::"); separator != std::string::npos) {
+        const auto owner_name = name.substr(0, separator);
+        const auto enum_name = name.substr(separator + 2);
+        if (owner_name == current_native_class_name_ &&
+            container_enum_types_.find(enum_name) != container_enum_types_.end()) {
+            return {TypeKind::enumeration, name};
+        }
+        if (script_symbols_) {
+            if (const auto* owner = script_symbols_->find_native_class(owner_name);
+                owner && script_symbols_->find_enum(*owner, enum_name)) {
+                return {TypeKind::enumeration, name};
+            }
+            if (const auto* owner = script_symbols_->find_inner_native(owner_name);
+                owner &&
+                std::any_of(owner->enums.begin(), owner->enums.end(), [&](const auto& enumeration) {
+                    return enumeration.name == enum_name;
+                })) {
+                return {TypeKind::enumeration, name};
+            }
+        }
+    }
     if (current_script_ && script_symbols_ && script_symbols_->find_enum(*current_script_, name))
         return {TypeKind::enumeration, name};
     if (current_inner_script_ &&
@@ -2197,6 +2218,14 @@ std::string CodeGenerator::emit_conversion(const Type& target, const Type& sourc
                    location + ")";
         }
         const std::string storage_prefix{"gdpp::runtime::ObjectStorage<"};
+        if (target_cpp.rfind(storage_prefix, 0) != 0 ||
+            target_cpp.size() <= storage_prefix.size() || target_cpp.back() != '>') {
+            diagnostics_.error("GDS3008",
+                               "object type '" + target.display_name() +
+                                   "' has no valid native storage representation",
+                               location_span ? *location_span : SourceSpan{});
+            return "gdpp::runtime::to_variant(" + value + ")";
+        }
         const auto object_cpp =
             target_cpp.substr(storage_prefix.size(), target_cpp.size() - storage_prefix.size() - 1);
         return "gdpp::runtime::strict_native_object_value_storage<" + object_cpp +

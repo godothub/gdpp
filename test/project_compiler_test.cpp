@@ -1520,6 +1520,8 @@ TEST_CASE("project compiler normalizes nested enum identities across typed conta
     std::filesystem::remove_all(root, error);
     write_text(root / "messages.gd",
                "extends RefCounted\n"
+               "enum Priority { LOW, HIGH }\n"
+               "var priorities: Array[Priority] = [Priority.LOW, Priority.HIGH]\n"
                "class Message:\n"
                "    enum Status { UNKNOWN, READY }\n"
                "class Collection:\n"
@@ -1537,6 +1539,8 @@ TEST_CASE("project compiler normalizes nested enum identities across typed conta
         read_text(options.output_directory / "generated" / result.scripts.front().source_file_name);
     REQUIRE(source.find("int64_t ") != std::string::npos);
     REQUIRE(source.find("::first()") != std::string::npos);
+    REQUIRE(source.find("godot::TypedArray<int64_t> _gdpp_array_") != std::string::npos);
+    REQUIRE(source.find("strict_native_object_value_storage") == std::string::npos);
 }
 
 TEST_CASE("project compiler normalizes bare inner enum storage against qualified members") {
