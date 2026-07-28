@@ -6,6 +6,7 @@
 #include <godot_cpp/core/error_macros.hpp>
 #include <godot_cpp/templates/vector.hpp>
 #include <godot_cpp/variant/callable.hpp>
+#include <godot_cpp/variant/node_path.hpp>
 #include <godot_cpp/variant/signal.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
@@ -68,6 +69,7 @@ class AttachedScriptInstance final {
 struct PendingConstruction {
     godot::String source_path;
     const godot::Array* arguments{nullptr};
+    bool skip_initializer{false};
     bool consumed{false};
 };
 
@@ -107,13 +109,6 @@ const godot::MethodInfo* find_method(const AttachedScriptInstance* instance,
         std::find_if(instance->descriptor.methods.begin(), instance->descriptor.methods.end(),
                      [&](const auto& item) { return item.name == name; });
     return found == instance->descriptor.methods.end() ? nullptr : &*found;
-}
-
-const godot::MethodInfo* find_method(const AttachedScriptDescriptor& descriptor,
-                                     const godot::StringName& name) {
-    const auto found = std::find_if(descriptor.methods.begin(), descriptor.methods.end(),
-                                    [&](const auto& item) { return item.name == name; });
-    return found == descriptor.methods.end() ? nullptr : &*found;
 }
 
 const AttachedScriptMethodDispatch* find_method_dispatch(const AttachedScriptInstance* instance,
@@ -536,7 +531,13 @@ void* AttachedCompiledScript::_instance_create(godot::Object* object) const {
         return instance->godot_instance_handle;
     }
 
-    {
+    const bool matches_construction =
+        pending_construction && pending_construction->source_path == metadata->source_path;
+    const bool skip_initializer = matches_construction && pending_construction->skip_initializer;
+    if (matches_construction)
+        pending_construction->consumed = true;
+
+    if (!skip_initializer) {
         // The complete base-to-derived @implicit_new chain shares one fault state. Its failure
         // preserves fields assigned before the failing expression, stops later field
         // initializers, and remains isolated from both the constructor caller and _init.
@@ -544,12 +545,11 @@ void* AttachedCompiledScript::_instance_create(godot::Object* object) const {
         behavior->_gdpp_initialize_instance();
     }
 
-    if (find_method(instance, "_init")) {
+    if (!skip_initializer && find_method(instance, "_init")) {
         const godot::Array empty_arguments;
         const auto* arguments = &empty_arguments;
-        if (pending_construction && pending_construction->source_path == metadata->source_path) {
+        if (matches_construction) {
             arguments = pending_construction->arguments;
-            pending_construction->consumed = true;
         }
         std::vector<const godot::Variant*> argument_pointers;
         argument_pointers.reserve(static_cast<std::size_t>(arguments->size()));
@@ -660,7 +660,8 @@ godot::Object* strict_attached_script_storage(const godot::Variant& value,
 }
 
 godot::Variant instantiate_attached_script(const godot::String& source_path,
-                                           const godot::Array& arguments, godot::String* error) {
+                                           const godot::Array& arguments, godot::String* error,
+                                           const bool skip_initializer) {
     const auto fail = [error](const godot::String& message) {
         if (error)
             *error = message;
@@ -696,13 +697,12 @@ godot::Variant instantiate_attached_script(const godot::String& source_path,
                 "GDPP: failed to materialize attached script resource: " + descriptor->source_path);
         return {};
     }
-    PendingConstruction construction{descriptor->source_path, &arguments, false};
+    PendingConstruction construction{descriptor->source_path, &arguments, skip_initializer, false};
     auto* previous = pending_construction;
     pending_construction = &construction;
     object->set_script(script);
     pending_construction = previous;
-    if (!script->_instance_has(object) ||
-        (find_method(*descriptor, "_init") && !construction.consumed)) {
+    if (!script->_instance_has(object) || !construction.consumed) {
         fail("failed to attach or initialize compiled script: " + descriptor->source_path);
         // ClassDB returns a strong Variant for RefCounted instances, but ordinary Objects remain
         // caller-owned. Release either ownership model before reporting construction failure.
@@ -713,6 +713,153 @@ godot::Variant instantiate_attached_script(const godot::String& source_path,
         return {};
     }
     return instance;
+}
+
+godot::Dictionary attached_instance_to_dictionary(godot::Object* object, godot::String* error) {
+    if (!object) {
+        if (error)
+            *error = "Not a script with an instance.";
+        return {};
+    }
+
+    AttachedScriptDescriptor descriptor;
+    godot::Ref<AttachedScriptBehavior> behavior;
+    godot::Dictionary metadata_values;
+    {
+        std::lock_guard<std::mutex> lock{AttachedScriptInstance::instances_mutex()};
+        const auto found = AttachedScriptInstance::instances().find(object);
+        if (found == AttachedScriptInstance::instances().end()) {
+            if (error)
+                *error = "Not a script with an instance.";
+            return {};
+        }
+        descriptor = found->second->descriptor;
+        behavior = found->second->behavior;
+        metadata_values = found->second->metadata_values;
+    }
+
+    const auto separator = descriptor.source_path.find("::");
+    const auto root_path =
+        separator < 0 ? descriptor.source_path : descriptor.source_path.substr(0, separator);
+    if (root_path.is_empty() || !root_path.begins_with("res://")) {
+        if (error)
+            *error = "Not based on a resource file.";
+        return {};
+    }
+
+    godot::Dictionary result;
+    result["@path"] = root_path;
+    result["@subpath"] =
+        separator < 0
+            ? godot::NodePath{}
+            : godot::NodePath{descriptor.source_path.substr(separator + 2).replace(".", "/")};
+    for (const auto& property : descriptor.properties) {
+        if (result.has(property.info.name))
+            continue;
+        if (behavior.is_valid()) {
+            if (!property.storage_getter) {
+                if (error)
+                    *error = "Script member has no raw storage getter: " +
+                             godot::String{property.info.name};
+                return {};
+            }
+            result[property.info.name] = property.storage_getter(behavior.ptr());
+        } else {
+            result[property.info.name] = metadata_values.get(
+                property.info.name,
+                property.has_default ? property.default_value : godot::Variant{});
+        }
+    }
+    return result;
+}
+
+godot::Variant dictionary_to_attached_instance(const godot::Dictionary& dictionary,
+                                               godot::String* error) {
+    const auto fail = [error](const godot::String& message) {
+        if (error)
+            *error = message;
+    };
+    if (!dictionary.has("@path")) {
+        fail("Invalid instance dictionary format (missing @path).");
+        return {};
+    }
+    const godot::Variant path_value = dictionary["@path"];
+    if (path_value.get_type() != godot::Variant::STRING &&
+        path_value.get_type() != godot::Variant::STRING_NAME) {
+        fail("Invalid instance dictionary format (@path is not a resource path).");
+        return {};
+    }
+    auto source_path = static_cast<godot::String>(path_value).simplify_path();
+    if (source_path.is_empty() || !source_path.begins_with("res://")) {
+        fail("Invalid instance dictionary format (@path is not a project resource).");
+        return {};
+    }
+
+    if (dictionary.has("@subpath")) {
+        const godot::Variant subpath_value = dictionary["@subpath"];
+        godot::NodePath subpath;
+        if (subpath_value.get_type() == godot::Variant::NODE_PATH) {
+            subpath = subpath_value.operator godot::NodePath();
+        } else if (subpath_value.get_type() == godot::Variant::STRING ||
+                   subpath_value.get_type() == godot::Variant::STRING_NAME) {
+            subpath = godot::NodePath{static_cast<godot::String>(subpath_value)};
+        } else if (subpath_value.get_type() != godot::Variant::NIL) {
+            fail("Invalid instance dictionary format (@subpath is not a NodePath).");
+            return {};
+        }
+        for (std::int64_t index = 0; index < subpath.get_name_count(); ++index) {
+            source_path += index == 0 ? "::" : ".";
+            source_path += godot::String{subpath.get_name(index)};
+        }
+    }
+
+    godot::String construction_error;
+    const godot::Array no_arguments;
+    auto result = instantiate_attached_script(source_path, no_arguments, &construction_error, true);
+    if (!construction_error.is_empty() || result.get_type() != godot::Variant::OBJECT ||
+        !result.get_validated_object()) {
+        fail(construction_error.is_empty()
+                 ? "Invalid instance dictionary format (can't load script at @path)."
+                 : construction_error);
+        return {};
+    }
+
+    const auto discard_result = [&result]() {
+        auto* object = result.get_validated_object();
+        if (!object)
+            return;
+        if (godot::Object::cast_to<godot::RefCounted>(object))
+            result = godot::Variant{};
+        else {
+            godot::memdelete(object);
+            result = godot::Variant{};
+        }
+    };
+    AttachedScriptDescriptor descriptor;
+    godot::Ref<AttachedScriptBehavior> behavior;
+    {
+        std::lock_guard<std::mutex> lock{AttachedScriptInstance::instances_mutex()};
+        const auto found = AttachedScriptInstance::instances().find(result.get_validated_object());
+        if (found == AttachedScriptInstance::instances().end() ||
+            found->second->behavior.is_null()) {
+            fail("Cannot restore a compiled script instance.");
+            discard_result();
+            return {};
+        }
+        descriptor = found->second->descriptor;
+        behavior = found->second->behavior;
+    }
+    for (const auto& property : descriptor.properties) {
+        if (!dictionary.has(property.info.name))
+            continue;
+        if (!property.storage_setter ||
+            !property.storage_setter(behavior.ptr(), dictionary[property.info.name])) {
+            fail("Cannot restore script member: " + godot::String{property.info.name});
+            discard_result();
+            return {};
+        }
+    }
+    return result;
 }
 
 godot::Variant call_attached_native_base_raw(godot::Object* owner,

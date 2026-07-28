@@ -213,11 +213,20 @@ set_attached_editor_storage_state(godot::Object* object,
 // valid only while the owner retains the attached compiled script.
 [[nodiscard]] void* attached_script_instance_handle(godot::Object* object);
 
-// Constructs the provider-owned native object, attaches the compiled script and invokes _init
-// with the supplied arguments. The Variant preserves RefCounted ownership when applicable.
+// Constructs the provider-owned native object and attaches the compiled script. Dictionary
+// restoration can skip both the field-initializer chain and _init, matching GDScript's
+// dict_to_inst() transaction instead of replaying customer side effects.
 [[nodiscard]] godot::Variant instantiate_attached_script(const godot::String& source_path,
                                                          const godot::Array& arguments = {},
-                                                         godot::String* error = nullptr);
+                                                         godot::String* error = nullptr,
+                                                         bool skip_initializer = false);
+
+// Implements GDScript's deprecated instance-dictionary transport against raw member slots.
+// Custom accessors are deliberately bypassed in both directions.
+[[nodiscard]] godot::Dictionary attached_instance_to_dictionary(godot::Object* object,
+                                                                godot::String* error = nullptr);
+[[nodiscard]] godot::Variant dictionary_to_attached_instance(const godot::Dictionary& dictionary,
+                                                             godot::String* error = nullptr);
 
 // Godot represents Array[ScriptType] and Dictionary[..., ScriptType] with both the provider-owned
 // native base class and the exact Script resource. A generated attached behavior is not a native
