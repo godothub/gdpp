@@ -140,6 +140,18 @@ func _verify_export_runtime() -> void:
     if child_count.call() != get_child_count():
         _fail("bound Godot object method Callable lost its receiver or result")
         return
+    var widened_return: WidenedReturnBase = WidenedReturnChild.new()
+    var widened_total := 0
+    for item in widened_return.values():
+        widened_total += item.value
+    if widened_total != 7:
+        _fail("dynamic override return storage was narrowed before direct iteration")
+        return
+    var exact_return: WidenedReturnBase = WidenedReturnBase.new()
+    var exact_values := exact_return.values()
+    if not exact_values.is_typed() or exact_values.get_typed_builtin() != TYPE_DICTIONARY:
+        _fail("dynamic return storage lost its typed container contract at assignment")
+        return
     var deferred_emit_seen := [false]
     first_lambda_resume.connect(
         func() -> void: deferred_emit_seen[0] = true,
