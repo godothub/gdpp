@@ -180,6 +180,24 @@ class ExternalProjectE2ETest(unittest.TestCase):
             self.assertEqual(product, project / "artifacts/product.app")
             self.assertIn('binary_format/architecture="universal"', content)
 
+    def test_pck_audit_defers_loader_runtime_diagnostics_to_the_exported_app(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            log = Path(temporary) / "audit.log"
+            log.write_text(
+                "PCK_AUDIT_FILES=20\n"
+                "PCK_AUDIT_PROJECT_LIBRARIES=1\n"
+                "PCK_AUDIT_VIOLATIONS=0\n"
+                "ERROR: custom loader is unavailable in the isolated audit host\n",
+                encoding="utf-8",
+            )
+            E2E.assert_zero_pck_violations(log)
+            log.write_text(
+                "PCK_AUDIT_VIOLATIONS=1\nERROR: forbidden source file\n",
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(RuntimeError, "zero-violation"):
+                E2E.assert_zero_pck_violations(log)
+
 
 if __name__ == "__main__":
     unittest.main(argv=[sys.argv[0]])

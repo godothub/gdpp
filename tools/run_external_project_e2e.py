@@ -137,6 +137,13 @@ def assert_clean_log(log: Path, phase: str) -> None:
         fail(f"{phase} emitted a forbidden diagnostic at {log}:{line}")
 
 
+def assert_zero_pck_violations(log: Path) -> None:
+    content = log.read_text(encoding="utf-8", errors="replace")
+    matches = re.findall(r"^PCK_AUDIT_VIOLATIONS=(\d+)$", content, re.MULTILINE)
+    if matches != ["0"]:
+        fail("PCK audit did not produce exactly one zero-violation result")
+
+
 def diagnostic_fingerprints(log: Path) -> list[str]:
     fingerprints: list[str] = []
     for line in log.read_text(encoding="utf-8", errors="replace").splitlines():
@@ -644,8 +651,11 @@ def main() -> int:
         pck = find_pck(product)
         # Keep the isolated host deterministic: it audits package contents, the runtime
         # descriptor, source disclosure, and native payload shape without pretending to own the
-        # customer's autoloads or custom ResourceFormatLoaders. The exported executable launched
-        # immediately afterwards is the authoritative extension/resource runtime gate.
+        # customer's autoloads or custom ResourceFormatLoaders. Mounting the customer's PCK after
+        # the empty host has initialized cannot load the project's native script-path provider, so
+        # Godot may report missing custom loader scripts while the audit host shuts down. Only the
+        # structured violation count is authoritative here; the exported executable launched
+        # immediately afterwards owns the full extension/resource runtime gate.
         audit_host = output / "audit-host"
         audit_host.mkdir(parents=True, exist_ok=True)
         (audit_host / "project.godot").write_text(
@@ -672,11 +682,7 @@ def main() -> int:
             timeout=args.import_timeout,
             log=audit_log,
         )
-        assert_clean_log(audit_log, "PCK audit")
-        if "PCK_AUDIT_VIOLATIONS=0" not in audit_log.read_text(
-            encoding="utf-8", errors="replace"
-        ):
-            fail("PCK audit did not produce a zero-violation result")
+        assert_zero_pck_violations(audit_log)
 
         executable = find_executable(product, args.host)
         runtime_log = output / "runtime.log"
