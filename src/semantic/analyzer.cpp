@@ -2529,6 +2529,7 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                     } else if (language_intrinsic) {
                         resolve_intrinsic(*language_intrinsic);
                     } else if (resolve_utility(api_.find_utility_function(callee.value()))) {
+                    } else if (resolve_constructor(callee.value())) {
                     } else if (const auto* symbol = resolve(callee.value())) {
                         call_result = symbol->type;
                         model_.referenced_symbols_.emplace(&callee, *symbol);
@@ -2640,14 +2641,11 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                                                             expression.span);
                         (void)resolve_method(method);
                     } else {
-                        if (!resolve_constructor(callee.value())) {
-                            call_result = analyze_expression(callee);
-                            if (call_result.kind == TypeKind::unknown) {
-                                diagnostics_.error("GDS4071",
-                                                   "unknown function or callable '" +
-                                                       callee.value() + "'",
-                                                   expression.span);
-                            }
+                        call_result = analyze_expression(callee);
+                        if (call_result.kind == TypeKind::unknown) {
+                            diagnostics_.error(
+                                "GDS4071", "unknown function or callable '" + callee.value() + "'",
+                                expression.span);
                         }
                     }
                 } else if (callee.kind() == ast::ExpressionKind::member) {

@@ -5512,6 +5512,20 @@ TEST_CASE("Godot builtin constructors resolve overloads and native value types")
     REQUIRE(result.unit.source.find(".distance_to(") != std::string::npos);
 }
 
+TEST_CASE("builtin constructors retain call syntax when a value shadows their type name") {
+    const gdpp::Compiler compiler;
+    const auto result = compiler.compile("shadowed_constructor.gd",
+                                         "extends Node\n"
+                                         "func convert(value: float, int := false) -> Variant:\n"
+                                         "    if int:\n"
+                                         "        return int(value)\n"
+                                         "    return int\n");
+
+    REQUIRE(result.success);
+    REQUIRE(result.unit.source.find("gdpp::runtime::explicit_variant_cast<int64_t>(") !=
+            std::string::npos);
+}
+
 TEST_CASE("invalid Godot builtin constructor overloads are diagnosed") {
     const gdpp::Compiler compiler;
     const auto result = compiler.compile("invalid_vector.gd", "var value := Vector2(\"x\")\n");
