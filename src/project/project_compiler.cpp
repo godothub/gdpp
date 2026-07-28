@@ -1590,6 +1590,132 @@ ProjectCompileResult ProjectCompiler::compile_impl(const ProjectCompileOptions& 
     }
     if (inputs.empty())
         report_project_progress(options, ProjectCompilePhase::parse, 1, 1);
+
+    // Resolve scalar class constants as one project graph before semantic analysis. GDScript
+    // permits preload paths, enum initializers and annotation arguments to concatenate or
+    // calculate constants through another globally named script. A bounded fixed point handles
+    // forward references and cross-script dependency order without loading customer scripts in
+    // the editor.
+    std::vector<std::unordered_map<std::string, std::string>> local_string_constants(inputs.size());
+    std::vector<std::unordered_map<std::string, std::int64_t>> local_integer_constants(
+        inputs.size());
+    std::unordered_map<std::string, std::string> project_string_constants;
+    std::unordered_map<std::string, std::int64_t> project_integer_constants;
+    std::size_t constant_resolution_budget = 1;
+    for (const auto& input : inputs) {
+        constant_resolution_budget += input.script.variables.size();
+        for (const auto& enumeration : input.script.enums)
+            constant_resolution_budget += enumeration.entries.size();
+    }
+    for (std::size_t iteration = 0; iteration < constant_resolution_budget; ++iteration) {
+        bool changed = false;
+        for (std::size_t input_index = 0; input_index < inputs.size(); ++input_index) {
+            auto& input = inputs[input_index];
+            auto string_environment = project_string_constants;
+            auto integer_environment = project_integer_constants;
+            for (const auto& [name, value] : local_string_constants[input_index])
+                string_environment.insert_or_assign(name, value);
+            for (const auto& [name, value] : local_integer_constants[input_index])
+                integer_environment.insert_or_assign(name, value);
+
+            const auto assign_changed = [&](auto& values, const std::string& name,
+                                            const auto& value) {
+                const auto existing = values.find(name);
+                if (existing != values.end() && existing->second == value)
+                    return false;
+                values.insert_or_assign(name, value);
+                return true;
+            };
+            const auto publish_string = [&](const std::string& name, const std::string& value) {
+                changed |= assign_changed(local_string_constants[input_index], name, value);
+                string_environment.insert_or_assign(name, value);
+                if (input.globally_named) {
+                    const auto qualified = input.script_class_name + "." + name;
+                    changed |= assign_changed(project_string_constants, qualified, value);
+                    string_environment.insert_or_assign(qualified, value);
+                }
+            };
+            const auto publish_integer = [&](const std::string& name, const std::int64_t value) {
+                changed |= assign_changed(local_integer_constants[input_index], name, value);
+                integer_environment.insert_or_assign(name, value);
+                if (input.globally_named) {
+                    const auto qualified = input.script_class_name + "." + name;
+                    changed |= assign_changed(project_integer_constants, qualified, value);
+                    integer_environment.insert_or_assign(qualified, value);
+                }
+            };
+
+            for (const auto& variable : input.script.variables) {
+                if (!variable.is_constant || !variable.initializer)
+                    continue;
+                const auto member = std::find_if(
+                    input.members.begin(), input.members.end(), [&](const auto& value) {
+                        return value.kind == ScriptMemberKind::constant &&
+                               value.name == variable.name;
+                    });
+                if (const auto value =
+                        evaluate_string_constant(*variable.initializer, string_environment)) {
+                    publish_string(variable.name, *value);
+                    if (member != input.members.end())
+                        member->folded_string_value = *value;
+                }
+                if (const auto value =
+                        evaluate_integer_constant(*variable.initializer, integer_environment)) {
+                    publish_integer(variable.name, *value);
+                    if (member != input.members.end())
+                        member->folded_integer_value = *value;
+                }
+            }
+
+            for (const auto& declaration : input.script.enums) {
+                auto previous = integer_environment;
+                std::optional<std::int64_t> next_value{0};
+                auto enumeration = declaration.name
+                                       ? std::find_if(input.enums.begin(), input.enums.end(),
+                                                      [&](const auto& value) {
+                                                          return value.name == *declaration.name;
+                                                      })
+                                       : input.enums.end();
+                for (std::size_t entry_index = 0; entry_index < declaration.entries.size();
+                     ++entry_index) {
+                    const auto& entry = declaration.entries[entry_index];
+                    const auto value = entry.value
+                                           ? evaluate_integer_constant(*entry.value, previous)
+                                           : next_value;
+                    if (!value) {
+                        next_value.reset();
+                        continue;
+                    }
+                    previous.insert_or_assign(entry.name, *value);
+                    if (declaration.name) {
+                        const auto enum_member = *declaration.name + "." + entry.name;
+                        publish_integer(enum_member, *value);
+                        if (enumeration != input.enums.end() &&
+                            entry_index < enumeration->entries.size()) {
+                            enumeration->entries[entry_index].value = *value;
+                        }
+                    } else {
+                        publish_integer(entry.name, *value);
+                        const auto member = std::find_if(
+                            input.members.begin(), input.members.end(), [&](const auto& candidate) {
+                                return candidate.kind == ScriptMemberKind::enum_value &&
+                                       candidate.name == entry.name;
+                            });
+                        if (member != input.members.end()) {
+                            member->constant_value = *value;
+                            member->folded_integer_value = *value;
+                        }
+                    }
+                    next_value = *value == std::numeric_limits<std::int64_t>::max()
+                                     ? std::optional<std::int64_t>{}
+                                     : std::optional<std::int64_t>{*value + 1};
+                }
+            }
+        }
+        if (!changed)
+            break;
+    }
+
     report_project_progress(options, ProjectCompilePhase::analyze, 0, script_progress_total);
     for (const auto& [name, bridge_class] : bridge_classes) {
         if (!target_api.find_class(bridge_class.type->godot_base)) {
@@ -2484,8 +2610,8 @@ ProjectCompileResult ProjectCompiler::compile_impl(const ProjectCompileOptions& 
                             const auto inferred = semantic.type_of(variable);
                             if (inferred.kind != TypeKind::unknown && member->type != inferred) {
                                 member->type = inferred;
-                                script_symbols.set_variable_type(
-                                    input.relative, inner_name, variable.name, inferred);
+                                script_symbols.set_variable_type(input.relative, inner_name,
+                                                                 variable.name, inferred);
                                 changed = true;
                             }
                         }

@@ -88,4 +88,28 @@ evaluate_integer_constant(const ast::Expression& expression,
     return std::nullopt;
 }
 
+std::optional<std::string>
+evaluate_string_constant(const ast::Expression& expression,
+                         const std::unordered_map<std::string, std::string>& previous) {
+    if (const auto* literal = expression.get_if<ast::LiteralExpression>();
+        literal && literal->kind == ast::LiteralKind::string) {
+        return literal->text;
+    }
+    if (const auto* identifier = expression.get_if<ast::IdentifierExpression>()) {
+        const auto found = previous.find(identifier->name);
+        return found == previous.end() ? std::nullopt : std::optional<std::string>{found->second};
+    }
+    if (expression.get_if<ast::MemberExpression>()) {
+        const auto name = qualified_constant_name(expression);
+        const auto found = name ? previous.find(*name) : previous.end();
+        return found == previous.end() ? std::nullopt : std::optional<std::string>{found->second};
+    }
+    const auto* binary = expression.get_if<ast::BinaryExpression>();
+    if (!binary || binary->operation != "+")
+        return std::nullopt;
+    const auto left = evaluate_string_constant(*binary->left, previous);
+    const auto right = evaluate_string_constant(*binary->right, previous);
+    return left && right ? std::optional<std::string>{*left + *right} : std::nullopt;
+}
+
 } // namespace gdpp

@@ -232,6 +232,16 @@ struct ProjectEnumLookup {
     std::string native_owner;
 };
 
+std::optional<std::string> qualified_constant_expression_name(const ast::Expression& expression) {
+    if (const auto* identifier = expression.get_if<ast::IdentifierExpression>())
+        return identifier->name;
+    const auto* member = expression.get_if<ast::MemberExpression>();
+    if (!member || !member->receiver)
+        return std::nullopt;
+    const auto receiver = qualified_constant_expression_name(*member->receiver);
+    return receiver ? std::optional<std::string>{*receiver + "." + member->name} : std::nullopt;
+}
+
 ProjectEnumLookup find_project_enum(const ScriptSymbolTable* symbols, const std::string& name) {
     if (!symbols)
         return {};
@@ -4379,23 +4389,38 @@ Type SemanticAnalyzer::runtime_storage_type_of(const ast::Expression& expression
 
 std::optional<std::string>
 SemanticAnalyzer::constant_string_expression(const ast::Expression& expression) const {
-    if (expression.kind() == ast::ExpressionKind::literal &&
-        expression.literal_kind() == ast::LiteralKind::string) {
-        return expression.value();
+    std::unordered_map<std::string, std::string> constants;
+    for (const auto& scope : scopes_) {
+        for (const auto& [name, symbol] : scope) {
+            if (symbol.constant_string_value)
+                constants.insert_or_assign(name, *symbol.constant_string_value);
+        }
     }
-    if (expression.kind() == ast::ExpressionKind::identifier) {
-        const auto* symbol = model_.symbol_of(expression);
-        return symbol && symbol->kind == SymbolKind::constant ? symbol->constant_string_value
-                                                              : std::nullopt;
-    }
-    if (expression.kind() == ast::ExpressionKind::binary && expression.value() == "+" &&
-        expression.operand_count() == 2) {
-        const auto left = constant_string_expression(*expression.operand(0));
-        const auto right = constant_string_expression(*expression.operand(1));
-        if (left && right)
-            return *left + *right;
-    }
-    return std::nullopt;
+    const auto collect_project_constants = [&](const auto& self,
+                                               const ast::Expression& candidate) -> void {
+        const auto name = qualified_constant_expression_name(candidate);
+        if (name && script_symbols_) {
+            const ScriptClassSymbol* owner = nullptr;
+            const ScriptMemberSymbol* member = nullptr;
+            if (const auto* resolution = model_.api_resolution_of(candidate);
+                resolution && resolution->kind == ApiResolutionKind::script_constant) {
+                owner = script_symbols_->find_native_class(resolution->owner);
+                if (owner)
+                    member = script_symbols_->find_member(*owner, candidate.value());
+            } else if (candidate.kind() == ast::ExpressionKind::identifier && current_script_) {
+                owner = current_script_;
+                member = script_symbols_->find_member(*owner, candidate.value());
+            }
+            if (member && member->kind == ScriptMemberKind::constant &&
+                member->folded_string_value) {
+                constants.insert_or_assign(*name, *member->folded_string_value);
+            }
+        }
+        for (std::size_t index = 0; index < candidate.operand_count(); ++index)
+            self(self, *candidate.operand(index));
+    };
+    collect_project_constants(collect_project_constants, expression);
+    return evaluate_string_constant(expression, constants);
 }
 
 std::optional<std::int64_t>
@@ -4409,6 +4434,24 @@ SemanticAnalyzer::constant_integer_expression(const ast::Expression& expression)
     }
     const auto collect_api_constants = [&](const auto& self,
                                            const ast::Expression& candidate) -> void {
+        const auto name = qualified_constant_expression_name(candidate);
+        if (name && script_symbols_) {
+            const ScriptClassSymbol* owner = nullptr;
+            const ScriptMemberSymbol* member = nullptr;
+            if (const auto* resolution = model_.api_resolution_of(candidate);
+                resolution && resolution->kind == ApiResolutionKind::script_constant) {
+                owner = script_symbols_->find_native_class(resolution->owner);
+                if (owner)
+                    member = script_symbols_->find_member(*owner, candidate.value());
+            } else if (candidate.kind() == ast::ExpressionKind::identifier && current_script_) {
+                owner = current_script_;
+                member = script_symbols_->find_member(*owner, candidate.value());
+            }
+            if (member && member->kind == ScriptMemberKind::constant &&
+                member->folded_integer_value) {
+                constants.insert_or_assign(*name, *member->folded_integer_value);
+            }
+        }
         if (candidate.kind() == ast::ExpressionKind::identifier) {
             if (const auto* constant = api_.find_global_constant(candidate.value()))
                 constants.insert_or_assign(candidate.value(), constant->value);

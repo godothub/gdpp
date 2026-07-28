@@ -33,6 +33,8 @@ struct ScriptMemberSymbol {
     bool is_vararg{false};
     bool read_only{false};
     std::int64_t constant_value{0};
+    std::optional<std::int64_t> folded_integer_value;
+    std::optional<std::string> folded_string_value;
     bool is_coroutine{false};
     bool is_abstract{false};
     std::uint32_t method_hash{0};

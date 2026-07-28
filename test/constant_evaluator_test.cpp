@@ -29,6 +29,21 @@ evaluate(std::string expression,
     return gdpp::evaluate_integer_constant(*script.variables.front().initializer, constants);
 }
 
+std::optional<std::string>
+evaluate_string(std::string expression,
+                const std::unordered_map<std::string, std::string>& constants = {}) {
+    gdpp::DiagnosticBag diagnostics;
+    const gdpp::SourceFile source{"constant.gd", "const VALUE = " + expression + "\n"};
+    gdpp::Lexer lexer{source, diagnostics};
+    const auto tokens = lexer.scan();
+    gdpp::Parser parser{tokens, diagnostics};
+    const auto script = parser.parse_script();
+    REQUIRE(!diagnostics.has_errors());
+    REQUIRE_EQ(script.variables.size(), std::size_t{1});
+    REQUIRE(script.variables.front().initializer != nullptr);
+    return gdpp::evaluate_string_constant(*script.variables.front().initializer, constants);
+}
+
 } // namespace
 
 TEST_CASE("integer constants use the same wrapped arithmetic as GDScript") {
@@ -71,4 +86,13 @@ TEST_CASE("integer constants resolve qualified script and enum members") {
     REQUIRE_EQ(evaluate("ProgressCommons.UnknownProgress", constants),
                std::optional<std::int64_t>{0});
     REQUIRE_EQ(evaluate("EChannel.CONNECT + 1", constants), std::optional<std::int64_t>{5});
+}
+
+TEST_CASE("string constants concatenate qualified script members") {
+    const std::unordered_map<std::string, std::string> constants{
+        {"Path.EntityComponent", "res://presets/entities/components/"},
+    };
+    REQUIRE_EQ(evaluate_string("Path.EntityComponent + \"Camera.tscn\"", constants),
+               std::optional<std::string>{"res://presets/entities/components/Camera.tscn"});
+    REQUIRE(!evaluate_string("Path.Missing + \"Camera.tscn\"", constants));
 }

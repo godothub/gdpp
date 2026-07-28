@@ -3535,6 +3535,36 @@ TEST_CASE("project compiler lowers cross-script constants enums and resource fac
                std::size_t{2});
 }
 
+TEST_CASE("project compiler folds cross-script resource path constants") {
+    const auto root = fixture_root("project-cross-script-resource-paths");
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
+    write_text(root / "paths.gd", "extends RefCounted\n"
+                                  "class_name ProjectPaths\n"
+                                  "const ROOT: String = \"res://\"\n"
+                                  "const SCENES: String = ROOT + \"scenes/\"\n");
+    write_text(root / "scenes/main.tscn", "[gd_scene format=3]\n\n"
+                                          "[node name=\"Main\" type=\"Node\"]\n");
+    write_text(root / "consumer.gd",
+               "extends Node\n"
+               "class_name PathConsumer\n"
+               "const MAIN: PackedScene = preload(ProjectPaths.SCENES + \"main.tscn\")\n"
+               "func create() -> Node:\n"
+               "    return MAIN.instantiate()\n");
+
+    const auto options = project_options(root);
+    const auto result = gdpp::ProjectCompiler{}.compile(options);
+
+    REQUIRE(result.success);
+    const auto consumer =
+        std::find_if(result.scripts.begin(), result.scripts.end(), [](const auto& script) {
+            return script.relative_path == std::filesystem::path{"consumer.gd"};
+        });
+    REQUIRE(consumer != result.scripts.end());
+    REQUIRE(std::find(consumer->dependencies.begin(), consumer->dependencies.end(), "paths.gd") !=
+            consumer->dependencies.end());
+}
+
 TEST_CASE("project compiler lowers cross-script static Callable values") {
     const auto root = fixture_root("project-cross-static-callable");
     std::error_code error;
