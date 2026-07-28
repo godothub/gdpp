@@ -6874,6 +6874,14 @@ std::string CodeGenerator::emit_statement_body(const typed::Statement& statement
                           root_value + ");\n" + prefix + "}\n";
                 return result;
             }
+            if (direct_chain.size() > 1) {
+                // Builtin getters such as Transform2D::get_origin() may return a const reference
+                // or a copy. Mutating the leaf directly is either invalid C++ or silently loses
+                // the change. The transactional Variant lvalue path already preserves receiver
+                // and RHS order, reconstructs every value layer, and commits the root exactly
+                // once for locals, properties, subscripts, and object members.
+                return emit_dynamic_assignment(statement, indentation);
+            }
             const auto& parent = *target.operands.at(0);
             if (parent.type.kind == TypeKind::builtin) {
                 const auto suffix = std::to_string(temporary_counter_++);

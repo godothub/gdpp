@@ -2946,6 +2946,25 @@ TEST_CASE("compiler maps every synthetic builtin member through its native ABI")
     REQUIRE(source.find("color.ok_hsl_h") == std::string::npos);
 }
 
+TEST_CASE("nested builtin assignments reconstruct every copied value layer") {
+    const gdpp::Compiler compiler;
+    const auto result = compiler.compile(
+        "nested_builtin_assignment.gd",
+        "func update(transform: Transform2D, values: Array[Transform2D]) -> void:\n"
+        "    transform.origin.x += 2.0\n"
+        "    values[0].origin.y = 4.0\n");
+
+    REQUIRE(result.success);
+    const auto& source = result.unit.source;
+    REQUIRE(source.find("godot::StringName(\"origin\")") != std::string::npos);
+    REQUIRE(source.find("godot::StringName(\"x\")") != std::string::npos);
+    REQUIRE(source.find("godot::StringName(\"y\")") != std::string::npos);
+    REQUIRE(source.find("gdpp::runtime::set_key(") != std::string::npos);
+    REQUIRE(source.find("_gdpp_builtin_receiver_") == std::string::npos);
+    REQUIRE(source.find("_gdpp_assignment_receiver_") != std::string::npos);
+    REQUIRE(source.find("_gdpp_dynamic_root_") != std::string::npos);
+}
+
 TEST_CASE("compiler contains invalid native sequence indexes instead of dereferencing them") {
     const gdpp::Compiler compiler;
     const auto result = compiler.compile(
