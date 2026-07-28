@@ -133,6 +133,42 @@ void validate_annotation_targets(const std::vector<ast::Annotation>& annotations
     }
 }
 
+bool is_inspector_group_annotation(const ast::Annotation& annotation) {
+    return annotation.name == "export_group" || annotation.name == "export_subgroup" ||
+           annotation.name == "export_category";
+}
+
+const ast::Annotation*
+first_non_group_annotation(const std::vector<ast::Annotation>& annotations) {
+    const auto found =
+        std::find_if(annotations.begin(), annotations.end(), [](const ast::Annotation& annotation) {
+            return !is_inspector_group_annotation(annotation);
+        });
+    return found == annotations.end() ? nullptr : &*found;
+}
+
+std::vector<ast::Annotation>
+take_declaration_annotations(std::vector<ast::Annotation>& pending,
+                             const bool accepts_inspector_groups) {
+    if (accepts_inspector_groups) {
+        auto result = std::move(pending);
+        pending.clear();
+        return result;
+    }
+    std::vector<ast::Annotation> result;
+    std::vector<ast::Annotation> retained;
+    result.reserve(pending.size());
+    retained.reserve(pending.size());
+    for (auto& annotation : pending) {
+        if (is_inspector_group_annotation(annotation))
+            retained.push_back(std::move(annotation));
+        else
+            result.push_back(std::move(annotation));
+    }
+    pending = std::move(retained);
+    return result;
+}
+
 } // namespace
 
 Parser::Parser(const std::vector<Token>& tokens, DiagnosticBag& diagnostics, FrontendLimits limits)
@@ -342,7 +378,7 @@ void Parser::parse_property_accessors(ast::VariableDeclaration& declaration) {
             diagnostics_.error("GDS2011", "expected 'get' or 'set' property accessor", name.span);
         }
         consume(TokenKind::colon, "expected ':' after property accessor");
-        accessor.body = parse_block();
+        accessor.body = parse_suite();
         accessor.span = joined(begin, previous().span);
         if (name.lexeme == "get") {
             if (declaration.getter) {
@@ -618,7 +654,10 @@ ast::VariableDeclaration Parser::parse_variable(bool is_constant,
         skip_newlines();
     } else if (match(TokenKind::semicolon)) {
         skip_newlines();
-    } else if (!check(TokenKind::newline) && !check(TokenKind::end_of_file)) {
+    } else if (!check(TokenKind::newline) && !check(TokenKind::end_of_file) &&
+               !(declaration.initializer &&
+                 declaration.initializer->kind() == ast::ExpressionKind::lambda &&
+                 declaration.initializer->span.begin.line < current().span.begin.line)) {
         diagnostics_.error(
             check(TokenKind::comma) ? "GDS2032" : "GDS2003",
             check(TokenKind::comma)
@@ -727,42 +766,47 @@ void Parser::parse_class_member(ast::ClassDeclaration& declaration,
             parse_type_name("expected an internal class base type after 'extends'");
         skip_newlines();
     } else if (match(TokenKind::kw_var)) {
-        validate_annotation_targets(annotations, AnnotationTarget::field, diagnostics_);
-        declaration.variables.push_back(parse_variable(false, std::move(annotations)));
-        annotations.clear();
+        auto current_annotations = take_declaration_annotations(annotations, true);
+        validate_annotation_targets(current_annotations, AnnotationTarget::field, diagnostics_);
+        declaration.variables.push_back(parse_variable(false, std::move(current_annotations)));
     } else if (match(TokenKind::kw_const)) {
-        validate_annotation_targets(annotations, AnnotationTarget::field, diagnostics_);
-        declaration.variables.push_back(parse_variable(true, std::move(annotations)));
-        annotations.clear();
+        auto current_annotations = take_declaration_annotations(annotations, false);
+        validate_annotation_targets(current_annotations, AnnotationTarget::field, diagnostics_);
+        declaration.variables.push_back(parse_variable(true, std::move(current_annotations)));
     } else if (match(TokenKind::kw_signal)) {
-        validate_annotation_targets(annotations, AnnotationTarget::signal, diagnostics_);
-        declaration.signals.push_back(parse_signal(std::move(annotations)));
-        annotations.clear();
+        auto current_annotations = take_declaration_annotations(annotations, false);
+        validate_annotation_targets(current_annotations, AnnotationTarget::signal, diagnostics_);
+        declaration.signals.push_back(parse_signal(std::move(current_annotations)));
     } else if (match(TokenKind::kw_enum)) {
-        validate_annotation_targets(annotations, AnnotationTarget::enumeration, diagnostics_);
-        declaration.enums.push_back(parse_enum(std::move(annotations)));
-        annotations.clear();
+        auto current_annotations = take_declaration_annotations(annotations, false);
+        validate_annotation_targets(current_annotations, AnnotationTarget::enumeration,
+                                    diagnostics_);
+        declaration.enums.push_back(parse_enum(std::move(current_annotations)));
     } else if (match(TokenKind::kw_static)) {
         if (match(TokenKind::kw_var)) {
-            validate_annotation_targets(annotations, AnnotationTarget::field, diagnostics_);
-            auto variable = parse_variable(false, std::move(annotations));
+            auto current_annotations = take_declaration_annotations(annotations, false);
+            validate_annotation_targets(current_annotations, AnnotationTarget::field,
+                                        diagnostics_);
+            auto variable = parse_variable(false, std::move(current_annotations));
             variable.is_static = true;
             declaration.variables.push_back(std::move(variable));
-            annotations.clear();
         } else {
-            validate_annotation_targets(annotations, AnnotationTarget::function, diagnostics_);
+            auto current_annotations = take_declaration_annotations(annotations, false);
+            validate_annotation_targets(current_annotations, AnnotationTarget::function,
+                                        diagnostics_);
             consume(TokenKind::kw_func, "expected 'var' or 'func' after 'static'");
-            declaration.functions.push_back(parse_function(true, std::move(annotations)));
-            annotations.clear();
+            declaration.functions.push_back(parse_function(true, std::move(current_annotations)));
         }
     } else if (match(TokenKind::kw_func)) {
-        validate_annotation_targets(annotations, AnnotationTarget::function, diagnostics_);
-        declaration.functions.push_back(parse_function(false, std::move(annotations)));
-        annotations.clear();
+        auto current_annotations = take_declaration_annotations(annotations, false);
+        validate_annotation_targets(current_annotations, AnnotationTarget::function,
+                                    diagnostics_);
+        declaration.functions.push_back(parse_function(false, std::move(current_annotations)));
     } else if (match(TokenKind::kw_class)) {
-        validate_annotation_targets(annotations, AnnotationTarget::inner_class, diagnostics_);
-        declaration.classes.push_back(parse_class(std::move(annotations)));
-        annotations.clear();
+        auto current_annotations = take_declaration_annotations(annotations, false);
+        validate_annotation_targets(current_annotations, AnnotationTarget::inner_class,
+                                    diagnostics_);
+        declaration.classes.push_back(parse_class(std::move(current_annotations)));
     } else {
         annotations.clear();
         diagnostics_.error("GDS2018", "unsupported internal class declaration", current().span);
@@ -818,9 +862,9 @@ ast::ClassDeclaration Parser::parse_class(std::vector<ast::Annotation> annotatio
         skip_newlines();
     }
     consume(TokenKind::dedent, "expected the end of an internal class body");
-    if (!pending_annotations.empty()) {
+    if (const auto* unattached = first_non_group_annotation(pending_annotations)) {
         diagnostics_.error("GDS2009", "annotation is not attached to a declaration",
-                           pending_annotations.front().span);
+                           unattached->span);
     }
     declaration.span = joined(begin, previous().span);
     return declaration;
@@ -1293,13 +1337,7 @@ ast::ExpressionPtr Parser::parse_lambda(SourceSpan begin) {
     if (match(TokenKind::arrow))
         lambda.return_type = parse_type_name("expected a lambda return type");
     consume(TokenKind::colon, "expected ':' after lambda signature");
-    if (check(TokenKind::newline)) {
-        lambda.body = parse_block();
-    } else {
-        auto statement = parse_statement();
-        apply_active_warning_ignores(statement);
-        lambda.body.push_back(std::move(statement));
-    }
+    lambda.body = parse_suite();
     lambda.span = joined(begin, previous().span);
     expression->span = lambda.span;
     return expression;
@@ -1498,48 +1536,57 @@ ast::Script Parser::parse_script() {
             skip_newlines();
         } else if (match(TokenKind::kw_var)) {
             script_header_closed = true;
-            validate_annotation_targets(annotations, AnnotationTarget::field, diagnostics_);
-            script.variables.push_back(parse_variable(false, std::move(annotations)));
-            annotations.clear();
+            auto current_annotations = take_declaration_annotations(annotations, true);
+            validate_annotation_targets(current_annotations, AnnotationTarget::field,
+                                        diagnostics_);
+            script.variables.push_back(parse_variable(false, std::move(current_annotations)));
         } else if (match(TokenKind::kw_const)) {
             script_header_closed = true;
-            validate_annotation_targets(annotations, AnnotationTarget::field, diagnostics_);
-            script.variables.push_back(parse_variable(true, std::move(annotations)));
-            annotations.clear();
+            auto current_annotations = take_declaration_annotations(annotations, false);
+            validate_annotation_targets(current_annotations, AnnotationTarget::field,
+                                        diagnostics_);
+            script.variables.push_back(parse_variable(true, std::move(current_annotations)));
         } else if (match(TokenKind::kw_signal)) {
             script_header_closed = true;
-            validate_annotation_targets(annotations, AnnotationTarget::signal, diagnostics_);
-            script.signals.push_back(parse_signal(std::move(annotations)));
-            annotations.clear();
+            auto current_annotations = take_declaration_annotations(annotations, false);
+            validate_annotation_targets(current_annotations, AnnotationTarget::signal,
+                                        diagnostics_);
+            script.signals.push_back(parse_signal(std::move(current_annotations)));
         } else if (match(TokenKind::kw_enum)) {
             script_header_closed = true;
-            validate_annotation_targets(annotations, AnnotationTarget::enumeration, diagnostics_);
-            script.enums.push_back(parse_enum(std::move(annotations)));
-            annotations.clear();
+            auto current_annotations = take_declaration_annotations(annotations, false);
+            validate_annotation_targets(current_annotations, AnnotationTarget::enumeration,
+                                        diagnostics_);
+            script.enums.push_back(parse_enum(std::move(current_annotations)));
         } else if (match(TokenKind::kw_static)) {
             script_header_closed = true;
             if (match(TokenKind::kw_var)) {
-                validate_annotation_targets(annotations, AnnotationTarget::field, diagnostics_);
-                auto variable = parse_variable(false, std::move(annotations));
+                auto current_annotations = take_declaration_annotations(annotations, false);
+                validate_annotation_targets(current_annotations, AnnotationTarget::field,
+                                            diagnostics_);
+                auto variable = parse_variable(false, std::move(current_annotations));
                 variable.is_static = true;
                 script.variables.push_back(std::move(variable));
-                annotations.clear();
             } else {
-                validate_annotation_targets(annotations, AnnotationTarget::function, diagnostics_);
+                auto current_annotations = take_declaration_annotations(annotations, false);
+                validate_annotation_targets(current_annotations, AnnotationTarget::function,
+                                            diagnostics_);
                 consume(TokenKind::kw_func, "expected 'var' or 'func' after 'static'");
-                script.functions.push_back(parse_function(true, std::move(annotations)));
-                annotations.clear();
+                script.functions.push_back(
+                    parse_function(true, std::move(current_annotations)));
             }
         } else if (match(TokenKind::kw_func)) {
             script_header_closed = true;
-            validate_annotation_targets(annotations, AnnotationTarget::function, diagnostics_);
-            script.functions.push_back(parse_function(false, std::move(annotations)));
-            annotations.clear();
+            auto current_annotations = take_declaration_annotations(annotations, false);
+            validate_annotation_targets(current_annotations, AnnotationTarget::function,
+                                        diagnostics_);
+            script.functions.push_back(parse_function(false, std::move(current_annotations)));
         } else if (match(TokenKind::kw_class)) {
             script_header_closed = true;
-            validate_annotation_targets(annotations, AnnotationTarget::inner_class, diagnostics_);
-            script.classes.push_back(parse_class(std::move(annotations)));
-            annotations.clear();
+            auto current_annotations = take_declaration_annotations(annotations, false);
+            validate_annotation_targets(current_annotations, AnnotationTarget::inner_class,
+                                        diagnostics_);
+            script.classes.push_back(parse_class(std::move(current_annotations)));
         } else if (match(TokenKind::string)) {
             // Standalone triple/single/double quoted strings are accepted by Godot as script
             // documentation/comment blocks and do not become runtime declarations.
@@ -1554,9 +1601,9 @@ ast::Script Parser::parse_script() {
         }
         skip_newlines();
     }
-    if (!annotations.empty()) {
+    if (const auto* unattached = first_non_group_annotation(annotations)) {
         diagnostics_.error("GDS2009", "annotation is not attached to a declaration",
-                           annotations.front().span);
+                           unattached->span);
     }
     script.span.end = current().span.end;
     return script;

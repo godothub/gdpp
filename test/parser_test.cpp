@@ -806,6 +806,60 @@ TEST_CASE("parser accepts commercial script headers semicolons and inline lambda
                std::size_t{1});
 }
 
+TEST_CASE("parser accepts inline accessors and complete lambda suites") {
+    const gdpp::SourceFile source{
+        "callable_suites.gd",
+        "var subsystem := preload(\"res://subsystem.gd\").new():\n"
+        "    get: return resolve_subsystem()\n"
+        "var stop: Callable = func(button: Object) -> void:\n"
+        "    button.cancel()\n"
+        "    button.finish()\n"
+        "func connect_deferred(signal_value: Signal) -> void:\n"
+        "    signal_value.connect(func(): await ready; queue_redraw())\n"};
+    gdpp::DiagnosticBag diagnostics;
+    const auto tokens = gdpp::Lexer{source, diagnostics}.scan();
+    const auto script = gdpp::Parser{tokens, diagnostics}.parse_script();
+
+    REQUIRE(!diagnostics.has_errors());
+    REQUIRE_EQ(script.variables.size(), std::size_t{2});
+    REQUIRE(script.variables.front().getter.has_value());
+    REQUIRE_EQ(script.variables.front().getter->body.size(), std::size_t{1});
+    REQUIRE(script.variables.back().initializer != nullptr);
+    REQUIRE(script.variables.back().initializer->lambda() != nullptr);
+    REQUIRE_EQ(script.variables.back().initializer->lambda()->body.size(), std::size_t{2});
+    REQUIRE_EQ(script.functions.size(), std::size_t{1});
+    const auto* call = script.functions.front().body.front().expression().get();
+    REQUIRE(call != nullptr);
+    REQUIRE_EQ(call->kind(), gdpp::ast::ExpressionKind::call);
+    REQUIRE(call->operand(1)->lambda() != nullptr);
+    REQUIRE_EQ(call->operand(1)->lambda()->body.size(), std::size_t{2});
+}
+
+TEST_CASE("parser carries inspector groups across non-property declarations") {
+    const gdpp::SourceFile source{
+        "inspector_groups.gd",
+        "@export_group(\"Appearance\")\n"
+        "enum Modes { FIRST, SECOND }\n"
+        "@export_subgroup(\"Color\")\n"
+        "func update_preview() -> void: pass\n"
+        "@export var mode: Modes = Modes.FIRST\n"
+        "@export_group(\"Trailing\")\n"};
+    gdpp::DiagnosticBag diagnostics;
+    const auto tokens = gdpp::Lexer{source, diagnostics}.scan();
+    const auto script = gdpp::Parser{tokens, diagnostics}.parse_script();
+
+    REQUIRE(!diagnostics.has_errors());
+    REQUIRE_EQ(script.enums.size(), std::size_t{1});
+    REQUIRE(script.enums.front().annotations.empty());
+    REQUIRE_EQ(script.functions.size(), std::size_t{1});
+    REQUIRE(script.functions.front().annotations.empty());
+    REQUIRE_EQ(script.variables.size(), std::size_t{1});
+    REQUIRE_EQ(script.variables.front().annotations.size(), std::size_t{3});
+    REQUIRE_EQ(script.variables.front().annotations[0].name, std::string{"export_group"});
+    REQUIRE_EQ(script.variables.front().annotations[1].name, std::string{"export_subgroup"});
+    REQUIRE_EQ(script.variables.front().annotations[2].name, std::string{"export"});
+}
+
 TEST_CASE("parser enforces callable parameter ordering and unique names") {
     const gdpp::SourceFile source{
         "invalid_parameters.gd",
