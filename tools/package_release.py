@@ -18,6 +18,7 @@ STATIC_ADDON_FILES = (
     "build_progress.gd",
     "native_build_job.gd",
     "export_plugin.gd",
+    "scene_transform_worker.gd",
     "gdpp.gdextension",
     "plugin.cfg",
     "plugin.gd",

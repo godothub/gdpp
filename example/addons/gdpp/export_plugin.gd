@@ -3,6 +3,7 @@ extends EditorExportPlugin
 
 const NATIVE_BUILD_JOB := preload("res://addons/gdpp/native_build_job.gd")
 const OUTPUT_DIRECTORY := "res://addons/gdpp/build/project"
+const EXPORT_WORKER_ROOT := OUTPUT_DIRECTORY + "/export-worker"
 const BINARY_DIRECTORY := "res://addons/gdpp/binary"
 const COMPILER_DESCRIPTOR := "res://addons/gdpp/gdpp.gdextension"
 const ADDON_PREFIX := "res://addons/gdpp/"
@@ -34,7 +35,7 @@ const ARCHITECTURE_FEATURES := [
 ]
 const SCRIPT_CLASS_CACHE := "res://.godot/global_script_class_cache.cfg"
 const GODOT_EXPORT_CACHE_DIRECTORY := "res://.godot/exported"
-const EXPORT_TRANSFORM_REVISION := 23
+const EXPORT_TRANSFORM_REVISION := 24
 
 var _compiler: Object
 var _build_progress: CanvasLayer
@@ -77,6 +78,10 @@ var _replaced_node_count := 0
 var _customized_resource_count := 0
 var _copied_property_count := 0
 var _strict_failure_injected := false
+var _prepared_export_transforms: Dictionary = {}
+var _transform_worker_directory := ""
+var _worker_mode := false
+var _worker_error := ""
 
 
 func configure(compiler: Object, build_progress: CanvasLayer) -> void:
@@ -225,9 +230,10 @@ func _begin_customize_scenes(
     _platform: EditorExportPlatform,
     _features: PackedStringArray
 ) -> bool:
-    # See _begin_customize_resources(): Godot 4.4/4.5 feeds every exported
-    # path through ResourceLoader as soon as either customization pass is
-    # enabled. _export_file() performs selective scene transformation instead.
+    # Supported Godot releases feed raw exported paths through ResourceLoader when either global
+    # customization pass is enabled. That includes icons, certificates and arbitrary customer
+    # data for which no ResourceFormatLoader exists. _export_file() therefore owns selective scene
+    # transformation and loads each qualifying scene exactly once.
     return false
 
 
@@ -257,9 +263,18 @@ func _get_customization_configuration_hash() -> int:
 
 
 func _customize_scene(scene: Node, path: String) -> Node:
-    var packed_scene := ResourceLoader.load(path, "PackedScene") as PackedScene
-    if packed_scene == null:
-        _fail_export("scene '%s' has no readable PackedScene state" % path)
+    if not _ready or not _resource_requires_aot(path):
+        return null
+    # Snapshot the already instantiated source tree to obtain its serialized property and
+    # connection state. The isolated worker loads each root once, so @tool resources, custom
+    # loaders, shaders and VisualShader graphs are not evaluated again by this transformation.
+    var packed_scene := PackedScene.new()
+    var snapshot_error := packed_scene.pack(scene)
+    if snapshot_error != OK:
+        _fail_export(
+            "scene '%s' cannot snapshot its serialized state during AOT customization (error %d)"
+            % [path, snapshot_error]
+        )
         return null
     var resource_replacements: Dictionary = {}
     var resource_changes := {"count": 0}
@@ -384,7 +399,7 @@ func _export_file(path: String, _type: String, _features: PackedStringArray) -> 
         and path.get_extension().to_lower() in ["tscn", "scn"]
         and _resource_requires_aot(path)
     ):
-        if _export_transformed_scene(path):
+        if _export_prepared_transform(path, "scenes", "scn"):
             return
         if _strict_failure_injected:
             skip()
@@ -396,7 +411,7 @@ func _export_file(path: String, _type: String, _features: PackedStringArray) -> 
         and path.get_extension().to_lower() in ["tres", "res"]
         and _resource_requires_aot(path)
     ):
-        if _export_transformed_resource(path):
+        if _export_prepared_transform(path, "resources", "res"):
             return
         if _strict_failure_injected:
             skip()
@@ -486,82 +501,29 @@ func _text_resource_mentions_gdscript(path: String) -> bool:
     )
 
 
-func _export_transformed_scene(path: String) -> bool:
-    var packed := ResourceLoader.load(
-        path,
-        "PackedScene",
-        ResourceLoader.CACHE_MODE_IGNORE
-    ) as PackedScene
-    if packed == null:
-        _fail_export("scene '%s' cannot be loaded for AOT transformation" % path)
-        return false
-    var source_root := packed.instantiate(PackedScene.GEN_EDIT_STATE_INSTANCE)
-    if source_root == null:
-        _fail_export("scene '%s' cannot be instantiated for AOT transformation" % path)
-        return false
-    var transformed_root := _customize_scene(source_root, path)
-    if transformed_root == null:
-        if is_instance_valid(source_root):
-            source_root.free()
-        return false
-
-    var transformed_scene := PackedScene.new()
-    var pack_error := transformed_scene.pack(transformed_root)
-    if pack_error != OK:
-        transformed_root.free()
-        _fail_export("cannot pack transformed scene '%s' (error %d)" % [path, pack_error])
-        return false
-    var result := _serialize_export_resource(
-        transformed_scene,
-        path,
-        "scenes",
-        "scn"
-    )
-    transformed_root.free()
-    return result
-
-
-func _export_transformed_resource(path: String) -> bool:
-    var source := ResourceLoader.load(path, "", ResourceLoader.CACHE_MODE_IGNORE)
-    if source == null:
-        _fail_export("resource '%s' cannot be loaded for AOT transformation" % path)
-        return false
-    var replacements: Dictionary = {}
-    var changes := {"count": 0}
-    var transformed := _transform_resource_graph(source, path, replacements, changes, true)
-    if transformed == null:
-        return false
-    if int(changes.count) == 0:
-        return false
-    return _serialize_export_resource(transformed, path, "resources", "res")
-
-
-func _serialize_export_resource(
-    resource: Resource,
+func _export_prepared_transform(
     source_path: String,
     runtime_directory: String,
     extension: String
 ) -> bool:
-    var cache_directory := OUTPUT_DIRECTORY.path_join("export-cache")
-    var cache_absolute := ProjectSettings.globalize_path(cache_directory)
-    var directory_error := DirAccess.make_dir_recursive_absolute(cache_absolute)
-    if directory_error != OK and directory_error != ERR_ALREADY_EXISTS:
+    if not _prepared_export_transforms.has(source_path):
         _fail_export(
-            "cannot create the native resource export cache '%s' (error %d)"
-            % [cache_directory, directory_error]
+            "isolated resource transformation did not prepare exported path '%s'" % source_path
         )
         return false
-    var cache_path := cache_directory.path_join("%s.%s" % [source_path.md5_text(), extension])
-    var save_error := ResourceSaver.save(resource, cache_path)
-    if save_error != OK:
+    var entry: Dictionary = _prepared_export_transforms[source_path]
+    var status := str(entry.get("status", "failed"))
+    if status == "unchanged":
+        return false
+    if status != "transformed":
         _fail_export(
-            "cannot serialize transformed resource '%s' (error %d)"
-            % [source_path, save_error]
+            "isolated resource transformation failed for '%s': %s"
+            % [source_path, str(entry.get("error", "unknown worker failure"))]
         )
         return false
-    var bytes := FileAccess.get_file_as_bytes(cache_path)
+    var output_path := str(entry.get("output_path", ""))
+    var bytes := FileAccess.get_file_as_bytes(output_path)
     var read_error := FileAccess.get_open_error()
-    DirAccess.remove_absolute(ProjectSettings.globalize_path(cache_path))
     if read_error != OK or bytes.is_empty():
         _fail_export(
             "cannot read transformed resource '%s' (error %d)" % [source_path, read_error]
@@ -576,11 +538,298 @@ func _serialize_export_resource(
             extension,
         ]
     )
-    # `remap = true` replaces only the current scene/resource file. Unlike the
-    # global resource customizer this never asks Godot to deserialize arbitrary
-    # customer assets, and the generated binary Resource contains no GDScript.
+    # `remap = true` replaces only the current scene/resource file. All customer ResourceLoader,
+    # @tool and shader work happened in the isolated worker, so the editor process neither
+    # re-evaluates unrelated assets nor inherits their diagnostic call stacks.
     add_file(runtime_path, bytes, true)
+    _metrics_mutex.lock()
+    _customized_scene_count += int(entry.get("scenes", 0))
+    _replaced_node_count += int(entry.get("nodes", 0))
+    _customized_resource_count += int(entry.get("resources", 0))
+    _copied_property_count += int(entry.get("properties", 0))
+    _metrics_mutex.unlock()
     return true
+
+
+func _prepare_export_transforms() -> bool:
+    var paths := _collect_export_transform_paths()
+    if paths.is_empty():
+        return true
+    if (
+        not _compiler.has_method(&"run_export_transform_worker")
+        or not _compiler.has_method(&"install_editor_script_descriptors")
+    ):
+        _fail_export("compiler service does not provide isolated resource transformation")
+        return false
+
+    _transform_worker_directory = EXPORT_WORKER_ROOT.path_join(_build_id.left(12))
+    var worker_absolute := ProjectSettings.globalize_path(_transform_worker_directory)
+    if DirAccess.dir_exists_absolute(worker_absolute):
+        if not _remove_directory_contents(worker_absolute):
+            _fail_export("cannot clear the previous isolated resource transformation")
+            return false
+    var directory_error := DirAccess.make_dir_recursive_absolute(worker_absolute)
+    if directory_error != OK and directory_error != ERR_ALREADY_EXISTS:
+        _fail_export(
+            "cannot create the isolated resource transformation directory (error %d)"
+            % directory_error
+        )
+        return false
+
+    var state_path := _transform_worker_directory.path_join("state.bin")
+    var result_path := _transform_worker_directory.path_join("result.bin")
+    var state_file := FileAccess.open(state_path, FileAccess.WRITE)
+    if state_file == null:
+        _fail_export("cannot create isolated resource transformation state")
+        return false
+    state_file.store_var({
+        "schema": 1,
+        "paths": paths,
+        "output_root": _transform_worker_directory.path_join("resources"),
+        "script_classes": _script_classes,
+        "attached_script_bases": _attached_script_bases,
+        "script_contract_hashes": _script_contract_hashes,
+        "editor_script_descriptors": _editor_script_descriptors,
+        "abstract_scripts": _abstract_scripts,
+        "editor_only_scripts": _editor_only_scripts,
+    }, true)
+    state_file.flush()
+    var state_error := state_file.get_error()
+    state_file = null
+    if state_error != OK:
+        _fail_export(
+            "cannot write isolated resource transformation state (error %d)" % state_error
+        )
+        return false
+
+    var process: Dictionary = _compiler.run_export_transform_worker(state_path, result_path)
+    if not bool(process.get("success", false)):
+        var diagnostics: PackedStringArray = process.get("diagnostics", PackedStringArray())
+        _fail_export(
+            (
+                "isolated resource transformer could not complete"
+                if diagnostics.is_empty()
+                else "\n".join(diagnostics)
+            )
+        )
+        return false
+
+    var result_file := FileAccess.open(result_path, FileAccess.READ)
+    if result_file == null:
+        _fail_export("isolated resource transformer produced no readable result")
+        return false
+    var result: Variant = result_file.get_var(true)
+    var result_error := result_file.get_error()
+    result_file = null
+    if result_error != OK or not (result is Dictionary):
+        _fail_export(
+            "isolated resource transformer produced malformed state (error %d)" % result_error
+        )
+        return false
+    var report: Dictionary = result
+    if int(report.get("schema", 0)) != 1 or not bool(report.get("success", false)):
+        _fail_export("isolated resource transformer rejected the project resource graph")
+        return false
+    var entries: Variant = report.get("entries")
+    if not (entries is Dictionary):
+        _fail_export("isolated resource transformer returned no path manifest")
+        return false
+    _prepared_export_transforms = entries
+    for path: String in paths:
+        if not _prepared_export_transforms.has(path):
+            _fail_export(
+                "isolated resource transformer omitted project path '%s'" % path
+            )
+            return false
+    return true
+
+
+func _collect_export_transform_paths() -> PackedStringArray:
+    var result := PackedStringArray()
+    var pending := PackedStringArray(["res://"])
+    while not pending.is_empty():
+        var directory := pending[pending.size() - 1]
+        pending.resize(pending.size() - 1)
+        for entry: String in ResourceLoader.list_directory(directory):
+            var path := directory.path_join(entry)
+            if entry.ends_with("/"):
+                var directory_name := entry.trim_suffix("/")
+                if (
+                    directory_name.begins_with(".")
+                    or path.begins_with(ADDON_PREFIX)
+                ):
+                    continue
+                pending.push_back(path)
+                continue
+            if (
+                path.begins_with(ADDON_PREFIX)
+                or path.get_extension().to_lower() not in ["tscn", "scn", "tres", "res"]
+                or not _resource_requires_aot(path)
+            ):
+                continue
+            result.append(path)
+    result.sort()
+    return result
+
+
+func prepare_isolated_transform_worker(compiler: Object, state: Dictionary) -> Dictionary:
+    _worker_mode = true
+    _worker_error = ""
+    _compiler = compiler
+    _script_classes = state.get("script_classes", {})
+    _attached_script_bases = state.get("attached_script_bases", {})
+    _script_contract_hashes = state.get("script_contract_hashes", {})
+    _editor_script_descriptors = state.get("editor_script_descriptors", [])
+    _abstract_scripts = state.get("abstract_scripts", {})
+    _editor_only_scripts = state.get("editor_only_scripts", {})
+    _compiled_scripts.clear()
+    for path: String in _script_classes:
+        _compiled_scripts[path] = true
+    _ready = true
+    _strict_failure_injected = false
+    var install: Dictionary = _compiler.install_editor_script_descriptors(
+        _editor_script_descriptors
+    )
+    if not bool(install.get("success", false)):
+        return {
+            "success": false,
+            "error": "cannot install compiled script metadata in isolated transformer",
+        }
+    if not _validate_native_classes():
+        return {
+            "success": false,
+            "error": (
+                _worker_error
+                if not _worker_error.is_empty()
+                else "compiled script metadata is incomplete in isolated transformer"
+            ),
+        }
+    return {"success": true}
+
+
+func run_isolated_transform_worker(state: Dictionary) -> Dictionary:
+    var output_root := str(state.get("output_root", ""))
+    var output_absolute := ProjectSettings.globalize_path(output_root)
+    var directory_error := DirAccess.make_dir_recursive_absolute(output_absolute)
+    if (
+        output_root.is_empty()
+        or directory_error != OK and directory_error != ERR_ALREADY_EXISTS
+    ):
+        return {
+            "schema": 1,
+            "success": false,
+            "error": "cannot create isolated transformed-resource output",
+        }
+    var entries: Dictionary = {}
+    for path: String in state.get("paths", PackedStringArray()):
+        entries[path] = _run_isolated_transform(path, output_root)
+    return {
+        "schema": 1,
+        "success": true,
+        "entries": entries,
+    }
+
+
+func finish_isolated_transform_worker() -> void:
+    if _compiler != null and _compiler.has_method(&"clear_editor_script_descriptors"):
+        _compiler.clear_editor_script_descriptors()
+    _ready = false
+    _compiled_scripts.clear()
+    _script_classes.clear()
+    _attached_script_bases.clear()
+    _script_contract_hashes.clear()
+    _editor_script_descriptors.clear()
+    _abstract_scripts.clear()
+    _editor_only_scripts.clear()
+    _prepared_export_transforms.clear()
+    _compiler = null
+
+
+func _run_isolated_transform(path: String, output_root: String) -> Dictionary:
+    _ready = true
+    _strict_failure_injected = false
+    _worker_error = ""
+    var before := [
+        _customized_scene_count,
+        _replaced_node_count,
+        _customized_resource_count,
+        _copied_property_count,
+    ]
+    var extension := path.get_extension().to_lower()
+    var output_extension := "scn" if extension in ["tscn", "scn"] else "res"
+    var output_path := output_root.path_join("%s.%s" % [path.md5_text(), output_extension])
+    var status := "unchanged"
+
+    if extension in ["tscn", "scn"]:
+        var packed := ResourceLoader.load(
+            path,
+            "PackedScene",
+            ResourceLoader.CACHE_MODE_IGNORE
+        ) as PackedScene
+        if packed == null:
+            _worker_error = "scene cannot be loaded"
+            status = "failed"
+        else:
+            var source_root := packed.instantiate(PackedScene.GEN_EDIT_STATE_INSTANCE)
+            if source_root == null:
+                _worker_error = "scene cannot be instantiated"
+                status = "failed"
+            else:
+                var transformed_root := _customize_scene(source_root, path)
+                if transformed_root == null:
+                    if is_instance_valid(source_root):
+                        source_root.free()
+                    status = "failed" if _strict_failure_injected else "unchanged"
+                else:
+                    var transformed_scene := PackedScene.new()
+                    var pack_error := transformed_scene.pack(transformed_root)
+                    transformed_root.free()
+                    if pack_error != OK:
+                        _worker_error = "scene cannot be packed (error %d)" % pack_error
+                        status = "failed"
+                    else:
+                        var save_error := ResourceSaver.save(transformed_scene, output_path)
+                        if save_error != OK:
+                            _worker_error = "scene cannot be serialized (error %d)" % save_error
+                            status = "failed"
+                        else:
+                            status = "transformed"
+    else:
+        var source := ResourceLoader.load(path, "", ResourceLoader.CACHE_MODE_IGNORE)
+        if source == null:
+            _worker_error = "resource cannot be loaded"
+            status = "failed"
+        else:
+            var replacements: Dictionary = {}
+            var changes := {"count": 0}
+            var transformed := _transform_resource_graph(
+                source,
+                path,
+                replacements,
+                changes,
+                true
+            )
+            if transformed == null:
+                status = "failed" if _strict_failure_injected else "unchanged"
+            elif int(changes.get("count", 0)) > 0:
+                var save_error := ResourceSaver.save(transformed, output_path)
+                if save_error != OK:
+                    _worker_error = "resource cannot be serialized (error %d)" % save_error
+                    status = "failed"
+                else:
+                    status = "transformed"
+
+    if status == "failed" and _worker_error.is_empty():
+        _worker_error = "resource graph cannot be transformed safely"
+    return {
+        "status": status,
+        "output_path": output_path if status == "transformed" else "",
+        "error": _worker_error,
+        "scenes": _customized_scene_count - int(before[0]),
+        "nodes": _replaced_node_count - int(before[1]),
+        "resources": _customized_resource_count - int(before[2]),
+        "properties": _copied_property_count - int(before[3]),
+    }
 
 
 func _prepare_export(features: PackedStringArray, is_debug: bool) -> bool:
@@ -703,6 +952,8 @@ func _prepare_export_impl(features: PackedStringArray, is_debug: bool) -> bool:
     if not _validate_native_classes():
         return false
     if not _prepare_autoloads():
+        return false
+    if not _prepare_export_transforms():
         return false
 
     var library_path := "res://addons/gdpp/binary/%s" % _output_library.get_file()
@@ -1615,6 +1866,8 @@ func _install_attached_script(
     var source_class := StringName(object.get_class())
     var source_properties := _storage_property_values(object, serialized_properties)
     var source_script_properties := _script_storage_property_names(object)
+    var source_script := object.get_script() as Script
+    _disconnect_replaced_script_connections(object, source_script)
     object.set_script(script)
     if object.get_script() != script:
         push_error(
@@ -1647,6 +1900,34 @@ func _install_attached_script(
         source_script_properties,
         true
     )
+
+
+func _disconnect_replaced_script_connections(object: Object, source_script: Script) -> void:
+    # @tool Resource constructors and setters commonly connect child Resource.changed signals back
+    # to methods on the script instance. Replacing that instance with an export-only metadata
+    # descriptor invalidates those transient callbacks. They are recreated by the compiled
+    # behavior constructor in the exported process and are not serialized scene connections.
+    # SceneState-owned Node connections were already snapshotted by _snapshot_connections().
+    var script_methods: Dictionary = {}
+    var current_script := source_script
+    while current_script != null:
+        for method: Dictionary in current_script.get_script_method_list():
+            script_methods[StringName(method.get("name", ""))] = true
+        current_script = current_script.get_base_script()
+    for connection: Dictionary in object.get_incoming_connections():
+        var signal_value: Variant = connection.get("signal")
+        var callable_value: Variant = connection.get("callable")
+        if not (signal_value is Signal) or not (callable_value is Callable):
+            continue
+        var source_signal: Signal = signal_value
+        var target_callable: Callable = callable_value
+        if (
+            target_callable.get_object() != object
+            or not script_methods.has(target_callable.get_method())
+        ):
+            continue
+        if source_signal.is_connected(target_callable):
+            source_signal.disconnect(target_callable)
 
 
 func _attach_compiled_script(
@@ -1959,6 +2240,11 @@ func _restore_connections(
 
 
 func _fail_export(message: String) -> void:
+    if _worker_mode:
+        _worker_error = message
+        _strict_failure_injected = true
+        push_error("GDPP export worker: %s" % message)
+        return
     _ready = false
     push_error("GDPP export: %s" % message)
     var platform := get_export_platform()
@@ -2494,6 +2780,10 @@ func _print_export_summary() -> void:
 func _reset_export_state() -> void:
     if _compiler != null and _compiler.has_method(&"clear_editor_script_descriptors"):
         _compiler.clear_editor_script_descriptors()
+    var worker_root_absolute := ProjectSettings.globalize_path(EXPORT_WORKER_ROOT)
+    if DirAccess.dir_exists_absolute(worker_root_absolute):
+        if _remove_directory_contents(worker_root_absolute):
+            DirAccess.remove_absolute(worker_root_absolute)
     _ready = false
     _script_classes.clear()
     _attached_script_bases.clear()
@@ -2524,6 +2814,10 @@ func _reset_export_state() -> void:
     _autoload_files.clear()
     _autoload_replacements.clear()
     _autoload_originals.clear()
+    _prepared_export_transforms.clear()
+    _transform_worker_directory = ""
+    _worker_mode = false
+    _worker_error = ""
     _metrics_mutex.lock()
     _customized_scene_count = 0
     _replaced_node_count = 0

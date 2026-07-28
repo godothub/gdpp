@@ -14,6 +14,7 @@
 #include <godot_cpp/classes/class_db_singleton.hpp>
 #include <godot_cpp/classes/engine.hpp>
 #include <godot_cpp/classes/global_constants.hpp>
+#include <godot_cpp/classes/os.hpp>
 #include <godot_cpp/classes/project_settings.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/templates/hashfuncs.hpp>
@@ -1509,6 +1510,38 @@ std::string trimmed_toolchain_output(std::string output) {
     return output;
 }
 
+std::vector<std::string> export_worker_diagnostics(const std::string& output) {
+    std::vector<std::string> diagnostics;
+    for (std::size_t begin = 0; begin <= output.size();) {
+        const auto end = output.find('\n', begin);
+        auto line = output.substr(begin, end == std::string::npos ? std::string::npos : end - begin);
+        while (!line.empty() && (line.back() == '\r' || line.back() == ' ' || line.back() == '\t'))
+            line.pop_back();
+        const auto first = line.find_first_not_of(" \t");
+        if (first != std::string::npos)
+            line.erase(0, first);
+        const bool diagnostic = line.rfind("ERROR:", 0) == 0 ||
+                                line.rfind("SCRIPT ERROR:", 0) == 0 ||
+                                line.rfind("WARNING:", 0) == 0 ||
+                                line.rfind("Unable to open", 0) == 0 ||
+                                line.find("[toolchain output truncated") != std::string::npos;
+        // Godot's shader compiler reports this known non-fatal continuation for custom samplers
+        // in valid Pixelorama shaders on both source and exported runs. Keep the allowlist exact;
+        // every other child-process diagnostic remains a release-blocking transform failure.
+        const bool known_custom_sampler_continuation =
+            line ==
+            "ERROR: Condition "
+            "\"!actions.custom_samplers.has(function->arguments[j].tex_builtin)\" is true. "
+            "Continuing.";
+        if (diagnostic && !known_custom_sampler_continuation)
+            diagnostics.push_back(std::move(line));
+        if (end == std::string::npos)
+            break;
+        begin = end + 1;
+    }
+    return diagnostics;
+}
+
 void report_build_progress(const godot::Callable& callback, const char* phase,
                            const std::size_t completed, const std::size_t total) {
     if (!callback.is_valid())
@@ -1557,6 +1590,9 @@ void GDPPCompiler::_bind_methods() {
         &GDPPCompiler::set_editor_script_storage_state);
     godot::ClassDB::bind_method(godot::D_METHOD("clear_editor_script_descriptors"),
                                 &GDPPCompiler::clear_editor_script_descriptors);
+    godot::ClassDB::bind_method(
+        godot::D_METHOD("run_export_transform_worker", "state_path", "result_path"),
+        &GDPPCompiler::run_export_transform_worker);
 }
 
 GDPPCompiler::BuildExecutionResult
@@ -1832,6 +1868,77 @@ GDPPCompiler::install_editor_script_descriptors(const godot::Array& descriptors)
 
 void GDPPCompiler::clear_editor_script_descriptors() const {
     gdpp::runtime::unregister_all_attached_scripts();
+}
+
+godot::Dictionary
+GDPPCompiler::run_export_transform_worker(const godot::String& state_path,
+                                          const godot::String& result_path) const {
+    constexpr std::string_view worker_prefix{"res://addons/gdpp/build/project/export-worker/"};
+    const auto state_resource = native_string(state_path);
+    const auto result_resource = native_string(result_path);
+    const auto safe_path = [&](const std::string& path) {
+        return path.size() >= worker_prefix.size() &&
+               std::equal(worker_prefix.begin(), worker_prefix.end(), path.begin()) &&
+               path.find("..") == std::string::npos &&
+               path.find('\\') == std::string::npos;
+    };
+    if (!safe_path(state_resource) || !safe_path(result_resource))
+        return failure_result("export transform worker paths must stay inside its transaction");
+
+    auto* settings = godot::ProjectSettings::get_singleton();
+    const auto project_root = native_string(settings->globalize_path("res://"));
+    const auto state_absolute = native_string(settings->globalize_path(state_path));
+    const auto result_absolute = native_string(settings->globalize_path(result_path));
+    if (project_root.empty() || state_absolute.empty() || result_absolute.empty() ||
+        !std::filesystem::is_regular_file(path_from_utf8(state_absolute)))
+        return failure_result("export transform worker state is unavailable");
+
+    const auto executable =
+        native_string(godot::OS::get_singleton()->get_executable_path());
+    const std::vector<std::string> arguments{
+        "--headless",
+        "--editor",
+        "--path",
+        project_root,
+        "--script",
+        "res://addons/gdpp/scene_transform_worker.gd",
+        "--",
+        state_absolute,
+        result_absolute,
+    };
+    auto process = execute_native_process(executable, arguments);
+    const auto captured = trimmed_toolchain_output(std::move(process.output));
+    constexpr std::string_view committed_marker{"GDPP_EXPORT_TRANSFORM_WORKER_COMMITTED"};
+    const auto committed_offset = captured.find(committed_marker);
+    const bool worker_committed = committed_offset != std::string::npos;
+    // A custom editor SceneTree owns the worker lifecycle instead of EditorNode. Godot can report
+    // editor-only server teardown diagnostics after SceneTree.quit(), so audit only the
+    // transaction output before the worker's authenticated commit marker. Every transform,
+    // serialization and cleanup diagnostic occurs before that marker and remains fail-closed.
+    const auto audited_output =
+        worker_committed ? captured.substr(0, committed_offset) : captured;
+    const auto child_diagnostics = export_worker_diagnostics(audited_output);
+    godot::Dictionary output;
+    output["success"] =
+        process.exit_code == 0 &&
+        std::filesystem::is_regular_file(path_from_utf8(result_absolute)) &&
+        worker_committed && child_diagnostics.empty();
+    output["exit_code"] = process.exit_code;
+    godot::PackedStringArray diagnostics;
+    if (!process.launch_error.empty())
+        diagnostics.push_back(godot::String::utf8(process.launch_error.c_str()));
+    if (!worker_committed)
+        diagnostics.push_back("isolated Godot resource transformer did not commit its transaction");
+    for (const auto& diagnostic : child_diagnostics)
+        diagnostics.push_back(godot::String::utf8(diagnostic.c_str()));
+    if (!static_cast<bool>(output["success"])) {
+        diagnostics.push_back("isolated Godot resource transformer failed with exit code " +
+                              godot::String::num_int64(process.exit_code));
+        if (!captured.empty())
+            diagnostics.push_back(godot::String::utf8(captured.c_str()));
+    }
+    output["diagnostics"] = diagnostics;
+    return output;
 }
 
 bool GDPPCompiler::set_editor_script_storage_state(

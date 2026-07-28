@@ -326,6 +326,7 @@ class ReleasePackagingTest(unittest.TestCase):
         )
         self.assertIn("addons/gdpp/build_progress.gd", names)
         self.assertIn("addons/gdpp/native_build_job.gd", names)
+        self.assertIn("addons/gdpp/scene_transform_worker.gd", names)
         self.assertFalse(any(path.startswith("gdpp/") for path in names))
 
         second_stage, second_name, _ = package_platform_release.stage_platform_package(

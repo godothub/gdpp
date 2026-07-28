@@ -65,6 +65,7 @@ jobs:
           fi
           grep -q '^addons/gdpp/build_progress.gd$' "$contents"
           grep -q '^addons/gdpp/native_build_job.gd$' "$contents"
+          grep -q '^addons/gdpp/scene_transform_worker.gd$' "$contents"
           grep -q '^addons/gdpp/PACKAGE_MANIFEST.txt$' "$contents"
           grep -q '^archive_layout addons/gdpp$' \
             <(unzip -p "$archive" addons/gdpp/PACKAGE_MANIFEST.txt)

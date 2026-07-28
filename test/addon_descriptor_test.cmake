@@ -5,6 +5,26 @@ if(EXISTS "${runtime_descriptor}")
 endif()
 
 file(READ "${GDPP_TEST_SOURCE_DIR}/example/addons/gdpp/plugin.cfg" plugin_metadata)
+file(READ
+    "${GDPP_TEST_SOURCE_DIR}/example/addons/gdpp/scene_transform_worker.gd"
+    scene_transform_worker)
+foreach(required_worker_contract IN ITEMS
+        "extends SceneTree"
+        "call_deferred(&\"_run_worker\", arguments)"
+        "while filesystem != null and filesystem.is_scanning()"
+        "prepare_isolated_transform_worker("
+        "run_isolated_transform_worker("
+        "finish_isolated_transform_worker()"
+        "GDPP_EXPORT_TRANSFORM_WORKER_COMMITTED"
+        "result_file.store_var(result, true)")
+    string(FIND "${scene_transform_worker}" "${required_worker_contract}"
+        worker_contract_offset)
+    if(worker_contract_offset EQUAL -1)
+        message(FATAL_ERROR
+            "Isolated resource transform worker contract is missing: "
+            "${required_worker_contract}")
+    endif()
+endforeach()
 foreach(required_plugin_metadata IN ITEMS
         "name=\"GDPP\""
         "description=\"GDScript AOT & Extension\""
@@ -336,6 +356,39 @@ foreach(required_scene_compatibility IN ITEMS
             "${required_scene_compatibility}")
     endif()
 endforeach()
+foreach(required_scene_customization_contract IN ITEMS
+        "loads each qualifying scene exactly once"
+        "return false"
+        "var packed_scene := PackedScene.new()"
+        "var snapshot_error := packed_scene.pack(scene)"
+        "_prepare_export_transforms()"
+        "_compiler.run_export_transform_worker(state_path, result_path)"
+        "func _export_prepared_transform("
+        "func prepare_isolated_transform_worker("
+        "func run_isolated_transform_worker("
+        "cannot snapshot its serialized state during AOT customization")
+    string(FIND "${export_plugin}" "${required_scene_customization_contract}"
+        scene_customization_contract_offset)
+    if(scene_customization_contract_offset EQUAL -1)
+        message(FATAL_ERROR
+            "Selective single-load scene customization contract is missing: "
+            "${required_scene_customization_contract}")
+    endif()
+endforeach()
+foreach(forbidden_scene_customization_contract IN ITEMS
+        "return _uses_native_scene_customizer()"
+        "func _uses_native_scene_customizer() -> bool:"
+        "func _export_transformed_scene("
+        "func _export_transformed_resource("
+        "_compiler.load_export_scene(path)")
+    string(FIND "${export_plugin}" "${forbidden_scene_customization_contract}"
+        forbidden_scene_customization_contract_offset)
+    if(NOT forbidden_scene_customization_contract_offset EQUAL -1)
+        message(FATAL_ERROR
+            "Unsafe global or duplicate scene customization path remains: "
+            "${forbidden_scene_customization_contract}")
+    endif()
+endforeach()
 foreach(required_abstract_contract IN ITEMS
         "distribution_result.get(\"abstract_scripts\", PackedStringArray())"
         "not _abstract_scripts.has(script_path)"
@@ -378,6 +431,11 @@ foreach(required_attached_contract IN ITEMS
         "distribution_result.get(\"attached_script_bases\", {})"
         "ClassDB.class_exists(&\"AttachedCompiledScript\")"
         "func _install_attached_script("
+        "_disconnect_replaced_script_connections(object, source_script)"
+        "object.get_incoming_connections()"
+        "current_script.get_script_method_list()"
+        "target_callable.get_object() != object"
+        "source_signal.disconnect(target_callable)"
         "object.set_script(script)"
         "[sub_resource type=\\\"AttachedCompiledScript\\\" id=\\\"AttachedScript\\\"]")
     string(FIND "${export_plugin}" "${required_attached_contract}" attached_contract_offset)

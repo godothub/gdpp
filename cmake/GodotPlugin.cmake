@@ -743,6 +743,7 @@ if(GDPP_CUSTOM_GDEXTENSION_API_FILE)
             build_progress.gd
             native_build_job.gd
             export_plugin.gd
+            scene_transform_worker.gd
             plugin.cfg
             plugin.gd)
         list(APPEND GDPP_CUSTOM_ADDON_STATIC_COMMANDS
@@ -835,6 +836,9 @@ if(GDPP_BUILD_TESTS)
         COMMAND "${CMAKE_COMMAND}" -E copy_if_different
                 "${GDPP_ADDON_DIRECTORY}/export_plugin.gd"
                 "${GDPP_ATTACHED_TEST_ROOT}/addons/gdpp/export_plugin.gd"
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+                "${GDPP_ADDON_DIRECTORY}/scene_transform_worker.gd"
+                "${GDPP_ATTACHED_TEST_ROOT}/addons/gdpp/scene_transform_worker.gd"
         COMMAND "${CMAKE_COMMAND}" -E copy_if_different
                 "${GDPP_ADDON_DIRECTORY}/build_progress.gd"
                 "${GDPP_ATTACHED_TEST_ROOT}/addons/gdpp/build_progress.gd"
