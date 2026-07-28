@@ -4301,9 +4301,16 @@ std::string CodeGenerator::emit_expression(const typed::Expression& expression) 
                            ? "_gdpp_virtual_impl_" + sanitize_identifier(callee.value)
                            : "_gdpp_script_method_" + sanitize_identifier(callee.value);
             }
-            if (const auto local = local_function_native_names_.find(callee.value);
-                local != local_function_native_names_.end()) {
-                return local->second;
+            const bool local_source_call =
+                callee.kind == typed::ExpressionKind::identifier ||
+                (callee.kind == typed::ExpressionKind::member && !callee.operands.empty() &&
+                 callee.operands.at(0)->kind == typed::ExpressionKind::identifier &&
+                 callee.operands.at(0)->value == "self");
+            if (local_source_call) {
+                if (const auto local = local_function_native_names_.find(callee.value);
+                    local != local_function_native_names_.end()) {
+                    return local->second;
+                }
             }
             return sanitize_identifier(callee.value);
         }();

@@ -1268,6 +1268,10 @@ TEST_CASE("generated script methods cannot hide godot-cpp class hooks") {
                                      "    print(what)\n"
                                      "func _to_string() -> String:\n"
                                      "    return \"settings\"\n"
+                                     "func play() -> void:\n"
+                                     "    pass\n"
+                                     "func play_native(player: AnimationPlayer) -> void:\n"
+                                     "    player.play()\n"
                                      "func read() -> Variant:\n"
                                      "    return _get(&\"value\")\n");
 
@@ -1286,8 +1290,16 @@ TEST_CASE("generated script methods cannot hide godot-cpp class hooks") {
                         "godot::Variant value)") != std::string::npos);
     REQUIRE(header.find("_gdpp_script_method__notification(int64_t what)") != std::string::npos);
     REQUIRE(header.find("_gdpp_script_method__to_string()") != std::string::npos);
+    REQUIRE(header.find("_gdpp_script_method_play()") != std::string::npos);
     REQUIRE(header.find("virtual godot::Variant _get(") == std::string::npos);
     REQUIRE(source.find("_gdpp_script_method__get(_gdpp_call_argument_") != std::string::npos);
+    const auto receiver = source.find("_gdpp_call_receiver_");
+    const auto native_play = source.find("->play(", receiver);
+    const auto callback = source.find("_gdpp_variant_call_play", receiver);
+    REQUIRE(receiver != std::string::npos);
+    REQUIRE(native_play != std::string::npos);
+    REQUIRE(native_play < callback);
+    REQUIRE(source.find("->_gdpp_script_method_play(", receiver) > callback);
 }
 
 TEST_CASE("project compiler preserves Object free lifetime semantics for script classes") {
