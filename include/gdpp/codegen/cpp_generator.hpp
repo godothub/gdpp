@@ -231,6 +231,8 @@ class CodeGenerator final {
     [[nodiscard]] std::string
     emit_attached_script_cast(const Type& target, std::string value,
                               const SourceSpan* source_span = nullptr) const;
+    [[nodiscard]] std::string emit_object_pointer_storage(const Type& target,
+                                                          std::string value) const;
     [[nodiscard]] bool is_ref_counted_object(const Type& type) const noexcept;
     [[nodiscard]] std::string native_super_owner(std::string_view owner) const;
     struct InnerMethodDeclaration {

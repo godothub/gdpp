@@ -1816,11 +1816,27 @@ std::string CodeGenerator::emit_attached_script_cast(const Type& target, std::st
     auto object = "gdpp::runtime::strict_attached_script_storage("
                   "gdpp::runtime::to_variant(" +
                   std::move(value) + "), " + godot_string(source_path) + location + ")";
+    return emit_object_pointer_storage(target, std::move(object));
+}
+
+std::string CodeGenerator::emit_object_pointer_storage(const Type& target,
+                                                       std::string value) const {
     const auto target_cpp = cpp_type(target);
-    if (target_cpp.rfind("godot::Ref<", 0) == 0) {
-        return target_cpp + "(godot::Object::cast_to<godot::RefCounted>(" + object + "))";
+    const std::string ref_prefix{"godot::Ref<"};
+    if (target_cpp.rfind(ref_prefix, 0) == 0 && target_cpp.back() == '>') {
+        const auto object_cpp =
+            target_cpp.substr(ref_prefix.size(), target_cpp.size() - ref_prefix.size() - 1);
+        return target_cpp + "(godot::Object::cast_to<" + object_cpp + ">(" + value + "))";
     }
-    return object;
+    const std::string storage_prefix{"gdpp::runtime::ObjectStorage<"};
+    if (target_cpp.rfind(storage_prefix, 0) == 0 && target_cpp.back() == '>') {
+        const auto object_cpp = target_cpp.substr(storage_prefix.size(),
+                                                  target_cpp.size() - storage_prefix.size() - 1);
+        return target_cpp + "(godot::Object::cast_to<" + object_cpp + ">(" + value + "))";
+    }
+    if (target_cpp == "godot::Variant")
+        return "gdpp::runtime::to_variant(" + value + ")";
+    return value;
 }
 
 bool CodeGenerator::is_ref_counted_object(const Type& type) const noexcept {
@@ -2160,6 +2176,10 @@ std::string CodeGenerator::emit_conversion(const Type& target, const Type& sourc
         return "(static_cast<void>(" + value + "))";
     if (target.is_dynamic())
         return source.is_dynamic() ? value : "gdpp::runtime::to_variant(" + value + ")";
+    if (attached_script_ && target.kind == TypeKind::object &&
+        value == self_object_expression()) {
+        return emit_object_pointer_storage(target, std::move(value));
+    }
     if (target == source)
         return value;
     if (target.kind == TypeKind::script_resource && source.kind == TypeKind::nil)
@@ -3644,8 +3664,15 @@ std::string CodeGenerator::emit_expression(const typed::Expression& expression) 
         if (expression.resolution == typed::ResolutionKind::script_signal)
             return "godot::Signal(" + self_object_expression() + ", " +
                    godot_string_name(expression.value) + ")";
-        if (expression.resolution == typed::ResolutionKind::script_autoload)
-            return "gdpp::runtime::find_autoload(" + godot_string_name(expression.getter) + ")";
+        if (expression.resolution == typed::ResolutionKind::script_autoload) {
+            auto value =
+                "gdpp::runtime::find_autoload(" + godot_string_name(expression.getter) + ")";
+            if (!attached_script_source_path(expression.type, expression.resolved_owner).empty()) {
+                return emit_attached_script_cast(expression.type, std::move(value),
+                                                 &expression.span);
+            }
+            return emit_object_pointer_storage(expression.type, std::move(value));
+        }
         if (expression.resolution == typed::ResolutionKind::script_callable)
             return "godot::Callable(" + self_object_expression() + ", " +
                    godot_string_name(expression.value) + ")";

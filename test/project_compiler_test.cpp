@@ -2585,6 +2585,58 @@ TEST_CASE("attached script self calls use native virtual dispatch without bypass
     REQUIRE(source.find("gdpp::runtime::to_variant(owner())") == std::string::npos);
 }
 
+TEST_CASE("attached script object values materialize their native storage representation") {
+    const auto root = fixture_root("project-attached-object-values");
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
+    write_text(root / "project.godot",
+               "[application]\nconfig/name=\"Attached Object Values\"\n\n"
+               "[autoload]\nMain=\"*res://main.gd\"\n");
+    write_text(root / "main.gd", "class_name AppMain\nextends Node\n");
+    write_text(root / "style.gd",
+               "class_name ResourceStyle\n"
+               "extends Resource\n"
+               "func root() -> ResourceStyle:\n"
+               "    if resource_path.is_empty():\n"
+               "        return self\n"
+               "    var current: ResourceStyle = self\n"
+               "    return current\n");
+    write_text(root / "consumer.gd",
+               "extends Node\n"
+               "func application() -> AppMain:\n"
+               "    return Main\n");
+    const auto options = project_options(root);
+
+    const auto result = gdpp::ProjectCompiler{}.compile(options);
+
+    REQUIRE(result.success);
+    const auto style =
+        std::find_if(result.scripts.begin(), result.scripts.end(), [](const auto& script) {
+            return script.relative_path.filename() == "style.gd";
+        });
+    const auto consumer =
+        std::find_if(result.scripts.begin(), result.scripts.end(), [](const auto& script) {
+            return script.relative_path.filename() == "consumer.gd";
+        });
+    REQUIRE(style != result.scripts.end());
+    REQUIRE(consumer != result.scripts.end());
+    const auto style_source =
+        read_text(options.output_directory / "generated" / style->source_file_name);
+    const auto consumer_source =
+        read_text(options.output_directory / "generated" / consumer->source_file_name);
+    REQUIRE(style_source.find(
+                "godot::Ref<godot::RefCounted>(godot::Object::cast_to<godot::RefCounted>("
+                "owner()))") != std::string::npos);
+    REQUIRE(style_source.find("godot::Ref<godot::RefCounted> current = owner();") ==
+            std::string::npos);
+    REQUIRE(consumer_source.find(
+                "gdpp::runtime::ObjectStorage<godot::Object>(godot::Object::cast_to<"
+                "godot::Object>(gdpp::runtime::strict_attached_script_storage(") !=
+            std::string::npos);
+    REQUIRE(consumer_source.find("gdpp::runtime::find_autoload(godot::StringName(\"Main\"))") !=
+            std::string::npos);
+}
+
 TEST_CASE("project symbol signature changes invalidate dependent script caches") {
     const auto root = fixture_root("project-symbol-cache");
     std::error_code error;
