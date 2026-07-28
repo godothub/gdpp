@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 from pathlib import Path
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -125,6 +126,67 @@ class ExternalProjectE2ETest(unittest.TestCase):
             self.assertIn("res://addons/one/plugin.cfg", content)
             self.assertIn("res://addons/two/plugin.cfg", content)
             self.assertIn("[rendering]", content)
+
+    def test_repeated_runs_restore_the_exact_pristine_project_state(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary)
+            subprocess.run(["git", "init", "-q"], cwd=project, check=True)
+            subprocess.run(
+                ["git", "config", "user.email", "e2e@example.invalid"],
+                cwd=project,
+                check=True,
+            )
+            subprocess.run(
+                ["git", "config", "user.name", "E2E"],
+                cwd=project,
+                check=True,
+            )
+            original_project = (
+                '[application]\nconfig/name="Fixture"\n\n'
+                "[editor_plugins]\n\n"
+                "enabled=PackedStringArray(\n"
+                '    "res://addons/one/plugin.cfg",\n'
+                '    "res://addons/two/plugin.cfg"\n'
+                ")\n"
+            )
+            original_presets = '[preset.0]\n\nname="Existing"\n'
+            (project / "project.godot").write_text(
+                original_project, encoding="utf-8"
+            )
+            (project / "export_presets.cfg").write_text(
+                original_presets, encoding="utf-8"
+            )
+            subprocess.run(["git", "add", "."], cwd=project, check=True)
+            subprocess.run(["git", "commit", "-qm", "fixture"], cwd=project, check=True)
+
+            state = E2E.prepare_pristine_e2e_state(project)
+            E2E.enable_plugin(project / "project.godot")
+            E2E.append_export_preset(project, "linux", project / "output")
+            addon = project / "addons/gdpp"
+            addon.mkdir(parents=True)
+            (addon / "plugin.cfg").write_text(
+                '[plugin]\nname="GDPP"\n', encoding="utf-8"
+            )
+            E2E.restore_pristine_e2e_state(project, state)
+            self.assertEqual(
+                (project / "project.godot").read_text(encoding="utf-8"),
+                original_project,
+            )
+            self.assertEqual(
+                (project / "export_presets.cfg").read_text(encoding="utf-8"),
+                original_presets,
+            )
+            self.assertFalse(addon.exists())
+
+            # A killed previous run is also recovered before the next pristine baseline.
+            E2E.enable_plugin(project / "project.godot")
+            E2E.append_export_preset(project, "linux", project / "output")
+            recovered = E2E.prepare_pristine_e2e_state(project)
+            self.assertEqual(recovered["project.godot"], original_project.encode())
+            self.assertEqual(
+                (project / "project.godot").read_text(encoding="utf-8"),
+                original_project,
+            )
 
     def test_install_addon_selects_one_sdk_and_excludes_generated_state(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

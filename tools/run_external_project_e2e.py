@@ -17,6 +17,7 @@ from pathlib import Path
 
 
 PLUGIN_RESOURCE = "res://addons/gdpp/plugin.cfg"
+E2E_PRESET_NAME = "GDPP External Project E2E"
 FORBIDDEN_DIAGNOSTICS = re.compile(
     r"(^|\s)(SCRIPT ERROR:|ERROR:|CRASH:|FATAL:)|"
     r"Parse Error:|Segmentation fault|EXC_BAD_ACCESS|"
@@ -210,6 +211,126 @@ def validate_checkout(project: Path, manifest: dict) -> str:
     return git_output(project, ["rev-parse", "HEAD"])
 
 
+def git_file_at_head(project: Path, relative: str) -> bytes | None:
+    completed = subprocess.run(
+        ["git", "show", f"HEAD:{relative}"],
+        cwd=project,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    )
+    return completed.stdout if completed.returncode == 0 else None
+
+
+def without_plugin(content: str) -> str:
+    lines = content.splitlines()
+    start, end = section_bounds(lines, "editor_plugins")
+    if start is None:
+        return "\n".join(lines) + ("\n" if content.endswith("\n") else "")
+    assignment = None
+    assignment_end = None
+    depth = 0
+    for index in range(start + 1, end):
+        stripped = lines[index].strip()
+        if assignment is None and stripped.startswith("enabled="):
+            assignment = index
+        if assignment is not None:
+            depth += lines[index].count("(") - lines[index].count(")")
+            if depth <= 0:
+                assignment_end = index + 1
+                break
+    if assignment is None:
+        return "\n".join(lines) + ("\n" if content.endswith("\n") else "")
+    assert assignment_end is not None
+    plugins = re.findall(
+        r'"((?:[^"\\]|\\.)*)"', "\n".join(lines[assignment:assignment_end])
+    )
+    plugins = [plugin for plugin in plugins if plugin != PLUGIN_RESOURCE]
+    encoded = ", ".join(json.dumps(plugin) for plugin in plugins)
+    lines[assignment:assignment_end] = [f"enabled=PackedStringArray({encoded})"]
+    return "\n".join(lines) + "\n"
+
+
+def without_e2e_presets(content: str) -> str:
+    header = re.compile(r"^\[preset\.(\d+)(?:\.options)?\]$", re.MULTILINE)
+    matches = list(header.finditer(content))
+    removable_indexes: set[str] = set()
+    for position, match in enumerate(matches):
+        if ".options]" in match.group(0):
+            continue
+        end = matches[position + 1].start() if position + 1 < len(matches) else len(content)
+        block = content[match.start() : end]
+        if re.search(
+            rf'^name={re.escape(json.dumps(E2E_PRESET_NAME))}$', block, re.MULTILINE
+        ):
+            removable_indexes.add(match.group(1))
+    if not removable_indexes:
+        return content
+    spans: list[tuple[int, int]] = []
+    for position, match in enumerate(matches):
+        if match.group(1) not in removable_indexes:
+            continue
+        end = matches[position + 1].start() if position + 1 < len(matches) else len(content)
+        spans.append((match.start(), end))
+    for begin, end in reversed(spans):
+        content = content[:begin] + content[end:]
+    return content.rstrip() + ("\n" if content.strip() else "")
+
+
+def prepare_pristine_e2e_state(project: Path) -> dict[str, bytes | None]:
+    addon = project / "addons/gdpp"
+    if addon.exists():
+        plugin = addon / "plugin.cfg"
+        if not plugin.is_file() or "GDPP" not in plugin.read_text(
+            encoding="utf-8", errors="replace"
+        ):
+            fail("refusing to remove an untracked addons/gdpp directory not identified as GDPP")
+        shutil.rmtree(addon)
+
+    managed: dict[str, bytes | None] = {}
+    project_file = project / "project.godot"
+    project_head = git_file_at_head(project, "project.godot")
+    if project_head is None:
+        fail("external project does not track project.godot")
+    current_project = project_file.read_text(encoding="utf-8")
+    head_project = project_head.decode("utf-8")
+    if current_project != head_project:
+        if PLUGIN_RESOURCE not in current_project or without_plugin(
+            current_project
+        ) != without_plugin(head_project):
+            fail("project.godot contains changes not attributable to a previous GDPP E2E run")
+        project_file.write_bytes(project_head)
+    managed["project.godot"] = project_head
+
+    presets = project / "export_presets.cfg"
+    presets_head = git_file_at_head(project, "export_presets.cfg")
+    current_presets = presets.read_text(encoding="utf-8") if presets.is_file() else ""
+    head_presets = presets_head.decode("utf-8") if presets_head is not None else ""
+    if current_presets != head_presets:
+        if without_e2e_presets(current_presets) != head_presets:
+            fail(
+                "export_presets.cfg contains changes not attributable to a previous GDPP E2E run"
+            )
+        if presets_head is None:
+            presets.unlink(missing_ok=True)
+        else:
+            presets.write_bytes(presets_head)
+    managed["export_presets.cfg"] = presets_head
+    return managed
+
+
+def restore_pristine_e2e_state(project: Path, managed: dict[str, bytes | None]) -> None:
+    addon = project / "addons/gdpp"
+    if addon.exists():
+        shutil.rmtree(addon)
+    for relative, content in managed.items():
+        path = project / relative
+        if content is None:
+            path.unlink(missing_ok=True)
+        else:
+            path.write_bytes(content)
+
+
 def link_or_copy(source: str, destination: str) -> str:
     try:
         os.link(source, destination)
@@ -325,7 +446,7 @@ def append_export_preset(project: Path, host: str, output: Path) -> tuple[str, P
     content = preset_file.read_text(encoding="utf-8") if preset_file.is_file() else ""
     indexes = [int(value) for value in re.findall(r"^\[preset\.(\d+)\]$", content, re.MULTILINE)]
     index = max(indexes, default=-1) + 1
-    name = "GDPP External Project E2E"
+    name = E2E_PRESET_NAME
     platform, architecture, export_path = export_contract(host, output)
     block = (
         f"\n[preset.{index}]\n\n"
@@ -459,6 +580,7 @@ def main() -> int:
         "phases": {},
     }
     atomic_json(report_path, report)
+    managed_state: dict[str, bytes | None] = {}
 
     try:
         report["resolved_commit"] = validate_checkout(corpus, manifest)
@@ -471,6 +593,7 @@ def main() -> int:
         project_file = project / "project.godot"
         if not project_file.is_file():
             fail(f"Godot project is missing: {project_file}")
+        managed_state = prepare_pristine_e2e_state(project)
 
         validation_log = output / "godot-contract.log"
         report["phases"]["godot_contract"] = run(
@@ -712,12 +835,19 @@ def main() -> int:
         }
         report["status"] = "passed"
         atomic_json(report_path, report)
+        restore_pristine_e2e_state(project, managed_state)
+        managed_state = {}
         print(
             f"complete external project E2E passed: {manifest['repository']['name']} "
             f"at {report['resolved_commit']}"
         )
         return 0
     except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:
+        if managed_state:
+            try:
+                restore_pristine_e2e_state(project, managed_state)
+            except OSError as cleanup_error:
+                error = RuntimeError(f"{error}; cleanup also failed: {cleanup_error}")
         report["status"] = "failed"
         report["failure"] = str(error)
         atomic_json(report_path, report)
