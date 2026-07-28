@@ -69,14 +69,49 @@ std::string native_string(const godot::String& value) {
     return {utf8.get_data(), static_cast<std::size_t>(utf8.length())};
 }
 
+void assign_diagnostic_channels(godot::Dictionary& output,
+                                const godot::PackedStringArray& diagnostics,
+                                const godot::PackedStringArray& errors,
+                                const godot::PackedStringArray& warnings = {},
+                                const godot::PackedStringArray& notes = {}) {
+    output["diagnostics"] = diagnostics;
+    output["errors"] = errors;
+    output["warnings"] = warnings;
+    output["notes"] = notes;
+}
+
+godot::Dictionary failure_result(const godot::String& message) {
+    godot::Dictionary output;
+    output["success"] = false;
+    godot::PackedStringArray errors;
+    errors.push_back(message);
+    assign_diagnostic_channels(output, errors, errors);
+    return output;
+}
+
 godot::Dictionary result_dictionary(const CompileResult& result, const SourceFile& source) {
     godot::Dictionary output;
     output["success"] = result.success;
     godot::PackedStringArray diagnostics;
+    godot::PackedStringArray errors;
+    godot::PackedStringArray warnings;
+    godot::PackedStringArray notes;
     for (const auto& diagnostic : result.diagnostics) {
-        diagnostics.push_back(godot::String{format_diagnostic(diagnostic, source, false).c_str()});
+        const godot::String message{format_diagnostic(diagnostic, source, false).c_str()};
+        diagnostics.push_back(message);
+        switch (diagnostic.severity) {
+        case DiagnosticSeverity::error:
+            errors.push_back(message);
+            break;
+        case DiagnosticSeverity::warning:
+            warnings.push_back(message);
+            break;
+        case DiagnosticSeverity::note:
+            notes.push_back(message);
+            break;
+        }
     }
-    output["diagnostics"] = diagnostics;
+    assign_diagnostic_channels(output, diagnostics, errors, warnings, notes);
     godot::Dictionary optimization;
     optimization["constants_folded"] = static_cast<int64_t>(result.optimization.constants_folded);
     optimization["statements_removed"] =
@@ -672,13 +707,8 @@ std::vector<ExtensionBridge> reflect_extension_contracts() {
 }
 
 godot::Dictionary invalid_version_result(const godot::String& value) {
-    godot::Dictionary output;
-    output["success"] = false;
-    godot::PackedStringArray diagnostics;
-    diagnostics.push_back("unsupported target Godot version '" + value +
+    return failure_result("unsupported target Godot version '" + value +
                           "'; expected 4.4, 4.5, 4.6, or 4.7");
-    output["diagnostics"] = diagnostics;
-    return output;
 }
 
 std::filesystem::path versioned_sdk_root(const std::filesystem::path& root, GodotVersion version,
@@ -1552,9 +1582,30 @@ GDPPCompiler::execute_project_build(const godot::Dictionary& build_plan,
     output["exit_code"] = int64_t{-1};
     godot::PackedStringArray diagnostics =
         build_plan.get("diagnostics", godot::PackedStringArray{});
+    godot::PackedStringArray errors;
+    godot::PackedStringArray warnings;
+    godot::PackedStringArray notes;
+    const bool has_severity_channels =
+        build_plan.has("errors") || build_plan.has("warnings") || build_plan.has("notes");
+    if (has_severity_channels) {
+        errors = build_plan.get("errors", godot::PackedStringArray{});
+        warnings = build_plan.get("warnings", godot::PackedStringArray{});
+        notes = build_plan.get("notes", godot::PackedStringArray{});
+    } else if (static_cast<bool>(build_plan.get("success", false))) {
+        // Plans produced before severity channels were introduced only reached execution when
+        // their diagnostics were non-fatal.
+        warnings = diagnostics;
+    } else {
+        errors = diagnostics;
+    }
 
     if (!static_cast<bool>(build_plan.get("success", false))) {
-        output["diagnostics"] = diagnostics;
+        if (errors.is_empty()) {
+            const godot::String message{"native build plan failed without an error diagnostic"};
+            diagnostics.push_back(message);
+            errors.push_back(message);
+        }
+        assign_diagnostic_channels(output, diagnostics, errors, warnings, notes);
         return output;
     }
 
@@ -1562,13 +1613,17 @@ GDPPCompiler::execute_project_build(const godot::Dictionary& build_plan,
     const auto execution = execute_build_commands(commands, progress_callback);
     output["exit_code"] = execution.exit_code;
     if (execution.exit_code != 0) {
-        for (const auto& diagnostic : execution.diagnostics)
+        for (const auto& diagnostic : execution.diagnostics) {
             diagnostics.push_back(diagnostic);
-        if (execution.diagnostics.is_empty()) {
-            diagnostics.push_back("C++ toolchain failed with exit code " +
-                                  godot::String::num_int64(execution.exit_code));
+            errors.push_back(diagnostic);
         }
-        output["diagnostics"] = diagnostics;
+        if (execution.diagnostics.is_empty()) {
+            const godot::String message = "C++ toolchain failed with exit code " +
+                                          godot::String::num_int64(execution.exit_code);
+            diagnostics.push_back(message);
+            errors.push_back(message);
+        }
+        assign_diagnostic_channels(output, diagnostics, errors, warnings, notes);
         return output;
     }
 
@@ -1581,8 +1636,10 @@ GDPPCompiler::execute_project_build(const godot::Dictionary& build_plan,
         std::string commit_diagnostic;
         if (!commit_xcframework(path_from_utf8(pending_path), path_from_utf8(output_path),
                                 commit_diagnostic)) {
-            diagnostics.push_back(godot::String{commit_diagnostic.c_str()});
-            output["diagnostics"] = diagnostics;
+            const godot::String message{commit_diagnostic.c_str()};
+            diagnostics.push_back(message);
+            errors.push_back(message);
+            assign_diagnostic_channels(output, diagnostics, errors, warnings, notes);
             return output;
         }
     }
@@ -1592,14 +1649,16 @@ GDPPCompiler::execute_project_build(const godot::Dictionary& build_plan,
         std::filesystem::is_regular_file(output_filesystem_path, file_error) ||
         is_xcframework(output_filesystem_path);
     if (output_path.empty() || !artifact_exists || file_error) {
-        diagnostics.push_back("native build completed without producing the planned library '" +
-                              output_library + "'");
-        output["diagnostics"] = diagnostics;
+        const godot::String message =
+            "native build completed without producing the planned library '" + output_library + "'";
+        diagnostics.push_back(message);
+        errors.push_back(message);
+        assign_diagnostic_channels(output, diagnostics, errors, warnings, notes);
         return output;
     }
 
     output["success"] = true;
-    output["diagnostics"] = diagnostics;
+    assign_diagnostic_channels(output, diagnostics, errors, warnings, notes);
     report_build_progress(progress_callback, "complete", static_cast<std::size_t>(commands.size()),
                           static_cast<std::size_t>(commands.size()));
     return output;
@@ -1735,39 +1794,21 @@ godot::Dictionary GDPPCompiler::compile_project(
         return invalid_version_result(target_version);
     const auto profile_value = native_string(build_profile);
     const auto profile = parse_native_build_profile(profile_value);
-    if (!profile) {
-        godot::Dictionary output;
-        output["success"] = false;
-        godot::PackedStringArray diagnostics;
-        diagnostics.push_back("unsupported build profile '" + build_profile +
+    if (!profile)
+        return failure_result("unsupported build profile '" + build_profile +
                               "'; expected debug or release");
-        output["diagnostics"] = diagnostics;
-        return output;
-    }
     const auto platform_value = target_platform.is_empty() ? native_platform_name(native_platform())
                                                            : native_string(target_platform);
     const auto platform = parse_native_platform(platform_value);
-    if (!platform) {
-        godot::Dictionary output;
-        output["success"] = false;
-        godot::PackedStringArray diagnostics;
-        diagnostics.push_back("unsupported native platform '" + target_platform +
+    if (!platform)
+        return failure_result("unsupported native platform '" + target_platform +
                               "'; expected macos, linux, windows, android, ios, or web");
-        output["diagnostics"] = diagnostics;
-        return output;
-    }
     const auto architecture = target_architecture.is_empty() ? std::string{GDPP_ARCH}
                                                              : native_string(target_architecture);
-    if (!native_architecture_supported(*platform, architecture)) {
-        godot::Dictionary output;
-        output["success"] = false;
-        godot::PackedStringArray diagnostics;
-        diagnostics.push_back("unsupported native architecture '" +
+    if (!native_architecture_supported(*platform, architecture))
+        return failure_result("unsupported native architecture '" +
                               godot::String{architecture.c_str()} + "' for " +
                               godot::String{platform_value.c_str()});
-        output["diagnostics"] = diagnostics;
-        return output;
-    }
     NativeWebThreadMode web_thread_mode = NativeWebThreadMode::not_applicable;
     const auto variant = native_string(target_variant);
     if (*platform == NativePlatform::web) {
@@ -1775,55 +1816,26 @@ godot::Dictionary GDPPCompiler::compile_project(
             web_thread_mode = NativeWebThreadMode::multi_threaded;
         else if (variant == "nothreads")
             web_thread_mode = NativeWebThreadMode::single_threaded;
-        else {
-            godot::Dictionary output;
-            output["success"] = false;
-            godot::PackedStringArray diagnostics;
-            diagnostics.push_back("Web target variant must be 'threads' or 'nothreads'");
-            output["diagnostics"] = diagnostics;
-            return output;
-        }
+        else
+            return failure_result("Web target variant must be 'threads' or 'nothreads'");
     } else if (!variant.empty()) {
-        godot::Dictionary output;
-        output["success"] = false;
-        godot::PackedStringArray diagnostics;
-        diagnostics.push_back("target variant is only valid for the Web platform");
-        output["diagnostics"] = diagnostics;
-        return output;
+        return failure_result("target variant is only valid for the Web platform");
     }
     const auto precision_value = native_string(target_precision);
     const auto precision = parse_native_precision(precision_value);
-    if (!precision) {
-        godot::Dictionary output;
-        output["success"] = false;
-        godot::PackedStringArray diagnostics;
-        diagnostics.push_back("target precision must be exactly 'single' or 'double'");
-        output["diagnostics"] = diagnostics;
-        return output;
-    }
-    if (precision_value != GDPP_GODOT_PRECISION) {
-        godot::Dictionary output;
-        output["success"] = false;
-        godot::PackedStringArray diagnostics;
-        diagnostics.push_back(
+    if (!precision)
+        return failure_result("target precision must be exactly 'single' or 'double'");
+    if (precision_value != GDPP_GODOT_PRECISION)
+        return failure_result(
             "target Godot precision is '" + target_precision +
             "', but this GDPP compiler was built for '" GDPP_GODOT_PRECISION
             "'; use the package rebuilt from the target engine extension_api.json");
-        output["diagnostics"] = diagnostics;
-        return output;
-    }
     auto resolved_compiler_executable = native_string(compiler_executable);
 #ifdef _WIN32
     if (*platform == NativePlatform::windows) {
         const auto resolved = resolve_msvc_compiler_for_plan(resolved_compiler_executable);
-        if (!resolved.valid()) {
-            godot::Dictionary output;
-            output["success"] = false;
-            godot::PackedStringArray diagnostics;
-            diagnostics.push_back(godot::String{resolved.diagnostic.c_str()});
-            output["diagnostics"] = diagnostics;
-            return output;
-        }
+        if (!resolved.valid())
+            return failure_result(godot::String{resolved.diagnostic.c_str()});
         resolved_compiler_executable = resolved.executable;
     }
 #endif
@@ -1912,14 +1924,29 @@ godot::Dictionary GDPPCompiler::compile_project(
     output["script_contract_hashes"] = script_contract_hashes;
     output["editor_script_descriptors"] = editor_script_descriptors;
     godot::PackedStringArray diagnostics;
+    godot::PackedStringArray errors;
+    godot::PackedStringArray warnings;
+    godot::PackedStringArray notes;
     for (const auto& item : result.diagnostics) {
         const auto message = generic_path_to_utf8(item.path) + ":" +
                              std::to_string(item.diagnostic.span.begin.line) + ":" +
                              std::to_string(item.diagnostic.span.begin.column) + ": " +
                              item.diagnostic.code + ": " + item.diagnostic.message;
-        diagnostics.push_back(godot::String{message.c_str()});
+        const godot::String formatted{message.c_str()};
+        diagnostics.push_back(formatted);
+        switch (item.diagnostic.severity) {
+        case DiagnosticSeverity::error:
+            errors.push_back(formatted);
+            break;
+        case DiagnosticSeverity::warning:
+            warnings.push_back(formatted);
+            break;
+        case DiagnosticSeverity::note:
+            notes.push_back(formatted);
+            break;
+        }
     }
-    output["diagnostics"] = diagnostics;
+    assign_diagnostic_channels(output, diagnostics, errors, warnings, notes);
     if (result.success) {
         output["build_id"] = godot::String{result.build_id.c_str()};
         NativeBuildOptions build_options;
@@ -1937,9 +1964,12 @@ godot::Dictionary GDPPCompiler::compile_project(
         const auto plan = builder.plan(build_options);
         if (!plan.success) {
             output["success"] = false;
-            for (const auto& message : plan.diagnostics)
-                diagnostics.push_back(godot::String{message.c_str()});
-            output["diagnostics"] = diagnostics;
+            for (const auto& message : plan.diagnostics) {
+                const godot::String formatted{message.c_str()};
+                diagnostics.push_back(formatted);
+                errors.push_back(formatted);
+            }
+            assign_diagnostic_channels(output, diagnostics, errors, warnings, notes);
             return output;
         }
         godot::Array commands;
@@ -2025,14 +2055,8 @@ godot::Dictionary GDPPCompiler::compile_file(const godot::String& source_path,
     const auto native_output_path = path_from_utf8(native_output_name);
 
     std::ifstream input{native_source_path, std::ios::binary};
-    godot::Dictionary failure;
-    if (!input) {
-        failure["success"] = false;
-        godot::PackedStringArray diagnostics;
-        diagnostics.push_back("cannot open source file: " + source_path);
-        failure["diagnostics"] = diagnostics;
-        return failure;
-    }
+    if (!input)
+        return failure_result("cannot open source file: " + source_path);
     const std::string text{std::istreambuf_iterator<char>{input}, std::istreambuf_iterator<char>{}};
     const SourceFile source_file{native_source_name, text};
     const Compiler compiler;
@@ -2050,8 +2074,13 @@ godot::Dictionary GDPPCompiler::compile_file(const godot::String& source_path,
         !write_file(native_output_path / result.unit.source_file_name, result.unit.source)) {
         output["success"] = false;
         auto diagnostics = static_cast<godot::PackedStringArray>(output["diagnostics"]);
-        diagnostics.push_back("cannot write generated files to: " + output_directory);
-        output["diagnostics"] = diagnostics;
+        auto errors = static_cast<godot::PackedStringArray>(output["errors"]);
+        const godot::String message = "cannot write generated files to: " + output_directory;
+        diagnostics.push_back(message);
+        errors.push_back(message);
+        assign_diagnostic_channels(output, diagnostics, errors,
+                                   static_cast<godot::PackedStringArray>(output["warnings"]),
+                                   static_cast<godot::PackedStringArray>(output["notes"]));
     }
     return output;
 }

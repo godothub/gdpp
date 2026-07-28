@@ -656,17 +656,44 @@ func _accept_build_outcome(outcome: Dictionary, label: String) -> bool:
     _active_build_label = label
     var plan: Dictionary = outcome.get("plan", {})
     if not plan.get("success", false):
-        for diagnostic in plan.get("diagnostics", []):
+        _publish_nonfatal_build_diagnostics(plan, label)
+        var plan_errors := _build_diagnostic_channel(plan, "errors", true)
+        if plan_errors.is_empty():
+            plan_errors.push_back("native build plan failed without an error diagnostic")
+        for diagnostic: String in plan_errors:
             _fail_export("%s build: %s" % [label, diagnostic])
         return false
     var execution: Dictionary = outcome.get("execution", {})
+    _publish_nonfatal_build_diagnostics(execution, label)
     if not execution.get("success", false):
-        for diagnostic in execution.get("diagnostics", []):
+        var execution_errors := _build_diagnostic_channel(execution, "errors", true)
+        if execution_errors.is_empty():
+            execution_errors.push_back("native build failed without an error diagnostic")
+        for diagnostic: String in execution_errors:
             _fail_export("%s build: %s" % [label, diagnostic])
         return false
-    for diagnostic in execution.get("diagnostics", []):
-        push_warning("GDPP: %s build: %s" % [label, diagnostic])
     return true
+
+
+func _publish_nonfatal_build_diagnostics(result: Dictionary, label: String) -> void:
+    var warnings := _build_diagnostic_channel(result, "warnings", not result.has("warnings"))
+    for diagnostic: String in warnings:
+        push_warning("GDPP: %s build: %s" % [label, diagnostic])
+    var notes := _build_diagnostic_channel(result, "notes", false)
+    for diagnostic: String in notes:
+        print("GDPP: %s build: %s" % [label, diagnostic])
+
+
+func _build_diagnostic_channel(
+    result: Dictionary,
+    channel: String,
+    fallback_to_legacy_diagnostics: bool
+) -> PackedStringArray:
+    if result.has(channel):
+        return result.get(channel, PackedStringArray())
+    if fallback_to_legacy_diagnostics:
+        return result.get("diagnostics", PackedStringArray())
+    return PackedStringArray()
 
 
 func _on_native_build_progress(phase: String, completed: int, total: int) -> void:

@@ -79,6 +79,13 @@ func _run() -> void:
         "success": true,
         "build_commands": commands,
         "output_library": "res://addons/gdpp/build/unreachable-native-library",
+        "diagnostics": PackedStringArray([
+            "GDPP_PLAN_WARNING_SENTINEL",
+            "GDPP_PLAN_NOTE_SENTINEL",
+        ]),
+        "errors": PackedStringArray(),
+        "warnings": PackedStringArray(["GDPP_PLAN_WARNING_SENTINEL"]),
+        "notes": PackedStringArray(["GDPP_PLAN_NOTE_SENTINEL"]),
     })
     if result.get("success", false) or int(result.get("exit_code", -1)) != 23:
         push_error("GDPP accepted a deliberately failing toolchain command: %s" % result)
@@ -100,6 +107,31 @@ func _run() -> void:
         return
     if "GDPP_CAPTURE_SENTINEL" not in diagnostic_text:
         push_error("GDPP toolchain diagnostics lost stderr: %s" % diagnostic_text)
+        quit(1)
+        return
+    var error_text := "\n".join(
+        result.get("errors", PackedStringArray()) as PackedStringArray
+    )
+    if "GDPP_CAPTURE_SENTINEL" not in error_text:
+        push_error("GDPP toolchain errors lost stderr: %s" % error_text)
+        quit(1)
+        return
+    if "GDPP_PLAN_WARNING_SENTINEL" in error_text:
+        push_error("GDPP promoted a compiler warning after a toolchain failure: %s" % error_text)
+        quit(1)
+        return
+    if (
+        result.get("warnings", PackedStringArray())
+        != PackedStringArray(["GDPP_PLAN_WARNING_SENTINEL"])
+    ):
+        push_error("GDPP lost structured compiler warnings: %s" % result)
+        quit(1)
+        return
+    if (
+        result.get("notes", PackedStringArray())
+        != PackedStringArray(["GDPP_PLAN_NOTE_SENTINEL"])
+    ):
+        push_error("GDPP lost structured compiler notes: %s" % result)
         quit(1)
         return
     DirAccess.remove_absolute(sequence_path)

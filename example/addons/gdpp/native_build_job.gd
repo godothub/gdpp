@@ -71,7 +71,10 @@ func _worker_entry(compiler: Object, request: Dictionary) -> Dictionary:
             "execution": {
                 "success": false,
                 "exit_code": -1,
-                "diagnostics": plan.get("diagnostics", PackedStringArray()),
+                "diagnostics": PackedStringArray(),
+                "errors": PackedStringArray(),
+                "warnings": PackedStringArray(),
+                "notes": PackedStringArray(),
             },
         }
 
