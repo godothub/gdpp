@@ -898,6 +898,12 @@ TEST_CASE("project compiler preserves nested internal class identities across ca
     const auto header =
         read_text(options.output_directory / "generated" / result.scripts.front().header_file_name);
     REQUIRE(header.find("class " + *derived + " : public " + *base) != std::string::npos);
+    const auto source =
+        read_text(options.output_directory / "generated" / result.scripts.front().source_file_name);
+    REQUIRE(source.find("descriptor.base_script_path = "
+                        "godot::String(\"res://factory.gd::Container.Base\")") !=
+            std::string::npos);
+    REQUIRE(source.find("res://factory.gd::GDPPNative_") == std::string::npos);
     const auto registration = read_text(options.output_directory / "register_types.cpp");
     REQUIRE(registration.find("GDREGISTER_CLASS(" + *base + ")") <
             registration.find("GDREGISTER_CLASS(" + *derived + ")"));
@@ -1167,6 +1173,12 @@ TEST_CASE("project compiler resolves inherited and cross-script internal class i
             std::string::npos);
     REQUIRE(derived_header.find("class " + derived->inner_class_names.front() + " : public " +
                                 library->inner_class_names.front()) != std::string::npos);
+    const auto derived_source =
+        read_text(options.output_directory / "generated" / derived->source_file_name);
+    REQUIRE(derived_source.find("descriptor.base_script_path = "
+                                "godot::String(\"res://library.gd::Payload\")") !=
+            std::string::npos);
+    REQUIRE(derived_source.find("res://library.gd::GDPPNative_") == std::string::npos);
 }
 
 TEST_CASE("project compiler canonicalizes autoload enums and serializable project exports") {

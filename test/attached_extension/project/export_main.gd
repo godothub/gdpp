@@ -46,6 +46,19 @@ class ContainerItem extends RefCounted:
         value = initial
 
 
+class DynamicBaseItem extends RefCounted:
+    var inherited_value := 42
+
+
+    func inherited_read() -> int:
+        return inherited_value
+
+
+class DynamicDerivedItem extends DynamicBaseItem:
+    func derived_read() -> int:
+        return inherited_read()
+
+
 class InnerCoroutineProbe extends RefCounted:
     func forward(signal_value: Signal) -> int:
         return await later(signal_value)
@@ -155,6 +168,15 @@ func _verify_export_runtime() -> void:
         or dynamic_static_callable.call([13, 21]) != 34
     ):
         _fail("compiled Script did not expose constants, static state, methods, or internal classes")
+        return
+    var dynamic_derived: Variant = dynamic_owner_script.DynamicDerivedItem.new()
+    if (
+        dynamic_derived == null
+        or dynamic_derived.inherited_value != 42
+        or dynamic_derived.inherited_read() != 42
+        or dynamic_derived.derived_read() != 42
+    ):
+        _fail("dynamic compiled Script construction lost internal-class inheritance identity")
         return
     var animation_storage_probe := get_node("AnimationStorageProbe")
     if (

@@ -8116,6 +8116,19 @@ void CodeGenerator::emit_inner_class_definition(const typed::Class& declaration,
                           : native_script_base       ? native_script_base->native_class_name
                                                      : "gdpp::runtime::AttachedScriptBehavior";
     const auto base_script_path = [&]() {
+        // Runtime descriptor identities always use canonical source paths. The C++ inheritance
+        // map may contain a generated native class name after project-level semantic resolution;
+        // publishing that implementation name after `::` creates an unregistered Script
+        // identity and breaks dynamic construction of every derived internal class.
+        if (current_inner_script_ && script_symbols_) {
+            if (const auto* inner_base = script_symbols_->inner_base_of(*current_inner_script_)) {
+                if (const auto* owner = script_symbols_->owner_of(*inner_base)) {
+                    return "res://" + owner->path + "::" + inner_base->name;
+                }
+            }
+            if (const auto* script_base = script_symbols_->base_of(*current_inner_script_))
+                return "res://" + script_base->path;
+        }
         if (!native_inner_base.empty()) {
             if (current_inner_script_ && !current_inner_script_->base_script_path.empty() &&
                 !current_inner_script_->base_class_name.empty()) {
