@@ -16,6 +16,12 @@
       "sources/effects/Projectile.gd"
     ]
   },
+  "runtime": {
+    "quit_after": 2,
+    "arguments": [
+      "--server"
+    ]
+  },
   "projects": [
     {
       "path": ".",

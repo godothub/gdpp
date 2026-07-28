@@ -20,6 +20,36 @@ SPEC.loader.exec_module(E2E)
 
 
 class ExternalProjectE2ETest(unittest.TestCase):
+    def test_runtime_arguments_select_a_project_mode_after_godot_options(self) -> None:
+        command = E2E.project_runtime_command(
+            Path("/product"),
+            {
+                "runtime": {
+                    "quit_after": 2,
+                    "arguments": ["--server", "--fixture"],
+                }
+            },
+        )
+        self.assertEqual(
+            command,
+            [
+                "/product",
+                "--headless",
+                "--audio-driver",
+                "Dummy",
+                "--quit-after",
+                "2",
+                "--server",
+                "--fixture",
+            ],
+        )
+        with self.assertRaisesRegex(RuntimeError, "runner-owned"):
+            E2E.runtime_user_arguments(
+                {"runtime": {"arguments": ["--server", "--path=/tmp/other"]}}
+            )
+        with self.assertRaisesRegex(RuntimeError, "1 through 3600"):
+            E2E.runtime_quit_after({"runtime": {"quit_after": 0}})
+
     def test_bootstrap_import_retries_only_failed_processes(self) -> None:
         failed = {"exit_code": -6, "timed_out": False, "log": "attempt-1.log"}
         passed = {"exit_code": 0, "timed_out": False, "log": "attempt-2.log"}

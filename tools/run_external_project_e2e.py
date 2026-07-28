@@ -50,7 +50,64 @@ def load_manifest(path: Path) -> dict:
     godot = manifest.get("godot")
     if not isinstance(godot, dict) or not godot.get("target") or not godot.get("engine"):
         fail("external project manifest must define its Godot target and exact engine")
+    runtime_user_arguments(manifest)
+    runtime_quit_after(manifest)
     return manifest
+
+
+def runtime_user_arguments(manifest: dict) -> list[str]:
+    runtime = manifest.get("runtime", {})
+    if not isinstance(runtime, dict):
+        fail("external project runtime contract must be an object")
+    arguments = runtime.get("arguments", [])
+    if not isinstance(arguments, list) or len(arguments) > 64:
+        fail("external project runtime arguments must be a list of at most 64 strings")
+    if any(
+        not isinstance(argument, str)
+        or not argument
+        or "\0" in argument
+        for argument in arguments
+    ):
+        fail("external project runtime arguments contain an invalid value")
+    reserved = (
+        "--audio-driver",
+        "--editor",
+        "--export",
+        "--path",
+        "--project-manager",
+        "--quit",
+        "--script",
+    )
+    if any(
+        argument == "--"
+        or any(argument == option or argument.startswith(option + "=") for option in reserved)
+        for argument in arguments
+    ):
+        fail("external project runtime arguments attempt to replace runner-owned Godot options")
+    return arguments
+
+
+def runtime_quit_after(manifest: dict) -> int:
+    runtime = manifest.get("runtime", {})
+    value = runtime.get("quit_after", 300) if isinstance(runtime, dict) else 300
+    if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= 3600:
+        fail("external project runtime quit_after must be an integer from 1 through 3600")
+    return value
+
+
+def project_runtime_command(executable: Path, manifest: dict) -> list[str]:
+    # Project-specific flags remain visible to OS.get_cmdline_args(), which many real projects use
+    # instead of get_cmdline_user_args(). The boundary above prevents them from replacing the
+    # executable, project, export, script, audio or lifecycle controls owned by this runner.
+    return [
+        str(executable),
+        "--headless",
+        "--audio-driver",
+        "Dummy",
+        "--quit-after",
+        str(runtime_quit_after(manifest)),
+        *runtime_user_arguments(manifest),
+    ]
 
 
 def atomic_json(path: Path, value: dict) -> None:
@@ -811,14 +868,7 @@ def main() -> int:
         baseline_executable = find_executable(baseline_product, args.host)
         baseline_runtime_log = output / "baseline-runtime.log"
         report["phases"]["baseline_runtime"] = run(
-            [
-                str(baseline_executable),
-                "--headless",
-                "--audio-driver",
-                "Dummy",
-                "--quit-after",
-                "300",
-            ],
+            project_runtime_command(baseline_executable, manifest),
             cwd=baseline_product.parent,
             timeout=args.runtime_timeout,
             log=baseline_runtime_log,
@@ -970,14 +1020,7 @@ def main() -> int:
         executable = find_executable(product, args.host)
         runtime_log = output / "runtime.log"
         report["phases"]["runtime"] = run(
-            [
-                str(executable),
-                "--headless",
-                "--audio-driver",
-                "Dummy",
-                "--quit-after",
-                "300",
-            ],
+            project_runtime_command(executable, manifest),
             cwd=product.parent,
             timeout=args.runtime_timeout,
             log=runtime_log,
