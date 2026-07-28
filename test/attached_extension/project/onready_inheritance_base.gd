@@ -3,6 +3,7 @@ extends Node
 @onready var base_marker: Node = $BaseMarker
 
 var ready_called := false
+var construction_script_path: String = get_script().resource_path
 
 
 func _ready() -> void:
@@ -15,3 +16,7 @@ func base_initialized() -> bool:
 
 func base_ready_observed() -> bool:
     return ready_called
+
+
+func base_observed_most_derived_script() -> bool:
+    return construction_script_path == "res://onready_inheritance_probe.gd"

@@ -8,5 +8,6 @@ func initialized() -> bool:
         base_initialized_first
         and base_initialized()
         and base_ready_observed()
+        and base_observed_most_derived_script()
         and derived_marker == get_node("DerivedMarker")
     )
