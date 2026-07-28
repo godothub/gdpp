@@ -1144,9 +1144,9 @@ godot::Variant script_identity(godot::Object* object, const char* source_path) {
         }
     }
 
-    const auto script = object->get_script();
-    if (script.is_valid())
-        return godot::Variant(static_cast<const godot::Object*>(script.ptr()));
+    const godot::Variant script = object->get_script();
+    if (script.get_type() == godot::Variant::OBJECT && script.get_validated_object())
+        return script;
 
     const auto native_class = object->get_class();
     if (const auto descriptor = find_attached_script_by_behavior_class(native_class); descriptor) {
