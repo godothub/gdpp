@@ -324,6 +324,7 @@ func _verify_export_runtime() -> void:
         return
     if (
         initialized != 1
+        or init_ping_value != bonus
         or not ready_seen
         or enter_tree_count != 1
         or ready_notification_count != 1
@@ -334,11 +335,19 @@ func _verify_export_runtime() -> void:
     if _child_ping_value != bonus or _vendor_ping_value != bonus:
         _fail("script or provider ready signals were not connected before lifecycle dispatch")
         return
+    var init_signal_count := 0
+    for signal_info in get_signal_list():
+        if signal_info.name == &"init_ping":
+            init_signal_count += 1
+    if init_signal_count != 1:
+        _fail("construction-time script signals were duplicated in Object introspection")
+        return
 
     var lifecycle_probe: Variant = ATTACHED_SCENE.instantiate()
     add_child(lifecycle_probe)
     if (
         lifecycle_probe.initialized != 1
+        or lifecycle_probe.init_ping_value != lifecycle_probe.bonus
         or not lifecycle_probe.ready_seen
         or lifecycle_probe.enter_tree_count != 1
         or lifecycle_probe.ready_notification_count != 1

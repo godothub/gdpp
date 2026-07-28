@@ -4,6 +4,7 @@
 #include <godot_cpp/classes/class_db_singleton.hpp>
 #include <godot_cpp/classes/engine.hpp>
 #include <godot_cpp/core/error_macros.hpp>
+#include <godot_cpp/godot.hpp>
 #include <godot_cpp/templates/vector.hpp>
 #include <godot_cpp/variant/callable.hpp>
 #include <godot_cpp/variant/node_path.hpp>
@@ -84,6 +85,18 @@ std::mutex& native_bind_mutex() {
 
 std::unordered_map<std::string, GDExtensionMethodBindPtr>& native_bind_cache() {
     static std::unordered_map<std::string, GDExtensionMethodBindPtr> value;
+    return value;
+}
+
+GDExtensionInterfaceObjectSetScriptInstance object_set_script_instance_interface() {
+    // The project library is compiled against the 4.4 compatibility surface, whose generated
+    // godot-cpp loader intentionally omits interfaces introduced later. Resolve this optional 4.5
+    // hook through Godot's canonical procedure table so one binary remains ABI-compatible across
+    // every supported 4.x minor.
+    static const auto value = reinterpret_cast<GDExtensionInterfaceObjectSetScriptInstance>(
+        godot::gdextension_interface::get_proc_address
+            ? godot::gdextension_interface::get_proc_address("object_set_script_instance")
+            : nullptr);
     return value;
 }
 
@@ -216,6 +229,23 @@ void destroy_method_infos(const GDExtensionMethodInfo* values, std::uint32_t cou
     for (std::uint32_t index = 0; index < count; ++index)
         destroy_method_info(values[index]);
     godot::memdelete_arr(values);
+}
+
+void publish_legacy_construction_signals(godot::Object* owner,
+                                         const AttachedScriptDescriptor& descriptor) {
+    // Godot 4.4 does not expose object_set_script_instance(), so ScriptExtension implementations
+    // cannot publish their ScriptInstance before _instance_create() returns. Keep that legacy
+    // engine functional by publishing owner-local construction signals. Godot 4.5 and newer use
+    // the exact pre-attached ScriptInstance path below and never enter here.
+    for (const auto& signal : descriptor.signals) {
+        if (owner->has_signal(signal.name))
+            continue;
+        godot::Array arguments;
+        arguments.resize(signal.arguments.size());
+        for (std::uint32_t index = 0; index < signal.arguments.size(); ++index)
+            arguments[index] = static_cast<godot::Dictionary>(signal.arguments[index]);
+        owner->add_user_signal(godot::String{signal.name}, arguments);
+    }
 }
 
 GDExtensionBool instance_set(AttachedScriptInstance* instance, const godot::StringName* name,
@@ -538,6 +568,25 @@ void* AttachedCompiledScript::_instance_create(godot::Object* object) const {
         return instance->godot_instance_handle;
     }
 
+    // GDScript attaches its ScriptInstance before evaluating fields and _init(). Reproduce that
+    // ordering so custom signals, properties, methods and reflection are all available throughout
+    // construction. Godot added the public GDExtension attachment hook in 4.5; the returned handle
+    // is the same one Object::set_script() stores when this callback returns, so no second instance
+    // is created and Object::set_script_instance() treats the outer assignment as a no-op.
+    const auto object_set_script_instance = object_set_script_instance_interface();
+    const bool can_pre_attach = object_set_script_instance != nullptr;
+    if (can_pre_attach) {
+        instance->godot_instance_handle =
+            godot::gdextension_interface::script_instance_create3(&script_instance_info(), instance);
+        if (!instance->godot_instance_handle) {
+            godot::memdelete(instance);
+            return nullptr;
+        }
+        object_set_script_instance(object->_owner, instance->godot_instance_handle);
+    } else {
+        publish_legacy_construction_signals(object, *metadata);
+    }
+
     const bool matches_construction =
         pending_construction && pending_construction->source_path == metadata->source_path;
     const bool skip_initializer = matches_construction && pending_construction->skip_initializer;
@@ -565,15 +614,24 @@ void* AttachedCompiledScript::_instance_create(godot::Object* object) const {
         GDExtensionCallError call_error{};
         call_behavior(instance, "_init", argument_pointers.data(), arguments->size(), call_error);
         if (call_error.error != GDEXTENSION_CALL_OK) {
-            godot::memdelete(instance);
+            if (can_pre_attach) {
+                // Clearing the owner destroys the ScriptInstance wrapper, whose free callback owns
+                // and destroys `instance`. Deleting the payload directly would leave Object with a
+                // dangling wrapper until the outer set_script() call resumed.
+                object_set_script_instance(object->_owner, nullptr);
+            } else {
+                godot::memdelete(instance);
+            }
             return nullptr;
         }
     }
-    instance->godot_instance_handle =
-        godot::gdextension_interface::script_instance_create3(&script_instance_info(), instance);
-    if (!instance->godot_instance_handle) {
-        godot::memdelete(instance);
-        return nullptr;
+    if (!can_pre_attach) {
+        instance->godot_instance_handle =
+            godot::gdextension_interface::script_instance_create3(&script_instance_info(), instance);
+        if (!instance->godot_instance_handle) {
+            godot::memdelete(instance);
+            return nullptr;
+        }
     }
     return instance->godot_instance_handle;
 }

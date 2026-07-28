@@ -4,9 +4,11 @@ extends VendorBase
 const INHERITED_PHYSICS_SCENE := preload("res://deferred_shape.tscn")
 
 signal child_ping(value: int)
+signal init_ping(value: int)
 
 @export var bonus: int = 7
 var initialized: int = 0
+var init_ping_value: int = -1
 var ready_seen: bool = false
 var enter_tree_count := 0
 var ready_notification_count := 0
@@ -15,6 +17,7 @@ var exit_tree_count := 0
 
 func _init() -> void:
     initialized += 1
+    init_ping.connect(_on_init_ping)
 
 
 func _enter_tree() -> void:
@@ -23,8 +26,13 @@ func _enter_tree() -> void:
 
 func _ready() -> void:
     ready_seen = true
+    init_ping.emit(bonus)
     child_ping.emit(bonus)
     super.emit_vendor_ping(bonus)
+
+
+func _on_init_ping(value: int) -> void:
+    init_ping_value = value
 
 
 func _exit_tree() -> void:
