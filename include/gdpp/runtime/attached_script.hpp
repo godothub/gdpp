@@ -218,6 +218,10 @@ set_attached_editor_storage_state(godot::Object* object,
 // Returns the opaque ScriptInstance handle Godot expects from debugger callbacks. The handle is
 // valid only while the owner retains the attached compiled script.
 [[nodiscard]] void* attached_script_instance_handle(godot::Object* object);
+// Returns the exact most-derived compiled script currently attached to the owner. The instance is
+// registered before its base-to-derived field initializer chain runs, so get_script() expressions
+// in inherited initializers observe the same script identity as GDScript construction.
+[[nodiscard]] godot::String attached_script_instance_source_path(godot::Object* object);
 
 // Constructs the provider-owned native object and attaches the compiled script. Dictionary
 // restoration can skip both the field-initializer chain and _init, matching GDScript's

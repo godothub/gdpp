@@ -618,6 +618,16 @@ void* attached_script_instance_handle(godot::Object* object) {
                : found->second->godot_instance_handle;
 }
 
+godot::String attached_script_instance_source_path(godot::Object* object) {
+    if (!object)
+        return {};
+    std::lock_guard<std::mutex> lock{AttachedScriptInstance::instances_mutex()};
+    const auto found = AttachedScriptInstance::instances().find(object);
+    return found == AttachedScriptInstance::instances().end()
+               ? godot::String{}
+               : found->second->descriptor.source_path;
+}
+
 bool set_attached_editor_storage_state(godot::Object* object,
                                        const godot::PackedStringArray& stored_properties) {
     if (!object)

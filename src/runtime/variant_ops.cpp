@@ -44,11 +44,8 @@ void register_property_marker(const godot::StringName& class_name,
     };
     const godot::StringName empty_method;
     godot::gdextension_interface::classdb_register_extension_class_property(
-        godot::gdextension_interface::library,
-        class_name._native_ptr(),
-        &property_info,
-        empty_method._native_ptr(),
-        empty_method._native_ptr());
+        godot::gdextension_interface::library, class_name._native_ptr(), &property_info,
+        empty_method._native_ptr(), empty_method._native_ptr());
 }
 
 class CoroutineState final {
@@ -1130,23 +1127,40 @@ godot::Variant script_identity(godot::Object* object, const char* source_path) {
     if (!object)
         return {};
 
+    // AttachedScriptInstance is published before the complete base-to-derived initializer chain.
+    // Its descriptor therefore remains the authoritative most-derived identity even while a base
+    // behavior executes its own lexical initializer.
+    const auto active_source_path = attached_script_instance_source_path(object);
+    if (!active_source_path.is_empty()) {
+        godot::String error;
+        const auto script = attached_script_resource(active_source_path, &error);
+        if (script.is_valid())
+            return godot::Variant(static_cast<const godot::Object*>(script.ptr()));
+        godot::UtilityFunctions::push_error(
+            godot::String{"GDPP: cannot materialize active compiled script '"} +
+            active_source_path + "': " + error);
+        return {};
+    }
+
+    const godot::Variant script = object->get_script();
+    if (script.get_type() == godot::Variant::OBJECT && script.get_validated_object())
+        return script;
+
+    // Non-attached native behaviors still need a lexical identity while the provider is creating
+    // the object and before Godot has exposed its Script resource through Object::get_script().
     if (source_path && *source_path) {
         const godot::String canonical{source_path};
         if (find_attached_script(canonical)) {
             godot::String error;
-            const auto script = attached_script_resource(canonical, &error);
-            if (script.is_valid())
-                return godot::Variant(static_cast<const godot::Object*>(script.ptr()));
+            const auto lexical_script = attached_script_resource(canonical, &error);
+            if (lexical_script.is_valid())
+                return godot::Variant(static_cast<const godot::Object*>(lexical_script.ptr()));
             godot::UtilityFunctions::push_error(
                 godot::String{"GDPP: cannot materialize current compiled script '"} + canonical +
                 "': " + error);
             return {};
         }
     }
-
-    const godot::Variant script = object->get_script();
-    if (script.get_type() == godot::Variant::OBJECT && script.get_validated_object())
-        return script;
 
     const auto native_class = object->get_class();
     if (const auto descriptor = find_attached_script_by_behavior_class(native_class); descriptor) {
