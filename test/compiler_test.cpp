@@ -5276,10 +5276,21 @@ TEST_CASE("semantic flow analysis warns about unreachable statements and rejects
 
 TEST_CASE("Godot numeric class names map to their actual header names") {
     const gdpp::Compiler compiler;
-    const auto result = compiler.compile("sprite.gd", "extends Node2D\nclass_name SpriteActor\n");
+    const auto result = compiler.compile("sprite.gd", "extends Node2D\n"
+                                                      "class_name SpriteActor\n"
+                                                      "var gradient: GradientTexture1D\n"
+                                                      "var blend_space: AnimationNodeBlendSpace1D\n"
+                                                      "var joint: Generic6DOFJoint3D\n");
 
     REQUIRE(result.success);
     REQUIRE(result.unit.header.find("#include <godot_cpp/classes/node2d.hpp>") !=
+            std::string::npos);
+    REQUIRE(result.unit.header.find("#include <godot_cpp/classes/gradient_texture1_d.hpp>") !=
+            std::string::npos);
+    REQUIRE(
+        result.unit.header.find("#include <godot_cpp/classes/animation_node_blend_space1_d.hpp>") !=
+        std::string::npos);
+    REQUIRE(result.unit.header.find("#include <godot_cpp/classes/generic6_dof_joint3d.hpp>") !=
             std::string::npos);
 }
 

@@ -568,10 +568,13 @@ std::string to_snake_case(std::string_view value) {
         if (std::isupper(byte) != 0) {
             const bool previous_is_lower =
                 index > 0 && std::islower(static_cast<unsigned char>(value[index - 1])) != 0;
+            const bool previous_is_digit =
+                index > 0 && std::isdigit(static_cast<unsigned char>(value[index - 1])) != 0;
             const bool next_starts_word =
                 index > 0 && index + 1 < value.size() &&
                 std::islower(static_cast<unsigned char>(value[index + 1])) != 0;
-            if (!result.empty() && result.back() != '_' && (previous_is_lower || next_starts_word))
+            if (!result.empty() && result.back() != '_' &&
+                (previous_is_lower || previous_is_digit || next_starts_word))
                 result.push_back('_');
             result.push_back(static_cast<char>(std::tolower(byte)));
         } else if (std::isalnum(byte) != 0 || value[index] == '_') {
@@ -579,6 +582,11 @@ std::string to_snake_case(std::string_view value) {
         } else {
             result.push_back('_');
         }
+    }
+    for (const std::string_view dimension : {"2_d", "3_d"}) {
+        std::size_t position = 0;
+        while ((position = result.find(dimension, position)) != std::string::npos)
+            result.erase(position + 1, 1);
     }
     return result.empty() ? "generated_script" : result;
 }
