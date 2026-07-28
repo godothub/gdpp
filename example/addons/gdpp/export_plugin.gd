@@ -1416,13 +1416,27 @@ func _storage_property_values(
     return values
 
 
+func _script_storage_property_names(source: Object) -> Dictionary:
+    var result: Dictionary = {}
+    var source_script := source.get_script() as Script
+    if source_script == null:
+        return result
+    for property: Dictionary in source_script.get_script_property_list():
+        var usage := int(property.get("usage", 0))
+        if (usage & PROPERTY_USAGE_STORAGE) != 0:
+            result[str(property.get("name", ""))] = true
+    return result
+
+
 func _restore_storage_properties(
     source_class: StringName,
     destination: Object,
     source_properties: Dictionary,
     replacements: Dictionary,
     changes: Dictionary,
-    context_path: String
+    context_path: String,
+    source_script_properties: Dictionary = {},
+    preserve_unlisted_native_state: bool = false
 ) -> int:
     var destination_properties: Dictionary = {}
     for property: Dictionary in destination.get_property_list():
@@ -1448,6 +1462,15 @@ func _restore_storage_properties(
             copied += 1
             continue
         if not destination_properties.has(name):
+            # Some engine classes accept compatibility storage keys through their native
+            # serialization hooks without publishing them in get_property_list(). AnimationPlayer
+            # "libraries" is one example. Attaching a compiled script mutates this same object, so
+            # those native values are already present and are sanitized by the serialized-resource
+            # pass that follows. Original script fields do not receive this exemption: if one is
+            # absent from the compiled descriptor, fail closed as a compiler contract error.
+            if preserve_unlisted_native_state and not source_script_properties.has(name):
+                copied += 1
+                continue
             push_error(
                 "GDPP: native class '%s' is missing stored property '%s' from '%s'" % [
                     destination.get_class(),
@@ -1483,6 +1506,7 @@ func _install_attached_script(
     var changes: Dictionary = resource_changes if resource_changes is Dictionary else {"count": 0}
     var source_class := StringName(object.get_class())
     var source_properties := _storage_property_values(object, serialized_properties)
+    var source_script_properties := _script_storage_property_names(object)
     object.set_script(script)
     if object.get_script() != script:
         push_error(
@@ -1511,7 +1535,9 @@ func _install_attached_script(
         source_properties,
         replacements,
         changes,
-        context_path
+        context_path,
+        source_script_properties,
+        true
     )
 
 

@@ -1,4 +1,4 @@
-[gd_scene load_steps=9 format=3]
+[gd_scene load_steps=12 format=3]
 
 [ext_resource type="Script" path="res://export_main.gd" id="1_script"]
 [ext_resource type="Shader" path="res://runtime_shader.gdshader" id="2_shader"]
@@ -7,10 +7,20 @@
 [ext_resource type="Script" path="res://onready_inheritance_probe.gd" id="5_onready_inheritance"]
 [ext_resource type="Script" path="res://inner_onready_probe.gd" id="6_inner_onready"]
 [ext_resource type="Script" path="res://message_dispatch_probe.gd" id="7_message_dispatch"]
+[ext_resource type="Script" path="res://animation_storage_probe.gd" id="8_animation_storage"]
 
 [sub_resource type="ShaderMaterial" id="ShaderMaterial_inline"]
 shader = ExtResource("2_shader")
 shader_parameter/pulse = 0.375
+
+[sub_resource type="Animation" id="Animation_storage_probe"]
+resource_name = "storage_probe"
+length = 0.001
+
+[sub_resource type="AnimationLibrary" id="AnimationLibrary_storage_probe"]
+_data = {
+&"storage_probe": SubResource("Animation_storage_probe")
+}
 
 [node name="ExportMain" type="VendorBase"]
 script = ExtResource("1_script")
@@ -38,6 +48,12 @@ script = ExtResource("5_onready_inheritance")
 
 [node name="InnerOnreadyProbe" type="Node" parent="."]
 script = ExtResource("6_inner_onready")
+
+[node name="AnimationStorageProbe" type="AnimationPlayer" parent="."]
+libraries = {
+&"": SubResource("AnimationLibrary_storage_probe")
+}
+script = ExtResource("8_animation_storage")
 
 [node name="MessageDispatchProbe" type="Node" parent="."]
 script = ExtResource("7_message_dispatch")

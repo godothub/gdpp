@@ -116,6 +116,13 @@ func _verify_fault_matrix() -> void:
 
 
 func _verify_export_runtime() -> void:
+    var animation_storage_probe := get_node("AnimationStorageProbe")
+    if (
+        animation_storage_probe == null
+        or not animation_storage_probe.call(&"has_serialized_library")
+    ):
+        _fail("native compatibility storage was lost while attaching the compiled script")
+        return
     var uppercase: Callable = "gdpp".to_upper
     if uppercase.call() != "GDPP":
         _fail("bound builtin method Callable lost its receiver or result")
