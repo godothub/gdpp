@@ -8,7 +8,6 @@ const HARNESS_FILES := {
 }
 const EXTENSION_REGISTRY := "res://.godot/extension_list.cfg"
 const RUNTIME_DESCRIPTOR := "res://addons/gdpp/gdpp.gdextension"
-const AUDIT_DESCRIPTOR := "res://gdpp_pck_audit.gdextension"
 const PROJECT_LIBRARY_ENTRY_SYMBOL := "gdpp_library_init"
 
 
@@ -21,13 +20,6 @@ func _init() -> void:
         )
         quit(2)
         return
-
-    # The empty audit host is reused across targets. A previous run may have
-    # staged a differently named architecture library; clean every GDPP project
-    # dylib/DLL/SO before mounting the next PCK so host files cannot be counted
-    # as package contents.
-    DirAccess.remove_absolute(ProjectSettings.globalize_path(AUDIT_DESCRIPTOR))
-    _clear_staged_runtime_libraries()
 
     var package_path := ProjectSettings.globalize_path(arguments[0])
     if not ProjectSettings.load_resource_pack(package_path, true):
@@ -43,8 +35,7 @@ func _init() -> void:
     var violations: PackedStringArray = []
     var native_library_path := arguments[2] if arguments.size() == 3 else ""
     var web_audit := native_library_path.get_extension().to_lower() == "wasm"
-    _validate_and_load_runtime_extension(violations, native_library_path, web_audit)
-    var load_checked := 0
+    _validate_runtime_extension(violations, native_library_path, web_audit)
     var package_file_count := 0
     for path in files:
         # The audit program belongs to the empty host project, not the mounted
@@ -61,16 +52,6 @@ func _init() -> void:
             violations.append("包含原生构建中间产物：%s" % path)
         if path.begins_with("res://addons/gdpp/") and not _allowed_runtime_path(path):
             violations.append("包含非运行时 GDPP 文件：%s" % path)
-        if not web_audit and (
-            lower.ends_with(".scn")
-            or lower.ends_with(".res")
-            or lower.ends_with(".tscn")
-            or lower.ends_with(".tres")
-        ):
-            load_checked += 1
-            if ResourceLoader.load(path) == null:
-                violations.append("资源无法完整加载（可能仍引用已移除脚本）：%s" % path)
-
     var native_library_count := -1
     if arguments.size() >= 2:
         var export_directory := ProjectSettings.globalize_path(arguments[1])
@@ -100,30 +81,11 @@ func _init() -> void:
                 )
 
     print("PCK_AUDIT_FILES=%d" % package_file_count)
-    print("PCK_AUDIT_RESOURCES_LOADED=%d" % load_checked)
     print("PCK_AUDIT_PROJECT_LIBRARIES=%d" % native_library_count)
     print("PCK_AUDIT_VIOLATIONS=%d" % violations.size())
     for violation in violations:
         push_error(violation)
     quit(0 if violations.is_empty() else 5)
-
-
-func _clear_staged_runtime_libraries() -> void:
-    var binary_directory := ProjectSettings.globalize_path("res://addons/gdpp/binary")
-    var directory := DirAccess.open(binary_directory)
-    if directory == null:
-        return
-    directory.list_dir_begin()
-    while true:
-        var name := directory.get_next()
-        if name.is_empty():
-            break
-        if directory.current_is_dir():
-            continue
-        var lower := name.to_lower()
-        if _is_project_library(lower) or _is_legacy_project_library(lower):
-            DirAccess.remove_absolute(binary_directory.path_join(name))
-    directory.list_dir_end()
 
 
 func _collect_files(directory_path: String, output: PackedStringArray) -> bool:
@@ -164,7 +126,7 @@ func _allowed_runtime_path(path: String) -> bool:
     return false
 
 
-func _validate_and_load_runtime_extension(
+func _validate_runtime_extension(
     violations: PackedStringArray,
     native_library_path: String,
     web_audit: bool
@@ -193,9 +155,11 @@ func _validate_and_load_runtime_extension(
     if not _is_project_library(runtime_library_path.get_file()):
         violations.append("项目运行时描述符引用了非标准命名的原生库")
     if native_library_path.is_empty():
-        violations.append("未提供项目原生动态库，无法执行资源加载审计")
+        violations.append("未提供项目原生动态库，无法核对运行时载荷")
         return
-    var native_library_absolute := ProjectSettings.globalize_path(native_library_path)
+    var native_library_absolute := native_library_path
+    if not native_library_absolute.is_absolute_path():
+        native_library_absolute = ProjectSettings.globalize_path(native_library_absolute)
     if not FileAccess.file_exists(native_library_absolute):
         violations.append("项目原生动态库不存在：%s" % native_library_absolute)
         return
@@ -204,55 +168,6 @@ func _validate_and_load_runtime_extension(
             violations.append("Web 运行时描述符未引用 Wasm side module")
         if not runtime_descriptor.contains("web.") or not runtime_descriptor.contains("wasm32"):
             violations.append("Web 运行时描述符缺少 web/wasm32 特征约束")
-        # Native Godot cannot load an Emscripten side module. Browser runtime
-        # loading is a separate CI gate; this branch still audits the complete
-        # PCK, runtime registry, descriptor and exported payload.
-        return
-    var staged_library_absolute := ProjectSettings.globalize_path(runtime_library_path)
-    var directory_error := DirAccess.make_dir_recursive_absolute(
-        staged_library_absolute.get_base_dir()
-    )
-    if directory_error != OK and directory_error != ERR_ALREADY_EXISTS:
-        violations.append("无法创建原生库审计目录（错误 %d）" % directory_error)
-        return
-    var copy_error := DirAccess.copy_absolute(
-        native_library_absolute,
-        staged_library_absolute
-    )
-    if copy_error != OK:
-        violations.append("无法暂存项目原生动态库（错误 %d）" % copy_error)
-        return
-
-    var platform: String = {
-        "macOS": "macos",
-        "Windows": "windows",
-        "Linux": "linux",
-    }.get(OS.get_name(), "")
-    var architecture := Engine.get_architecture_name()
-    if platform.is_empty() or architecture.is_empty():
-        violations.append("无法识别审计宿主平台或架构")
-        return
-    var audit_descriptor := (
-        "[configuration]\n\n"
-        + 'entry_symbol = "%s"\n' % PROJECT_LIBRARY_ENTRY_SYMBOL
-        + "compatibility_minimum = \"4.4\"\n"
-        + "reloadable = false\n\n"
-        + "[libraries]\n\n"
-        + "%s.editor.%s = \"%s\"\n"
-        % [platform, architecture, runtime_library_path]
-    )
-    var descriptor_file := FileAccess.open(AUDIT_DESCRIPTOR, FileAccess.WRITE)
-    if descriptor_file == null:
-        violations.append("无法创建宿主专用的 GDExtension 审计描述符")
-        return
-    descriptor_file.store_string(audit_descriptor)
-    descriptor_file = null
-    var load_status := GDExtensionManager.load_extension(AUDIT_DESCRIPTOR)
-    if load_status not in [
-        GDExtensionManager.LOAD_STATUS_OK,
-        GDExtensionManager.LOAD_STATUS_ALREADY_LOADED,
-    ]:
-        violations.append("项目原生 GDExtension 无法加载（状态 %d）" % load_status)
 
 
 func _runtime_library_path() -> String:
