@@ -116,6 +116,25 @@ func _verify_fault_matrix() -> void:
 
 
 func _verify_export_runtime() -> void:
+    var uppercase: Callable = "gdpp".to_upper
+    if uppercase.call() != "GDPP":
+        _fail("bound builtin method Callable lost its receiver or result")
+        return
+    var child_count: Callable = self.get_child_count
+    if child_count.call() != get_child_count():
+        _fail("bound Godot object method Callable lost its receiver or result")
+        return
+    var deferred_emit_seen := [false]
+    first_lambda_resume.connect(
+        func() -> void: deferred_emit_seen[0] = true,
+        CONNECT_ONE_SHOT,
+    )
+    first_lambda_resume.emit.call_deferred()
+    await get_tree().process_frame
+    if not deferred_emit_seen[0]:
+        _fail("bound Signal method Callable was not deferred or invoked")
+        return
+
     var static_result: int = await _await_static_result(
         get_tree().create_timer(0.001).timeout,
     )

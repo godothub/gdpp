@@ -1789,9 +1789,29 @@ TEST_CASE("compiler lowers inherited methods as first-class callables") {
                                               "    add_child.call_deferred(child)\n");
 
     REQUIRE(result.success);
-    REQUIRE(result.unit.source.find("godot::Callable(this, godot::StringName(\"add_child\"))") !=
-            std::string::npos);
+    REQUIRE(result.unit.source.find("gdpp::runtime::bound_method_at(") != std::string::npos);
+    REQUIRE(result.unit.source.find("godot::StringName(\"add_child\")") != std::string::npos);
     REQUIRE(result.unit.source.find(".call_deferred(") != std::string::npos);
+}
+
+TEST_CASE("compiler preserves bound Godot method Callables across every receiver family") {
+    gdpp::CompileOptions options;
+    options.target_version = gdpp::GodotVersion::v4_6;
+    const auto result = gdpp::Compiler{}.compile(
+        "bound_godot_callables.gd",
+        "extends Node\n"
+        "func collect(signal_value: Signal, node: Node) -> Array[Callable]:\n"
+        "    var emit_later: Callable = signal_value.emit\n"
+        "    var uppercase: Callable = \"gdpp\".to_upper\n"
+        "    var duplicate_node: Callable = node.duplicate\n"
+        "    emit_later.call_deferred()\n"
+        "    return [emit_later, uppercase, duplicate_node]\n",
+        options);
+
+    REQUIRE(result.success);
+    REQUIRE(result.unit.source.find("gdpp::runtime::bound_method_at(") != std::string::npos);
+    REQUIRE(result.unit.source.find("godot::StringName(\"emit\")") != std::string::npos);
+    REQUIRE(result.unit.source.find(".emit)") == std::string::npos);
 }
 
 TEST_CASE("compiler emits explicit engine super method dispatch") {
@@ -3196,8 +3216,7 @@ TEST_CASE("compiler emits guarded native stubs for abstract method contracts") {
             std::string::npos);
     REQUIRE(root.unit.header.find("execute(int64_t value) = 0") == std::string::npos);
     REQUIRE(root.unit.source.find("GDPPNative_WorkContract::execute(") != std::string::npos);
-    REQUIRE(root.unit.source.find("Cannot call abstract function 'execute'.") !=
-            std::string::npos);
+    REQUIRE(root.unit.source.find("Cannot call abstract function 'execute'.") != std::string::npos);
     REQUIRE(root.unit.source.find("&GDPPNative_WorkContract::_gdpp_variant_call_execute") !=
             std::string::npos);
 
@@ -3240,8 +3259,7 @@ TEST_CASE("compiler preserves engine virtual ABI around abstract contracts") {
     REQUIRE(result.unit.header.find("virtual void _gdpp_virtual_impl__process(double delta);") !=
             std::string::npos);
     REQUIRE(result.unit.source.find("GDPPNative_AbstractProcess::_process(") != std::string::npos);
-    REQUIRE(result.unit.source.find(
-                "GDPPNative_AbstractProcess::_gdpp_virtual_impl__process(") !=
+    REQUIRE(result.unit.source.find("GDPPNative_AbstractProcess::_gdpp_virtual_impl__process(") !=
             std::string::npos);
 }
 
