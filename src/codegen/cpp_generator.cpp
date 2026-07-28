@@ -688,6 +688,22 @@ void collect_statement_types(const typed::Statement& statement, NativeTypeInclud
 
 void collect_header_statement_dependencies(const typed::Statement& statement,
                                            NativeTypeIncludes& includes);
+void collect_header_expression_dependencies(const typed::Expression& expression,
+                                            NativeTypeIncludes& includes);
+void collect_expression_types(const typed::Expression& expression, NativeTypeIncludes& includes,
+                              const GodotApi& api, const ScriptSymbolTable* script_symbols);
+
+void collect_header_match_pattern_dependencies(const typed::MatchPattern& pattern,
+                                               NativeTypeIncludes& includes) {
+    if (pattern.expression)
+        collect_header_expression_dependencies(*pattern.expression, includes);
+    for (const auto& key : pattern.keys) {
+        if (key)
+            collect_header_expression_dependencies(*key, includes);
+    }
+    for (const auto& element : pattern.elements)
+        collect_header_match_pattern_dependencies(element, includes);
+}
 
 void collect_header_expression_dependencies(const typed::Expression& expression,
                                             NativeTypeIncludes& includes) {
@@ -729,6 +745,21 @@ void collect_header_statement_dependencies(const typed::Statement& statement,
         collect_header_statement_dependencies(child, includes);
     for (const auto& child : statement.assert_message_prefix)
         collect_header_statement_dependencies(child, includes);
+    for (const auto& pattern : statement.patterns)
+        collect_header_match_pattern_dependencies(pattern, includes);
+}
+
+void collect_match_pattern_types(const typed::MatchPattern& pattern, NativeTypeIncludes& includes,
+                                 const GodotApi& api, const ScriptSymbolTable* script_symbols) {
+    collect_type(pattern.type, includes, api, script_symbols);
+    if (pattern.expression)
+        collect_expression_types(*pattern.expression, includes, api, script_symbols);
+    for (const auto& key : pattern.keys) {
+        if (key)
+            collect_expression_types(*key, includes, api, script_symbols);
+    }
+    for (const auto& element : pattern.elements)
+        collect_match_pattern_types(element, includes, api, script_symbols);
 }
 
 void collect_expression_types(const typed::Expression& expression, NativeTypeIncludes& includes,
@@ -806,6 +837,8 @@ void collect_statement_types(const typed::Statement& statement, NativeTypeInclud
         collect_statement_types(child, includes, api, script_symbols);
     for (const auto& child : statement.assert_message_prefix)
         collect_statement_types(child, includes, api, script_symbols);
+    for (const auto& pattern : statement.patterns)
+        collect_match_pattern_types(pattern, includes, api, script_symbols);
 }
 
 void collect_class_types(const typed::Class& declaration, NativeTypeIncludes& includes,
