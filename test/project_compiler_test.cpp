@@ -830,6 +830,35 @@ TEST_CASE("project compiler includes complete owners for cross-script enum-only 
     REQUIRE(include < use);
 }
 
+TEST_CASE("project compiler preserves canonical internal static method symbols") {
+    const auto root = fixture_root("project-internal-static-method-symbols");
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
+    write_text(root / "panel.gd", "extends RefCounted\n"
+                                  "class Worker:\n"
+                                  "    static func compute(value: int) -> int:\n"
+                                  "        return value + 1\n"
+                                  "    func inside(value: int) -> int:\n"
+                                  "        return Worker.compute(value)\n"
+                                  "func outside(value: int) -> int:\n"
+                                  "    return Worker.compute(value)\n");
+
+    const auto options = project_options(root);
+    const auto result = gdpp::ProjectCompiler{}.compile(options);
+
+    REQUIRE(result.success);
+    REQUIRE_EQ(result.scripts.size(), std::size_t{1});
+    REQUIRE_EQ(result.scripts.front().inner_class_names.size(), std::size_t{1});
+    const auto source =
+        read_text(options.output_directory / "generated" / result.scripts.front().source_file_name);
+    const auto& worker = result.scripts.front().inner_class_names.front();
+    const auto canonical = worker + "::_gdpp_script_method_compute(";
+    const auto first = source.find(canonical);
+    REQUIRE(first != std::string::npos);
+    REQUIRE(source.find(canonical, first + canonical.size()) != std::string::npos);
+    REQUIRE(source.find(worker + "::compute(") == std::string::npos);
+}
+
 TEST_CASE("project compiler preserves nested internal class identities across cache hits") {
     const auto root = fixture_root("project-nested-internal-classes");
     std::error_code error;
