@@ -1320,6 +1320,19 @@ TEST_CASE("compiler selects the Godot Node template for implicit get_node calls"
     REQUIRE(result.unit.source.find("get_node_or_null<") == std::string::npos);
 }
 
+TEST_CASE("compiler does not apply the Node template to unrelated get_node methods") {
+    const gdpp::Compiler compiler;
+    const auto result = compiler.compile(
+        "visual_shader_lookup.gd",
+        "extends Node\n"
+        "func find_shader_node(shader: VisualShader, node_id: int) -> VisualShaderNode:\n"
+        "    return shader.get_node(VisualShader.TYPE_FRAGMENT, node_id)\n");
+
+    REQUIRE(result.success);
+    REQUIRE(result.unit.source.find("->get_node(") != std::string::npos);
+    REQUIRE(result.unit.source.find("->get_node<godot::Node>(") == std::string::npos);
+}
+
 TEST_CASE("compiler lowers inherited Godot signals on self and typed objects") {
     const gdpp::Compiler compiler;
     const auto result =

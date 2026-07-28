@@ -4349,6 +4349,9 @@ std::string CodeGenerator::emit_expression(const typed::Expression& expression) 
                 ? api_.find_constructor(callee.resolved_owner, expression.operands.size() - 1,
                                         static_cast<std::size_t>(callee.indexed_argument))
                 : nullptr;
+        const bool node_get_node_method =
+            godot_method && std::string_view{godot_method->owner} == "Node" &&
+            std::string_view{godot_method->name} == "get_node";
         const ScriptMemberSymbol* script_method = nullptr;
         const ScriptClassSymbol* script_method_owner = nullptr;
         const ScriptInnerClassSymbol* inner_method_owner = nullptr;
@@ -4990,14 +4993,12 @@ std::string CodeGenerator::emit_expression(const typed::Expression& expression) 
                     callee.operands.at(0)->type.kind == TypeKind::object ? "->" : ".";
                 invocation = receiver + connector + script_native_name;
             }
-            if (callee.resolution == typed::ResolutionKind::godot_method &&
-                callee.value == "get_node") {
+            if (node_get_node_method) {
                 invocation += "<godot::Node>";
             }
         } else {
             invocation = emit_expression(callee);
-            if (callee.resolution == typed::ResolutionKind::godot_method &&
-                callee.value == "get_node") {
+            if (node_get_node_method) {
                 invocation += "<godot::Node>";
             }
         }
