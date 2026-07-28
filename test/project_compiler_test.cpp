@@ -2906,6 +2906,34 @@ TEST_CASE("project compiler isolates coroutine overrides behind dynamic script d
     REQUIRE(source.find("gdpp::runtime::call_dynamic_at(") != std::string::npos);
 }
 
+TEST_CASE("project compiler preserves super as a compile-time receiver across suspension") {
+    const auto root = fixture_root("project-super-await-receiver");
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
+    write_text(root / "base.gd", "extends Node\nclass_name SuperAwaitBase\n"
+                                "signal resumed\n"
+                                "func entered(area: Area2D) -> void:\n"
+                                "    await resumed\n");
+    write_text(root / "child.gd", "extends SuperAwaitBase\nclass_name SuperAwaitChild\n"
+                                 "func entered(area: Area2D) -> void:\n"
+                                 "    await super.entered(area)\n");
+    const auto options = project_options(root);
+
+    const auto result = gdpp::ProjectCompiler{}.compile(options);
+
+    REQUIRE(result.success);
+    const auto child =
+        std::find_if(result.scripts.begin(), result.scripts.end(), [](const auto& script) {
+            return script.relative_path.filename() == "child.gd";
+        });
+    REQUIRE(child != result.scripts.end());
+    const auto source = read_text(options.output_directory / "generated" / child->source_file_name);
+    const auto& base_class = native_class_for(result, "base.gd");
+    REQUIRE(source.find(base_class + "::_gdpp_script_method_entered") != std::string::npos);
+    REQUIRE(source.find("= " + base_class + ";") == std::string::npos);
+    REQUIRE(source.find("@gdpp-await-value-") == std::string::npos);
+}
+
 TEST_CASE("project symbol refinement keeps immediate await functions on the coroutine ABI") {
     const auto root = fixture_root("project-immediate-await-abi");
     std::error_code error;

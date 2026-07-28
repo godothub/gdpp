@@ -106,7 +106,8 @@ bool is_type_reference(const ir::Expression& expression) {
            expression.resolution == ir::ResolutionKind::script_type ||
            expression.resolution == ir::ResolutionKind::inner_type ||
            expression.resolution == ir::ResolutionKind::script_enum_type ||
-           expression.resolution == ir::ResolutionKind::global_enum_type;
+           expression.resolution == ir::ResolutionKind::global_enum_type ||
+           expression.resolution == ir::ResolutionKind::script_super;
 }
 
 ir::ExpressionPtr make_temporary_reference(const std::string& name, const Type& type,
