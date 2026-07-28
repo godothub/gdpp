@@ -462,7 +462,7 @@ TEST_CASE("project compiler isolates tool access to runtime script state") {
             std::string::npos);
 }
 
-TEST_CASE("project compiler rejects unsafe tool to runtime inheritance transitions") {
+TEST_CASE("project compiler preserves mixed tool inheritance metadata") {
     const auto root = fixture_root("project-tool-inheritance");
     std::error_code error;
     std::filesystem::remove_all(root, error);
@@ -473,28 +473,38 @@ TEST_CASE("project compiler rejects unsafe tool to runtime inheritance transitio
                                           "class_name RuntimeChild\n");
     const auto options = project_options(root);
 
-    const auto invalid = gdpp::ProjectCompiler{}.compile(options);
-    REQUIRE(!invalid.success);
-    REQUIRE(std::any_of(invalid.diagnostics.begin(), invalid.diagnostics.end(),
-                        [](const auto& item) { return item.diagnostic.code == "PRJ0025"; }));
+    const auto runtime_child = gdpp::ProjectCompiler{}.compile(options);
+    REQUIRE(runtime_child.success);
+    REQUIRE_EQ(runtime_child.scripts.size(), std::size_t{2});
+    const auto editor_base_script =
+        std::find_if(runtime_child.scripts.begin(), runtime_child.scripts.end(),
+                     [](const auto& script) { return script.global_name == "EditorBase"; });
+    const auto runtime_child_script =
+        std::find_if(runtime_child.scripts.begin(), runtime_child.scripts.end(),
+                     [](const auto& script) { return script.global_name == "RuntimeChild"; });
+    REQUIRE(editor_base_script != runtime_child.scripts.end());
+    REQUIRE(runtime_child_script != runtime_child.scripts.end());
+    REQUIRE(editor_base_script->is_tool);
+    REQUIRE(!runtime_child_script->is_tool);
 
     write_text(root / "editor_base.gd", "extends Node\n"
                                         "class_name EditorBase\n");
     write_text(root / "runtime_child.gd", "@tool\n"
                                           "extends EditorBase\n"
                                           "class_name RuntimeChild\n");
-    const auto reverse_invalid = gdpp::ProjectCompiler{}.compile(options);
-    REQUIRE(!reverse_invalid.success);
-    REQUIRE(std::any_of(reverse_invalid.diagnostics.begin(), reverse_invalid.diagnostics.end(),
-                        [](const auto& item) { return item.diagnostic.code == "PRJ0026"; }));
-
-    write_text(root / "editor_base.gd", "@tool\n"
-                                        "extends Node\n"
-                                        "class_name EditorBase\n");
-    const auto valid = gdpp::ProjectCompiler{}.compile(options);
-    REQUIRE(valid.success);
-    REQUIRE(std::all_of(valid.scripts.begin(), valid.scripts.end(),
-                        [](const auto& script) { return script.is_tool; }));
+    const auto editor_child = gdpp::ProjectCompiler{}.compile(options);
+    REQUIRE(editor_child.success);
+    REQUIRE_EQ(editor_child.scripts.size(), std::size_t{2});
+    const auto runtime_base_script =
+        std::find_if(editor_child.scripts.begin(), editor_child.scripts.end(),
+                     [](const auto& script) { return script.global_name == "EditorBase"; });
+    const auto editor_child_script =
+        std::find_if(editor_child.scripts.begin(), editor_child.scripts.end(),
+                     [](const auto& script) { return script.global_name == "RuntimeChild"; });
+    REQUIRE(runtime_base_script != editor_child.scripts.end());
+    REQUIRE(editor_child_script != editor_child.scripts.end());
+    REQUIRE(!runtime_base_script->is_tool);
+    REQUIRE(editor_child_script->is_tool);
 }
 
 TEST_CASE("project compiler includes GDScript embedded in text scenes") {
