@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import copy
 import json
 import os
 import shutil
@@ -24,21 +25,28 @@ def run(command: list[str], cwd: Path | None = None) -> subprocess.CompletedProc
 
 
 def write_manifest(
-    path: Path, repository_url: str, revision: dict[str, str]
+    path: Path,
+    repository_url: str,
+    revision: dict[str, str],
+    checkout: str = "sparse",
 ) -> None:
+    repository = {
+        "name": "test/corpus",
+        "url": repository_url,
+        **revision,
+        "license_file": "LICENSE",
+        "license": "MIT",
+        "required_files": ["project/version.txt"],
+    }
+    if checkout == "full":
+        repository["checkout"] = "full"
+    else:
+        repository["sparse_paths"] = ["project"]
     path.write_text(
         json.dumps(
             {
                 "schema_version": 1,
-                "repository": {
-                    "name": "test/corpus",
-                    "url": repository_url,
-                    **revision,
-                    "license_file": "LICENSE",
-                    "license": "MIT",
-                    "sparse_paths": ["project"],
-                    "required_files": ["project/version.txt"],
-                },
+                "repository": repository,
                 "projects": [
                     {
                         "path": "project",
@@ -111,9 +119,14 @@ def main() -> int:
     run(["git", "config", "user.name", "GDPP Test"], upstream)
     run(["git", "config", "user.email", "gdpp-test@example.invalid"], upstream)
     (upstream / "project").mkdir()
+    (upstream / "other").mkdir()
+    (upstream / "other/complete.txt").write_text(
+        "full checkout evidence\n", encoding="utf-8"
+    )
     (upstream / "LICENSE").write_text("test license\n", encoding="utf-8")
     (upstream / "project/project.godot").write_text(
-        "config_version=5\n", encoding="utf-8"
+        'config_version=5\nconfig/features=PackedStringArray("4.6", "GL Compatibility")\n',
+        encoding="utf-8",
     )
     first_commit = commit(upstream, "one\n")
     repository_url = upstream.as_uri()
@@ -141,6 +154,29 @@ def main() -> int:
     assert_checkout(branch_checkout, third_commit, "three\n")
     if (branch_checkout / "untracked.txt").exists():
         raise AssertionError("untracked compatibility output was not removed")
+
+    full_manifest = test_root / "full.json"
+    full_checkout = test_root / "full-checkout"
+    write_manifest(
+        full_manifest,
+        repository_url,
+        {"branch": "main"},
+        checkout="full",
+    )
+    fetch(fetch_script, full_manifest, full_checkout, test_root)
+    assert_checkout(full_checkout, third_commit, "three\n")
+    if not (full_checkout / "other/complete.txt").is_file():
+        raise AssertionError("full compatibility checkout omitted repository content")
+    sparse_config = subprocess.run(
+        ["git", "config", "--bool", "core.sparseCheckout"],
+        cwd=full_checkout,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    if sparse_config.returncode == 0 and sparse_config.stdout.strip() == "true":
+        raise AssertionError("full compatibility checkout retained sparse-checkout mode")
 
     run(
         ["git", "remote", "set-url", "origin", (test_root / "wrong-remote").as_uri()],
@@ -189,6 +225,99 @@ def main() -> int:
     )
     if invalid.returncode == 0 or "exactly one of commit or branch" not in invalid.stderr:
         raise AssertionError("ambiguous compatibility revision was not rejected")
+
+    invalid_full_manifest = test_root / "invalid-full.json"
+    write_manifest(
+        invalid_full_manifest,
+        repository_url,
+        {"branch": "main"},
+        checkout="full",
+    )
+    invalid_full_data = json.loads(invalid_full_manifest.read_text(encoding="utf-8"))
+    invalid_full_data["repository"]["sparse_paths"] = ["project"]
+    invalid_full_manifest.write_text(
+        json.dumps(invalid_full_data),
+        encoding="utf-8",
+    )
+    invalid_full = subprocess.run(
+        [
+            sys.executable,
+            str(fetch_script),
+            "--manifest",
+            str(invalid_full_manifest),
+            "--destination",
+            str(test_root / "invalid-full-checkout"),
+            "--build-root",
+            str(test_root),
+        ],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    if (
+        invalid_full.returncode == 0
+        or "cannot be combined with checkout='full'" not in invalid_full.stderr
+    ):
+        raise AssertionError("ambiguous full/sparse checkout policy was not rejected")
+
+    sys.path.insert(0, str(source_root / "tools"))
+    try:
+        import validate_compatibility_godot
+    finally:
+        sys.path.pop(0)
+
+    contract_manifest = json.loads(full_manifest.read_text(encoding="utf-8"))
+    contract_manifest["godot"] = {"target": "4.6", "engine": "4.6.3"}
+    report = validate_compatibility_godot.validate_contract(
+        contract_manifest,
+        full_checkout,
+        "4.6.3",
+        "4.6.3.stable.official.test",
+    )
+    if (
+        report["status"] != "passed"
+        or report["target_godot"] != "4.6"
+        or report["projects"][0]["project_feature"] != "4.6"
+    ):
+        raise AssertionError("valid Godot compatibility contract was not preserved")
+    if (
+        validate_compatibility_godot.parse_engine_version(
+            "4.6.3.stable.official.test\n"
+        )
+        != "4.6.3"
+    ):
+        raise AssertionError("official Godot version output was not parsed exactly")
+
+    wrong_engine = copy.deepcopy(contract_manifest)
+    wrong_engine["godot"]["engine"] = "4.6.2"
+    try:
+        validate_compatibility_godot.validate_contract(
+            wrong_engine,
+            full_checkout,
+            "4.6.3",
+            "4.6.3.stable.official.test",
+        )
+    except RuntimeError as error:
+        if "engine mismatch" not in str(error):
+            raise
+    else:
+        raise AssertionError("mismatched Godot executable version was accepted")
+
+    wrong_target = copy.deepcopy(contract_manifest)
+    wrong_target["godot"] = {"target": "4.7", "engine": "4.7.1"}
+    try:
+        validate_compatibility_godot.validate_contract(
+            wrong_target,
+            full_checkout,
+            "4.7.1",
+            "4.7.1.stable.official.test",
+        )
+    except RuntimeError as error:
+        if "declares Godot 4.6, expected 4.7" not in str(error):
+            raise
+    else:
+        raise AssertionError("mismatched project.godot feature version was accepted")
 
     print("compatibility fetch policy passed")
     return 0

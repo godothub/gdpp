@@ -68,8 +68,21 @@ def repository_revision(repository: dict) -> tuple[str, str]:
     return "branch", f"refs/heads/{branch}"
 
 
+def checkout_mode(manifest: dict) -> str:
+    mode = manifest["repository"].get("checkout", "sparse")
+    if mode not in {"full", "sparse"}:
+        raise RuntimeError("repository.checkout must be either 'full' or 'sparse'")
+    return mode
+
+
 def sparse_paths(manifest: dict) -> list[str]:
     repository = manifest["repository"]
+    if checkout_mode(manifest) == "full":
+        if "sparse_paths" in repository:
+            raise RuntimeError(
+                "repository.sparse_paths cannot be combined with checkout='full'"
+            )
+        return []
     # Cone-mode sparse checkout always materializes repository-root files, including the
     # separately validated license. Supplying an individual file here is rejected by newer Git.
     paths: list[str] = []
@@ -118,7 +131,12 @@ def remove_checkout(destination: Path) -> None:
     shutil.rmtree(destination, onerror=make_writable_and_retry)
 
 
-def initialize_checkout(destination: Path, repository: dict, paths: list[str]) -> None:
+def initialize_checkout(
+    destination: Path,
+    repository: dict,
+    paths: list[str],
+    mode: str,
+) -> None:
     remove_checkout(destination)
     destination.parent.mkdir(parents=True, exist_ok=True)
 
@@ -127,8 +145,9 @@ def initialize_checkout(destination: Path, repository: dict, paths: list[str]) -
     run(["git", "config", "extensions.partialClone", "origin"], destination)
     run(["git", "config", "remote.origin.promisor", "true"], destination)
     run(["git", "config", "remote.origin.partialCloneFilter", "blob:none"], destination)
-    run(["git", "sparse-checkout", "init", "--cone"], destination)
-    run(["git", "sparse-checkout", "set", "--"] + paths, destination)
+    if mode == "sparse":
+        run(["git", "sparse-checkout", "init", "--cone"], destination)
+        run(["git", "sparse-checkout", "set", "--"] + paths, destination)
 
 
 def checkout_matches_repository(destination: Path, repository: dict) -> bool:
@@ -145,9 +164,14 @@ def checkout_matches_repository(destination: Path, repository: dict) -> bool:
     return remote.returncode == 0 and remote.stdout.strip() == repository["url"]
 
 
-def prepare_checkout(destination: Path, repository: dict, paths: list[str]) -> None:
+def prepare_checkout(
+    destination: Path,
+    repository: dict,
+    paths: list[str],
+    mode: str,
+) -> None:
     if not checkout_matches_repository(destination, repository):
-        initialize_checkout(destination, repository, paths)
+        initialize_checkout(destination, repository, paths, mode)
         return
 
     try:
@@ -156,11 +180,24 @@ def prepare_checkout(destination: Path, repository: dict, paths: list[str]) -> N
         # never influence the next gate while preserving the partial-clone cache.
         run(["git", "reset", "--hard", "--quiet"], destination)
         run(["git", "clean", "-ffdx", "--quiet"], destination)
-        run(["git", "sparse-checkout", "set", "--"] + paths, destination)
+        if mode == "sparse":
+            run(["git", "sparse-checkout", "init", "--cone"], destination)
+            run(["git", "sparse-checkout", "set", "--"] + paths, destination)
+        else:
+            sparse_state = subprocess.run(
+                ["git", "config", "--bool", "core.sparseCheckout"],
+                cwd=destination,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                check=False,
+            )
+            if sparse_state.returncode == 0 and sparse_state.stdout.strip() == "true":
+                run(["git", "sparse-checkout", "disable"], destination)
     except subprocess.CalledProcessError:
         # A repository can retain a readable HEAD while its index or sparse
         # metadata is damaged. Rebuild that controlled checkout deterministically.
-        initialize_checkout(destination, repository, paths)
+        initialize_checkout(destination, repository, paths, mode)
 
 
 def main() -> int:
@@ -175,9 +212,10 @@ def main() -> int:
     destination = args.destination.resolve()
     ensure_build_destination(destination, args.build_root)
     revision_kind, revision = repository_revision(repository)
+    mode = checkout_mode(manifest)
     checkout_paths = sparse_paths(manifest)
 
-    prepare_checkout(destination, repository, checkout_paths)
+    prepare_checkout(destination, repository, checkout_paths, mode)
 
     if (
         revision_kind == "commit"
