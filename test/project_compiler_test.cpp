@@ -2906,6 +2906,54 @@ TEST_CASE("project compiler isolates coroutine overrides behind dynamic script d
     REQUIRE(source.find("gdpp::runtime::call_dynamic_at(") != std::string::npos);
 }
 
+TEST_CASE("project compiler preserves isolated coroutine ABI families across descendants") {
+    const auto root = fixture_root("project-coroutine-override-family");
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
+    write_text(root / "base.gd", "extends RefCounted\nclass_name CoroutineFamilyBase\n"
+                                 "func execute() -> void:\n"
+                                 "    pass\n");
+    write_text(root / "suspending.gd",
+               "extends CoroutineFamilyBase\nclass_name CoroutineFamilySuspending\n"
+               "signal resumed\n"
+               "func execute() -> void:\n"
+               "    await resumed\n");
+    write_text(root / "child.gd",
+               "extends CoroutineFamilySuspending\nclass_name CoroutineFamilyChild\n"
+               "func execute() -> void:\n"
+               "    await super.execute()\n");
+    const auto options = project_options(root);
+
+    const auto result = gdpp::ProjectCompiler{}.compile(options);
+
+    REQUIRE(result.success);
+    const auto suspending =
+        std::find_if(result.scripts.begin(), result.scripts.end(), [](const auto& script) {
+            return script.relative_path.filename() == "suspending.gd";
+        });
+    const auto child =
+        std::find_if(result.scripts.begin(), result.scripts.end(), [](const auto& script) {
+            return script.relative_path.filename() == "child.gd";
+        });
+    REQUIRE(suspending != result.scripts.end());
+    REQUIRE(child != result.scripts.end());
+    const auto suspending_header =
+        read_text(options.output_directory / "generated" / suspending->header_file_name);
+    const auto child_header =
+        read_text(options.output_directory / "generated" / child->header_file_name);
+    const auto child_source =
+        read_text(options.output_directory / "generated" / child->source_file_name);
+    REQUIRE(suspending_header.find(
+                "virtual godot::Variant _gdpp_native_override_execute();") !=
+            std::string::npos);
+    REQUIRE(child_header.find(
+                "virtual godot::Variant _gdpp_native_override_execute() override;") !=
+            std::string::npos);
+    REQUIRE(child_header.find("_gdpp_script_method_execute() override") == std::string::npos);
+    REQUIRE(child_source.find("CoroutineFamilySuspending") != std::string::npos);
+    REQUIRE(child_source.find("::_gdpp_native_override_execute()") != std::string::npos);
+}
+
 TEST_CASE("project compiler normalizes widened override calls to the inherited return ABI") {
     const auto root = fixture_root("project-widened-override-return");
     std::error_code error;

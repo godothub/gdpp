@@ -1986,8 +1986,12 @@ std::string CodeGenerator::script_method_native_name(const ScriptClassSymbol& ow
                                           : std::string_view{owner.godot_base_type});
     // GDScript permits an override to change annotations and to become a coroutine. C++ cannot
     // overload solely by return type, so an ABI-incompatible override receives a private native
-    // symbol while ClassDB continues to publish the original source method name.
-    return same_native_abi ? source_name : "_gdpp_native_override_" + source_name;
+    // symbol while ClassDB continues to publish the original source method name. Once a hierarchy
+    // has entered such an isolated ABI family, compatible descendants must keep overriding that
+    // exact native symbol instead of reverting to the source-name family.
+    if (!same_native_abi)
+        return "_gdpp_native_override_" + source_name;
+    return base_owner ? script_method_native_name(*base_owner, **base) : source_name;
 }
 
 std::string
@@ -2091,9 +2095,15 @@ std::string CodeGenerator::inner_method_native_name(const ScriptInnerClassSymbol
         inherited.inner_owner    ? std::string_view{inherited.inner_owner->godot_base_type}
         : inherited.script_owner ? std::string_view{inherited.script_owner->godot_base_type}
                                  : std::string_view{owner.godot_base_type};
-    return same_native_method_abi(method, owner.godot_base_type, *inherited.method, base_godot_type)
-               ? source_name
-               : "_gdpp_native_override_" + source_name;
+    if (!same_native_method_abi(method, owner.godot_base_type, *inherited.method,
+                                base_godot_type)) {
+        return "_gdpp_native_override_" + source_name;
+    }
+    if (inherited.inner_owner)
+        return inner_method_native_name(*inherited.inner_owner, *inherited.method);
+    if (inherited.script_owner)
+        return script_method_native_name(*inherited.script_owner, *inherited.method);
+    return source_name;
 }
 
 std::string
@@ -8849,19 +8859,6 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
                                                                           ? local_base
                                                                           : declaration_owner));
             }
-            auto* base_script = script_symbols_->base_of(*current_script_);
-            bool generated_base_declares_method = false;
-            while (base_script && !generated_base_declares_method) {
-                generated_base_declares_method =
-                    std::any_of(base_script->members.begin(), base_script->members.end(),
-                                [&](const auto& member) {
-                                    return member.kind == ScriptMemberKind::function &&
-                                           member.name == function.name;
-                                });
-                base_script = script_symbols_->base_of(*base_script);
-            }
-            if (!generated_base_declares_method)
-                return false;
         }
         const auto declared = std::find_if(current_script_->members.begin(),
                                            current_script_->members.end(), [&](const auto& member) {
@@ -8870,14 +8867,23 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
                                            });
         if (declared == current_script_->members.end() || declared->is_static)
             return false;
-        const auto inherited = script_symbols_->inherited_members(*current_script_);
-        const bool has_inherited_method =
-            std::any_of(inherited.begin(), inherited.end(), [&](const auto* member) {
-                return member->kind == ScriptMemberKind::function && !member->is_static &&
-                       member->name == function.name;
-            });
-        return has_inherited_method && script_method_native_name(*current_script_, *declared) ==
-                                           sanitize_identifier(function.name);
+        auto* base_script = script_symbols_->base_of(*current_script_);
+        while (base_script) {
+            const auto inherited =
+                std::find_if(base_script->members.begin(), base_script->members.end(),
+                             [&](const auto& member) {
+                                 return member.kind == ScriptMemberKind::function &&
+                                        !member.is_static && member.name == function.name;
+                             });
+            if (inherited != base_script->members.end()) {
+                return same_native_method_abi(*declared, current_script_->godot_base_type,
+                                              *inherited, base_script->godot_base_type) &&
+                       script_method_implementation_name(*current_script_, *declared) ==
+                           script_method_implementation_name(*base_script, *inherited);
+            }
+            base_script = script_symbols_->base_of(*base_script);
+        }
+        return false;
     };
     const auto function_native_name = [&](const typed::Function& function) {
         const auto isolated_source_name =
