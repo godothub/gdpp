@@ -126,6 +126,9 @@ func _verify_export_runtime() -> void:
     if not animation_storage_probe.call(&"has_serialized_node_reference"):
         _fail("serialized script Node reference was not resolved after AOT attachment")
         return
+    if not animation_storage_probe.call(&"has_serialized_typed_container"):
+        _fail("serialized typed container metadata was not preserved after AOT attachment")
+        return
     var uppercase: Callable = "gdpp".to_upper
     if uppercase.call() != "GDPP":
         _fail("bound builtin method Callable lost its receiver or result")

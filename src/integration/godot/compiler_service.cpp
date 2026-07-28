@@ -335,6 +335,14 @@ std::string reflected_object_native_base(const Type& type,
     return type.name;
 }
 
+std::string reflected_container_argument(const std::string& argument,
+                                         const ProjectScriptNativeBases& script_native_bases) {
+    const auto type = type_from_annotation(argument);
+    if (type.kind == TypeKind::object)
+        return reflected_object_native_base(type, script_native_bases);
+    return argument;
+}
+
 godot::PropertyInfo script_property_info(const Type& type, const godot::StringName& name,
                                          const std::uint32_t usage,
                                          const ProjectScriptNativeBases& script_native_bases) {
@@ -354,7 +362,8 @@ godot::PropertyInfo script_property_info(const Type& type, const godot::StringNa
         info.usage |= godot::PROPERTY_USAGE_NIL_IS_VARIANT;
     } else if (type.kind == TypeKind::object || type.kind == TypeKind::script_resource) {
         info.class_name = godot::StringName{type.name.c_str()};
-        if (type.kind == TypeKind::object) {
+        if (type.kind == TypeKind::object &&
+            (usage & godot::PROPERTY_USAGE_EDITOR) != 0U) {
             const auto native_base = reflected_object_native_base(type, script_native_bases);
             const godot::StringName native_base_name{native_base.c_str()};
             const auto* class_db = godot::ClassDBSingleton::get_singleton();
@@ -372,6 +381,19 @@ godot::PropertyInfo script_property_info(const Type& type, const godot::StringNa
                 info.hint_string = godot::String{type.name.c_str()};
             }
         }
+    }
+    if (const auto container = describe_container_type(type);
+        container && container->has_runtime_constraint()) {
+        info.hint = container->kind == ContainerTypeKind::array
+                        ? godot::PROPERTY_HINT_ARRAY_TYPE
+                        : godot::PROPERTY_HINT_DICTIONARY_TYPE;
+        std::string hint;
+        for (const auto& argument : container->arguments) {
+            if (!hint.empty())
+                hint += container->kind == ContainerTypeKind::array ? "," : ";";
+            hint += reflected_container_argument(argument, script_native_bases);
+        }
+        info.hint_string = godot::String{hint.c_str()};
     }
     return info;
 }
@@ -1939,6 +1961,7 @@ godot::Dictionary GDPPCompiler::compile_project(
         script_native_bases.insert_or_assign(relative_path, script.attached_native_base);
         script_native_bases.insert_or_assign("res://" + relative_path,
                                              script.attached_native_base);
+        script_native_bases.insert_or_assign(script.class_name, script.attached_native_base);
         if (!script.global_name.empty()) {
             script_native_bases.insert_or_assign(script.global_name,
                                                  script.attached_native_base);

@@ -3,6 +3,7 @@ extends AnimationPlayer
 @export_category("Storage Probe")
 @export var verify_library := true
 @export var linked_node: Node
+@export var typed_records: Array[Dictionary] = []
 
 
 func has_serialized_library() -> bool:
@@ -11,3 +12,12 @@ func has_serialized_library() -> bool:
 
 func has_serialized_node_reference() -> bool:
     return linked_node == get_parent()
+
+
+func has_serialized_typed_container() -> bool:
+    return (
+        typed_records.is_typed()
+        and typed_records.get_typed_builtin() == TYPE_DICTIONARY
+        and typed_records.size() == 1
+        and typed_records[0].get("score", 0) == 42
+    )

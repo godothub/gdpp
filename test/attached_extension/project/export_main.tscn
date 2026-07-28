@@ -55,6 +55,9 @@ libraries = {
 }
 script = ExtResource("8_animation_storage")
 linked_node = NodePath("..")
+typed_records = Array[Dictionary]([{
+"score": 42
+}])
 
 [node name="MessageDispatchProbe" type="Node" parent="."]
 script = ExtResource("7_message_dispatch")
