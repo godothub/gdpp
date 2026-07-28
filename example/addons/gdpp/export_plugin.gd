@@ -34,7 +34,7 @@ const ARCHITECTURE_FEATURES := [
 ]
 const SCRIPT_CLASS_CACHE := "res://.godot/global_script_class_cache.cfg"
 const GODOT_EXPORT_CACHE_DIRECTORY := "res://.godot/exported"
-const EXPORT_TRANSFORM_REVISION := 22
+const EXPORT_TRANSFORM_REVISION := 23
 
 var _compiler: Object
 var _build_progress: CanvasLayer
@@ -47,6 +47,7 @@ var _editor_script_descriptors: Array = []
 var _compiled_scripts: Dictionary = {}
 var _abstract_scripts: Dictionary = {}
 var _editor_only_scripts: Dictionary = {}
+var _resource_aot_requirements: Dictionary = {}
 var _runtime_descriptor := ""
 var _runtime_library_path := ""
 var _output_library := ""
@@ -390,14 +391,23 @@ func _export_file(path: String, _type: String, _features: PackedStringArray) -> 
         skip()
         return
 
-    if _ready and path.get_extension().to_lower() in ["tscn", "scn"]:
+    if (
+        _ready
+        and path.get_extension().to_lower() in ["tscn", "scn"]
+        and _resource_requires_aot(path)
+    ):
         if _export_transformed_scene(path):
             return
         if _strict_failure_injected:
             skip()
             return
 
-    if _ready and _has_resource_scripts and path.get_extension().to_lower() in ["tres", "res"]:
+    if (
+        _ready
+        and _has_resource_scripts
+        and path.get_extension().to_lower() in ["tres", "res"]
+        and _resource_requires_aot(path)
+    ):
         if _export_transformed_resource(path):
             return
         if _strict_failure_injected:
@@ -407,6 +417,85 @@ func _export_file(path: String, _type: String, _features: PackedStringArray) -> 
     var source_path := path.trim_suffix("c") if path.ends_with(".gdc") else path
     if _ready and _compiled_scripts.has(source_path):
         skip()
+
+
+func _resource_requires_aot(path: String) -> bool:
+    if _resource_aot_requirements.has(path):
+        return bool(_resource_aot_requirements[path])
+
+    # Binary resources cannot be inspected safely without loading them. Preserve the existing
+    # fail-closed transformation path for .scn/.res so embedded GDScript can never bypass source
+    # stripping. Text resources can be classified without instantiating foreign ScriptLanguage
+    # resources, which lets pure C#, GDExtension-language and data-only scenes follow Godot's
+    # native exporter even when the current editor cannot execute that language.
+    if path.get_extension().to_lower() in ["scn", "res"]:
+        _resource_aot_requirements[path] = true
+        return true
+
+    var pending := PackedStringArray([path])
+    var visited: Dictionary = {}
+    while not pending.is_empty():
+        var current := pending[pending.size() - 1]
+        pending.resize(pending.size() - 1)
+        if visited.has(current):
+            continue
+        visited[current] = true
+
+        var extension := current.get_extension().to_lower()
+        var source_path := current.trim_suffix("c") if current.ends_with(".gdc") else current
+        if extension in ["gd", "gdc"] or _compiled_scripts.has(source_path):
+            _resource_aot_requirements[path] = true
+            return true
+        if extension in ["scn", "res"]:
+            _resource_aot_requirements[path] = true
+            return true
+        if extension not in ["tscn", "tres"]:
+            continue
+        if _text_resource_mentions_gdscript(current):
+            _resource_aot_requirements[path] = true
+            return true
+
+        for encoded_dependency: String in ResourceLoader.get_dependencies(current):
+            var dependency := _dependency_resource_path(encoded_dependency)
+            if dependency.is_empty():
+                continue
+            var dependency_extension := dependency.get_extension().to_lower()
+            if dependency_extension in ["gd", "gdc"]:
+                _resource_aot_requirements[path] = true
+                return true
+            if dependency_extension in ["tscn", "tres", "scn", "res"]:
+                pending.push_back(dependency)
+
+    _resource_aot_requirements[path] = false
+    return false
+
+
+func _dependency_resource_path(encoded_dependency: String) -> String:
+    for field: String in encoded_dependency.split("::", false):
+        if field.begins_with("res://"):
+            return field
+        if field.begins_with("uid://"):
+            var uid := ResourceUID.text_to_id(field)
+            if uid != ResourceUID.INVALID_ID and ResourceUID.has_id(uid):
+                var resolved := ResourceUID.get_id_path(uid)
+                if resolved.begins_with("res://"):
+                    return resolved
+    return ""
+
+
+func _text_resource_mentions_gdscript(path: String) -> bool:
+    var file := FileAccess.open(path, FileAccess.READ)
+    if file == null:
+        # Classification must never turn an unreadable resource into an unchecked pass-through.
+        return true
+    var content := file.get_as_text()
+    return (
+        content.contains('type="GDScript"')
+        or content.contains('type = "GDScript"')
+        or content.contains("script/source")
+        or content.contains('.gd"')
+        or content.contains('.gdc"')
+    )
 
 
 func _export_transformed_scene(path: String) -> bool:
@@ -2408,6 +2497,7 @@ func _reset_export_state() -> void:
     _compiled_scripts.clear()
     _abstract_scripts.clear()
     _editor_only_scripts.clear()
+    _resource_aot_requirements.clear()
     _runtime_descriptor = ""
     _runtime_library_path = ""
     _output_library = ""
