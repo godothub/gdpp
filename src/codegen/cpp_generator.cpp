@@ -1874,16 +1874,12 @@ std::string CodeGenerator::native_super_owner(std::string_view owner) const {
 }
 
 bool CodeGenerator::same_native_method_abi(const ScriptMemberSymbol& derived,
-                                           const std::string_view derived_godot_base,
-                                           const ScriptMemberSymbol& base,
-                                           const std::string_view base_godot_base) const {
-    const auto native_return_type = [&](const ScriptMemberSymbol& method,
-                                        const std::string_view godot_base) {
-        const auto* engine_method =
-            method.is_static ? nullptr : api_.find_method(godot_base, method.name);
-        const bool coroutine_abi =
-            method.is_coroutine && !(engine_method && engine_method->is_virtual);
-        return coroutine_abi ? std::string{"godot::Variant"} : cpp_type(method.type);
+                                           const ScriptMemberSymbol& base) const {
+    const auto native_return_type = [&](const ScriptMemberSymbol& method) {
+        // Attached behavior methods use Variant for coroutine completion even when the source
+        // name also denotes a Godot virtual. The exact ClassDB virtual wrapper is a separate ABI
+        // layer and must not weaken the generated script inheritance contract.
+        return method.is_coroutine ? std::string{"godot::Variant"} : cpp_type(method.type);
     };
     const auto native_parameter_type = [&](const ScriptMemberSymbol& method,
                                            const std::size_t index) {
@@ -1894,8 +1890,7 @@ bool CodeGenerator::same_native_method_abi(const ScriptMemberSymbol& derived,
     };
     if (derived.is_static != base.is_static || derived.is_vararg != base.is_vararg ||
         derived.parameters.size() != base.parameters.size() ||
-        native_return_type(derived, derived_godot_base) !=
-            native_return_type(base, base_godot_base)) {
+        native_return_type(derived) != native_return_type(base)) {
         return false;
     }
     for (std::size_t index = 0; index < derived.parameters.size(); ++index) {
@@ -1906,22 +1901,15 @@ bool CodeGenerator::same_native_method_abi(const ScriptMemberSymbol& derived,
 }
 
 bool CodeGenerator::same_native_function_abi(const typed::Function& derived,
-                                             const std::string_view derived_godot_base,
-                                             const typed::Function& base,
-                                             const std::string_view base_godot_base) const {
-    const auto native_return_type = [&](const typed::Function& function,
-                                        const std::string_view godot_base) {
-        const auto* engine_method =
-            function.is_static ? nullptr : api_.find_method(godot_base, function.name);
-        const bool coroutine_abi =
-            function.is_coroutine && !(engine_method && engine_method->is_virtual);
-        return coroutine_abi ? std::string{"godot::Variant"} : cpp_type(function.return_type);
+                                             const typed::Function& base) const {
+    const auto native_return_type = [&](const typed::Function& function) {
+        return function.is_coroutine ? std::string{"godot::Variant"}
+                                     : cpp_type(function.return_type);
     };
     if (derived.is_static != base.is_static ||
         derived.rest_parameter.has_value() != base.rest_parameter.has_value() ||
         derived.parameters.size() != base.parameters.size() ||
-        native_return_type(derived, derived_godot_base) !=
-            native_return_type(base, base_godot_base)) {
+        native_return_type(derived) != native_return_type(base)) {
         return false;
     }
     for (std::size_t index = 0; index < derived.parameters.size(); ++index) {
@@ -1969,8 +1957,7 @@ std::string CodeGenerator::typed_inner_method_implementation_name(
             if (inherited) {
                 const auto inherited_owner =
                     declaration_owner.empty() ? base->second : declaration_owner;
-                if (same_native_function_abi(method, inner_godot_base_type(owner), *inherited,
-                                             inner_godot_base_type(inherited_owner))) {
+                if (same_native_function_abi(method, *inherited)) {
                     return typed_inner_method_implementation_name(inherited_owner, *inherited);
                 }
                 return "_gdpp_native_override_" + source_name;
@@ -2003,10 +1990,7 @@ std::string CodeGenerator::script_method_native_name(const ScriptClassSymbol& ow
             break;
         base_owner = script_symbols_->base_of(*base_owner);
     }
-    const auto same_native_abi =
-        same_native_method_abi(method, owner.godot_base_type, **base,
-                               base_owner ? std::string_view{base_owner->godot_base_type}
-                                          : std::string_view{owner.godot_base_type});
+    const auto same_native_abi = same_native_method_abi(method, **base);
     // GDScript permits an override to change annotations and to become a coroutine. C++ cannot
     // overload solely by return type, so an ABI-incompatible override receives a private native
     // symbol while ClassDB continues to publish the original source method name. Once a hierarchy
@@ -2114,12 +2098,7 @@ std::string CodeGenerator::inner_method_native_name(const ScriptInnerClassSymbol
     const auto inherited = find_inner_method_declaration(owner, method.name, false);
     if (!inherited.method || inherited.method->is_static)
         return source_name;
-    const auto base_godot_type =
-        inherited.inner_owner    ? std::string_view{inherited.inner_owner->godot_base_type}
-        : inherited.script_owner ? std::string_view{inherited.script_owner->godot_base_type}
-                                 : std::string_view{owner.godot_base_type};
-    if (!same_native_method_abi(method, owner.godot_base_type, *inherited.method,
-                                base_godot_type)) {
+    if (!same_native_method_abi(method, *inherited.method)) {
         return "_gdpp_native_override_" + source_name;
     }
     if (inherited.inner_owner)
@@ -2151,12 +2130,7 @@ bool CodeGenerator::inner_overrides_method(const ScriptInnerClassSymbol& owner,
     const auto inherited = find_inner_method_declaration(owner, method.name, false);
     if (!inherited.method || inherited.method->is_static)
         return false;
-    const auto base_godot_type =
-        inherited.inner_owner    ? std::string_view{inherited.inner_owner->godot_base_type}
-        : inherited.script_owner ? std::string_view{inherited.script_owner->godot_base_type}
-                                 : std::string_view{owner.godot_base_type};
-    return same_native_method_abi(method, owner.godot_base_type, *inherited.method,
-                                  base_godot_type);
+    return same_native_method_abi(method, *inherited.method);
 }
 
 bool CodeGenerator::managed_constant_field(const typed::Field& field) const {
@@ -7818,8 +7792,7 @@ void CodeGenerator::emit_inner_class_declaration(const typed::Class& declaration
             const auto* inherited =
                 find_inherited_inner_function(source_base, function.name, &base_owner);
             if (inherited && !function.is_static &&
-                same_native_function_abi(function, godot_base, *inherited,
-                                         inner_godot_base_type(base_owner))) {
+                same_native_function_abi(function, *inherited)) {
                 header << " override";
             }
         }
@@ -8883,11 +8856,7 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
                 std::string declaration_owner;
                 const auto* inherited =
                     find_inherited_inner_function(local_base, function.name, &declaration_owner);
-                return inherited &&
-                       same_native_function_abi(function, godot_base_type, *inherited,
-                                                inner_godot_base_type(declaration_owner.empty()
-                                                                          ? local_base
-                                                                          : declaration_owner));
+                return inherited && same_native_function_abi(function, *inherited);
             }
         }
         const auto declared = std::find_if(current_script_->members.begin(),
@@ -8906,8 +8875,7 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
                                         !member.is_static && member.name == function.name;
                              });
             if (inherited != base_script->members.end()) {
-                return same_native_method_abi(*declared, current_script_->godot_base_type,
-                                              *inherited, base_script->godot_base_type) &&
+                return same_native_method_abi(*declared, *inherited) &&
                        script_method_implementation_name(*current_script_, *declared) ==
                            script_method_implementation_name(*base_script, *inherited);
             }

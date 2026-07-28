@@ -244,13 +244,9 @@ class CodeGenerator final {
         const ScriptClassSymbol* script_owner{nullptr};
     };
     [[nodiscard]] bool same_native_method_abi(const ScriptMemberSymbol& derived,
-                                              std::string_view derived_godot_base,
-                                              const ScriptMemberSymbol& base,
-                                              std::string_view base_godot_base) const;
+                                              const ScriptMemberSymbol& base) const;
     [[nodiscard]] bool same_native_function_abi(const typed::Function& derived,
-                                                std::string_view derived_godot_base,
-                                                const typed::Function& base,
-                                                std::string_view base_godot_base) const;
+                                                const typed::Function& base) const;
     [[nodiscard]] const typed::Function*
     find_inherited_inner_function(std::string_view base, std::string_view method,
                                   std::string* declaration_owner = nullptr) const noexcept;

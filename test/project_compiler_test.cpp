@@ -2954,6 +2954,66 @@ TEST_CASE("project compiler preserves isolated coroutine ABI families across des
     REQUIRE(child_source.find("::_gdpp_native_override_execute()") != std::string::npos);
 }
 
+TEST_CASE("project compiler separates Godot virtual wrappers from attached coroutine ABIs") {
+    const auto root = fixture_root("project-virtual-coroutine-override-family");
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
+    write_text(root / "base.gd",
+               "extends Node\nclass_name VirtualCoroutineBase\n"
+               "signal resumed\n"
+               "func _ready() -> void:\n"
+               "    await resumed\n");
+    write_text(root / "child.gd",
+               "extends VirtualCoroutineBase\nclass_name VirtualCoroutineChild\n"
+               "func _ready() -> void:\n"
+               "    pass\n");
+    write_text(root / "grandchild.gd",
+               "extends VirtualCoroutineChild\nclass_name VirtualCoroutineGrandchild\n"
+               "func _ready() -> void:\n"
+               "    super._ready()\n");
+    const auto options = project_options(root);
+
+    const auto result = gdpp::ProjectCompiler{}.compile(options);
+
+    REQUIRE(result.success);
+    const auto base =
+        std::find_if(result.scripts.begin(), result.scripts.end(), [](const auto& script) {
+            return script.relative_path.filename() == "base.gd";
+        });
+    const auto child =
+        std::find_if(result.scripts.begin(), result.scripts.end(), [](const auto& script) {
+            return script.relative_path.filename() == "child.gd";
+        });
+    const auto grandchild =
+        std::find_if(result.scripts.begin(), result.scripts.end(), [](const auto& script) {
+            return script.relative_path.filename() == "grandchild.gd";
+        });
+    REQUIRE(base != result.scripts.end());
+    REQUIRE(child != result.scripts.end());
+    REQUIRE(grandchild != result.scripts.end());
+    const auto base_header =
+        read_text(options.output_directory / "generated" / base->header_file_name);
+    const auto child_header =
+        read_text(options.output_directory / "generated" / child->header_file_name);
+    const auto grandchild_header =
+        read_text(options.output_directory / "generated" / grandchild->header_file_name);
+    const auto grandchild_source =
+        read_text(options.output_directory / "generated" / grandchild->source_file_name);
+    REQUIRE(base_header.find("virtual godot::Variant _gdpp_virtual_impl__ready();") !=
+            std::string::npos);
+    REQUIRE(child_header.find(
+                "virtual void _gdpp_native_override__gdpp_virtual_impl__ready();") !=
+            std::string::npos);
+    REQUIRE(grandchild_header.find(
+                "virtual void _gdpp_native_override__gdpp_virtual_impl__ready() override;") !=
+            std::string::npos);
+    REQUIRE(grandchild_source.find(
+                "VirtualCoroutineChild") != std::string::npos);
+    REQUIRE(grandchild_source.find(
+                "::_gdpp_native_override__gdpp_virtual_impl__ready()") !=
+            std::string::npos);
+}
+
 TEST_CASE("project compiler normalizes widened override calls to the inherited return ABI") {
     const auto root = fixture_root("project-widened-override-return");
     std::error_code error;
