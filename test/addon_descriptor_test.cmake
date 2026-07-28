@@ -87,6 +87,9 @@ foreach(required_runtime_export IN ITEMS
         "func _clear_godot_export_cache() -> bool:"
         "func _remove_legacy_project_artifacts() -> bool:"
         "if not _remove_legacy_project_artifacts():"
+        "func _is_gdscript_provider(script: Script, path: String) -> bool:"
+        "script.is_class(&\"GDScript\")"
+        "if _is_gdscript_provider(script_value as Script, script_path):"
         "func _restore_compiler_descriptor() -> void:")
     string(FIND "${export_plugin}" "${required_runtime_export}" runtime_export_offset)
     if(runtime_export_offset EQUAL -1)

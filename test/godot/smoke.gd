@@ -1,5 +1,7 @@
 extends SceneTree
 
+const EXPORT_PLUGIN := preload("res://addons/gdpp/export_plugin.gd")
+
 
 func _init() -> void:
     call_deferred("_run")
@@ -32,5 +34,27 @@ func _run() -> void:
         push_error("GDPP did not expose optimization statistics")
         quit(1)
         return
+    if not _verify_script_language_boundaries():
+        quit(1)
+        return
     print("GDPP_SMOKE_OK")
     quit(0)
+
+
+func _verify_script_language_boundaries() -> bool:
+    var export_plugin := EXPORT_PLUGIN.new()
+    var gdscript := GDScript.new()
+    if not export_plugin._is_gdscript_provider(gdscript, "res://fixture.custom"):
+        push_error("GDPP did not identify a GDScript provider independently of its suffix")
+        return false
+    if not export_plugin._is_gdscript_provider(null, "res://fixture.gdc"):
+        push_error("GDPP did not identify a compiled GDScript suffix")
+        return false
+    var foreign := ClassDB.instantiate(&"AttachedCompiledScript") as Script
+    if foreign == null:
+        push_error("GDPP could not instantiate the foreign ScriptExtension oracle")
+        return false
+    if export_plugin._is_gdscript_provider(foreign, "res://fixture.foreign"):
+        push_error("GDPP classified another ScriptLanguage provider as GDScript")
+        return false
+    return true

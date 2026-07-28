@@ -323,33 +323,21 @@ func _transform_scene_with_state(
 
 
 func _customize_resource(resource: Resource, path: String) -> Resource:
-    var script_path := _script_path(resource)
-    if script_path.is_empty():
-        return null
-    if _editor_only_scripts.has(script_path):
-        _fail_export("runtime resource '%s' uses editor-only script '%s'" % [path, script_path])
-        return null
-    if not _script_classes.has(script_path):
-        _fail_export("resource '%s' uses an uncompiled script '%s'" % [path, script_path])
-        return null
-    var replacements := {resource.get_instance_id(): resource}
+    # Sanitize the complete storage graph even when the root belongs to another ScriptLanguage.
+    # A C# or custom-language Resource can legally own nested GDScript-backed resources; preserving
+    # its provider must not let those nested project scripts escape the binary-only transaction.
+    var replacements: Dictionary = {}
     var changes := {"count": 0}
-    var copied_properties := _attach_compiled_script(
+    var transformed := _transform_resource_graph(
         resource,
-        script_path,
-        null,
+        path,
         replacements,
         changes,
-        path
+        true
     )
-    if copied_properties < 0:
-        _fail_export("resource '%s' cannot attach its compiled script" % path)
+    if transformed == null:
         return null
-    _metrics_mutex.lock()
-    _customized_resource_count += 1
-    _copied_property_count += copied_properties
-    _metrics_mutex.unlock()
-    return resource
+    return transformed if int(changes.get("count", 0)) > 0 else null
 
 
 func _export_file(path: String, _type: String, _features: PackedStringArray) -> void:
@@ -1236,10 +1224,16 @@ func _collect_scene_replacement_plan(
                 )
                 return false
             if not _script_classes.has(script_path):
-                push_error(
-                    "GDPP: scene '%s' uses uncompiled script '%s'" % [scene_path, script_path]
-                )
-                return false
+                if _is_gdscript_provider(script_value as Script, script_path):
+                    push_error(
+                        "GDPP: scene '%s' uses uncompiled script '%s'"
+                        % [scene_path, script_path]
+                    )
+                    return false
+                # Scripts owned by another installed ScriptLanguage remain attached to their
+                # original node. GDPP compiles only GDScript and must not require C#, custom
+                # language, or editor extension projects to rewrite valid customer scenes.
+                continue
             var attached_base := StringName(_attached_script_bases[script_path])
             if not node.is_class(attached_base):
                 push_error(
@@ -1822,37 +1816,40 @@ func _transform_resource_graph(
             )
             return null
         if not _script_classes.has(script_path):
-            _fail_export(
-                "resource graph '%s' uses an uncompiled script '%s'"
-                % [context_path, script_path]
+            var source_script := resource.get_script() as Script
+            if _is_gdscript_provider(source_script, script_path):
+                _fail_export(
+                    "resource graph '%s' uses an uncompiled script '%s'"
+                    % [context_path, script_path]
+                )
+                return null
+        else:
+            # Install the identity mapping before copying so self-references and
+            # cyclic built-in Resource graphs retain their exact topology.
+            replacements[instance_id] = resource
+            var copied := _attach_compiled_script(
+                resource,
+                script_path,
+                null,
+                replacements,
+                changes,
+                context_path
             )
-            return null
-        # Install the identity mapping before copying so self-references and
-        # cyclic built-in Resource graphs retain their exact topology.
-        replacements[instance_id] = resource
-        var copied := _attach_compiled_script(
-            resource,
-            script_path,
-            null,
-            replacements,
-            changes,
-            context_path
-        )
-        if copied < 0:
-            replacements.erase(instance_id)
-            _fail_export(
-                "resource graph '%s' cannot attach compiled script '%s'" % [
-                    context_path,
-                    script_path,
-                ]
-            )
-            return null
-        changes.count = int(changes.get("count", 0)) + 1
-        _metrics_mutex.lock()
-        _customized_resource_count += 1
-        _copied_property_count += copied
-        _metrics_mutex.unlock()
-        return resource
+            if copied < 0:
+                replacements.erase(instance_id)
+                _fail_export(
+                    "resource graph '%s' cannot attach compiled script '%s'" % [
+                        context_path,
+                        script_path,
+                    ]
+                )
+                return null
+            changes.count = int(changes.get("count", 0)) + 1
+            _metrics_mutex.lock()
+            _customized_resource_count += 1
+            _copied_property_count += copied
+            _metrics_mutex.unlock()
+            return resource
 
     replacements[instance_id] = resource
     # Traverse storage properties only. Godot's 4.4/4.5 global resource pass
@@ -1882,6 +1879,14 @@ func _transform_resource_graph(
 func _script_path(object: Object) -> String:
     var script: Script = object.get_script()
     return "" if script == null else script.resource_path
+
+
+func _is_gdscript_provider(script: Script, path: String) -> bool:
+    var source_path := path.trim_suffix("c") if path.ends_with(".gdc") else path
+    if _compiled_scripts.has(source_path):
+        return true
+    var extension := path.get_extension().to_lower()
+    return extension in ["gd", "gdc"] or (script != null and script.is_class(&"GDScript"))
 
 
 func _snapshot_connections(root: Node, scene_state: SceneState) -> Array[Dictionary]:
