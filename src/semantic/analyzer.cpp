@@ -1241,21 +1241,29 @@ std::optional<Type> SemanticAnalyzer::object_iteration_element_type(const Type& 
 Type SemanticAnalyzer::resolve_binary_expression(const ast::Expression& expression,
                                                  const Type& left, const Type& right) {
     const auto& operation = expression.value();
-    if (operation == "is" || operation == "is not") {
-        auto target_type = right;
-        if (expression.operand(1)->kind() == ast::ExpressionKind::identifier) {
-            const auto alias = script_resource_aliases_.find(expression.operand(1)->value());
-            if (alias != script_resource_aliases_.end()) {
-                target_type = {TypeKind::object, alias->second->native_class_name};
-                model_.expression_types_.insert_or_assign(expression.operand(1).get(), target_type);
-                model_.api_resolutions_.insert_or_assign(
-                    expression.operand(1).get(),
-                    ApiResolution{ApiResolutionKind::script_type_reference,
-                                  alias->second->native_class_name, "", "", target_type, 0, 0,
-                                  false, true});
-                record_script_dependency(alias->second);
+    const auto resolve_script_type_operand = [&](const ast::Expression& operand, Type fallback) {
+        const ScriptClassSymbol* target = nullptr;
+        if (operand.kind() == ast::ExpressionKind::identifier) {
+            if (const auto alias = script_resource_aliases_.find(operand.value());
+                alias != script_resource_aliases_.end()) {
+                target = alias->second;
             }
         }
+        if (!target && fallback.kind == TypeKind::script_resource && script_symbols_)
+            target = script_symbols_->find_path(fallback.name);
+        if (!target)
+            return fallback;
+
+        const Type type{TypeKind::object, target->script_name};
+        model_.expression_types_.insert_or_assign(&operand, type);
+        model_.api_resolutions_.insert_or_assign(
+            &operand, ApiResolution{ApiResolutionKind::script_type_reference,
+                                    target->native_class_name, "", "", type, 0, 0, false, true});
+        record_script_dependency(target);
+        return type;
+    };
+    if (operation == "is" || operation == "is not") {
+        auto target_type = resolve_script_type_operand(*expression.operand(1), right);
         const auto* target = model_.api_resolution_of(*expression.operand(1));
         if (target && target->kind == ApiResolutionKind::script_enum_type) {
             target_type = {TypeKind::enumeration, target->owner};
@@ -1285,20 +1293,7 @@ Type SemanticAnalyzer::resolve_binary_expression(const ast::Expression& expressi
         return {TypeKind::boolean, "bool"};
     }
     if (operation == "as") {
-        auto target_type = right;
-        if (expression.operand(1)->kind() == ast::ExpressionKind::identifier) {
-            const auto alias = script_resource_aliases_.find(expression.operand(1)->value());
-            if (alias != script_resource_aliases_.end()) {
-                target_type = {TypeKind::object, alias->second->native_class_name};
-                model_.expression_types_.insert_or_assign(expression.operand(1).get(), target_type);
-                model_.api_resolutions_.insert_or_assign(
-                    expression.operand(1).get(),
-                    ApiResolution{ApiResolutionKind::script_type_reference,
-                                  alias->second->native_class_name, "", "", target_type, 0, 0,
-                                  false, true});
-                record_script_dependency(alias->second);
-            }
-        }
+        auto target_type = resolve_script_type_operand(*expression.operand(1), right);
         const auto* target = model_.api_resolution_of(*expression.operand(1));
         if (target && target->kind == ApiResolutionKind::script_enum_type) {
             target_type = {TypeKind::enumeration, target->owner};
@@ -1882,10 +1877,15 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
         } else if (const auto* project_type = script_symbols_
                                                   ? script_symbols_->find_global(expression.value())
                                                   : nullptr) {
-            result = {TypeKind::object, project_type->script_name};
+            // A globally named GDScript class is a Script resource whenever it is used as an
+            // expression. Type-only contexts (`is`, `as`, annotations and inheritance) resolve
+            // the same spelling separately. Keeping the value as an object-instance type loses
+            // the Script identity when it is inferred into a local, field, parameter, container,
+            // argument or return value.
+            result = {TypeKind::script_resource, project_type->path};
             record_script_dependency(project_type);
             model_.api_resolutions_.emplace(&expression,
-                                            ApiResolution{ApiResolutionKind::script_type_reference,
+                                            ApiResolution{ApiResolutionKind::script_resource,
                                                           project_type->native_class_name, "", "",
                                                           result, 0, 0, false, true});
         } else if (const auto* external_type =

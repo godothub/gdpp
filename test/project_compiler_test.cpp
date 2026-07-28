@@ -3095,7 +3095,11 @@ TEST_CASE("project compiler lowers cross-script constants enums and resource fac
         "func create() -> SharedValues:\n"
         "    return Factory.new(5)\n"
         "func type_token():\n"
-        "    return SharedValues\n");
+        "    var Alias := SharedValues\n"
+        "    return Alias\n"
+        "func alias_answer() -> int:\n"
+        "    var Alias := SharedValues\n"
+        "    return Alias.LIMIT + Alias.State.ACTIVE\n");
 
     const auto options = project_options(root);
     const auto result = gdpp::ProjectCompiler{}.compile(options);
@@ -3130,7 +3134,13 @@ TEST_CASE("project compiler lowers cross-script constants enums and resource fac
     REQUIRE(consumer_source.find("::MASK()") != std::string::npos);
     REQUIRE(consumer_source.find("ScriptResource<GDPPNative_SharedValues_") != std::string::npos);
     REQUIRE(consumer_source.find(".instantiate(") != std::string::npos);
-    REQUIRE(consumer_source.find("godot::StringName(\"" + base_class + "\")") != std::string::npos);
+    REQUIRE(consumer_source.find("[[maybe_unused]] "
+                                 "shared_consumer_gdpp_detail::ScriptResource<" +
+                                 base_class +
+                                 "> Alias = "
+                                 "shared_consumer_gdpp_detail::ScriptResource<" +
+                                 base_class + ">{};") != std::string::npos);
+    REQUIRE(consumer_source.find("godot::StringName(\"" + base_class + "\")") == std::string::npos);
     REQUIRE(consumer_source.find("_gdpp_call_argument_") != std::string::npos);
     REQUIRE(consumer_source.find("IDLE:0,ACTIVE:4,BOOST:8") != std::string::npos);
     REQUIRE(consumer_source.find("_gdpp_constant_Factory_storage())>::missing()") !=
@@ -3533,13 +3543,12 @@ TEST_CASE("project compiler enforces cross-script abstract method obligations") 
                                            "class_name ConcreteWork\n"
                                            "func execute(value: int) -> String:\n"
                                            "    return str(value)\n");
-    write_text(root / "coroutine_implementation.gd",
-               "extends DeferredWork\n"
-               "class_name CoroutineWork\n"
-               "signal resume\n"
-               "func execute(value: int) -> String:\n"
-               "    await resume\n"
-               "    return str(value)\n");
+    write_text(root / "coroutine_implementation.gd", "extends DeferredWork\n"
+                                                     "class_name CoroutineWork\n"
+                                                     "signal resume\n"
+                                                     "func execute(value: int) -> String:\n"
+                                                     "    await resume\n"
+                                                     "    return str(value)\n");
     write_text(root / "inner_types.gd", "@tool\n"
                                         "class_name InnerContracts\n"
                                         "@abstract class Contract:\n"
@@ -3561,8 +3570,7 @@ TEST_CASE("project compiler enforces cross-script abstract method obligations") 
             std::string::npos);
     REQUIRE(registration.find("GDREGISTER_ABSTRACT_CLASS(GDPPNative_DeferredWork_") !=
             std::string::npos);
-    REQUIRE(registration.find("GDREGISTER_CLASS(GDPPNative_CoroutineWork_") !=
-            std::string::npos);
+    REQUIRE(registration.find("GDREGISTER_CLASS(GDPPNative_CoroutineWork_") != std::string::npos);
     REQUIRE(registration.find("GDREGISTER_ABSTRACT_CLASS(GDPPNative_InnerContracts_") !=
             std::string::npos);
     REQUIRE(registration.find("__Contract);") != std::string::npos);
