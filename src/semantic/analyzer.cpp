@@ -689,8 +689,14 @@ void SemanticAnalyzer::validate_container_method_call(const Type& container,
             require_argument(0, element);
         } else if (method == "insert") {
             require_argument(1, element);
-        } else if (method == "append_array" || method == "assign") {
+        } else if (method == "append_array") {
             require_argument(0, container);
+        } else if (method == "assign") {
+            // Array.assign() is the conversion boundary Godot provides for replacing a typed
+            // array from another Array. It validates and converts every source element at
+            // runtime; requiring an identical source signature would incorrectly reject the
+            // operation that users must call to perform that conversion.
+            require_argument(0, {TypeKind::array, "Array"});
         }
         return;
     }

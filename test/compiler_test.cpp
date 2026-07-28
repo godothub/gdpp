@@ -3482,6 +3482,18 @@ TEST_CASE("compiler enforces dynamic typed storage through exact Godot metadata"
                 "int64_t>>") != std::string::npos);
 }
 
+TEST_CASE("typed Array assign accepts a differently typed Array conversion source") {
+    const gdpp::Compiler compiler;
+    const auto result =
+        compiler.compile("typed_array_assign.gd", "extends Node\n"
+                                                  "var children: Array[Node2D] = []\n"
+                                                  "func collect(values: Array[Node]) -> void:\n"
+                                                  "    children.assign(values)\n");
+
+    REQUIRE(result.success);
+    REQUIRE(result.unit.source.find(".assign(") != std::string::npos);
+}
+
 TEST_CASE("compiler guards dynamic explicit casts with the runtime source type") {
     const gdpp::Compiler compiler;
     const auto result =
