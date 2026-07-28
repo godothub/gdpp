@@ -180,6 +180,13 @@ ConversionKind classify_conversion(const Type& target, const Type& source) noexc
         return ConversionKind::implicit;
     if (target.kind == TypeKind::script_resource && source.kind == TypeKind::nil)
         return ConversionKind::implicit;
+    // A resolved `.gd` resource is a source-level GDScript value. Binary-only exports replace its
+    // concrete provider with AttachedCompiledScript, but that representational change must not
+    // make valid GDScript annotations fail semantic analysis.
+    if (target.kind == TypeKind::object && target.name == "GDScript" &&
+        source.kind == TypeKind::script_resource) {
+        return ConversionKind::implicit;
+    }
     if (target.kind == TypeKind::script_resource || source.kind == TypeKind::script_resource)
         return ConversionKind::incompatible;
 

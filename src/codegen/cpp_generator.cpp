@@ -1404,7 +1404,8 @@ std::string CodeGenerator::cpp_type(const Type& type) const {
             const auto argument = container_cpp_argument(container->arguments.front());
             const auto argument_type = container_argument_type(container->arguments.front());
             const auto script_typed = argument_type.kind == TypeKind::object &&
-                                      !attached_script_source_path(argument_type).empty();
+                                      (argument_type.name == "GDScript" ||
+                                       !attached_script_source_path(argument_type).empty());
             return (script_typed ? "gdpp::runtime::ScriptTypedArray<" : "godot::TypedArray<") +
                    argument + ">";
         }
@@ -1415,10 +1416,13 @@ std::string CodeGenerator::cpp_type(const Type& type) const {
                 return "godot::Dictionary";
             const auto key_type = container_argument_type(container->arguments.at(0));
             const auto value_type = container_argument_type(container->arguments.at(1));
-            const auto script_typed = (key_type.kind == TypeKind::object &&
-                                       !attached_script_source_path(key_type).empty()) ||
-                                      (value_type.kind == TypeKind::object &&
-                                       !attached_script_source_path(value_type).empty());
+            const auto script_typed =
+                (key_type.kind == TypeKind::object &&
+                 (key_type.name == "GDScript" ||
+                  !attached_script_source_path(key_type).empty())) ||
+                (value_type.kind == TypeKind::object &&
+                 (value_type.name == "GDScript" ||
+                  !attached_script_source_path(value_type).empty()));
             return (script_typed ? "gdpp::runtime::ScriptTypedDictionary<"
                                  : "godot::TypedDictionary<") +
                    container_cpp_argument(container->arguments.at(0)) + ", " +
@@ -1439,6 +1443,8 @@ std::string CodeGenerator::cpp_type(const Type& type) const {
         }
         return "godot::" + type.name;
     case TypeKind::object:
+        if (type.name == "GDScript")
+            return "godot::Ref<godot::Script>";
         if (!api_.find_class(type.name)) {
             if (const auto inner = inner_cpp_type(type.name); !inner.empty()) {
                 const auto godot_base = inner_godot_base_type(type.name);
@@ -1643,6 +1649,8 @@ Type CodeGenerator::container_argument_type(const std::string_view type_name) co
 
 std::string CodeGenerator::container_cpp_argument(const std::string_view type_name) const {
     const auto type = container_argument_type(type_name);
+    if (type.kind == TypeKind::object && type.name == "GDScript")
+        return "gdpp::runtime::GDScriptContainerTag";
     switch (type.kind) {
     case TypeKind::variant:
     case TypeKind::unknown:
@@ -2291,6 +2299,12 @@ std::string CodeGenerator::emit_conversion(const Type& target, const Type& sourc
         return cpp_type(target) + "::missing()";
     if (!attached_script_source_path(target).empty())
         return emit_attached_script_cast(target, std::move(value), source_span);
+    if (target.kind == TypeKind::object && target.name == "GDScript") {
+        const auto script_location =
+            location.empty() ? ", gdpp::runtime::ScriptSourceLocation{}" : location;
+        return "gdpp::runtime::strict_gdscript_storage(gdpp::runtime::to_variant(" + value + ")" +
+               script_location + ")";
+    }
     const bool target_external = target.kind == TypeKind::object && script_symbols_ &&
                                  script_symbols_->find_external(target.name);
     const bool source_external = source.kind == TypeKind::object && script_symbols_ &&
@@ -3290,6 +3304,8 @@ bool CodeGenerator::conversion_may_fail(const Type& target, const Type& source) 
         return false;
     if (source.kind == TypeKind::nil && target.kind == TypeKind::script_resource)
         return false;
+    if (target.kind == TypeKind::object && target.name == "GDScript" && target != source)
+        return true;
 
     // Dynamic-to-static storage is the principal checked conversion boundary. Packed arrays and
     // typed containers also validate their element contract even when the source itself is
@@ -4900,8 +4916,12 @@ std::string CodeGenerator::emit_expression(const typed::Expression& expression) 
             callee.operands.at(0)->resolution != typed::ResolutionKind::inner_type &&
             !attached_script_source_path(callee.operands.at(0)->type, callee.resolved_owner)
                  .empty();
+        const bool gdscript_resource_constructor =
+            callee.kind == typed::ExpressionKind::member && callee.value == "new" &&
+            !callee.operands.empty() &&
+            callee.operands.at(0)->type == Type{TypeKind::object, "GDScript"};
         if (callee.resolution == typed::ResolutionKind::dynamic_method ||
-            attached_instance_script_call) {
+            attached_instance_script_call || gdscript_resource_constructor) {
             const auto identity = temporary_counter_++;
             const auto suffix = std::to_string(identity);
             const auto target_name = "_gdpp_dynamic_target_" + suffix;
@@ -8530,6 +8550,20 @@ void CodeGenerator::emit_inner_class_definition(const typed::Class& declaration,
                        ? sanitize_identifier(field.setter->parameter)
                        : "value")
                << ") {\n";
+        if (field.type == Type{TypeKind::object, "GDScript"}) {
+            const auto parameter =
+                field.setter && field.setter->method.empty()
+                    ? sanitize_identifier(field.setter->parameter)
+                    : std::string{"value"};
+            source << "    gdpp::runtime::ScriptFunctionScope _gdpp_gdscript_storage_scope("
+                      "gdpp::runtime::ScriptFaultPolicy::inherit_existing);\n"
+                   << "    " << parameter
+                   << " = gdpp::runtime::strict_gdscript_storage("
+                      "gdpp::runtime::to_variant("
+                   << parameter << "), gdpp::runtime::ScriptSourceLocation{_gdpp_source_path, "
+                   << field.span.begin.line << ", " << field.span.begin.column << "});\n"
+                   << "    if (script_function_failed()) return;\n";
+        }
         if (field.is_static && has_static_initialization) {
             source << "    gdpp::runtime::ScriptFunctionScope _gdpp_script_initialization_scope("
                       "gdpp::runtime::ScriptFaultPolicy::inherit_existing);\n"

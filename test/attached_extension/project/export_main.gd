@@ -325,6 +325,10 @@ func _verify_export_runtime() -> void:
     if (
         initialized != 1
         or init_ping_value != bonus
+        or script_factory_payload != 40
+        or script_factories.size() != 1
+        or script_factories[0] != script_factory
+        or script_factory_lookup.get("primary") != script_factory
         or not ready_seen
         or enter_tree_count != 1
         or ready_notification_count != 1
@@ -348,6 +352,10 @@ func _verify_export_runtime() -> void:
     if (
         lifecycle_probe.initialized != 1
         or lifecycle_probe.init_ping_value != lifecycle_probe.bonus
+        or lifecycle_probe.script_factory_payload != 40
+        or lifecycle_probe.script_factories.size() != 1
+        or lifecycle_probe.script_factories[0] != lifecycle_probe.script_factory
+        or lifecycle_probe.script_factory_lookup.get("primary") != lifecycle_probe.script_factory
         or not lifecycle_probe.ready_seen
         or lifecycle_probe.enter_tree_count != 1
         or lifecycle_probe.ready_notification_count != 1

@@ -3,6 +3,7 @@
 
 #include <godot_cpp/classes/class_db_singleton.hpp>
 #include <godot_cpp/classes/engine.hpp>
+#include <godot_cpp/classes/gd_script.hpp>
 #include <godot_cpp/core/error_macros.hpp>
 #include <godot_cpp/godot.hpp>
 #include <godot_cpp/templates/vector.hpp>
@@ -714,6 +715,33 @@ bool set_attached_editor_storage_state(godot::Object* object,
 godot::Object* cast_attached_script(const godot::Variant& value, const godot::String& source_path) {
     auto* object = value.get_validated_object();
     return is_attached_script_instance(object, source_path) ? object : nullptr;
+}
+
+godot::Ref<godot::Script> strict_gdscript_storage(const godot::Variant& value,
+                                                  const ScriptSourceLocation& location) {
+    if (script_function_failed())
+        return {};
+    if (value.get_type() == godot::Variant::NIL)
+        return {};
+    if (value.get_type() != godot::Variant::OBJECT) {
+        report_script_failure(godot::String{"Cannot assign "} + describe_variant_type(value) +
+                                  " to GDScript.",
+                              location);
+        return {};
+    }
+    auto* object = value.get_validated_object();
+    if (!object)
+        return {};
+    auto* script = godot::Object::cast_to<godot::Script>(object);
+    if (script &&
+        (godot::Object::cast_to<godot::GDScript>(script) ||
+         godot::Object::cast_to<AttachedCompiledScript>(script))) {
+        return godot::Ref<godot::Script>(script);
+    }
+    report_script_failure(godot::String{"Cannot assign object of type "} +
+                              godot::String{object->get_class()} + " to GDScript.",
+                          location);
+    return {};
 }
 
 godot::Object* strict_attached_script_storage(const godot::Variant& value,

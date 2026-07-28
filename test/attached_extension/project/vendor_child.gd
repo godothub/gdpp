@@ -7,8 +7,14 @@ signal child_ping(value: int)
 signal init_ping(value: int)
 
 @export var bonus: int = 7
+@export var script_factory: GDScript = preload("res://dynamic_load_target.gd")
 var initialized: int = 0
 var init_ping_value: int = -1
+var script_factory_payload: int = -1
+var script_factories: Array[GDScript] = [preload("res://dynamic_load_target.gd")]
+var script_factory_lookup: Dictionary[String, GDScript] = {
+    "primary": preload("res://dynamic_load_target.gd"),
+}
 var ready_seen: bool = false
 var enter_tree_count := 0
 var ready_notification_count := 0
@@ -26,6 +32,8 @@ func _enter_tree() -> void:
 
 func _ready() -> void:
     ready_seen = true
+    var product: Variant = script_factory.new()
+    script_factory_payload = product.payload
     init_ping.emit(bonus)
     child_ping.emit(bonus)
     super.emit_vendor_ping(bonus)

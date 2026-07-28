@@ -182,6 +182,15 @@ TEST_CASE("implicit conversion matrix exactly mirrors Godot strict Variant conve
     }
 }
 
+TEST_CASE("resolved script resources retain their source-level GDScript type") {
+    const gdpp::Type gdscript{gdpp::TypeKind::object, "GDScript"};
+    const gdpp::Type resource{gdpp::TypeKind::script_resource, "res://factory.gd"};
+    const gdpp::Type unrelated{gdpp::TypeKind::object, "CSharpScript"};
+
+    REQUIRE(gdpp::is_implicitly_convertible(gdscript, resource));
+    REQUIRE(!gdpp::is_implicitly_convertible(unrelated, resource));
+}
+
 TEST_CASE("explicit conversion matrix adds only Godot permissive casts") {
     auto expected = strict_pairs();
     expected.emplace(gdpp::VariantType::boolean, gdpp::VariantType::string);

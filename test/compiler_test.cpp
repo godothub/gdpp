@@ -1292,17 +1292,46 @@ TEST_CASE("compiler routes native script identity through the compatibility runt
             std::string::npos);
 }
 
-TEST_CASE("compiler uses godot-cpp escaped names for engine methods") {
+TEST_CASE("compiler routes GDScript resource construction through the AOT runtime") {
     const gdpp::Compiler compiler;
     const auto result = compiler.compile(
         "script_factory.gd", "extends Node\n"
                              "@export var factory: GDScript\n"
+                             "func replace(value: Variant) -> void:\n"
+                             "    factory = value\n"
                              "func create(first: Variant, second: Variant) -> Variant:\n"
                              "    return factory.new(first, second)\n");
 
     REQUIRE(result.success);
-    REQUIRE(result.unit.source.find("->new_(") != std::string::npos);
+    REQUIRE(result.unit.header.find("godot::Ref<godot::Script> factory") != std::string::npos);
+    REQUIRE(result.unit.source.find("strict_gdscript_storage") != std::string::npos);
+    REQUIRE(result.unit.source.find("gdpp::runtime::call_dynamic_at(") != std::string::npos);
+    REQUIRE(result.unit.source.find("->new_(") == std::string::npos);
     REQUIRE(result.unit.source.find("->_gdpp_id_6e6577(") == std::string::npos);
+}
+
+TEST_CASE("compiler preserves GDScript annotations across AOT script resources and containers") {
+    const gdpp::Compiler compiler;
+    const auto result = compiler.compile(
+        "script_storage.gd",
+        "extends Node\n"
+        "var factory: GDScript\n"
+        "var factories: Array[GDScript] = []\n"
+        "var lookup: Dictionary[String, GDScript] = {}\n"
+        "func replace(value: Variant) -> void:\n"
+        "    factory = value\n"
+        "    factories[0] = value\n"
+        "    lookup[\"main\"] = value\n");
+
+    REQUIRE(result.success);
+    REQUIRE(result.unit.header.find("godot::Ref<godot::Script> factory") != std::string::npos);
+    REQUIRE(result.unit.header.find(
+                "gdpp::runtime::ScriptTypedArray<gdpp::runtime::GDScriptContainerTag>") !=
+            std::string::npos);
+    REQUIRE(result.unit.header.find(
+                "gdpp::runtime::ScriptTypedDictionary<godot::String, "
+                "gdpp::runtime::GDScriptContainerTag>") != std::string::npos);
+    REQUIRE(result.unit.source.find("strict_gdscript_storage") != std::string::npos);
 }
 
 TEST_CASE("compiler selects the Godot Node template for implicit get_node calls") {

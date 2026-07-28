@@ -212,6 +212,13 @@ set_attached_editor_storage_state(godot::Object* object,
                                   const godot::PackedStringArray& stored_properties);
 [[nodiscard]] godot::Object* cast_attached_script(const godot::Variant& value,
                                                   const godot::String& source_path);
+// A source-level GDScript value may refer either to an interpreted GDScript resource or to the
+// canonical AttachedCompiledScript that replaces it in a binary-only export. Keep the public
+// annotation and reflection contract as GDScript while accepting exactly those two providers at
+// generated storage boundaries.
+[[nodiscard]] godot::Ref<godot::Script>
+strict_gdscript_storage(const godot::Variant& value,
+                        const ScriptSourceLocation& location);
 [[nodiscard]] godot::Object* strict_attached_script_storage(const godot::Variant& value,
                                                             const godot::String& source_path,
                                                             const ScriptSourceLocation& location);
@@ -260,6 +267,22 @@ template <typename Type, typename = void> struct ContainerTypeResolver {
     [[nodiscard]] static godot::StringName reflection_name() {
         return godot::Variant::get_type_name(
             static_cast<godot::Variant::Type>(godot::GetTypeInfo<Type>::VARIANT_TYPE));
+    }
+};
+
+// Godot's runtime container metadata can name only one ClassDB type. Binary-only exports must hold
+// both source GDScript resources and their AttachedCompiledScript replacements, whose exact common
+// native base is Script. Generated element conversions retain the stricter source-level GDScript
+// contract, while reflection continues to report the original annotation.
+struct GDScriptContainerTag {};
+
+template <> struct ContainerTypeResolver<GDScriptContainerTag> {
+    [[nodiscard]] static AttachedContainerType resolve() {
+        return {godot::Variant::OBJECT, godot::Script::get_class_static(), {}};
+    }
+
+    [[nodiscard]] static godot::StringName reflection_name() {
+        return godot::StringName{"GDScript"};
     }
 };
 
