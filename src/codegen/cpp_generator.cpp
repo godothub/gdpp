@@ -7604,8 +7604,6 @@ void CodeGenerator::emit_inner_class_declaration(const typed::Class& declaration
                 header << " override";
             }
         }
-        if (function.is_abstract)
-            header << " = 0";
         header << ";\n";
     }
     header << "};\n\n";
@@ -8271,6 +8269,33 @@ void CodeGenerator::emit_inner_class_definition(const typed::Class& declaration,
                    << ";\n}\n\n";
         }
         if (function.is_abstract) {
+            record_generated_symbol(GeneratedSymbolKind::method, source_symbol,
+                                    native_name + "::" + native_function_name, function.span);
+            source << function_return_type(function) << ' ' << native_name
+                   << "::" << native_function_name << '(';
+            for (std::size_t index = 0; index < function.parameters.size(); ++index) {
+                if (index != 0)
+                    source << ", ";
+                const auto& parameter = function.parameters[index];
+                source << "[[maybe_unused]] " << parameter_native_type(parameter) << ' '
+                       << parameter_native_name(parameter);
+            }
+            if (function.rest_parameter) {
+                if (!function.parameters.empty())
+                    source << ", ";
+                source << "[[maybe_unused]] godot::Array "
+                       << sanitize_identifier(function.rest_parameter->name);
+            }
+            source << ") {\n"
+                   << "    gdpp::runtime::ScriptFunctionScope _gdpp_abstract_scope("
+                      "gdpp::runtime::ScriptFaultPolicy::inherit_existing);\n"
+                   << "    gdpp::runtime::report_script_failure("
+                   << godot_string("Cannot call abstract function '" + function.name + "'.")
+                   << ", _gdpp_source_path, " << function.span.begin.line << ", "
+                   << function.span.begin.column << ");\n";
+            if (function.return_type.kind != TypeKind::void_type)
+                source << "    return {};\n";
+            source << "}\n\n";
             in_function_body_ = false;
             current_coroutine_abi_ = false;
             current_coroutine_state_.clear();
@@ -9106,8 +9131,6 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
         header << ')';
         if (overrides_script_method(function))
             header << " override";
-        if (function.is_abstract)
-            header << " = 0";
         header << ";\n";
     }
     if (!attached_script && has_onready_fields && ready == module.functions.end()) {
@@ -9908,6 +9931,35 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
             source << ";\n}\n\n";
         }
         if (function.is_abstract) {
+            record_generated_symbol(GeneratedSymbolKind::method, function.name,
+                                    unit.class_name + "::" + native_function_name, function.span);
+            source << function_return_type(function) << ' ' << unit.class_name
+                   << "::" << native_function_name << '(';
+            for (std::size_t index = 0; index < function.parameters.size(); ++index) {
+                if (index != 0)
+                    source << ", ";
+                const auto& parameter = function.parameters[index];
+                source << "[[maybe_unused]] "
+                       << (parameter.default_value ? parameter_native_type(parameter)
+                                                   : function_parameter_type(function, index))
+                       << ' ' << parameter_native_name(parameter);
+            }
+            if (function.rest_parameter) {
+                if (!function.parameters.empty())
+                    source << ", ";
+                source << "[[maybe_unused]] godot::Array "
+                       << sanitize_identifier(function.rest_parameter->name);
+            }
+            source << ") {\n"
+                   << "    gdpp::runtime::ScriptFunctionScope _gdpp_abstract_scope("
+                      "gdpp::runtime::ScriptFaultPolicy::inherit_existing);\n"
+                   << "    gdpp::runtime::report_script_failure("
+                   << godot_string("Cannot call abstract function '" + function.name + "'.")
+                   << ", _gdpp_source_path, " << function.span.begin.line << ", "
+                   << function.span.begin.column << ");\n";
+            if (function.return_type.kind != TypeKind::void_type)
+                source << "    return {};\n";
+            source << "}\n\n";
             in_function_body_ = false;
             current_coroutine_abi_ = false;
             current_coroutine_state_.clear();

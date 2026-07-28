@@ -3176,7 +3176,7 @@ TEST_CASE("semantic analysis rejects calls to unimplemented abstract parents") {
                std::ptrdiff_t{2});
 }
 
-TEST_CASE("compiler emits pure virtual C++ for abstract method contracts") {
+TEST_CASE("compiler emits guarded native stubs for abstract method contracts") {
     const gdpp::Compiler compiler;
     const auto root = compiler.compile("work_contract.gd", "@abstract\n"
                                                            "extends RefCounted\n"
@@ -3192,20 +3192,24 @@ TEST_CASE("compiler emits pure virtual C++ for abstract method contracts") {
 
     REQUIRE(root.success);
     REQUIRE(root.unit.is_abstract);
-    REQUIRE(root.unit.header.find("virtual godot::String execute(int64_t value) = 0;") !=
+    REQUIRE(root.unit.header.find("virtual godot::String execute(int64_t value);") !=
             std::string::npos);
-    REQUIRE(root.unit.source.find("GDPPNative_WorkContract::execute(") == std::string::npos);
+    REQUIRE(root.unit.header.find("execute(int64_t value) = 0") == std::string::npos);
+    REQUIRE(root.unit.source.find("GDPPNative_WorkContract::execute(") != std::string::npos);
+    REQUIRE(root.unit.source.find("Cannot call abstract function 'execute'.") !=
+            std::string::npos);
     REQUIRE(root.unit.source.find("&GDPPNative_WorkContract::_gdpp_variant_call_execute") !=
             std::string::npos);
 
     REQUIRE(inner.success);
     REQUIRE_EQ(inner.unit.abstract_inner_class_names.size(), std::size_t{1});
     REQUIRE(inner.unit.abstract_inner_class_names.front().find("__Contract") != std::string::npos);
-    REQUIRE(inner.unit.header.find("virtual godot::String execute(int64_t value) = 0;") !=
+    REQUIRE(inner.unit.header.find("virtual godot::String execute(int64_t value);") !=
             std::string::npos);
     REQUIRE(inner.unit.header.find("virtual godot::String execute(int64_t value) override;") !=
             std::string::npos);
-    REQUIRE(inner.unit.source.find("GDPPNative_InnerContract__Contract::execute(") ==
+    REQUIRE(inner.unit.header.find("execute(int64_t value) = 0") == std::string::npos);
+    REQUIRE(inner.unit.source.find("GDPPNative_InnerContract__Contract::execute(") !=
             std::string::npos);
     REQUIRE(inner.unit.source.find("GDPPNative_InnerContract__Implementation::execute(") !=
             std::string::npos);
@@ -3233,11 +3237,11 @@ TEST_CASE("compiler preserves engine virtual ABI around abstract contracts") {
     REQUIRE(result.success);
     REQUIRE(result.unit.header.find("virtual void _process(double _gdpp_engine_argument_0) "
                                     "override;") != std::string::npos);
-    REQUIRE(
-        result.unit.header.find("virtual void _gdpp_virtual_impl__process(double delta) = 0;") !=
-        std::string::npos);
+    REQUIRE(result.unit.header.find("virtual void _gdpp_virtual_impl__process(double delta);") !=
+            std::string::npos);
     REQUIRE(result.unit.source.find("GDPPNative_AbstractProcess::_process(") != std::string::npos);
-    REQUIRE(result.unit.source.find("GDPPNative_AbstractProcess::_gdpp_virtual_impl__process(") ==
+    REQUIRE(result.unit.source.find(
+                "GDPPNative_AbstractProcess::_gdpp_virtual_impl__process(") !=
             std::string::npos);
 }
 

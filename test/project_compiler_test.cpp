@@ -3533,6 +3533,13 @@ TEST_CASE("project compiler enforces cross-script abstract method obligations") 
                                            "class_name ConcreteWork\n"
                                            "func execute(value: int) -> String:\n"
                                            "    return str(value)\n");
+    write_text(root / "coroutine_implementation.gd",
+               "extends DeferredWork\n"
+               "class_name CoroutineWork\n"
+               "signal resume\n"
+               "func execute(value: int) -> String:\n"
+               "    await resume\n"
+               "    return str(value)\n");
     write_text(root / "inner_types.gd", "@tool\n"
                                         "class_name InnerContracts\n"
                                         "@abstract class Contract:\n"
@@ -3554,11 +3561,23 @@ TEST_CASE("project compiler enforces cross-script abstract method obligations") 
             std::string::npos);
     REQUIRE(registration.find("GDREGISTER_ABSTRACT_CLASS(GDPPNative_DeferredWork_") !=
             std::string::npos);
+    REQUIRE(registration.find("GDREGISTER_CLASS(GDPPNative_CoroutineWork_") !=
+            std::string::npos);
     REQUIRE(registration.find("GDREGISTER_ABSTRACT_CLASS(GDPPNative_InnerContracts_") !=
             std::string::npos);
     REQUIRE(registration.find("__Contract);") != std::string::npos);
     REQUIRE(registration.find("GDREGISTER_CLASS(GDPPNative_InnerContracts_") != std::string::npos);
     REQUIRE(registration.find("__Implementation);") != std::string::npos);
+    const auto coroutine_script =
+        std::find_if(valid.scripts.begin(), valid.scripts.end(), [](const auto& script) {
+            return script.relative_path == std::filesystem::path{"coroutine_implementation.gd"};
+        });
+    REQUIRE(coroutine_script != valid.scripts.end());
+    const auto coroutine_header =
+        read_text(options.output_directory / "generated" / coroutine_script->header_file_name);
+    REQUIRE(coroutine_header.find(
+                "virtual godot::Variant _gdpp_native_override_execute(int64_t value);") !=
+            std::string::npos);
 
     write_text(root / "missing.gd", "extends DeferredWork\n"
                                     "class_name MissingWork\n");
