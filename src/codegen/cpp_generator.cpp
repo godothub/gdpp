@@ -4373,6 +4373,18 @@ std::string CodeGenerator::emit_expression(const typed::Expression& expression) 
                 if (!owner && callee.resolution == typed::ResolutionKind::script_static_callable &&
                     !callee.resolved_owner.empty()) {
                     owner = script_symbols_->find_native_class(callee.resolved_owner);
+                    if (!owner) {
+                        if (const auto* inner =
+                                script_symbols_->find_inner_native(callee.resolved_owner)) {
+                            const auto declaration =
+                                find_inner_method_declaration(*inner, callee.value, true);
+                            if (declaration.method) {
+                                script_method = declaration.method;
+                                inner_method_owner = declaration.inner_owner;
+                                script_method_owner = declaration.script_owner;
+                            }
+                        }
+                    }
                 }
                 if (!owner)
                     owner = script_symbols_->find_global(callee.operands.at(0)->type.name);
@@ -4527,8 +4539,15 @@ std::string CodeGenerator::emit_expression(const typed::Expression& expression) 
                     return local->second;
                 }
             }
+            if (callee.kind == typed::ExpressionKind::member && !callee.operands.empty() &&
+                callee.operands.at(0)->resolution == typed::ResolutionKind::inner_type &&
+                callee.resolution != typed::ResolutionKind::godot_method) {
+                return "_gdpp_script_method_" + sanitize_identifier(callee.value);
+            }
             return callee.resolution == typed::ResolutionKind::godot_method
                        ? godot_cpp_method_identifier(callee.value)
+                   : callee.resolution == typed::ResolutionKind::script_static_callable
+                       ? "_gdpp_script_method_" + sanitize_identifier(callee.value)
                        : sanitize_identifier(callee.value);
         }();
         const std::vector<Type>* local_parameters = nullptr;
@@ -4938,6 +4957,10 @@ std::string CodeGenerator::emit_expression(const typed::Expression& expression) 
         } else if (callee.resolution == typed::ResolutionKind::script_static_callable &&
                    !callee.resolved_owner.empty()) {
             invocation = callee.resolved_owner + "::" + script_native_name;
+        } else if (callee.kind == typed::ExpressionKind::member && !callee.operands.empty() &&
+                   callee.operands.at(0)->resolution == typed::ResolutionKind::inner_type &&
+                   callee.resolution != typed::ResolutionKind::godot_method) {
+            invocation = emit_expression(*callee.operands.at(0)) + "::" + script_native_name;
         } else if (explicit_self_script_call && script_method) {
             invocation = "this->" + script_native_name;
         } else if (local_function ||
