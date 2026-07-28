@@ -474,25 +474,32 @@ void register_autoload(const godot::StringName& name, godot::Object* instance);
 // compile-time script contract used by new(), constants, and static members.
 template <typename T> class ScriptResource final {
   public:
-    ScriptResource() : resource_(materialize()) {}
+    // A generated header may hold a ScriptResource for another script that is only forward
+    // declared because the two scripts reference each other. Keep construction independent of T;
+    // methods that need the script contract are instantiated later in generated source files,
+    // after the complete dependency headers have been included.
+    ScriptResource() = default;
 
-    explicit ScriptResource(const godot::Ref<godot::Script>& resource) : resource_(resource) {
-        validate_identity();
-    }
+    explicit ScriptResource(const godot::Ref<godot::Script>& resource)
+        : resource_(resource), materialize_on_access_(false) {}
 
     static ScriptResource missing() { return ScriptResource(MissingTag{}); }
 
-    [[nodiscard]] godot::Ref<godot::Script> resource() const { return resource_; }
+    [[nodiscard]] godot::Ref<godot::Script> resource() const {
+        return validate_identity(materialize_on_access_ ? materialize() : resource_);
+    }
 
     [[nodiscard]] godot::Variant variant() const {
-        return godot::Variant(static_cast<const godot::Object*>(resource_.ptr()));
+        const auto script = resource();
+        return godot::Variant(static_cast<const godot::Object*>(script.ptr()));
     }
 
     operator godot::Variant() const { return variant(); }
 
     template <typename... Arguments> auto instantiate(Arguments&&... arguments) const {
         if constexpr (T::_gdpp_attached) {
-            if (resource_.is_null()) {
+            const auto script = resource();
+            if (script.is_null()) {
                 report_script_failure("Cannot instantiate a missing script resource.");
                 if constexpr (T::_gdpp_attached_ref_counted)
                     return godot::Ref<godot::RefCounted>();
@@ -524,7 +531,7 @@ template <typename T> class ScriptResource final {
   private:
     struct MissingTag {};
 
-    explicit ScriptResource(MissingTag) {}
+    explicit ScriptResource(MissingTag) : materialize_on_access_(false) {}
 
     [[nodiscard]] static godot::Ref<godot::Script> materialize() {
         if constexpr (T::_gdpp_attached) {
@@ -541,19 +548,21 @@ template <typename T> class ScriptResource final {
         return {};
     }
 
-    void validate_identity() {
-        if (resource_.is_null())
-            return;
-        const godot::String actual = resource_->get_path().simplify_path();
+    [[nodiscard]] static godot::Ref<godot::Script>
+    validate_identity(godot::Ref<godot::Script> resource) {
+        if (resource.is_null())
+            return resource;
+        const godot::String actual = resource->get_path().simplify_path();
         const godot::String expected = godot::String{T::_gdpp_source_path}.simplify_path();
         if (actual == expected)
-            return;
+            return resource;
         report_script_failure(godot::String{"Cannot assign Script resource '"} + actual +
                               "' to script type '" + expected + "'.");
-        resource_.unref();
+        return {};
     }
 
     godot::Ref<godot::Script> resource_;
+    bool materialize_on_access_{true};
 };
 
 template <typename T>
