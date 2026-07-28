@@ -2363,9 +2363,17 @@ std::string CodeGenerator::emit_parameter_initializer(const typed::Parameter& pa
         }
         if (parameter.type.is_dynamic())
             fallback = "gdpp::runtime::to_variant(" + fallback + ")";
-        const auto supplied = emit_conversion(parameter.type, {TypeKind::variant, "Variant"},
-                                              native_name, &parameter.span);
-        return prefix + cpp_type(parameter.type) + " " + source_name + " = " +
+        auto supplied = emit_conversion(parameter.type, {TypeKind::variant, "Variant"},
+                                        native_name, &parameter.span);
+        const auto storage_type = cpp_type(parameter.type);
+        // Both branches must have the exact declared storage representation. A Godot object
+        // default can be a native pointer while the supplied Variant conversion is ObjectStorage;
+        // leaving C++ to select a common type is ambiguous because both conversions are valid.
+        if (!parameter.type.is_dynamic()) {
+            fallback = storage_type + "(" + fallback + ")";
+            supplied = storage_type + "(" + supplied + ")";
+        }
+        return prefix + storage_type + " " + source_name + " = " +
                "gdpp::runtime::is_default_argument(" + native_name + ") ? " + fallback + " : " +
                supplied + ";\n" + emit_script_failure_return(indentation, continuation_context);
     }

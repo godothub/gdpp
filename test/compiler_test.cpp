@@ -1143,8 +1143,28 @@ TEST_CASE("compiler preserves instance defaults and explicit null through native
             std::string::npos);
     REQUIRE(result.unit.source.find("DEFVAL(godot::Variant())") == std::string::npos);
     REQUIRE(result.unit.source.find(
-                "? gdpp::runtime::ObjectStorage<godot::Control>{} : "
+                "? gdpp::runtime::ObjectStorage<godot::Control>(") !=
+            std::string::npos);
+    REQUIRE(result.unit.source.find(
+                ": gdpp::runtime::ObjectStorage<godot::Control>("
                 "gdpp::runtime::strict_native_object_value_storage<godot::Control>") !=
+            std::string::npos);
+}
+
+TEST_CASE("compiler gives native object defaults one exact parameter storage type") {
+    const gdpp::Compiler compiler;
+    const auto result =
+        compiler.compile("object_default.gd", "extends Tree\n"
+                                              "func choose(parent: TreeItem = get_root()) "
+                                              "-> TreeItem:\n"
+                                              "    return parent\n");
+
+    REQUIRE(result.success);
+    REQUIRE(result.unit.source.find(
+                "? gdpp::runtime::ObjectStorage<godot::TreeItem>(") != std::string::npos);
+    REQUIRE(result.unit.source.find(
+                ": gdpp::runtime::ObjectStorage<godot::TreeItem>("
+                "gdpp::runtime::strict_native_object_value_storage<godot::TreeItem>") !=
             std::string::npos);
 }
 
