@@ -28,6 +28,7 @@
 #include <optional>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 namespace gdpp::runtime {
 
@@ -1184,6 +1185,106 @@ bool is_external_instance(const godot::Variant& value, const godot::StringName& 
         return false;
     auto* object = value.get_validated_object();
     return object && object->is_class(class_name);
+}
+
+godot::Callable bound_method_at(const godot::Variant& value, const godot::StringName& method,
+                                const std::size_t required_arguments,
+                                const std::size_t positional_arguments, const bool is_vararg,
+                                const ScriptSourceLocation location) {
+    if (value.get_type() == godot::Variant::OBJECT) {
+        auto* object = value.get_validated_object();
+        if (!object) {
+            report_script_failure("Cannot create a Callable for a null or freed Godot object.",
+                                  location);
+            return {};
+        }
+        if (!object->has_method(method)) {
+            report_script_failure(godot::String{"Godot object has no method '"} +
+                                      godot::String{method} + godot::String{"'."},
+                                  location);
+            return {};
+        }
+        return {object, method};
+    }
+    if (!value.has_method(method)) {
+        report_script_failure(godot::String{"Godot value of type '"} +
+                                  godot::Variant::get_type_name(value.get_type()) +
+                                  godot::String{"' has no method '"} + godot::String{method} +
+                                  godot::String{"'."},
+                              location);
+        return {};
+    }
+    return make_callable(nullptr, required_arguments, positional_arguments, is_vararg,
+                         [target = value, method, location](const godot::Array& arguments) mutable {
+                             std::vector<godot::Variant> values;
+                             values.reserve(static_cast<std::size_t>(arguments.size()));
+                             for (std::int64_t index = 0; index < arguments.size(); ++index)
+                                 values.push_back(arguments[index]);
+                             std::vector<const godot::Variant*> pointers;
+                             pointers.reserve(values.size());
+                             for (const auto& argument : values)
+                                 pointers.push_back(&argument);
+                             return call_dynamic_impl(target, method, pointers.data(),
+                                                      pointers.size(), location);
+                         });
+}
+
+godot::Callable bound_builtin_static_method_at(const godot::Variant::Type type,
+                                               const godot::StringName& method,
+                                               const std::size_t required_arguments,
+                                               const std::size_t positional_arguments,
+                                               const bool is_vararg,
+                                               const ScriptSourceLocation location) {
+    return make_callable(
+        nullptr, required_arguments, positional_arguments, is_vararg,
+        [type, method, location](const godot::Array& arguments) {
+            std::vector<godot::Variant> values;
+            values.reserve(static_cast<std::size_t>(arguments.size()));
+            for (std::int64_t index = 0; index < arguments.size(); ++index)
+                values.push_back(arguments[index]);
+            std::vector<const godot::Variant*> pointers;
+            pointers.reserve(values.size());
+            for (const auto& argument : values)
+                pointers.push_back(&argument);
+            godot::Variant result;
+            GDExtensionCallError error{GDEXTENSION_CALL_OK, 0, 0};
+            godot::Variant::callp_static(type, method, pointers.data(),
+                                         static_cast<int>(pointers.size()), result, error);
+            if (error.error != GDEXTENSION_CALL_OK) {
+                report_script_failure(call_error_message(godot::String{"Static builtin method '"} +
+                                                             godot::Variant::get_type_name(type) +
+                                                             godot::String{"."} +
+                                                             godot::String{method} +
+                                                             godot::String{"'"},
+                                                         error),
+                                      location);
+                return godot::Variant{};
+            }
+            return result;
+        });
+}
+
+godot::Callable bound_class_static_method_at(const godot::StringName& class_name,
+                                             const godot::StringName& method,
+                                             const std::size_t required_arguments,
+                                             const std::size_t positional_arguments,
+                                             const bool is_vararg,
+                                             const ScriptSourceLocation location) {
+    return make_callable(nullptr, required_arguments, positional_arguments, is_vararg,
+                         [class_name, method, location](const godot::Array& arguments) {
+                             std::vector<godot::Variant> values;
+                             values.reserve(2 + static_cast<std::size_t>(arguments.size()));
+                             values.emplace_back(class_name);
+                             values.emplace_back(method);
+                             for (std::int64_t index = 0; index < arguments.size(); ++index)
+                                 values.push_back(arguments[index]);
+                             std::vector<const godot::Variant*> pointers;
+                             pointers.reserve(values.size());
+                             for (const auto& argument : values)
+                                 pointers.push_back(&argument);
+                             return call_external_static_impl(class_name, method, pointers.data(),
+                                                              pointers.size(), location);
+                         });
 }
 
 godot::Callable external_callable_at(const godot::Variant& value, const godot::StringName& method,

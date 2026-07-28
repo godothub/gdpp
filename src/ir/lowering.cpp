@@ -485,6 +485,8 @@ ir::ExpressionPtr IrLowerer::lower_expression(const ast::Expression& expression)
     if (const auto* resolution = semantic_.api_resolution_of(expression)) {
         if (resolution->kind == ApiResolutionKind::method)
             lowered->resolution = ir::ResolutionKind::godot_method;
+        else if (resolution->kind == ApiResolutionKind::godot_callable)
+            lowered->resolution = ir::ResolutionKind::godot_callable;
         else if (resolution->kind == ApiResolutionKind::property)
             lowered->resolution = ir::ResolutionKind::godot_property;
         else if (resolution->kind == ApiResolutionKind::constructor)
@@ -565,6 +567,9 @@ ir::ExpressionPtr IrLowerer::lower_expression(const ast::Expression& expression)
         lowered->getter = resolution->getter;
         lowered->setter = resolution->setter;
         lowered->direct_access = resolution->direct;
+        lowered->callable_required_arguments = resolution->required_arguments;
+        lowered->callable_maximum_arguments = resolution->maximum_arguments;
+        lowered->callable_is_vararg = resolution->is_vararg;
         lowered->indexed_argument = resolution->indexed_argument;
         lowered->intrinsic = resolution->intrinsic;
         if (resolution->assignment_type.kind != TypeKind::unknown)

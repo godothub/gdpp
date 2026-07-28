@@ -123,6 +123,9 @@ struct Value {
     std::string getter;
     std::string setter;
     bool direct_access{false};
+    std::uint16_t callable_required_arguments{0};
+    std::uint16_t callable_maximum_arguments{0};
+    bool callable_is_vararg{false};
     bool coroutine_call{false};
     std::int64_t indexed_argument{-1};
     FlowSymbolId symbol_identity{0};

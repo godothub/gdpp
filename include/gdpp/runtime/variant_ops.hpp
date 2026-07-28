@@ -480,6 +480,19 @@ call_external_static_at(const ScriptSourceLocation location, const godot::String
 
 [[nodiscard]] bool is_external_instance(const godot::Variant& value,
                                         const godot::StringName& class_name);
+[[nodiscard]] godot::Callable bound_method_at(const godot::Variant& value,
+                                              const godot::StringName& method,
+                                              std::size_t required_arguments,
+                                              std::size_t positional_arguments, bool is_vararg,
+                                              ScriptSourceLocation location = {});
+[[nodiscard]] godot::Callable
+bound_builtin_static_method_at(godot::Variant::Type type, const godot::StringName& method,
+                               std::size_t required_arguments, std::size_t positional_arguments,
+                               bool is_vararg, ScriptSourceLocation location = {});
+[[nodiscard]] godot::Callable
+bound_class_static_method_at(const godot::StringName& class_name, const godot::StringName& method,
+                             std::size_t required_arguments, std::size_t positional_arguments,
+                             bool is_vararg, ScriptSourceLocation location = {});
 [[nodiscard]] godot::Callable external_callable_at(const godot::Variant& value,
                                                    const godot::StringName& method,
                                                    ScriptSourceLocation location = {});

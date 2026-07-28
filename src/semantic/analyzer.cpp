@@ -60,6 +60,18 @@ bool annotations_ignore_warning(const std::vector<ast::Annotation>& annotations,
     });
 }
 
+bool godot_method_exposes_native_pointer(const GodotApi& api, const GodotMethodRecord& method) {
+    if (godot_api_type_is_native_pointer(method.return_type))
+        return true;
+    for (std::size_t index = 0; index < method.maximum_arguments; ++index) {
+        if (const auto* argument = api.argument(method, index);
+            argument && godot_api_type_is_native_pointer(argument->type)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 bool is_number_literal(const ast::Expression& expression) {
     if (expression.kind() == ast::ExpressionKind::literal) {
         return expression.literal_kind() == ast::LiteralKind::integer ||
@@ -1895,11 +1907,21 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                 model_.api_resolutions_.emplace(
                     &expression, ApiResolution{ApiResolutionKind::script_signal, base_type_, "", "",
                                                result, 0, 0, false, false});
-            } else if (api_.find_method(base_type_, expression.value())) {
+            } else if (const auto* method = api_.find_method(base_type_, expression.value())) {
+                if (godot_method_exposes_native_pointer(api_, *method)) {
+                    diagnostics_.error(
+                        "GDS4118",
+                        "Godot method '" + expression.value() +
+                            "' exposes an internal native pointer ABI that GDScript cannot "
+                            "represent",
+                        expression.span);
+                }
                 result = {TypeKind::builtin, "Callable"};
                 model_.api_resolutions_.emplace(
-                    &expression, ApiResolution{ApiResolutionKind::script_callable, base_type_, "",
-                                               "", result, 0, 0, false, false});
+                    &expression,
+                    ApiResolution{ApiResolutionKind::godot_callable, method->owner, "", "", result,
+                                  method->required_arguments, method->maximum_arguments,
+                                  method->is_vararg, method->is_static});
             } else if (const auto* engine_type = api_.find_class(expression.value())) {
                 result = type_from_annotation(engine_type->name);
                 model_.api_resolutions_.emplace(
@@ -1915,11 +1937,20 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
             model_.api_resolutions_.emplace(
                 &expression, ApiResolution{ApiResolutionKind::script_signal, base_type_, "", "",
                                            result, 0, 0, false, false});
-        } else if (api_.find_method(base_type_, expression.value())) {
+        } else if (const auto* method = api_.find_method(base_type_, expression.value())) {
+            if (godot_method_exposes_native_pointer(api_, *method)) {
+                diagnostics_.error(
+                    "GDS4118",
+                    "Godot method '" + expression.value() +
+                        "' exposes an internal native pointer ABI that GDScript cannot represent",
+                    expression.span);
+            }
             result = {TypeKind::builtin, "Callable"};
             model_.api_resolutions_.emplace(
-                &expression, ApiResolution{ApiResolutionKind::script_callable, base_type_, "", "",
-                                           result, 0, 0, false, false});
+                &expression,
+                ApiResolution{ApiResolutionKind::godot_callable, method->owner, "", "", result,
+                              method->required_arguments, method->maximum_arguments,
+                              method->is_vararg, method->is_static});
         } else if (const auto* type = api_.find_class(expression.value())) {
             result = type_from_annotation(type->name);
             model_.api_resolutions_.emplace(
@@ -1957,7 +1988,9 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                                                     expression.span);
             } else if (resolution->kind == ApiResolutionKind::script_signal) {
                 diagnose_static_instance_access("signal", expression.value(), expression.span);
-            } else if (resolution->kind == ApiResolutionKind::script_callable) {
+            } else if (resolution->kind == ApiResolutionKind::script_callable ||
+                       (resolution->kind == ApiResolutionKind::godot_callable &&
+                        !resolution->direct)) {
                 diagnose_static_instance_access("method", expression.value(), expression.span);
             }
         }
@@ -2104,16 +2137,7 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                 const auto resolve_method = [&](const GodotMethodRecord* method) {
                     if (!method)
                         return false;
-                    bool exposes_native_pointer =
-                        godot_api_type_is_native_pointer(method->return_type);
-                    for (std::size_t index = 0; index < method->maximum_arguments; ++index) {
-                        if (const auto* argument = api_.argument(*method, index)) {
-                            exposes_native_pointer =
-                                exposes_native_pointer ||
-                                godot_api_type_is_native_pointer(argument->type);
-                        }
-                    }
-                    if (exposes_native_pointer) {
+                    if (godot_method_exposes_native_pointer(api_, *method)) {
                         diagnostics_.error("GDS4118",
                                            "Godot method '" + std::string{method->name} +
                                                "' exposes an internal native pointer ABI that "
@@ -3310,6 +3334,53 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
             do {
                 const auto object_type = analyze_expression(*expression.operand(0));
                 const auto* object_resolution = model_.api_resolution_of(*expression.operand(0));
+                const auto resolve_godot_callable = [&](const std::string_view owner,
+                                                        const bool accessed_on_type) {
+                    const auto* method = api_.find_method(owner, expression.value());
+                    if (!method) {
+                        if (GodotApi::for_version(latest_godot_version)
+                                .find_method(owner, expression.value())) {
+                            diagnostics_.error("GDS4016",
+                                               "method '" + expression.value() +
+                                                   "' is not available on Godot type '" +
+                                                   std::string{owner} +
+                                                   "' for the selected target version",
+                                               expression.span);
+                            member_result = unknown_type;
+                            return true;
+                        }
+                        return false;
+                    }
+                    if (accessed_on_type && !method->is_static) {
+                        diagnostics_.error("GDS4015",
+                                           "instance method '" + expression.value() +
+                                               "' cannot be accessed on a Godot type",
+                                           expression.span);
+                    } else if (!accessed_on_type && method->is_static &&
+                               !warning_is_ignored(active_warning_ignores_,
+                                                   "static_called_on_instance")) {
+                        diagnostics_.warning("GDS4130",
+                                             "static method '" + expression.value() +
+                                                 "' is accessed on a Godot value instance",
+                                             expression.span);
+                    }
+                    if (godot_method_exposes_native_pointer(api_, *method)) {
+                        diagnostics_.error(
+                            "GDS4118",
+                            "Godot method '" + expression.value() +
+                                "' exposes an internal native pointer ABI that GDScript "
+                                "cannot represent",
+                            expression.span);
+                    }
+                    member_result = {TypeKind::builtin, "Callable"};
+                    model_.api_resolutions_.emplace(
+                        &expression,
+                        ApiResolution{ApiResolutionKind::godot_callable, method->owner, "", "",
+                                      member_result, method->required_arguments,
+                                      method->maximum_arguments, method->is_vararg,
+                                      method->is_static});
+                    return true;
+                };
                 if (object_resolution &&
                     object_resolution->kind == ApiResolutionKind::script_enum_type) {
                     const auto& enum_owner = object_resolution->owner;
@@ -3531,6 +3602,8 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                             model_.api_resolutions_.emplace(&expression, std::move(resolution));
                             break;
                         }
+                        if (resolve_godot_callable("Script", false))
+                            break;
                         diagnostics_.error("GDS4055",
                                            "script resource '" + target->script_name +
                                                "' has no member '" + expression.value() + "'",
@@ -3641,6 +3714,8 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                     }
                     const auto* found = find_inner_member(*inner, expression.value());
                     if (!found) {
+                        if (resolve_godot_callable(inner->godot_base_type, accessed_on_type))
+                            break;
                         if (accessed_on_type) {
                             diagnostics_.error("GDS4055",
                                                "internal class '" + inner->name +
@@ -3825,6 +3900,8 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                                 break;
                             }
                         }
+                        if (resolve_godot_callable(script_owner->godot_base_type, accessed_on_type))
+                            break;
                         if (!accessed_on_type) {
                             member_result = variant_type;
                             model_.api_resolutions_.emplace(
@@ -4039,6 +4116,8 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                         }
                         break;
                     }
+                    if (resolve_godot_callable(external_owner->godot_base_type, accessed_on_type))
+                        break;
                     if (external_owner->members_complete) {
                         diagnostics_.error("GDS4112",
                                            "external type '" + external_owner->name +
@@ -4101,6 +4180,8 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                     auto resolution = property_resolution(ApiResolutionKind::property, *property);
                     member_result = resolution.type;
                     model_.api_resolutions_.emplace(&expression, std::move(resolution));
+                } else if (resolve_godot_callable(owner, accessed_on_type)) {
+                    break;
                 } else if (object_type.kind == TypeKind::dictionary) {
                     // GDScript supports dictionary.key as syntax sugar for dictionary["key"].
                     // A typed Dictionary accepts that sugar only when StringName can enter its
@@ -5185,17 +5266,11 @@ void SemanticAnalyzer::analyze_function(const ast::FunctionDeclaration& function
     } else if (virtual_method) {
         std::vector<Type> api_parameters;
         api_parameters.reserve(virtual_method->maximum_arguments);
-        bool exposes_native_pointer =
-            std::string_view{virtual_method->return_type}.find('*') != std::string_view::npos;
         for (std::size_t index = 0; index < virtual_method->maximum_arguments; ++index) {
-            if (const auto* argument = api_.argument(*virtual_method, index)) {
+            if (const auto* argument = api_.argument(*virtual_method, index))
                 api_parameters.push_back(type_from_godot_api(argument->type));
-                exposes_native_pointer =
-                    exposes_native_pointer ||
-                    std::string_view{argument->type}.find('*') != std::string_view::npos;
-            }
         }
-        if (exposes_native_pointer) {
+        if (godot_method_exposes_native_pointer(api_, *virtual_method)) {
             diagnostics_.error(
                 "GDS4118",
                 "Godot virtual override '" + function.name +

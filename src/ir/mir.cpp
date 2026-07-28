@@ -192,6 +192,9 @@ class FunctionBuilder final {
         value.getter = expression->getter;
         value.setter = expression->setter;
         value.direct_access = expression->direct_access;
+        value.callable_required_arguments = expression->callable_required_arguments;
+        value.callable_maximum_arguments = expression->callable_maximum_arguments;
+        value.callable_is_vararg = expression->callable_is_vararg;
         value.coroutine_call = expression->coroutine_call;
         value.indexed_argument = expression->indexed_argument;
         value.symbol_identity = expression->symbol_identity;

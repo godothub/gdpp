@@ -87,6 +87,7 @@ class CodeGenerator final {
 
     [[nodiscard]] std::string
     emit_script_static_callable(const typed::Expression& expression) const;
+    [[nodiscard]] std::string emit_godot_callable(const typed::Expression& expression) const;
     [[nodiscard]] std::string emit_expression(const typed::Expression& expression) const;
     [[nodiscard]] bool expression_may_fail(const typed::Expression& expression) const;
     [[nodiscard]] bool conversion_may_fail(const Type& target, const Type& source) const;

@@ -68,6 +68,7 @@ struct Symbol {
 enum class ApiResolutionKind {
     none,
     method,
+    godot_callable,
     property,
     constructor,
     singleton,

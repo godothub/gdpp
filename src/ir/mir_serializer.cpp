@@ -139,6 +139,8 @@ std::string_view resolution_kind_name(const typed::ResolutionKind kind) {
         return "none";
     case typed::ResolutionKind::godot_method:
         return "godot_method";
+    case typed::ResolutionKind::godot_callable:
+        return "godot_callable";
     case typed::ResolutionKind::godot_property:
         return "godot_property";
     case typed::ResolutionKind::godot_constructor:
@@ -318,11 +320,13 @@ std::string MirSerializer::serialize(const mir::Module& module) const {
                    << " resolution " << resolution_kind_name(value.resolution) << " intrinsic "
                    << intrinsic_name(value.intrinsic) << " symbol " << value.symbol_identity
                    << " coroutine " << (value.coroutine_call ? 1 : 0) << " direct "
-                   << (value.direct_access ? 1 : 0) << " argument " << value.indexed_argument
-                   << " payload " << std::quoted(value.payload) << " owner "
-                   << std::quoted(value.resolved_owner) << " getter " << std::quoted(value.getter)
-                   << " setter " << std::quoted(value.setter) << " source e"
-                   << value.source_expression << " operands ";
+                   << (value.direct_access ? 1 : 0) << " callable "
+                   << value.callable_required_arguments << ':' << value.callable_maximum_arguments
+                   << ':' << (value.callable_is_vararg ? 1 : 0) << " argument "
+                   << value.indexed_argument << " payload " << std::quoted(value.payload)
+                   << " owner " << std::quoted(value.resolved_owner) << " getter "
+                   << std::quoted(value.getter) << " setter " << std::quoted(value.setter)
+                   << " source e" << value.source_expression << " operands ";
             write_ids(output, value.operands, 'v');
             output << " span ";
             write_span(output, value.span);

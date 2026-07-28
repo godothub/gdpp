@@ -3112,6 +3112,7 @@ bool CodeGenerator::expression_may_fail(const typed::Expression& expression) con
         case typed::ResolutionKind::external_singleton:
         case typed::ResolutionKind::external_callable:
         case typed::ResolutionKind::external_signal:
+        case typed::ResolutionKind::godot_callable:
         case typed::ResolutionKind::dynamic_method:
         case typed::ResolutionKind::dynamic_property:
         case typed::ResolutionKind::script_property:
@@ -3486,6 +3487,53 @@ std::string CodeGenerator::emit_script_static_callable(const typed::Expression& 
     return result + "; })";
 }
 
+std::string CodeGenerator::emit_godot_callable(const typed::Expression& expression) const {
+    const auto method = godot_string_name(expression.value);
+    const auto required = std::to_string(expression.callable_required_arguments);
+    const auto positional = std::to_string(expression.callable_maximum_arguments);
+    const auto vararg = expression.callable_is_vararg ? "true" : "false";
+    const auto location = script_location(expression.span);
+    const auto* owner = api_.find_class(expression.resolved_owner);
+    const auto owner_type = type_from_annotation(expression.resolved_owner);
+    const auto static_callable =
+        owner && owner->builtin
+            ? "gdpp::runtime::bound_builtin_static_method_at(" + variant_type(owner_type) + ", " +
+                  method + ", " + required + ", " + positional + ", " + vararg + ", " + location +
+                  ")"
+            : "gdpp::runtime::bound_class_static_method_at(" +
+                  godot_string_name(expression.resolved_owner) + ", " + method + ", " + required +
+                  ", " + positional + ", " + vararg + ", " + location + ")";
+
+    if (expression.direct_access) {
+        if (expression.operands.empty())
+            return static_callable;
+        const auto& receiver = *expression.operands.front();
+        const bool type_receiver = receiver.resolution == typed::ResolutionKind::godot_type ||
+                                   receiver.resolution == typed::ResolutionKind::external_type ||
+                                   receiver.resolution == typed::ResolutionKind::script_type ||
+                                   receiver.resolution == typed::ResolutionKind::inner_type;
+        if (type_receiver)
+            return static_callable;
+        const auto suffix = std::to_string(temporary_counter_++);
+        const auto value = "_gdpp_static_callable_receiver_" + suffix;
+        return "([&]() -> godot::Callable { const godot::Variant " + value +
+               " = gdpp::runtime::to_variant(" + emit_expression(receiver) +
+               "); if (script_function_failed()) return {}; static_cast<void>(" + value +
+               "); return " + static_callable + "; }())";
+    }
+
+    const auto receiver =
+        expression.operands.empty()
+            ? "gdpp::runtime::to_variant(" + self_object_expression() + ")"
+            : "gdpp::runtime::to_variant(" + emit_expression(*expression.operands.front()) + ")";
+    const auto suffix = std::to_string(temporary_counter_++);
+    const auto value = "_gdpp_bound_callable_receiver_" + suffix;
+    return "([&]() -> godot::Callable { const godot::Variant " + value + " = " + receiver +
+           "; if (script_function_failed()) return {}; return gdpp::runtime::bound_method_at(" +
+           value + ", " + method + ", " + required + ", " + positional + ", " + vararg + ", " +
+           location + "); }())";
+}
+
 std::string CodeGenerator::emit_expression(const typed::Expression& expression) const {
     struct ExpressionSpanScope final {
         const SourceSpan*& current;
@@ -3582,6 +3630,8 @@ std::string CodeGenerator::emit_expression(const typed::Expression& expression) 
         if (expression.resolution == typed::ResolutionKind::script_callable)
             return "godot::Callable(" + self_object_expression() + ", " +
                    godot_string_name(expression.value) + ")";
+        if (expression.resolution == typed::ResolutionKind::godot_callable)
+            return emit_godot_callable(expression);
         if (expression.resolution == typed::ResolutionKind::script_static_callable)
             return emit_script_static_callable(expression);
         if (expression.resolution == typed::ResolutionKind::script_static_field)
@@ -4832,6 +4882,8 @@ std::string CodeGenerator::emit_expression(const typed::Expression& expression) 
                 object = "(" + object + ").ptr()";
             return "godot::Callable(" + object + ", " + godot_string_name(expression.value) + ")";
         }
+        if (expression.resolution == typed::ResolutionKind::godot_callable)
+            return emit_godot_callable(expression);
         if (expression.resolution == typed::ResolutionKind::script_static_callable)
             return emit_script_static_callable(expression);
         if (expression.resolution == typed::ResolutionKind::global_constant ||
