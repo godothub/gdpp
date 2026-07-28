@@ -7,6 +7,7 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 
 SOURCE_ROOT = Path(sys.argv[1]).resolve() if len(sys.argv) > 1 else Path(__file__).parents[1]
@@ -18,6 +19,35 @@ SPEC.loader.exec_module(E2E)
 
 
 class ExternalProjectE2ETest(unittest.TestCase):
+    def test_bootstrap_import_retries_only_failed_processes(self) -> None:
+        failed = {"exit_code": -6, "timed_out": False, "log": "attempt-1.log"}
+        passed = {"exit_code": 0, "timed_out": False, "log": "attempt-2.log"}
+        with mock.patch.object(E2E, "run", side_effect=[failed, passed]) as runner:
+            result = E2E.run_bootstrap_import(
+                Path("/godot"),
+                Path("/project"),
+                60,
+                Path("/output"),
+                "baseline-import-bootstrap",
+            )
+        self.assertEqual(result["successful_attempt"], 2)
+        self.assertEqual(len(result["attempts"]), 2)
+        self.assertEqual(runner.call_count, 2)
+        self.assertTrue(runner.call_args_list[0].kwargs["allow_failure"])
+
+    def test_bootstrap_import_rejects_persistent_failures(self) -> None:
+        failed = {"exit_code": -6, "timed_out": False, "log": "attempt.log"}
+        with mock.patch.object(E2E, "run", return_value=failed) as runner:
+            with self.assertRaisesRegex(RuntimeError, "3 consecutive attempts"):
+                E2E.run_bootstrap_import(
+                    Path("/godot"),
+                    Path("/project"),
+                    60,
+                    Path("/output"),
+                    "import-bootstrap",
+                )
+        self.assertEqual(runner.call_count, 3)
+
     def test_import_gate_rejects_only_diagnostics_added_by_gdpp(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

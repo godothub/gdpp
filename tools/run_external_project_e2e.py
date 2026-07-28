@@ -60,6 +60,7 @@ def run(
     timeout: float,
     log: Path,
     allow_timeout: bool = False,
+    allow_failure: bool = False,
 ) -> dict:
     started = time.monotonic()
     creationflags = 0
@@ -94,9 +95,38 @@ def run(
     }
     if timed_out and not allow_timeout:
         fail(f"command timed out after {timeout:.0f}s; see {log}")
-    if not timed_out and exit_code != 0:
+    if not timed_out and exit_code != 0 and not allow_failure:
         fail(f"command failed with exit code {exit_code}; see {log}")
     return result
+
+
+def run_bootstrap_import(
+    godot: Path,
+    project: Path,
+    timeout: float,
+    output: Path,
+    phase: str,
+    maximum_attempts: int = 3,
+) -> dict:
+    attempts: list[dict] = []
+    for attempt in range(1, maximum_attempts + 1):
+        result = run(
+            [str(godot), "--headless", "--editor", "--path", str(project), "--import"],
+            cwd=project,
+            timeout=timeout,
+            log=output / f"{phase}-{attempt}.log",
+            allow_failure=True,
+        )
+        attempts.append(result)
+        if result["exit_code"] == 0:
+            return {
+                "attempts": attempts,
+                "successful_attempt": attempt,
+            }
+    fail(
+        f"{phase.replace('-', ' ')} failed in {maximum_attempts} consecutive attempts; "
+        f"see {attempts[-1]['log']}"
+    )
 
 
 def assert_clean_log(log: Path, phase: str) -> None:
@@ -454,12 +484,12 @@ def main() -> int:
             log=validation_log,
         )
 
-        baseline_bootstrap_log = output / "baseline-import-bootstrap.log"
-        report["phases"]["baseline_import_bootstrap"] = run(
-            [str(godot), "--headless", "--editor", "--path", str(project), "--import"],
-            cwd=project,
-            timeout=args.import_timeout,
-            log=baseline_bootstrap_log,
+        report["phases"]["baseline_import_bootstrap"] = run_bootstrap_import(
+            godot,
+            project,
+            args.import_timeout,
+            output,
+            "baseline-import-bootstrap",
         )
         baseline_import_log = output / "baseline-import.log"
         report["phases"]["baseline_import"] = run(
@@ -524,12 +554,12 @@ def main() -> int:
         _, _, product_path = export_contract(args.host, product_directory)
         product = Path(product_path)
 
-        bootstrap_import_log = output / "import-bootstrap.log"
-        report["phases"]["import_bootstrap"] = run(
-            [str(godot), "--headless", "--editor", "--path", str(project), "--import"],
-            cwd=project,
-            timeout=args.import_timeout,
-            log=bootstrap_import_log,
+        report["phases"]["import_bootstrap"] = run_bootstrap_import(
+            godot,
+            project,
+            args.import_timeout,
+            output,
+            "import-bootstrap",
         )
 
         # The pristine two-pass baseline separates customer-project diagnostics from changes
