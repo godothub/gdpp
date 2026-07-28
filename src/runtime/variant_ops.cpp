@@ -1126,13 +1126,39 @@ godot::Object* find_engine_singleton_at(const godot::StringName& name,
     return singleton;
 }
 
-godot::Variant script_identity(godot::Object* object) {
+godot::Variant script_identity(godot::Object* object, const char* source_path) {
     if (!object)
         return {};
+
+    if (source_path && *source_path) {
+        const godot::String canonical{source_path};
+        if (find_attached_script(canonical)) {
+            godot::String error;
+            const auto script = attached_script_resource(canonical, &error);
+            if (script.is_valid())
+                return godot::Variant(static_cast<const godot::Object*>(script.ptr()));
+            godot::UtilityFunctions::push_error(
+                godot::String{"GDPP: cannot materialize current compiled script '"} + canonical +
+                "': " + error);
+            return {};
+        }
+    }
+
+    const auto script = object->get_script();
+    if (script.is_valid())
+        return godot::Variant(static_cast<const godot::Object*>(script.ptr()));
+
     const auto native_class = object->get_class();
-    if (native_class.begins_with("GDPPNative_"))
-        return godot::StringName(native_class);
-    return object->get_script();
+    if (const auto descriptor = find_attached_script_by_behavior_class(native_class); descriptor) {
+        godot::String error;
+        const auto attached = attached_script_resource(descriptor->source_path, &error);
+        if (attached.is_valid())
+            return godot::Variant(static_cast<const godot::Object*>(attached.ptr()));
+        godot::UtilityFunctions::push_error(
+            godot::String{"GDPP: cannot materialize compiled script for behavior '"} +
+            godot::String{native_class} + "': " + error);
+    }
+    return {};
 }
 
 godot::Variant call_callable_impl(const godot::Callable& callable, const godot::Variant** arguments,

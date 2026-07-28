@@ -4,6 +4,7 @@ extends AnimationPlayer
 @export var verify_library := true
 @export var linked_node: Node
 @export var typed_records: Array[Dictionary] = []
+var initialized_script_path: String = get_script().resource_path
 
 
 func has_serialized_library() -> bool:
@@ -24,4 +25,7 @@ func has_serialized_typed_container() -> bool:
 
 
 func has_script_resource_identity() -> bool:
-    return get_script().resource_path == "res://animation_storage_probe.gd"
+    return (
+        initialized_script_path == "res://animation_storage_probe.gd"
+        and get_script().resource_path == initialized_script_path
+    )

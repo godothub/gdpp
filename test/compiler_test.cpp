@@ -1286,7 +1286,8 @@ TEST_CASE("compiler routes native script identity through the compatibility runt
                                                         "    return get_script()\n");
 
     REQUIRE(result.success);
-    REQUIRE(result.unit.source.find("gdpp::runtime::script_identity(this)") != std::string::npos);
+    REQUIRE(result.unit.source.find(
+                "gdpp::runtime::script_identity(this, _gdpp_source_path)") != std::string::npos);
 }
 
 TEST_CASE("compiler selects the Godot Node template for implicit get_node calls") {

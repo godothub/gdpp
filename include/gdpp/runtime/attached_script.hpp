@@ -137,6 +137,12 @@ struct AttachedScriptDescriptor {
 void unregister_all_attached_scripts();
 [[nodiscard]] std::optional<AttachedScriptDescriptor>
 find_attached_script(const godot::String& source_path);
+// Generated behavior classes and their source identities form a one-to-one runtime contract.
+// This reverse lookup is used during the narrow construction window before Godot has published
+// the provider object's ScriptInstance, and by behavior-owned compatibility paths that do not
+// have a provider Script pointer.
+[[nodiscard]] std::optional<AttachedScriptDescriptor>
+find_attached_script_by_behavior_class(const godot::StringName& behavior_class);
 // Canonicalizes `res://`, `uid://`, and project-root-relative resource identities using Godot's
 // active UID table. An unresolved UID or a non-project path returns an empty String.
 [[nodiscard]] godot::String

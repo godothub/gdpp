@@ -4733,7 +4733,7 @@ std::string CodeGenerator::emit_expression(const typed::Expression& expression) 
                 if (ref_counted)
                     object = "(" + object + ").ptr()";
             }
-            return "gdpp::runtime::script_identity(" + object + ")";
+            return "gdpp::runtime::script_identity(" + object + ", _gdpp_source_path)";
         }
         // A local declared/inherited signal is already owned by this native object. Constructing
         // a temporary godot::Signal for every `pulse.emit(...)` iteration performs a redundant

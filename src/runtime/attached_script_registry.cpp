@@ -72,6 +72,11 @@ std::map<std::string, AttachedScriptDescriptor>& registry() {
     return value;
 }
 
+std::map<std::string, std::string>& behavior_registry() {
+    static std::map<std::string, std::string> value;
+    return value;
+}
+
 std::map<std::string, godot::Ref<AttachedCompiledScript>>& script_resources() {
     static std::map<std::string, godot::Ref<AttachedCompiledScript>> value;
     return value;
@@ -324,13 +329,25 @@ bool register_attached_script(AttachedScriptDescriptor descriptor, godot::String
         set_error(error, "conflicting attached script descriptor: " + descriptor.source_path);
         return false;
     }
+    const auto behavior_key = registry_key(godot::String{descriptor.behavior_class});
+    if (!behavior_key.empty()) {
+        const auto behavior = behavior_registry().find(behavior_key);
+        if (behavior != behavior_registry().end() && behavior->second != key) {
+            set_error(error, "attached behavior class is already registered for another script: " +
+                                 godot::String{descriptor.behavior_class});
+            return false;
+        }
+    }
     registry().emplace(key, std::move(descriptor));
+    if (!behavior_key.empty())
+        behavior_registry().emplace(behavior_key, key);
     return true;
 }
 
 void unregister_all_attached_scripts() {
     std::lock_guard<std::mutex> lock{registry_mutex()};
     script_resources().clear();
+    behavior_registry().clear();
     registry().clear();
 }
 
@@ -340,6 +357,19 @@ std::optional<AttachedScriptDescriptor> find_attached_script(const godot::String
     if (found == registry().end())
         return std::nullopt;
     return found->second;
+}
+
+std::optional<AttachedScriptDescriptor>
+find_attached_script_by_behavior_class(const godot::StringName& behavior_class) {
+    std::lock_guard<std::mutex> lock{registry_mutex()};
+    const auto behavior =
+        behavior_registry().find(registry_key(godot::String{behavior_class}));
+    if (behavior == behavior_registry().end())
+        return std::nullopt;
+    const auto descriptor = registry().find(behavior->second);
+    if (descriptor == registry().end())
+        return std::nullopt;
+    return descriptor->second;
 }
 
 godot::Ref<AttachedCompiledScript> attached_script_resource(const godot::String& source_path,

@@ -461,7 +461,10 @@ void register_autoload(const godot::StringName& name, godot::Object* instance);
 [[nodiscard]] godot::Object* find_autoload(const godot::StringName& name);
 [[nodiscard]] godot::Object* find_engine_singleton_at(const godot::StringName& name,
                                                       ScriptSourceLocation location = {});
-[[nodiscard]] godot::Variant script_identity(godot::Object* object);
+// `source_path` preserves get_script() during attached behavior construction, before Godot has
+// published the provider object's ScriptInstance. It may be omitted for ordinary native objects.
+[[nodiscard]] godot::Variant script_identity(godot::Object* object,
+                                             const char* source_path = nullptr);
 [[nodiscard]] godot::Variant instantiate_external_class_at(const godot::StringName& name,
                                                            ScriptSourceLocation location = {});
 
