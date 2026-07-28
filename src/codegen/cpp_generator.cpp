@@ -3793,33 +3793,6 @@ std::string CodeGenerator::emit_expression(const typed::Expression& expression) 
             expression.resolution == typed::ResolutionKind::global_enum_value ||
             expression.resolution == typed::ResolutionKind::global_enum_type)
             return expression.resolved_owner;
-        if (current_inner_script_ &&
-            local_functions_.find(expression.value) != local_functions_.end()) {
-            const auto member =
-                std::find_if(current_inner_script_->members.begin(),
-                             current_inner_script_->members.end(), [&](const auto& candidate) {
-                                 return candidate.kind == ScriptMemberKind::function &&
-                                        candidate.name == expression.value;
-                             });
-            if (member != current_inner_script_->members.end())
-                return inner_method_implementation_name(*current_inner_script_, *member);
-        }
-        if (current_script_ && local_functions_.find(expression.value) != local_functions_.end()) {
-            const auto member =
-                std::find_if(current_script_->members.begin(), current_script_->members.end(),
-                             [&](const auto& candidate) {
-                                 return candidate.kind == ScriptMemberKind::function &&
-                                        candidate.name == expression.value;
-                             });
-            if (member != current_script_->members.end())
-                return script_method_implementation_name(*current_script_, *member);
-        }
-        if (local_functions_.find(expression.value) != local_functions_.end()) {
-            const auto* engine_method =
-                api_.find_method(current_godot_base_type_, expression.value);
-            if (engine_method && engine_method->is_virtual)
-                return "_gdpp_virtual_impl_" + sanitize_identifier(expression.value);
-        }
         {
             auto identifier = expression.value == "self" ? self_object_expression()
                                                          : sanitize_identifier(expression.value);

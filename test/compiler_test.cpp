@@ -5566,6 +5566,23 @@ TEST_CASE("static function values use owner-free callables with default argument
     REQUIRE(result.unit.source.find("gdpp::runtime::default_argument()") != std::string::npos);
 }
 
+TEST_CASE("resolved lexical values shadow same-named script methods during code generation") {
+    const gdpp::Compiler compiler;
+    const auto result =
+        compiler.compile("shadowed_method_value.gd",
+                         "extends Node\n"
+                         "func replace(value: String) -> void:\n"
+                         "    pass\n"
+                         "func forward(helper: Variant, replace: bool) -> void:\n"
+                         "    helper.confirm_code_completion(replace, self)\n");
+
+    REQUIRE(result.success);
+    REQUIRE(result.unit.source.find("gdpp::runtime::to_variant(replace)") != std::string::npos);
+    REQUIRE(result.unit.source.find(
+                "gdpp::runtime::to_variant(_gdpp_script_method_replace)") ==
+            std::string::npos);
+}
+
 TEST_CASE("internal static function values use owner-free callables") {
     const gdpp::Compiler compiler;
     const auto result =
