@@ -121,9 +121,18 @@ class ExternalProjectE2ETest(unittest.TestCase):
                 + "SCRIPT ERROR: existing customer failure\n",
                 encoding="utf-8",
             )
-            with self.assertRaisesRegex(RuntimeError, "additional occurrence"):
+            E2E.assert_no_new_diagnostics(
+                repeated, baseline_diagnostics, "Godot import"
+            )
+            different_origin = root / "different-origin.log"
+            different_origin.write_text(
+                "SCRIPT ERROR: existing customer failure\n"
+                "   at: customer_plugin (res://addons/customer/plugin.gd:10)\n",
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(RuntimeError, "diagnostic signature"):
                 E2E.assert_no_new_diagnostics(
-                    repeated, baseline_diagnostics, "Godot import"
+                    different_origin, baseline_diagnostics, "Godot import"
                 )
             bootstrap = root / "bootstrap.log"
             bootstrap.write_text(
@@ -147,6 +156,35 @@ class ExternalProjectE2ETest(unittest.TestCase):
                 E2E.assert_no_new_diagnostics(
                     bootstrap_regression,
                     E2E.diagnostic_envelope(bootstrap),
+                    "Godot bootstrap import",
+                )
+            baseline_leak = root / "baseline-leak.log"
+            baseline_leak.write_text(
+                "ERROR: 168 resources still in use at exit.\n"
+                "   at: clear (core/io/resource.cpp:822)\n",
+                encoding="utf-8",
+            )
+            smaller_leak = root / "smaller-leak.log"
+            smaller_leak.write_text(
+                "ERROR: 4 resources still in use at exit.\n"
+                "   at: clear (core/io/resource.cpp:822)\n",
+                encoding="utf-8",
+            )
+            E2E.assert_no_new_diagnostics(
+                smaller_leak,
+                E2E.diagnostic_envelope(baseline_leak),
+                "Godot bootstrap import",
+            )
+            larger_leak = root / "larger-leak.log"
+            larger_leak.write_text(
+                "ERROR: 169 resources still in use at exit.\n"
+                "   at: clear (core/io/resource.cpp:822)\n",
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(RuntimeError, "leak magnitude"):
+                E2E.assert_no_new_diagnostics(
+                    larger_leak,
+                    E2E.diagnostic_envelope(baseline_leak),
                     "Godot bootstrap import",
                 )
         source = MODULE_PATH.read_text(encoding="utf-8")

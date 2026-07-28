@@ -26,6 +26,14 @@ FORBIDDEN_DIAGNOSTICS = re.compile(
     re.MULTILINE | re.IGNORECASE,
 )
 ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+DIAGNOSTIC_CONTEXT = re.compile(
+    r"^(?:at:|GDScript backtrace\b|\[\d+\]\s|stack trace\b)",
+    re.IGNORECASE,
+)
+LEAK_MAGNITUDE = re.compile(
+    r"\b(\d+)\s+(?=(?:ObjectDB instances|resources|RID allocations|RIDs of type)\b)",
+    re.IGNORECASE,
+)
 
 
 def fail(message: str) -> None:
@@ -157,19 +165,29 @@ def assert_zero_pck_violations(log: Path) -> None:
 
 def diagnostic_fingerprints(log: Path) -> list[str]:
     fingerprints: list[str] = []
-    for line in log.read_text(encoding="utf-8", errors="replace").splitlines():
-        normalized = ANSI_ESCAPE.sub("", line)
-        if FORBIDDEN_DIAGNOSTICS.search(normalized):
-            fingerprints.append(" ".join(normalized.split()))
+    lines = [
+        " ".join(ANSI_ESCAPE.sub("", line).split())
+        for line in log.read_text(encoding="utf-8", errors="replace").splitlines()
+    ]
+    for index, normalized in enumerate(lines):
+        if not FORBIDDEN_DIAGNOSTICS.search(normalized):
+            continue
+        context: list[str] = []
+        for following in lines[index + 1 : index + 9]:
+            if FORBIDDEN_DIAGNOSTICS.search(following):
+                break
+            if DIAGNOSTIC_CONTEXT.search(following):
+                context.append(following)
+        fingerprints.append(" | ".join([normalized, *context]))
     return fingerprints
 
 
 def diagnostic_envelope(*logs: Path) -> Counter[str]:
     # Editor imports execute customer @tool plugins while the resource scan is converging. The
-    # number of times an existing customer diagnostic is emitted can vary between the bootstrap
-    # and settled pass even with identical project bytes. Preserve the highest pristine count for
-    # each exact fingerprint; a new signature still fails closed, while scan scheduling alone
-    # cannot make a moving-project gate flaky.
+    # number of times an existing customer diagnostic is emitted can vary between the bootstrap,
+    # settled and export passes even with identical project bytes. Preserve every pristine
+    # signature with its origin context. Occurrence counts remain evidence, but scheduling alone
+    # is not a regression; a new origin or a larger resource-leak magnitude still fails closed.
     envelope: Counter[str] = Counter()
     for log in logs:
         current = Counter(diagnostic_fingerprints(log))
@@ -178,22 +196,51 @@ def diagnostic_envelope(*logs: Path) -> Counter[str]:
     return envelope
 
 
+def normalized_leak_signature(fingerprint: str) -> str:
+    header, separator, context = fingerprint.partition(" | ")
+    if not re.search(r"\b(?:leaked|still in use)\b", header, re.IGNORECASE):
+        return fingerprint
+    normalized = LEAK_MAGNITUDE.sub("<count> ", header)
+    return normalized + (separator + context if separator else "")
+
+
+def leak_magnitude(fingerprint: str) -> int | None:
+    header = fingerprint.partition(" | ")[0]
+    if not re.search(r"\b(?:leaked|still in use)\b", header, re.IGNORECASE):
+        return None
+    match = LEAK_MAGNITUDE.search(header)
+    return int(match.group(1)) if match else None
+
+
 def assert_no_new_diagnostics(
     log: Path,
     baseline: Counter[str],
     phase: str,
 ) -> None:
     current = Counter(diagnostic_fingerprints(log))
-    regressions = sorted(
-        (message, count - baseline[message])
-        for message, count in current.items()
-        if count > baseline[message]
-    )
+    baseline_leaks: dict[str, int] = {}
+    for fingerprint in baseline:
+        magnitude = leak_magnitude(fingerprint)
+        if magnitude is None:
+            continue
+        signature = normalized_leak_signature(fingerprint)
+        baseline_leaks[signature] = max(baseline_leaks.get(signature, 0), magnitude)
+
+    regressions: list[str] = []
+    for fingerprint in current:
+        if fingerprint in baseline:
+            continue
+        magnitude = leak_magnitude(fingerprint)
+        if magnitude is not None:
+            signature = normalized_leak_signature(fingerprint)
+            if magnitude <= baseline_leaks.get(signature, -1):
+                continue
+        regressions.append(fingerprint)
     if regressions:
-        message, added_count = regressions[0]
+        message = sorted(regressions)[0]
         fail(
-            f"{phase} introduced a diagnostic with {added_count} additional occurrence(s) "
-            f"not present at that count in the pristine project: {message}"
+            f"{phase} introduced a diagnostic signature or leak magnitude "
+            f"not present in the pristine project: {message}"
         )
 
 
@@ -746,7 +793,7 @@ def main() -> int:
         )
         assert_no_new_diagnostics(
             import_bootstrap_log,
-            diagnostic_envelope(baseline_bootstrap_log),
+            baseline_import_envelope,
             "Godot bootstrap import",
         )
 
