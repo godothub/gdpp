@@ -1746,9 +1746,32 @@ ProjectCompileResult ProjectCompiler::compile_impl(const ProjectCompileOptions& 
         }
         for (auto& inner : input.inner_classes) {
             for (auto& member : inner.members) {
+                if ((member.type.kind == TypeKind::object ||
+                     member.type.kind == TypeKind::enumeration) &&
+                    member.type.name.find('.') == std::string::npos) {
+                    const auto enumeration = std::find_if(
+                        inner.enums.begin(), inner.enums.end(),
+                        [&](const auto& candidate) { return candidate.name == member.type.name; });
+                    if (enumeration != inner.enums.end()) {
+                        member.type = {TypeKind::enumeration, inner.name + "." + enumeration->name};
+                    }
+                }
                 resolve_enum_type(member.type);
-                for (auto& parameter : member.parameters)
+                for (auto& parameter : member.parameters) {
+                    if ((parameter.kind == TypeKind::object ||
+                         parameter.kind == TypeKind::enumeration) &&
+                        parameter.name.find('.') == std::string::npos) {
+                        const auto enumeration = std::find_if(
+                            inner.enums.begin(), inner.enums.end(), [&](const auto& candidate) {
+                                return candidate.name == parameter.name;
+                            });
+                        if (enumeration != inner.enums.end()) {
+                            parameter = {TypeKind::enumeration,
+                                         inner.name + "." + enumeration->name};
+                        }
+                    }
                     resolve_enum_type(parameter);
+                }
             }
         }
     }
@@ -2234,7 +2257,15 @@ ProjectCompileResult ProjectCompiler::compile_impl(const ProjectCompileOptions& 
                            global != script_classes.end()) {
                     owner_index = global->second;
                 } else if (owner_name != input.script_class_name) {
-                    return;
+                    const bool local_inner_owner =
+                        std::any_of(input.inner_classes.begin(), input.inner_classes.end(),
+                                    [&](const ScriptInnerClassSymbol& candidate) {
+                                        return candidate.name == owner_name ||
+                                               candidate.name.rfind(owner_name + ".", 0) == 0;
+                                    });
+                    if (!local_inner_owner)
+                        return;
+                    member_name = type.name;
                 }
             }
 

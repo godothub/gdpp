@@ -1539,6 +1539,28 @@ TEST_CASE("project compiler normalizes nested enum identities across typed conta
     REQUIRE(source.find("::first()") != std::string::npos);
 }
 
+TEST_CASE("project compiler normalizes bare inner enum storage against qualified members") {
+    const auto root = fixture_root("project-inner-enum-storage-identity");
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
+    write_text(root / "commands.gd", "extends RefCounted\n"
+                                     "class Command:\n"
+                                     "    enum Kind { SHOW, HIDE }\n"
+                                     "    var kind: Kind\n"
+                                     "func create() -> Command:\n"
+                                     "    var command := Command.new()\n"
+                                     "    command.kind = Command.Kind.SHOW\n"
+                                     "    return command\n");
+
+    const auto options = project_options(root);
+    const auto result = gdpp::ProjectCompiler{}.compile(options);
+
+    REQUIRE(result.success);
+    const auto source =
+        read_text(options.output_directory / "generated" / result.scripts.front().source_file_name);
+    REQUIRE(source.find("::Kind::_gdpp_enum_SHOW") != std::string::npos);
+}
+
 TEST_CASE("project compiler rejects incompatible script override contracts") {
     const auto root = fixture_root("project-invalid-overrides");
     std::error_code error;

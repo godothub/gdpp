@@ -70,14 +70,10 @@ std::set<Pair> strict_pairs() {
             result.emplace(target, source);
     };
     add(gdpp::VariantType::object, {gdpp::VariantType::nil});
-    add(gdpp::VariantType::boolean,
-        {gdpp::VariantType::integer, gdpp::VariantType::floating});
-    add(gdpp::VariantType::integer,
-        {gdpp::VariantType::boolean, gdpp::VariantType::floating});
-    add(gdpp::VariantType::floating,
-        {gdpp::VariantType::boolean, gdpp::VariantType::integer});
-    add(gdpp::VariantType::string,
-        {gdpp::VariantType::node_path, gdpp::VariantType::string_name});
+    add(gdpp::VariantType::boolean, {gdpp::VariantType::integer, gdpp::VariantType::floating});
+    add(gdpp::VariantType::integer, {gdpp::VariantType::boolean, gdpp::VariantType::floating});
+    add(gdpp::VariantType::floating, {gdpp::VariantType::boolean, gdpp::VariantType::integer});
+    add(gdpp::VariantType::string, {gdpp::VariantType::node_path, gdpp::VariantType::string_name});
     add(gdpp::VariantType::vector2, {gdpp::VariantType::vector2i});
     add(gdpp::VariantType::vector2i, {gdpp::VariantType::vector2});
     add(gdpp::VariantType::rect2, {gdpp::VariantType::rect2i});
@@ -90,11 +86,10 @@ std::set<Pair> strict_pairs() {
     add(gdpp::VariantType::quaternion, {gdpp::VariantType::basis});
     add(gdpp::VariantType::basis, {gdpp::VariantType::quaternion});
     add(gdpp::VariantType::transform3d,
-        {gdpp::VariantType::transform2d, gdpp::VariantType::quaternion,
-         gdpp::VariantType::basis, gdpp::VariantType::projection});
+        {gdpp::VariantType::transform2d, gdpp::VariantType::quaternion, gdpp::VariantType::basis,
+         gdpp::VariantType::projection});
     add(gdpp::VariantType::projection, {gdpp::VariantType::transform3d});
-    add(gdpp::VariantType::color,
-        {gdpp::VariantType::string, gdpp::VariantType::integer});
+    add(gdpp::VariantType::color, {gdpp::VariantType::string, gdpp::VariantType::integer});
     add(gdpp::VariantType::string_name, {gdpp::VariantType::string});
     add(gdpp::VariantType::node_path, {gdpp::VariantType::string});
     add(gdpp::VariantType::rid, {gdpp::VariantType::object});
@@ -104,16 +99,12 @@ std::set<Pair> strict_pairs() {
          gdpp::VariantType::packed_float64_array, gdpp::VariantType::packed_string_array,
          gdpp::VariantType::packed_vector2_array, gdpp::VariantType::packed_vector3_array,
          gdpp::VariantType::packed_color_array, gdpp::VariantType::packed_vector4_array});
-    for (const auto packed : {gdpp::VariantType::packed_byte_array,
-                              gdpp::VariantType::packed_int32_array,
-                              gdpp::VariantType::packed_int64_array,
-                              gdpp::VariantType::packed_float32_array,
-                              gdpp::VariantType::packed_float64_array,
-                              gdpp::VariantType::packed_string_array,
-                              gdpp::VariantType::packed_vector2_array,
-                              gdpp::VariantType::packed_vector3_array,
-                              gdpp::VariantType::packed_color_array,
-                              gdpp::VariantType::packed_vector4_array}) {
+    for (const auto packed :
+         {gdpp::VariantType::packed_byte_array, gdpp::VariantType::packed_int32_array,
+          gdpp::VariantType::packed_int64_array, gdpp::VariantType::packed_float32_array,
+          gdpp::VariantType::packed_float64_array, gdpp::VariantType::packed_string_array,
+          gdpp::VariantType::packed_vector2_array, gdpp::VariantType::packed_vector3_array,
+          gdpp::VariantType::packed_color_array, gdpp::VariantType::packed_vector4_array}) {
         add(packed, {gdpp::VariantType::array});
     }
     return result;
@@ -167,8 +158,7 @@ TEST_CASE("GDScript ownership distinguishes copied values shared containers and 
     REQUIRE_EQ((Type{TypeKind::integer, "int"}.ownership()), OwnershipKind::value);
     REQUIRE_EQ((Type{TypeKind::string, "String"}.ownership()), OwnershipKind::value);
     REQUIRE_EQ((Type{TypeKind::builtin, "Vector3"}.ownership()), OwnershipKind::value);
-    REQUIRE_EQ((Type{TypeKind::array, "Array[int]"}.ownership()),
-               OwnershipKind::shared_container);
+    REQUIRE_EQ((Type{TypeKind::array, "Array[int]"}.ownership()), OwnershipKind::shared_container);
     REQUIRE_EQ((Type{TypeKind::dictionary, "Dictionary[String, int]"}.ownership()),
                OwnershipKind::shared_container);
     REQUIRE_EQ((Type{TypeKind::builtin, "PackedByteArray"}.ownership()),
@@ -208,6 +198,18 @@ TEST_CASE("explicit conversion matrix adds only Godot permissive casts") {
                        expected.find({target, source}) != expected.end());
         }
     }
+}
+
+TEST_CASE("named enums preserve integer ABI while requiring explicit cross-enum casts") {
+    const gdpp::Type first{gdpp::TypeKind::enumeration, "First.Mode"};
+    const gdpp::Type second{gdpp::TypeKind::enumeration, "Second.Mode"};
+    const gdpp::Type integer{gdpp::TypeKind::integer, "int"};
+
+    REQUIRE(gdpp::is_implicitly_convertible(first, first));
+    REQUIRE(gdpp::is_implicitly_convertible(first, integer));
+    REQUIRE(gdpp::is_implicitly_convertible(integer, first));
+    REQUIRE(!gdpp::is_implicitly_convertible(first, second));
+    REQUIRE(gdpp::is_explicitly_convertible(first, second));
 }
 
 TEST_CASE("typed containers are invariant for assignment but builtin-compatible for casts") {

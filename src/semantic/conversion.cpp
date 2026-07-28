@@ -65,16 +65,12 @@ bool strict_variant_conversion(const VariantType target, const VariantType sourc
     case VariantType::object:
         return false;
     case VariantType::array:
-        return is_one_of(source, {VariantType::packed_byte_array,
-                                  VariantType::packed_int32_array,
-                                  VariantType::packed_int64_array,
-                                  VariantType::packed_float32_array,
-                                  VariantType::packed_float64_array,
-                                  VariantType::packed_string_array,
-                                  VariantType::packed_vector2_array,
-                                  VariantType::packed_vector3_array,
-                                  VariantType::packed_color_array,
-                                  VariantType::packed_vector4_array});
+        return is_one_of(source,
+                         {VariantType::packed_byte_array, VariantType::packed_int32_array,
+                          VariantType::packed_int64_array, VariantType::packed_float32_array,
+                          VariantType::packed_float64_array, VariantType::packed_string_array,
+                          VariantType::packed_vector2_array, VariantType::packed_vector3_array,
+                          VariantType::packed_color_array, VariantType::packed_vector4_array});
     case VariantType::packed_byte_array:
     case VariantType::packed_int32_array:
     case VariantType::packed_int64_array:
@@ -173,10 +169,11 @@ ConversionKind classify_conversion(const Type& target, const Type& source) noexc
         return ConversionKind::dynamic;
 
     if (target.kind == TypeKind::enumeration) {
-        if (source.kind == TypeKind::integer ||
-            (source.kind == TypeKind::enumeration && target.name == source.name)) {
+        if (source.kind == TypeKind::integer)
             return ConversionKind::implicit;
-        }
+        if (source.kind == TypeKind::enumeration)
+            return target.name == source.name ? ConversionKind::implicit
+                                              : ConversionKind::explicit_only;
         return ConversionKind::incompatible;
     }
     if (target.kind == TypeKind::integer && source.kind == TypeKind::enumeration)
