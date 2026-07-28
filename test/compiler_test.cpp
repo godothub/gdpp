@@ -5747,6 +5747,29 @@ TEST_CASE("compiler lowers the complete GDScript debug utility family") {
     REQUIRE(result.unit.source.find("godot::UtilityFunctions::print_debug") == std::string::npos);
 }
 
+TEST_CASE("compiler lowers GDScript instance dictionary transport with native contracts") {
+    gdpp::CompileOptions options;
+    options.target_version = gdpp::GodotVersion::v4_4;
+    const auto result = gdpp::Compiler{}.compile("instance_dictionary.gd",
+                                                 "func snapshot(instance: Object) -> Dictionary:\n"
+                                                 "    return inst_to_dict(instance)\n"
+                                                 "func restore(state: Dictionary) -> Object:\n"
+                                                 "    return dict_to_inst(state)\n",
+                                                 options);
+
+    REQUIRE(result.success);
+    REQUIRE(result.unit.source.find("gdpp::runtime::instance_to_dictionary(") != std::string::npos);
+    REQUIRE(result.unit.source.find("gdpp::runtime::dictionary_to_instance(") != std::string::npos);
+    REQUIRE(result.unit.source.find("gdpp::runtime::strict_native_object_value_storage<"
+                                    "godot::Object>") != std::string::npos);
+    REQUIRE(
+        result.unit.source.find("gdpp::runtime::ScriptSourceLocation{_gdpp_source_path, 2, 12}") !=
+        std::string::npos);
+    REQUIRE(
+        result.unit.source.find("gdpp::runtime::ScriptSourceLocation{_gdpp_source_path, 4, 12}") !=
+        std::string::npos);
+}
+
 TEST_CASE("warning ignores scope every semantic warning on a function") {
     const gdpp::Compiler compiler;
     const auto result = compiler.compile(
@@ -6149,7 +6172,9 @@ TEST_CASE("compiler rejects invalid GDScript utility argument contracts before c
                                                           "    ord(1)\n"
                                                           "    Color8(1, 2)\n"
                                                           "    type_exists(7)\n"
-                                                          "    is_instance_of(1, [])\n");
+                                                          "    is_instance_of(1, [])\n"
+                                                          "    inst_to_dict(1)\n"
+                                                          "    dict_to_inst([])\n");
 
     REQUIRE(!result.success);
     REQUIRE(result.unit.source.empty());

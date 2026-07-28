@@ -4332,6 +4332,10 @@ std::string CodeGenerator::emit_expression(const typed::Expression& expression) 
                 is_intrinsic ? nullptr : api_.find_utility_function(callee.resolved_owner);
             const auto emit_intrinsic_argument = [&](const std::size_t index) {
                 const auto& argument = *expression.operands[index];
+                if (callee.intrinsic == IntrinsicKind::dictionary_to_instance ||
+                    callee.intrinsic == IntrinsicKind::instance_to_dictionary) {
+                    return "gdpp::runtime::to_variant(" + emit_expression(argument) + ")";
+                }
                 if (callee.intrinsic == IntrinsicKind::range) {
                     return emit_conversion({TypeKind::integer, "int"}, argument.type,
                                            emit_expression(argument), &argument.span);
@@ -4349,6 +4353,16 @@ std::string CodeGenerator::emit_expression(const typed::Expression& expression) 
                 return type_name.empty()
                            ? emit_expression(argument)
                            : "gdpp::runtime::to_variant(" + godot_string_name(type_name) + ")";
+            };
+            const bool intrinsic_has_location =
+                is_intrinsic && (callee.intrinsic == IntrinsicKind::dictionary_to_instance ||
+                                 callee.intrinsic == IntrinsicKind::instance_to_dictionary);
+            const auto finish_intrinsic_call = [&](std::string call) {
+                if (callee.intrinsic == IntrinsicKind::dictionary_to_instance) {
+                    return emit_conversion(expression.type, {TypeKind::variant, "Variant"},
+                                           std::move(call), &expression.span);
+                }
+                return call;
             };
             const bool zero_arity_vararg = utility_function && utility_function->is_vararg &&
                                            utility_function->required_arguments == 0 &&
@@ -4382,7 +4396,13 @@ std::string CodeGenerator::emit_expression(const typed::Expression& expression) 
                 }
                 if (zero_arity_vararg)
                     direct += "godot::String()";
-                return is_intrinsic ? direct + ")" : emit_api_return(expression.type, direct + ")");
+                if (intrinsic_has_location) {
+                    if (expression.operands.size() > 1)
+                        direct += ", ";
+                    direct += script_location(expression.span);
+                }
+                return is_intrinsic ? finish_intrinsic_call(direct + ")")
+                                    : emit_api_return(expression.type, direct + ")");
             }
             std::string result = "([&]()";
             if (expression.type.kind != TypeKind::void_type)
@@ -4417,13 +4437,18 @@ std::string CodeGenerator::emit_expression(const typed::Expression& expression) 
             }
             if (zero_arity_vararg)
                 call += "godot::String()";
+            if (intrinsic_has_location) {
+                if (expression.operands.size() > 1)
+                    call += ", ";
+                call += script_location(expression.span);
+            }
             call += ")";
             if (expression.type.kind != TypeKind::void_type) {
                 const auto value = "_gdpp_utility_result_" + suffix;
-                result +=
-                    "const auto " + value + " = " +
-                    (is_intrinsic ? call : emit_api_return(expression.type, std::move(call))) +
-                    "; " + expression_failure_return + "return " + value;
+                result += "const auto " + value + " = " +
+                          (is_intrinsic ? finish_intrinsic_call(std::move(call))
+                                        : emit_api_return(expression.type, std::move(call))) +
+                          "; " + expression_failure_return + "return " + value;
             } else {
                 result += call + "; " + expression_failure_return;
             }

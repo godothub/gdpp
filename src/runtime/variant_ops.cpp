@@ -896,6 +896,41 @@ void print_stack() {
     }
 }
 
+godot::Dictionary instance_to_dictionary(const godot::Variant& instance,
+                                         const ScriptSourceLocation location) {
+    if (instance.get_type() == godot::Variant::NIL)
+        return {};
+    if (instance.get_type() != godot::Variant::OBJECT || !instance.get_validated_object()) {
+        report_script_failure(
+            "Error calling GDScript utility function \"inst_to_dict()\": Not a script with an "
+            "instance.",
+            location);
+        return {};
+    }
+    godot::String error;
+    auto result = attached_instance_to_dictionary(instance.get_validated_object(), &error);
+    if (!error.is_empty())
+        report_script_failure(
+            "Error calling GDScript utility function \"inst_to_dict()\": " + error, location);
+    return result;
+}
+
+godot::Variant dictionary_to_instance(const godot::Variant& dictionary,
+                                      const ScriptSourceLocation location) {
+    if (dictionary.get_type() != godot::Variant::DICTIONARY) {
+        report_script_failure(
+            "Error calling GDScript utility function \"dict_to_inst()\": Expected a Dictionary.",
+            location);
+        return {};
+    }
+    godot::String error;
+    auto result = dictionary_to_attached_instance(godot::Dictionary{dictionary}, &error);
+    if (!error.is_empty())
+        report_script_failure(
+            "Error calling GDScript utility function \"dict_to_inst()\": " + error, location);
+    return result;
+}
+
 godot::Variant convert_value(const godot::Variant& value, const std::int64_t type) {
     if (type < 0 || type >= static_cast<std::int64_t>(godot::Variant::VARIANT_MAX)) {
         godot::UtilityFunctions::push_error(

@@ -436,6 +436,10 @@ template <typename... Arguments> void print_debug(Arguments&&... arguments) {
     print_debug_values(values);
 }
 void print_stack();
+[[nodiscard]] godot::Dictionary instance_to_dictionary(const godot::Variant& instance,
+                                                       ScriptSourceLocation location = {});
+[[nodiscard]] godot::Variant dictionary_to_instance(const godot::Variant& dictionary,
+                                                    ScriptSourceLocation location = {});
 [[nodiscard]] godot::Variant convert_value(const godot::Variant& value, std::int64_t type);
 [[nodiscard]] bool type_exists(const godot::Variant& name);
 [[nodiscard]] godot::String character(std::int64_t code);

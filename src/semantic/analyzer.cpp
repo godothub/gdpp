@@ -2275,6 +2275,11 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                         case IntrinsicArgumentRule::any:
                         case IntrinsicArgumentRule::resource_path:
                             break;
+                        case IntrinsicArgumentRule::dictionary:
+                            require_assignable({TypeKind::dictionary, "Dictionary"},
+                                               argument_types[index],
+                                               expression.operand(index + 1)->span, context);
+                            break;
                         case IntrinsicArgumentRule::integer:
                             require_assignable({TypeKind::integer, "int"}, argument_types[index],
                                                expression.operand(index + 1)->span, context);
@@ -2309,6 +2314,10 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                             }
                             break;
                         }
+                        case IntrinsicArgumentRule::object:
+                            require_assignable({TypeKind::object, "Object"}, argument_types[index],
+                                               expression.operand(index + 1)->span, context);
+                            break;
                         }
                     }
                     switch (feature.result_rule) {
@@ -2333,8 +2342,14 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
                     case IntrinsicResultRule::array:
                         call_result = {TypeKind::array, "Array"};
                         break;
+                    case IntrinsicResultRule::dictionary:
+                        call_result = {TypeKind::dictionary, "Dictionary"};
+                        break;
                     case IntrinsicResultRule::integer_array:
                         call_result = {TypeKind::array, "Array[int]"};
+                        break;
+                    case IntrinsicResultRule::object:
+                        call_result = {TypeKind::object, "Object"};
                         break;
                     case IntrinsicResultRule::resource:
                         call_result = variant_type;

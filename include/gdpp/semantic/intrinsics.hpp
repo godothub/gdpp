@@ -16,10 +16,12 @@ enum class IntrinsicKind : std::uint8_t {
     length,
     get_stack,
     convert,
+    dictionary_to_instance,
     type_exists,
     character,
     ordinal,
     color8,
+    instance_to_dictionary,
     is_instance_of,
     print_debug,
     print_stack,
@@ -32,6 +34,8 @@ enum class IntrinsicArgumentRule : std::uint8_t {
     string_name,
     type_descriptor,
     resource_path,
+    dictionary,
+    object,
 };
 enum class IntrinsicResultRule : std::uint8_t {
     void_type,
@@ -41,7 +45,9 @@ enum class IntrinsicResultRule : std::uint8_t {
     string,
     color,
     array,
+    dictionary,
     integer_array,
+    object,
     resource,
 };
 
