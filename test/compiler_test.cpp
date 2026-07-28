@@ -4099,6 +4099,26 @@ TEST_CASE("compiler generates single-evaluation match control flow") {
     REQUIRE(result.unit.source.find("    return {};\n}") != std::string::npos);
 }
 
+TEST_CASE("compiler encloses complete dynamic match guard expressions") {
+    const gdpp::Compiler compiler;
+    const auto result =
+        compiler.compile("dynamic_match_guard.gd",
+                         "func inspect(mode: int, value: Variant, validation: Callable) -> void:\n"
+                         "    match mode:\n"
+                         "        1 when value.begins_with(\"res://\"):\n"
+                         "            pass\n"
+                         "        2 when validation:\n"
+                         "            pass\n");
+
+    REQUIRE(result.success);
+    REQUIRE(result.unit.source.find(
+                "if ((gdpp::runtime::to_variant(([&]() -> godot::Variant") !=
+            std::string::npos);
+    REQUIRE(result.unit.source.find(
+                "if ((gdpp::runtime::to_variant(validation)).booleanize())") !=
+            std::string::npos);
+}
+
 TEST_CASE("compiler accepts identifier patterns and warns about unreachable match branches") {
     const gdpp::Compiler compiler;
     const auto live_identifier =

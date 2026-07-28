@@ -7080,11 +7080,7 @@ std::string CodeGenerator::emit_statement_body(const typed::Statement& statement
                 result += emit_statement(guard_statement, content_indent);
             if (branch.expression) {
                 const auto guard = emit_truthy(*branch.expression);
-                const auto guard_condition =
-                    guard.size() >= 2 && guard.front() == '(' && guard.back() == ')'
-                        ? guard
-                        : "(" + guard + ")";
-                result += indent(content_indent) + "if " + guard_condition + " {\n" +
+                result += indent(content_indent) + "if (" + guard + ") {\n" +
                           indent(content_indent + 1) + matched_name + " = true;\n";
                 for (const auto& child : branch.body)
                     result += emit_statement(child, content_indent + 1);
