@@ -74,6 +74,14 @@ add_test(
 )
 
 add_test(
+    NAME gdpp.compatibility.external_project_e2e_contract
+    COMMAND
+        "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/external_project_e2e_test.py"
+        "${PROJECT_SOURCE_DIR}"
+)
+
+add_test(
     NAME gdpp.export.immutability
     COMMAND
         "${Python3_EXECUTABLE}"
