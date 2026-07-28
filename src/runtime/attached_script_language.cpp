@@ -528,6 +528,12 @@ void unregister_attached_script_resource_loader() {
 
 void AttachedCompiledScript::set_source_path(const godot::String& source_path) {
     source_path_ = source_path.simplify_path();
+    // Script.resource_path is observable language state used by loaders, add-ons, default field
+    // initializers, and relative dependency discovery. set_path_cache() assigns that Resource
+    // identity without evicting the source GDScript resource that remains cached by the editor
+    // while export-time metadata descriptors are installed.
+    if (get_path() != source_path_)
+        set_path_cache(source_path_);
     emit_changed();
 }
 

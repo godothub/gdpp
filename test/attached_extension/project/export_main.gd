@@ -129,6 +129,9 @@ func _verify_export_runtime() -> void:
     if not animation_storage_probe.call(&"has_serialized_typed_container"):
         _fail("serialized typed container metadata was not preserved after AOT attachment")
         return
+    if not animation_storage_probe.call(&"has_script_resource_identity"):
+        _fail("compiled script identity did not preserve Resource property access")
+        return
     var uppercase: Callable = "gdpp".to_upper
     if uppercase.call() != "GDPP":
         _fail("bound builtin method Callable lost its receiver or result")

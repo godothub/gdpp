@@ -21,3 +21,7 @@ func has_serialized_typed_container() -> bool:
         and typed_records.size() == 1
         and typed_records[0].get("score", 0) == 42
     )
+
+
+func has_script_resource_identity() -> bool:
+    return get_script().resource_path == "res://animation_storage_probe.gd"
