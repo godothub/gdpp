@@ -2906,6 +2906,35 @@ TEST_CASE("project compiler isolates coroutine overrides behind dynamic script d
     REQUIRE(source.find("gdpp::runtime::call_dynamic_at(") != std::string::npos);
 }
 
+TEST_CASE("project compiler normalizes widened override calls to the inherited return ABI") {
+    const auto root = fixture_root("project-widened-override-return");
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
+    write_text(root / "base.gd", "extends RefCounted\nclass_name WidenedOverrideBase\n"
+                                "func refresh(data: Dictionary) -> void:\n"
+                                "    pass\n");
+    write_text(root / "child.gd", "extends WidenedOverrideBase\nclass_name WidenedOverrideChild\n"
+                                 "func refresh(data: Dictionary, force := false):\n"
+                                 "    pass\n"
+                                 "func invoke() -> void:\n"
+                                 "    refresh({}, true)\n");
+    const auto options = project_options(root);
+
+    const auto result = gdpp::ProjectCompiler{}.compile(options);
+
+    REQUIRE(result.success);
+    const auto child =
+        std::find_if(result.scripts.begin(), result.scripts.end(), [](const auto& script) {
+            return script.relative_path.filename() == "child.gd";
+        });
+    REQUIRE(child != result.scripts.end());
+    const auto header = read_text(options.output_directory / "generated" / child->header_file_name);
+    const auto source = read_text(options.output_directory / "generated" / child->source_file_name);
+    REQUIRE(header.find("void _gdpp_native_override_refresh(") != std::string::npos);
+    REQUIRE(source.find("const auto _gdpp_call_result_") == std::string::npos);
+    REQUIRE(source.find("_gdpp_native_override_refresh(") != std::string::npos);
+}
+
 TEST_CASE("project compiler preserves super as a compile-time receiver across suspension") {
     const auto root = fixture_root("project-super-await-receiver");
     std::error_code error;

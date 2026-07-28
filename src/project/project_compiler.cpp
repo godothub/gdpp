@@ -1997,13 +1997,14 @@ ProjectCompileResult ProjectCompiler::compile_impl(const ProjectCompileOptions& 
             if (!input.script_base)
                 continue;
             const auto* inherited = inherited_member(inherited_member, index, member.name);
-            if (!inherited || inherited->is_static ||
-                inherited->parameters.size() != member.parameters.size()) {
+            if (!inherited || inherited->is_static) {
                 continue;
             }
             if (!member.has_explicit_type)
                 member.type = inherited->type;
-            for (std::size_t parameter = 0; parameter < member.parameters.size(); ++parameter) {
+            const auto shared_parameters =
+                std::min(member.parameters.size(), inherited->parameters.size());
+            for (std::size_t parameter = 0; parameter < shared_parameters; ++parameter) {
                 if (parameter >= member.explicit_parameter_types.size() ||
                     !member.explicit_parameter_types[parameter]) {
                     member.parameters[parameter] = inherited->parameters[parameter];
