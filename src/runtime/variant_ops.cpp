@@ -676,6 +676,18 @@ bool reject_invalid_object_target(const godot::Variant& target, const char* oper
     return true;
 }
 
+bool object_exposes_property(godot::Object* object, const godot::StringName& name) {
+    if (!object)
+        return false;
+    const auto properties = object->get_property_list();
+    for (std::int64_t index = 0; index < properties.size(); ++index) {
+        const godot::Dictionary property = properties[index];
+        if (godot::StringName{property.get("name", godot::StringName{})} == name)
+            return true;
+    }
+    return false;
+}
+
 } // namespace
 
 godot::Variant default_argument() { return default_argument_marker(); }
@@ -1694,6 +1706,13 @@ godot::Variant get_named(const godot::Variant& target, const godot::StringName& 
     }
     bool valid = false;
     auto result = target.get_named(name, valid);
+    if (!valid && target.get_type() == godot::Variant::OBJECT) {
+        auto* object = target.get_validated_object();
+        if (object_exposes_property(object, name)) {
+            result = object->get(name);
+            valid = true;
+        }
+    }
     if (!valid) {
         report_invalid_member("property read", name, location);
         return {};
@@ -1712,6 +1731,13 @@ void set_named(godot::Variant& target, const godot::StringName& name, const godo
     }
     bool valid = false;
     target.set_named(name, value, valid);
+    if (!valid && target.get_type() == godot::Variant::OBJECT) {
+        auto* object = target.get_validated_object();
+        if (object_exposes_property(object, name)) {
+            object->set(name, value);
+            valid = true;
+        }
+    }
     if (!valid)
         report_invalid_member("property write", name, location);
 }
