@@ -3019,12 +3019,18 @@ std::string CodeGenerator::emit_dynamic_assignment(const typed::Statement& state
         result += emit_script_failure_return(indentation + 1, in_async_continuation_);
     }
 
-    // Objects, Array and Dictionary carry reference semantics through Variant. Other roots are
-    // values and need one final assignment so copy-on-write builtins and Variant-held values live.
+    // The lvalue's declared storage, rather than a flow-refined expression view, determines
+    // whether the root must be rebound. Object references and shared containers are mutated
+    // through their Variant identity. Dynamic and ordinary value storage must receive the
+    // reconstructed root so Variant-held builtins and copy-valued members are preserved.
+    const auto& root_storage_type = root->storage_type.kind == TypeKind::unknown
+                                        ? root->type
+                                        : root->storage_type;
+    const auto root_ownership = root_storage_type.ownership();
     const bool root_requires_writeback =
-        root->kind == typed::ExpressionKind::identifier && root->type.kind != TypeKind::object &&
-        root->type.kind != TypeKind::array && root->type.kind != TypeKind::dictionary &&
-        root->type.kind != TypeKind::script_resource;
+        root->kind == typed::ExpressionKind::identifier &&
+        root_ownership != OwnershipKind::object_reference &&
+        root_ownership != OwnershipKind::shared_container;
     if (root_requires_writeback) {
         auto converted =
             emit_conversion(root->type, {TypeKind::variant, "Variant"}, root_name, &root->span);
