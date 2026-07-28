@@ -521,6 +521,32 @@ def export_contract(host: str, output: Path) -> tuple[str, str, str]:
     fail(f"unsupported end-to-end host platform: {host}")
 
 
+def replace_preset_assignment(body: str, key: str, value: str) -> str:
+    assignment = re.compile(rf"^{re.escape(key)}=.*$", re.MULTILINE)
+    if assignment.search(body):
+        return assignment.sub(f"{key}={value}", body, count=1)
+    return body.rstrip() + f"\n{key}={value}\n"
+
+
+def source_preset_bodies(content: str, platform: str) -> tuple[str, str] | None:
+    header = re.compile(r"^\[preset\.(\d+)(?:\.options)?\]$", re.MULTILINE)
+    matches = list(header.finditer(content))
+    sections: dict[tuple[str, bool], str] = {}
+    for position, match in enumerate(matches):
+        end = matches[position + 1].start() if position + 1 < len(matches) else len(content)
+        sections[(match.group(1), ".options]" in match.group(0))] = content[match.end() : end]
+    for (index, options), body in sections.items():
+        if options:
+            continue
+        if re.search(
+            rf"^platform={re.escape(json.dumps(platform))}$",
+            body,
+            re.MULTILINE,
+        ):
+            return body, sections.get((index, True), "\n")
+    return None
+
+
 def append_export_preset(project: Path, host: str, output: Path) -> tuple[str, Path]:
     output.mkdir(parents=True, exist_ok=True)
     preset_file = project / "export_presets.cfg"
@@ -529,27 +555,56 @@ def append_export_preset(project: Path, host: str, output: Path) -> tuple[str, P
     index = max(indexes, default=-1) + 1
     name = E2E_PRESET_NAME
     platform, architecture, export_path = export_contract(host, output)
+    source = source_preset_bodies(content, platform)
+    if source is None:
+        preset_body = (
+            "\n"
+            f'name="{name}"\n'
+            f'platform="{platform}"\n'
+            "runnable=false\n"
+            "dedicated_server=false\n"
+            'custom_features=""\n'
+            'export_filter="all_resources"\n'
+            'include_filter=""\n'
+            'exclude_filter=""\n'
+            f'export_path="{export_path.replace(os.sep, "/")}"\n'
+            'encryption_include_filters=""\n'
+            'encryption_exclude_filters=""\n'
+            "encrypt_pck=false\n"
+            "encrypt_directory=false\n"
+            "script_export_mode=2\n"
+        )
+        options_body = '\napplication/bundle_identifier="com.gdpp.compatibility"\n'
+    else:
+        # Exercise the same resource inclusion, exclusion, feature, template and platform
+        # contract the customer actually ships. A synthetic all-resources preset silently drops
+        # non-imported files covered by include_filter and can therefore test a different product.
+        preset_body, options_body = source
+
+    preset_body = replace_preset_assignment(preset_body, "name", json.dumps(name))
+    preset_body = replace_preset_assignment(preset_body, "platform", json.dumps(platform))
+    preset_body = replace_preset_assignment(preset_body, "runnable", "false")
+    preset_body = replace_preset_assignment(
+        preset_body,
+        "export_path",
+        json.dumps(export_path.replace(os.sep, "/")),
+    )
+    preset_body = replace_preset_assignment(preset_body, "script_export_mode", "2")
+    preset_body = replace_preset_assignment(
+        preset_body, "gdpp/strip_gdscript_sources", "true"
+    )
+    preset_body = replace_preset_assignment(
+        preset_body, "gdpp/allow_source_fallback", "false"
+    )
+    architecture_key, architecture_value = architecture.split("=", 1)
+    options_body = replace_preset_assignment(
+        options_body, architecture_key, architecture_value
+    )
     block = (
-        f"\n[preset.{index}]\n\n"
-        f'name="{name}"\n'
-        f'platform="{platform}"\n'
-        "runnable=false\n"
-        "dedicated_server=false\n"
-        'custom_features=""\n'
-        'export_filter="all_resources"\n'
-        'include_filter=""\n'
-        'exclude_filter=""\n'
-        f'export_path="{export_path.replace(os.sep, "/")}"\n'
-        'encryption_include_filters=""\n'
-        'encryption_exclude_filters=""\n'
-        "encrypt_pck=false\n"
-        "encrypt_directory=false\n"
-        "script_export_mode=2\n\n"
-        f"[preset.{index}.options]\n\n"
-        f"{architecture}\n"
-        'application/bundle_identifier="com.gdpp.compatibility"\n'
-        "gdpp/strip_gdscript_sources=true\n"
-        "gdpp/allow_source_fallback=false\n"
+        f"\n[preset.{index}]"
+        f"{preset_body.rstrip()}\n\n"
+        f"[preset.{index}.options]"
+        f"{options_body.rstrip()}\n"
     )
     preset_file.write_text(content.rstrip() + block, encoding="utf-8")
     return name, Path(export_path)

@@ -340,6 +340,47 @@ class ExternalProjectE2ETest(unittest.TestCase):
             self.assertIn("gdpp/allow_source_fallback=false", content)
             self.assertTrue((project / "artifacts").is_dir())
 
+    def test_export_preset_clones_customer_platform_resource_contract(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary)
+            (project / "export_presets.cfg").write_text(
+                '[preset.4]\n\n'
+                'name="Customer macOS"\n'
+                'platform="macOS"\n'
+                "runnable=true\n"
+                'custom_features="customer_feature"\n'
+                'export_filter="all_resources"\n'
+                'include_filter="data/conf/*,data/db/*"\n'
+                'exclude_filter="data/maps/*"\n'
+                'export_path="customer.zip"\n'
+                "script_export_mode=1\n\n"
+                "[preset.4.options]\n\n"
+                'binary_format/architecture="arm64"\n'
+                'application/bundle_identifier="org.customer.game"\n'
+                "codesign/codesign=0\n",
+                encoding="utf-8",
+            )
+
+            _, product = E2E.append_export_preset(
+                project, "macos", project / "artifacts"
+            )
+            content = (project / "export_presets.cfg").read_text(encoding="utf-8")
+            cloned = content[content.index("[preset.5]") :]
+
+            self.assertEqual(product, project / "artifacts/product.app")
+            self.assertIn('custom_features="customer_feature"', cloned)
+            self.assertIn('include_filter="data/conf/*,data/db/*"', cloned)
+            self.assertIn('exclude_filter="data/maps/*"', cloned)
+            self.assertIn(
+                'application/bundle_identifier="org.customer.game"', cloned
+            )
+            self.assertIn("codesign/codesign=0", cloned)
+            self.assertIn('binary_format/architecture="universal"', cloned)
+            self.assertNotIn('binary_format/architecture="arm64"', cloned)
+            self.assertIn("script_export_mode=2", cloned)
+            self.assertIn("gdpp/strip_gdscript_sources=true", cloned)
+            self.assertIn("gdpp/allow_source_fallback=false", cloned)
+
     def test_macos_export_matches_the_official_universal_template(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             project = Path(temporary)
