@@ -674,9 +674,8 @@ func _collect_export_transform_paths() -> PackedStringArray:
         for entry: String in ResourceLoader.list_directory(directory):
             var path := directory.path_join(entry)
             if entry.ends_with("/"):
-                var directory_name := entry.trim_suffix("/")
                 if (
-                    directory_name.begins_with(".")
+                    _is_ignored_export_transform_directory(path)
                     or path.begins_with(ADDON_PREFIX)
                 ):
                     continue
@@ -691,6 +690,17 @@ func _collect_export_transform_paths() -> PackedStringArray:
             result.append(path)
     result.sort()
     return result
+
+
+func _is_ignored_export_transform_directory(path: String) -> bool:
+    var normalized := path.trim_suffix("/")
+    var directory_name := normalized.get_file()
+    return (
+        directory_name.begins_with(".")
+        or normalized == "res://build"
+        or FileAccess.file_exists(normalized.path_join(".gdignore"))
+        or FileAccess.file_exists(normalized.path_join("project.godot"))
+    )
 
 
 func prepare_isolated_transform_worker(compiler: Object, state: Dictionary) -> Dictionary:

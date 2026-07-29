@@ -89,6 +89,9 @@ if(editor_only_metadata_offset EQUAL -1)
 endif()
 foreach(required_runtime_export IN ITEMS
         "return \"AOT GDPP scene transformer r%d %s\""
+        "func _is_ignored_export_transform_directory(path: String) -> bool:"
+        "FileAccess.file_exists(normalized.path_join(\".gdignore\"))"
+        "FileAccess.file_exists(normalized.path_join(\"project.godot\"))"
         "add_file(COMPILER_DESCRIPTOR, _runtime_descriptor.to_utf8_buffer(), false)"
         "func _register_runtime_library() -> bool:"
         "func _register_shared_object_once("
