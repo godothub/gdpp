@@ -554,6 +554,11 @@ func _verify_export_runtime() -> void:
         _fail("attached behavior was not retained across a pre-tree await continuation")
         return
 
+    var stale_await_final: Variant = get_node("StaleAwaitFinal")
+    if stale_await_final == null or not stale_await_final.lifecycle_is_current():
+        _fail("a replaced attached behavior resumed after scene inheritance changed the script")
+        return
+
     var message_dispatch_probe: Variant = get_node("MessageDispatchProbe")
     if message_dispatch_probe == null or not message_dispatch_probe.dispatch_burst(128):
         _fail(

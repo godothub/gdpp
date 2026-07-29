@@ -1,0 +1,7 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="PackedScene" path="res://stale_await_base.tscn" id="1_base_scene"]
+[ext_resource type="Script" path="res://stale_await_final.gd" id="2_final"]
+
+[node name="StaleAwaitFinal" instance=ExtResource("1_base_scene")]
+script = ExtResource("2_final")

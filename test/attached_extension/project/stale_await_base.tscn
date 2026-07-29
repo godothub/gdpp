@@ -1,0 +1,9 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://stale_await_base.gd" id="1_base"]
+
+[node name="StaleAwaitBase" type="Node"]
+script = ExtResource("1_base")
+payload = 42
+
+[node name="Marker" type="Node" parent="."]

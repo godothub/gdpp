@@ -1,4 +1,4 @@
-[gd_scene load_steps=13 format=3]
+[gd_scene load_steps=14 format=3]
 
 [ext_resource type="Script" path="res://export_main.gd" id="1_script"]
 [ext_resource type="Shader" path="res://runtime_shader.gdshader" id="2_shader"]
@@ -9,6 +9,7 @@
 [ext_resource type="Script" path="res://message_dispatch_probe.gd" id="7_message_dispatch"]
 [ext_resource type="Script" path="res://animation_storage_probe.gd" id="8_animation_storage"]
 [ext_resource type="Script" path="res://attached_await_lifetime_probe.gd" id="9_await_lifetime"]
+[ext_resource type="PackedScene" path="res://stale_await_final.tscn" id="10_stale_await"]
 
 [sub_resource type="ShaderMaterial" id="ShaderMaterial_inline"]
 shader = ExtResource("2_shader")
@@ -78,6 +79,8 @@ script = ExtResource("9_await_lifetime")
 value = 42
 
 [node name="Marker" type="Node" parent="AttachedAwaitLifetimeProbe"]
+
+[node name="StaleAwaitFinal" parent="." instance=ExtResource("10_stale_await")]
 
 [connection signal="child_ping" from="." to="." method="_on_child_ping"]
 [connection signal="vendor_contract" from="." to="." method="_on_vendor_contract"]
