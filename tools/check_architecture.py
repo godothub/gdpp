@@ -248,6 +248,8 @@ def validate_attached_method_dispatch_contract(errors: list[str]) -> None:
         instance: (
             "find_method_dispatch(",
             "dispatch->call(",
+            "get_version_info()",
+            "major == 4 && minor < 5",
         ),
         generator: ("descriptor.method_dispatches.push_back({",),
     }
