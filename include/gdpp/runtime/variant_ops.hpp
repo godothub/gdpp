@@ -191,10 +191,10 @@ class EngineLifetimeStatic final {
     EngineLifetimeStatic& operator=(const EngineLifetimeStatic&) = delete;
 
     template <typename Factory>
-    [[nodiscard]] const Value& get(Factory&& factory) {
+    [[nodiscard]] const Value* get(Factory&& factory) {
         auto* value = pointer_.load(std::memory_order_acquire);
         if (value)
-            return *value;
+            return value;
         std::lock_guard lock{mutex_};
         value = pointer_.load(std::memory_order_relaxed);
         if (!value) {
@@ -202,7 +202,7 @@ class EngineLifetimeStatic final {
             pointer_.store(value, std::memory_order_release);
             register_engine_lifetime_static(this, &EngineLifetimeStatic::release_registered);
         }
-        return *value;
+        return value;
     }
 
     void release() noexcept {
@@ -220,7 +220,7 @@ class EngineLifetimeStatic final {
 };
 
 template <typename Factory>
-[[nodiscard]] const auto& engine_lifetime_static(Factory&& factory) {
+[[nodiscard]] const auto* engine_lifetime_static_ptr(Factory&& factory) {
     using Value = std::remove_cv_t<std::remove_reference_t<std::invoke_result_t<Factory&>>>;
     static EngineLifetimeStatic<Value> storage;
     return storage.get(std::forward<Factory>(factory));

@@ -215,7 +215,7 @@ def validate_local_signal_contract(errors: list[str]) -> None:
             "object_method_bind_call(",
         ),
         generator: (
-            "gdpp::runtime::engine_lifetime_static([] { return godot::Variant{",
+            "gdpp::runtime::engine_lifetime_static_ptr([] { return godot::Variant{",
             '"gdpp::runtime::emit_local_signal_at("',
             "script_location(expression.span)",
         ),

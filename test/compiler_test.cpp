@@ -160,7 +160,7 @@ TEST_CASE("compiler centralizes packed values at every generated Variant boundar
     REQUIRE(result.unit.source.find("] = gdpp::runtime::to_variant(_gdpp_call_argument_") !=
             std::string::npos);
     REQUIRE(result.unit.source.find(
-                "engine_lifetime_static([] { return godot::Variant{godot::StringName(") !=
+                "engine_lifetime_static_ptr([] { return godot::Variant{godot::StringName(") !=
             std::string::npos);
     REQUIRE(result.unit.source.find("static const godot::Variant _gdpp_signal_name_") ==
             std::string::npos);
@@ -1413,7 +1413,7 @@ TEST_CASE("compiler emits local signals through their owner without temporary Si
 
     REQUIRE(result.success);
     REQUIRE(result.unit.source.find(
-                "engine_lifetime_static([] { return godot::Variant{godot::StringName(") !=
+                "engine_lifetime_static_ptr([] { return godot::Variant{godot::StringName(") !=
             std::string::npos);
     REQUIRE(result.unit.source.find("static const godot::Variant _gdpp_signal_name_") ==
             std::string::npos);
@@ -4423,7 +4423,7 @@ TEST_CASE("compiler lowers Dictionary named access through its keyed native ABI"
     REQUIRE(result.success);
     REQUIRE(result.unit.source.find("_gdpp_dictionary_target_") != std::string::npos);
     REQUIRE(result.unit.source.find(
-                "engine_lifetime_static([] { return godot::StringName(") !=
+                "engine_lifetime_static_ptr([] { return godot::StringName(") !=
             std::string::npos);
     REQUIRE(result.unit.source.find("static const godot::StringName _gdpp_dictionary_read_key_") ==
             std::string::npos);
@@ -4465,7 +4465,7 @@ TEST_CASE("compiler only updates proven local Dictionary slots in place") {
     REQUIRE(local.unit.source.find("const auto& _gdpp_proven_dictionary_read_key_") !=
             std::string::npos);
     REQUIRE(local.unit.source.find(
-                "engine_lifetime_static([] { return godot::Variant{godot::StringName(") !=
+                "engine_lifetime_static_ptr([] { return godot::Variant{godot::StringName(") !=
             std::string::npos);
     REQUIRE(local.unit.source.find("checked_dictionary_get_named(") == std::string::npos);
     REQUIRE(local.unit.source.find("unchecked_dictionary_set_named(") == std::string::npos);
@@ -6082,7 +6082,7 @@ TEST_CASE("third-party GDExtension singletons resolve through Engine at runtime"
     REQUIRE(result.unit.source.find("gdpp::runtime::call_dynamic") != std::string::npos);
     REQUIRE(result.unit.source.find("const auto& _gdpp_dynamic_method_") != std::string::npos);
     REQUIRE(result.unit.source.find(
-                "engine_lifetime_static([] { return godot::StringName(\"run_callbacks\")") !=
+                "engine_lifetime_static_ptr([] { return godot::StringName(\"run_callbacks\")") !=
             std::string::npos);
     REQUIRE(result.unit.source.find("static const godot::StringName _gdpp_dynamic_method_") ==
             std::string::npos);

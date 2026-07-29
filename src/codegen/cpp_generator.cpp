@@ -1342,7 +1342,7 @@ void CodeGenerator::emit_named_enum_declaration(const typed::Enum& enumeration,
                << entry.value << ";\n";
     }
     header << body << "static const godot::Dictionary& _gdpp_dictionary() {\n"
-           << nested << "return gdpp::runtime::engine_lifetime_static([] {\n"
+           << nested << "return *gdpp::runtime::engine_lifetime_static_ptr([] {\n"
            << nested << "    godot::Dictionary result;\n";
     for (const auto& entry : enumeration.entries) {
         header << nested << "    result[" << godot_string(entry.name) << "] = int64_t{"
@@ -3203,7 +3203,7 @@ std::string CodeGenerator::emit_dictionary_member_assignment(const typed::Statem
     if (statement.operation != "=" && proven) {
         const auto slot = "_gdpp_dictionary_slot_" + suffix;
         result += "const auto& " + key +
-                  " = gdpp::runtime::engine_lifetime_static([] { return godot::Variant{" +
+                  " = *gdpp::runtime::engine_lifetime_static_ptr([] { return godot::Variant{" +
                   godot_string_name(target.value) + "}; });\n" + nested_prefix + "godot::Variant &" +
                   slot + " = " + dictionary + "[" + key + "];\n" + nested_prefix + "const auto " +
                   value + " = " +
@@ -3224,7 +3224,7 @@ std::string CodeGenerator::emit_dictionary_member_assignment(const typed::Statem
     } else if (statement.operation != "=") {
         const auto current = "_gdpp_dictionary_current_" + suffix;
         result += "const auto& " + key +
-                  " = gdpp::runtime::engine_lifetime_static([] { return " +
+                  " = *gdpp::runtime::engine_lifetime_static_ptr([] { return " +
                   godot_string_name(target.value) + "; });\n" + nested_prefix + "godot::Variant " +
                   current + " = gdpp::runtime::checked_dictionary_get_named(" + dictionary +
                   ", " + key + ", " + script_location(target.span) + ");\n" +
@@ -3249,7 +3249,7 @@ std::string CodeGenerator::emit_dictionary_member_assignment(const typed::Statem
                   emit_script_failure_return(indentation + 1, in_async_continuation_);
     } else {
         result += "const auto& " + key +
-                  " = gdpp::runtime::engine_lifetime_static([] { return " +
+                  " = *gdpp::runtime::engine_lifetime_static_ptr([] { return " +
                   godot_string_name(target.value) + "; });\n" + nested_prefix +
                   "const godot::Variant " + value + " = " + "gdpp::runtime::to_variant(" +
                   emit_expression(*statement.expression) + ");\n" +
@@ -4848,7 +4848,7 @@ std::string CodeGenerator::emit_expression(const typed::Expression& expression) 
                 const auto signal_name = "_gdpp_signal_name_" + suffix;
                 std::string result =
                     "([&]() { const auto& " + signal_name +
-                    " = gdpp::runtime::engine_lifetime_static([] { return godot::Variant{" +
+                    " = *gdpp::runtime::engine_lifetime_static_ptr([] { return godot::Variant{" +
                     godot_string_name(signal.value) + "}; }); ";
                 for (std::size_t index = 1; index < expression.operands.size(); ++index) {
                     result += "const auto _gdpp_signal_argument_" + suffix + "_" +
@@ -4935,7 +4935,7 @@ std::string CodeGenerator::emit_expression(const typed::Expression& expression) 
                                       : emit_expression(*callee.operands.at(0))) +
                                  "); if (script_function_failed()) return {}; const auto& " +
                                  method_name +
-                                 " = gdpp::runtime::engine_lifetime_static([] { return " +
+                                 " = *gdpp::runtime::engine_lifetime_static_ptr([] { return " +
                                  godot_string_name(callee.value) + "; }); ";
             for (std::size_t index = 1; index < expression.operands.size(); ++index) {
                 result += "const godot::Variant _gdpp_dynamic_argument_" + suffix + "_" +
@@ -5214,7 +5214,7 @@ std::string CodeGenerator::emit_expression(const typed::Expression& expression) 
                     const auto key = "_gdpp_proven_dictionary_read_key_" + suffix;
                     const auto value =
                         "([&]() -> const godot::Variant& { const auto& " + key +
-                        " = gdpp::runtime::engine_lifetime_static([] { return godot::Variant{" +
+                        " = *gdpp::runtime::engine_lifetime_static_ptr([] { return godot::Variant{" +
                         godot_string_name(expression.value) + "}; }); return " + object + "[" +
                         key + "]; }())";
                     return emit_conversion(expression.type, {TypeKind::variant, "Variant"}, value,
@@ -5223,7 +5223,7 @@ std::string CodeGenerator::emit_expression(const typed::Expression& expression) 
                 const auto key = "_gdpp_dictionary_read_key_" + suffix;
                 const auto lookup = [&](const std::string& receiver) {
                     return "gdpp::runtime::checked_dictionary_get_named(" + receiver +
-                           ", gdpp::runtime::engine_lifetime_static([] { return " +
+                           ", *gdpp::runtime::engine_lifetime_static_ptr([] { return " +
                            godot_string_name(expression.value) + "; }), " +
                            script_location(expression.span) + ")";
                 };
