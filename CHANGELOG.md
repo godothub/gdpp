@@ -9,7 +9,7 @@
 - Match Godot operator and conversion semantics for numeric, enum, Variant, Object, and built-in value expressions.
 - Preserve asynchronous initialization, awaited `super` calls, coroutine ABIs, and attached lifetimes; cancel pending awaits on shutdown.
 - Make scripts without an explicit base inherit `RefCounted`, matching GDScript.
-- Preserve compiled Script identity across paths, UIDs, `load`/`preload`, caches, attachment, inheritance, rollback, and shutdown.
+- Preserve compiled Script identity across concurrent threaded loads, paths, UIDs, `load`/`preload`, caches, attachment, inheritance, rollback, and shutdown.
 - Preserve foreign scripts, scenes, nested resource owners, serialized references, presets, diagnostics, and customer sources during export.
 - Release generated static state, compiled scripts, asynchronous work, and Script caches safely during extension shutdown.
 - Make engine-lifetime static references explicit across generated and runtime code for warning-clean GCC builds.

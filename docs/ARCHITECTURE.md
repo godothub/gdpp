@@ -129,7 +129,8 @@ GDExtension 创建，生成行为通过下列层附着：
 
 编译脚本本身也是有状态的 `Script` 资源。生成 `ScriptResource<T>` 保存规范 `Ref<Script>`，
 因此 load/preload、资源缓存、可空性、Object/Resource/Script 参数、Script 属性与 Signal、
-类型判断和实例化共享同一运行时身份；只有全局类名这种纯类型引用才由 `T` 选择构造目标。
+类型判断和实例化共享同一运行时身份；线程 ResourceLoader 对同一脚本的并发请求以单次事务完成
+构造、契约赋值和发布，只有全局类名这种纯类型引用才由 `T` 选择构造目标。
 
 生成常量存储的冷态、事务回滚态和终止态使用不执行物化的 missing sentinel。只有常量 getter
 在持有对应互斥锁时才把它替换为规范 Script 资源；回滚和终止清理只释放现有引用，不调用会重新
