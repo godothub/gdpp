@@ -363,6 +363,7 @@ foreach(required_scene_customization_contract IN ITEMS
         "var snapshot_error := packed_scene.pack(scene)"
         "_prepare_export_transforms()"
         "_compiler.run_export_transform_worker(state_path, result_path)"
+        "ProjectSettings.globalize_path("
         "func _export_prepared_transform("
         "func prepare_isolated_transform_worker("
         "func run_isolated_transform_worker("
@@ -373,6 +374,19 @@ foreach(required_scene_customization_contract IN ITEMS
         message(FATAL_ERROR
             "Selective single-load scene customization contract is missing: "
             "${required_scene_customization_contract}")
+    endif()
+endforeach()
+foreach(required_worker_isolation_contract IN ITEMS
+        "create_export_worker_snapshot(path_from_utf8(project_root), snapshot_root)"
+        "\"--path\","
+        "path_to_utf8(snapshot_root)"
+        "std::filesystem::remove_all(snapshot_root, snapshot_cleanup_error)")
+    string(FIND "${compiler_service}" "${required_worker_isolation_contract}"
+        worker_isolation_contract_offset)
+    if(worker_isolation_contract_offset EQUAL -1)
+        message(FATAL_ERROR
+            "Independent export-worker project isolation is missing: "
+            "${required_worker_isolation_contract}")
     endif()
 endforeach()
 foreach(forbidden_scene_customization_contract IN ITEMS
