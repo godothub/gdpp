@@ -137,13 +137,13 @@ def source_contracts() -> tuple[str, tuple[str, ...], tuple[str, ...], int, int]
     archives = tuple(
         f"{name}.zip"
         for name in re.findall(
-            r'PlatformPackage\("[^"]+",\s*"(gdpp-[^"]+)"',
+            r'ReleasePackage\("(gdpp(?:-all)?)",',
             platform_packaging,
         )
     )
-    if len(archives) != 3 or len(set(archives)) != len(archives):
+    if archives != ("gdpp.zip", "gdpp-all.zip"):
         raise ValueError(
-            "tools/package_platform_release.py must define exactly three unique archives"
+            "tools/package_platform_release.py must define gdpp.zip and gdpp-all.zip"
         )
     return version, cmake_versions, archives, schema, runtime_abi
 
