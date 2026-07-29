@@ -3,6 +3,9 @@
 - Replace host-specific archives with `gdpp.zip` for Godot 4.6-4.7 and `gdpp-all.zip` for 4.4-4.7; both contain all three desktop editor plugins and every supported export SDK.
 - Add full-project compatibility tests for Konado, Pixelorama, Godot Open RPG, and Source of Mana.
 - Resolve cross-script classes, inheritance, enums, constants, static calls, method overrides, and name collisions with consistent type identity.
+- Refine inferred fields, constants, parameters, and coroutine contracts to a project-wide fixed point before generating cross-script ABIs.
+- Retain native dependencies used only by default arguments, and select optional ScriptInstance interfaces without diagnostics on Godot 4.4.
+- Preserve inherited property backing storage inside overridden accessors and cancel suspended callbacks after script replacement.
 - Complete reflection and restoration for script members, Inspector metadata, custom accessors, and attached instances.
 - Preserve bound, internal, and static Callables with their varargs, default parameters, typed results, and `assert` behavior.
 - Match GDScript container semantics for typed arrays, dictionaries, enum values, packed-array returns, nested writes, and dynamic `len`.

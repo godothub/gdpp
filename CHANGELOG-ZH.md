@@ -3,6 +3,9 @@
 - 将宿主专用压缩包收敛为面向 Godot 4.6～4.7 的 `gdpp.zip` 和面向 4.4～4.7 的 `gdpp-all.zip`；两者均包含三种桌面编辑器插件及全部支持的导出 SDK。
 - 增加 Konado、Pixelorama、Godot Open RPG 和 Source of Mana 的完整项目兼容性测试。
 - 统一解析跨脚本类、继承、枚举、常量、静态调用、方法覆盖和名称冲突中的类型身份。
+- 在生成跨脚本 ABI 前，将推导字段、常量、参数和协程契约收敛到项目级固定点。
+- 保留仅由默认参数使用的原生依赖，并在 Godot 4.4 上无诊断地选择可选 ScriptInstance 接口。
+- 覆盖继承属性访问器时直接访问后备字段，并在脚本替换后取消过期异步回调。
 - 完善脚本成员、Inspector 元数据、自定义访问器和 Attached 实例的反射与恢复。
 - 保留绑定、内部和静态 Callable 的 vararg、默认参数、类型化返回值及 `assert` 行为。
 - 对强类型数组、字典、枚举值、PackedArray 返回、嵌套写入和动态 `len` 匹配 GDScript 容器语义。
