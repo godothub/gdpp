@@ -40,7 +40,7 @@
 | 桌面目标 | Windows x86_64、Linux x86_64、macOS Universal 2 |
 | 其他目标 | Android arm64、iOS device arm64 + Universal Simulator、Web wasm32 threads/nothreads |
 | 无源码交付 | 成功 AOT 包剥离 `.gd/.gdc`、compiler、SDK、静态库、生成 C++ 与对象文件 |
-| 发行物 | `gdpp-mac.zip`、`gdpp-linux.zip`、`gdpp-win.zip`，每个包含 Godot 4.4～4.7 SDK |
+| 发行物 | `gdpp.zip` 包含 Godot 4.6～4.7，`gdpp-all.zip` 包含 4.4～4.7；两者均包含三桌面编辑器及全部支持的导出 SDK |
 
 ## P0 语言与运行语义结论
 

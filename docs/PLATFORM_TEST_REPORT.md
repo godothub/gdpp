@@ -8,7 +8,8 @@
 | 功能审计范围 | 1.8.2 发布提交 `0e1236e1d2e609328a4223a518da9817e9ed66f2` |
 | 最近正式发布运行 | 1.8.2 / `https://github.com/abandoft/gdpp/actions/runs/30311849463` |
 | 1.8.2 发布状态 | 已发布；48 个正式发布作业全部成功 |
-| 目标发行资产 | `gdpp-mac.zip`、`gdpp-linux.zip`、`gdpp-win.zip`、`SHA256SUMS` |
+| 1.8.2 已发布资产 | `gdpp-mac.zip`、`gdpp-linux.zip`、`gdpp-win.zip`、`SHA256SUMS` |
+| 当前目标发行资产 | `gdpp.zip`、`gdpp-all.zip`、`SHA256SUMS` |
 | 本地编译器单元测试 | 560 / 560 |
 
 本报告只描述可重复证据。内部商业语料和客户项目不按名称公开；它们只能补充发现问题，不能替代
@@ -115,16 +116,13 @@ preset 注册，Godot editor 服务只在 plugin preset 注册；这里的 CTest
 | Linux | 4.4～4.7 x86_64 SDK + compiler | 官方 Godot 4.7.1 | glibc ≤ 2.35 |
 | Windows | 4.4～4.7 x86_64 SDK + compiler | 官方 Godot 4.7.1 | MSVC、Windows 10、静态 CRT |
 
-三端均从 host component 实际导出、运行普通 oracle和 4996 项协程循环 oracle。macOS/Windows
-还把最终生成的 ZIP 安装到全新工程，再重复导入、导出、运行、库唯一性和 PCK 审计；这能发现
+三端均从 host component 实际导出、运行普通 oracle和 4996 项协程循环 oracle。默认
+`gdpp.zip` 还会分别在 macOS、Linux、Windows 安装到全新工程，再重复导入、导出、运行、库唯一性和 PCK 审计；这能发现
 “构建目录可用但发行包缺文件”的问题。
 
 Windows compiler 还必须在未调用 `gdpp_library_init` 时通过 `LoadLibraryExW`，暴露正确入口后
 可由 `FreeLibrary` 卸载。该门禁专门阻止包含 Godot 对象的静态/TLS 构造在 godot-cpp 取得引擎
 接口前运行；仅依赖 Godot 编辑器后续报错不足以定位这一类 DLL attach 失败。
-
-Linux 最终 ZIP 目前有完整结构/内容测试和 host component 实跑，但没有独立的“解压最终 ZIP 到
-干净工程”作业；这是发布流程仍可补齐的对称性缺口。
 
 ### Android
 
