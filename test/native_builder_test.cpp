@@ -140,9 +140,9 @@ std::filesystem::path make_sdk_fixture(const std::string& name, const std::strin
                 "GDPP_SDK " + std::to_string(GDPP_NATIVE_SDK_SCHEMA) + "\napi 4.4\n" +
                     api_manifest_fields() + "platform " + platform + "\narch " + architecture +
                     "\nprofiles debug,release\n" + binding_manifest_fields(platform) +
-                    "runtime_abi " +
-                    std::to_string(GDPP_NATIVE_RUNTIME_ABI) + "\nruntime_header_sha256 " +
-                    GDPP_NATIVE_RUNTIME_HEADER_SHA256 + "\nreference_semantics_header_sha256 " +
+                    "runtime_abi " + std::to_string(GDPP_NATIVE_RUNTIME_ABI) +
+                    "\nruntime_header_sha256 " + GDPP_NATIVE_RUNTIME_HEADER_SHA256 +
+                    "\nreference_semantics_header_sha256 " +
                     GDPP_REFERENCE_SEMANTICS_HEADER_SHA256 + "\nruntime_source_sha256 " +
                     GDPP_NATIVE_RUNTIME_SOURCE_SHA256 + "\n" + attached_runtime_manifest_fields() +
                     "integer_semantics_header_sha256 " + GDPP_INTEGER_SEMANTICS_HEADER_SHA256 +
@@ -326,12 +326,10 @@ TEST_CASE("native builder rejects Godot API and precision contract drift") {
 
 TEST_CASE("native precision names reject ambiguous ABI values") {
     REQUIRE_EQ(std::string{gdpp::native_precision_name(gdpp::NativePrecision::single)}, "single");
-    REQUIRE_EQ(
-        std::string{gdpp::native_precision_name(gdpp::NativePrecision::double_precision)},
-        "double");
+    REQUIRE_EQ(std::string{gdpp::native_precision_name(gdpp::NativePrecision::double_precision)},
+               "double");
     REQUIRE(gdpp::parse_native_precision("single") == gdpp::NativePrecision::single);
-    REQUIRE(gdpp::parse_native_precision("double") ==
-            gdpp::NativePrecision::double_precision);
+    REQUIRE(gdpp::parse_native_precision("double") == gdpp::NativePrecision::double_precision);
     REQUIRE(!gdpp::parse_native_precision(""));
     REQUIRE(!gdpp::parse_native_precision("float"));
     REQUIRE(!gdpp::parse_native_precision("double_precision"));
@@ -961,6 +959,28 @@ TEST_CASE("native builder selects an Android manifest and library from a shared 
                            root / "sdk/lib/libgodot-cpp.macos.template_release.arm64.a"));
 }
 
+TEST_CASE("native builder selects a Universal macOS manifest from a multi-host SDK") {
+    const auto root = make_sdk_fixture("native-builder-multi-host-macos",
+                                       "libgodot-cpp.macos.template_release.universal.a");
+    std::filesystem::create_directories(root / "sdk/manifests");
+    std::filesystem::rename(root / "sdk/sdk.manifest",
+                            root / "sdk/manifests/macos.universal.sdk.manifest");
+
+    gdpp::NativeBuildOptions options;
+    options.project_output_directory = root / "project";
+    options.binary_output_directory = root / "addons/gdpp/binary";
+    options.sdk_root = root / "sdk";
+    options.compiler_executable = "clang++";
+    options.platform = gdpp::NativePlatform::macos;
+    options.architecture = "arm64";
+
+    const auto plan = gdpp::NativeBuilder{}.plan(options);
+
+    REQUIRE(plan.success);
+    REQUIRE(contains_path(plan.commands.back().arguments,
+                          root / "sdk/lib/libgodot-cpp.macos.template_release.universal.a"));
+}
+
 TEST_CASE("native builder emits a transactional device and Universal Simulator XCFramework") {
     const auto root =
         make_sdk_fixture("native-builder-ios", "libgodot-cpp.ios.template_release.arm64.a");
@@ -1066,9 +1086,8 @@ TEST_CASE("native builder fails closed for incomplete iOS target contracts") {
     const auto root = make_sdk_fixture("native-builder-ios-contract",
                                        "libgodot-cpp.ios.template_release.arm64.a");
     write_input(root / "sdk/sdk.manifest",
-                "GDPP_SDK " + std::to_string(GDPP_NATIVE_SDK_SCHEMA) +
-                    "\napi 4.4\n" + api_manifest_fields() +
-                    "platform ios\narch arm64\nprofiles debug,release\n" +
+                "GDPP_SDK " + std::to_string(GDPP_NATIVE_SDK_SCHEMA) + "\napi 4.4\n" +
+                    api_manifest_fields() + "platform ios\narch arm64\nprofiles debug,release\n" +
                     binding_manifest_fields("ios") + "runtime_abi " +
                     std::to_string(GDPP_NATIVE_RUNTIME_ABI) + "\nruntime_header_sha256 " +
                     GDPP_NATIVE_RUNTIME_HEADER_SHA256 + "\nreference_semantics_header_sha256 " +
@@ -1272,8 +1291,8 @@ TEST_CASE("native builder emits a macOS universal compile and link plan") {
     const auto root = make_sdk_fixture("native-builder-universal",
                                        "libgodot-cpp.macos.template_release.universal.a");
     write_input(root / "sdk/sdk.manifest",
-                "GDPP_SDK " + std::to_string(GDPP_NATIVE_SDK_SCHEMA) +
-                    "\napi 4.4\n" + api_manifest_fields() +
+                "GDPP_SDK " + std::to_string(GDPP_NATIVE_SDK_SCHEMA) + "\napi 4.4\n" +
+                    api_manifest_fields() +
                     "platform macos\narch universal\n"
                     "profiles debug,release\n" +
                     binding_manifest_fields("macos") +
@@ -1308,8 +1327,8 @@ TEST_CASE("macOS universal SDK can build a thin host release library") {
     const auto root = make_sdk_fixture("native-builder-universal-host",
                                        "libgodot-cpp.macos.template_release.universal.a");
     write_input(root / "sdk/sdk.manifest",
-                "GDPP_SDK " + std::to_string(GDPP_NATIVE_SDK_SCHEMA) +
-                    "\napi 4.4\n" + api_manifest_fields() +
+                "GDPP_SDK " + std::to_string(GDPP_NATIVE_SDK_SCHEMA) + "\napi 4.4\n" +
+                    api_manifest_fields() +
                     "platform macos\narch universal\n"
                     "profiles debug,release\n" +
                     binding_manifest_fields("macos") +

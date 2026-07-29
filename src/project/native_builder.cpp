@@ -33,17 +33,13 @@ struct GodotApiContract {
 GodotApiContract godot_api_contract(const GodotVersion version) {
     switch (version) {
     case GodotVersion::v4_4:
-        return {GDPP_GODOT_API_KIND_4_4, GDPP_GODOT_API_PRECISION_4_4,
-                GDPP_GODOT_API_SHA256_4_4};
+        return {GDPP_GODOT_API_KIND_4_4, GDPP_GODOT_API_PRECISION_4_4, GDPP_GODOT_API_SHA256_4_4};
     case GodotVersion::v4_5:
-        return {GDPP_GODOT_API_KIND_4_5, GDPP_GODOT_API_PRECISION_4_5,
-                GDPP_GODOT_API_SHA256_4_5};
+        return {GDPP_GODOT_API_KIND_4_5, GDPP_GODOT_API_PRECISION_4_5, GDPP_GODOT_API_SHA256_4_5};
     case GodotVersion::v4_6:
-        return {GDPP_GODOT_API_KIND_4_6, GDPP_GODOT_API_PRECISION_4_6,
-                GDPP_GODOT_API_SHA256_4_6};
+        return {GDPP_GODOT_API_KIND_4_6, GDPP_GODOT_API_PRECISION_4_6, GDPP_GODOT_API_SHA256_4_6};
     case GodotVersion::v4_7:
-        return {GDPP_GODOT_API_KIND_4_7, GDPP_GODOT_API_PRECISION_4_7,
-                GDPP_GODOT_API_SHA256_4_7};
+        return {GDPP_GODOT_API_KIND_4_7, GDPP_GODOT_API_PRECISION_4_7, GDPP_GODOT_API_SHA256_4_7};
     }
     return {};
 }
@@ -333,6 +329,12 @@ std::filesystem::path sdk_manifest_path(const NativeBuildOptions& options) {
     const auto target_manifest = options.sdk_root / "manifests" / (target_name + ".sdk.manifest");
     if (std::filesystem::is_regular_file(target_manifest))
         return target_manifest;
+    if (options.platform == NativePlatform::macos && options.architecture != "universal") {
+        const auto universal_manifest =
+            options.sdk_root / "manifests" / "macos.universal.sdk.manifest";
+        if (std::filesystem::is_regular_file(universal_manifest))
+            return universal_manifest;
+    }
     return options.sdk_root / "sdk.manifest";
 }
 
@@ -555,17 +557,15 @@ bool validate_manifest(const NativeBuildOptions& options, std::vector<std::strin
     const auto api_contract = godot_api_contract(options.target_version);
     const auto expected_precision = native_precision_name(options.precision);
     if (api_contract.precision != expected_precision) {
-        diagnostics.push_back(
-            "compiler Godot API precision mismatch: target requests " +
-            std::string{expected_precision} + ", compiler metadata is " +
-            std::string{api_contract.precision} +
-            "; rebuild GDPP from the exact target engine extension_api.json");
+        diagnostics.push_back("compiler Godot API precision mismatch: target requests " +
+                              std::string{expected_precision} + ", compiler metadata is " +
+                              std::string{api_contract.precision} +
+                              "; rebuild GDPP from the exact target engine extension_api.json");
     }
     if (precision != expected_precision) {
-        diagnostics.push_back(
-            "native SDK precision mismatch: expected " + std::string{expected_precision} +
-            ", package contains " +
-            (precision.empty() ? std::string{"<missing>"} : precision));
+        diagnostics.push_back("native SDK precision mismatch: expected " +
+                              std::string{expected_precision} + ", package contains " +
+                              (precision.empty() ? std::string{"<missing>"} : precision));
     }
     if (api_kind != api_contract.kind || api_sha256 != api_contract.sha256) {
         diagnostics.emplace_back(
