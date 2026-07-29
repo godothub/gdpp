@@ -606,6 +606,7 @@ if(GDPP_BUILD_TESTS)
     )
 endif()
 
+if(GDPP_BUILD_CLI)
 set(GDPP_SMOKE_DIR "${CMAKE_BINARY_DIR}/generated-smoke")
 add_custom_command(
     OUTPUT
@@ -702,6 +703,7 @@ target_include_directories(
 target_link_libraries(gdpp_script_resource_smoke PRIVATE gdpp::runtime godot::cpp)
 target_compile_features(gdpp_script_resource_smoke PRIVATE cxx_std_17)
 gdpp_set_project_warnings(gdpp_script_resource_smoke)
+endif()
 
 add_custom_target(
     gdpp_addon ALL
