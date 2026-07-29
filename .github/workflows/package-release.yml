@@ -8,28 +8,15 @@ permissions:
 
 jobs:
   package:
-    name: ZIP / ${{ matrix.package_host }} / Godot 4.4-4.7
+    name: ZIP / multi-host / Godot 4.6-4.7 and 4.4-4.7
     runs-on: ubuntu-22.04
     timeout-minutes: 90
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - package_host: mac
-            component_host: mac-universal
-            archive: gdpp-mac.zip
-          - package_host: linux
-            component_host: linux-x64
-            archive: gdpp-linux.zip
-          - package_host: win
-            component_host: windows-x64
-            archive: gdpp-win.zip
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
-          name: gdpp-host-${{ matrix.component_host }}
-          path: build/components/gdpp-host-${{ matrix.component_host }}
+          pattern: gdpp-host-*
+          path: build/components
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           pattern: gdpp-android-arm64-godot-*
@@ -39,84 +26,118 @@ jobs:
           pattern: gdpp-web-godot-*
           path: build/components
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
-        if: matrix.package_host == 'mac'
         with:
           pattern: gdpp-ios-godot-*
           path: build/components
-      - name: Assemble the cross-version desktop plugin ZIP
+      - name: Assemble both multi-host plugin ZIPs
         shell: bash
         run: |
           set -euo pipefail
-          python3 tools/package_platform_release.py \
-            --components build/components \
-            --output build/release \
-            --host ${{ matrix.package_host }}
-      - name: Audit the platform and SDK matrix
-        shell: bash
-        run: |
-          set -euo pipefail
-          archive="build/release/${{ matrix.archive }}"
-          test -f "$archive"
-          unzip -Z1 "$archive" > build/archive-contents.txt
-          contents=build/archive-contents.txt
-          if grep -qv '^addons/gdpp/' "$contents"; then
-            echo 'Release ZIP must contain exactly one addons/gdpp plugin directory.'
-            exit 1
-          fi
-          for static_file in \
-            .gitignore \
-            build_progress.gd \
-            build_progress.gd.uid \
-            native_build_job.gd \
-            native_build_job.gd.uid \
-            export_plugin.gd \
-            export_plugin.gd.uid \
-            scene_transform_worker.gd \
-            scene_transform_worker.gd.uid \
-            gdpp.gdextension \
-            gdpp.gdextension.uid \
-            plugin.cfg \
-            plugin.gd \
-            plugin.gd.uid; do
-            grep -Fqx "addons/gdpp/${static_file}" "$contents"
+          for package in standard all; do
+            python3 tools/package_platform_release.py \
+              --components build/components \
+              --output build/release \
+              --package "$package"
           done
-          grep -q '^addons/gdpp/PACKAGE_MANIFEST.txt$' "$contents"
-          grep -q '^archive_layout addons/gdpp$' \
-            <(unzip -p "$archive" addons/gdpp/PACKAGE_MANIFEST.txt)
-          grep -q '^sdk_layout shared-target-manifests$' \
-            <(unzip -p "$archive" addons/gdpp/PACKAGE_MANIFEST.txt)
-          test "$(grep -Ec '^addons/gdpp/binary/[^/]+$' "$contents")" -eq 2
-          for godot in 4.4 4.5 4.6 4.7; do
-            grep -q "^addons/gdpp/sdk/$godot/sdk.manifest$" "$contents"
-            grep -q "^addons/gdpp/sdk/$godot/manifests/android.arm64.sdk.manifest$" "$contents"
-            grep -q "^addons/gdpp/sdk/$godot/manifests/web.wasm32.nothreads.sdk.manifest$" "$contents"
-            grep -q "^addons/gdpp/sdk/$godot/manifests/web.wasm32.threads.sdk.manifest$" "$contents"
-            if [[ "${{ matrix.package_host }}" == mac ]]; then
-              grep -q "^addons/gdpp/sdk/$godot/manifests/ios.arm64.sdk.manifest$" "$contents"
-              test "$(grep -Ec "^addons/gdpp/sdk/$godot/lib/[^/]+$" "$contents")" -eq 6
-            elif grep -q "^addons/gdpp/sdk/$godot/manifests/ios\\." "$contents"; then
-              echo 'A non-macOS package contains an iOS SDK.'
+      - name: Audit both package and SDK matrices
+        shell: bash
+        run: |
+          set -euo pipefail
+          audit_archive() {
+            local archive="$1"
+            shift
+            local contents="build/$(basename "$archive").contents"
+            local expected_csv
+            expected_csv="$(IFS=,; echo "$*")"
+            test -f "$archive"
+            unzip -Z1 "$archive" > "$contents"
+            if grep -qv '^addons/gdpp/' "$contents"; then
+              echo 'Release ZIP must contain exactly one addons/gdpp plugin directory.'
               exit 1
-            else
-              test "$(grep -Ec "^addons/gdpp/sdk/$godot/lib/[^/]+$" "$contents")" -eq 4
             fi
-          done
-          test "$(grep -Eo '^addons/gdpp/sdk/(4\.4|4\.5|4\.6|4\.7)/' "$contents" \
-            | sort -u | wc -l)" -eq 4
-          if grep -Eq \
-              'template_debug|\.editor\.|\.zip$|/build/|gdpp_project|(^|/)(lib)?gdpp\.(debug|release)\.|(^|/)gdpp\.lib$|\.DS_Store$|/\._' \
-              "$contents"; then
-            echo 'Release ZIP contains a forbidden binding or generated product.'
-            exit 1
-          fi
-          if grep -Eq '^addons/gdpp/sdk/(4\.4|4\.5|4\.6|4\.7)/(android|ios|web|macos|linux|windows)/' \
-              "$contents"; then
-            echo 'Release ZIP contains a retired per-target SDK directory.'
-            exit 1
-          fi
+            for static_file in \
+              .gitignore \
+              build_progress.gd \
+              build_progress.gd.uid \
+              native_build_job.gd \
+              native_build_job.gd.uid \
+              export_plugin.gd \
+              export_plugin.gd.uid \
+              scene_transform_worker.gd \
+              scene_transform_worker.gd.uid \
+              gdpp.gdextension \
+              gdpp.gdextension.uid \
+              plugin.cfg \
+              plugin.gd \
+              plugin.gd.uid; do
+              grep -Fqx "addons/gdpp/${static_file}" "$contents"
+            done
+            grep -Fqx 'addons/gdpp/PACKAGE_MANIFEST.txt' "$contents"
+            grep -q '^GDPP_PACKAGE 6$' \
+              <(unzip -p "$archive" addons/gdpp/PACKAGE_MANIFEST.txt)
+            grep -q '^kind multi-host$' \
+              <(unzip -p "$archive" addons/gdpp/PACKAGE_MANIFEST.txt)
+            grep -q '^archive_layout addons/gdpp$' \
+              <(unzip -p "$archive" addons/gdpp/PACKAGE_MANIFEST.txt)
+            grep -q '^sdk_layout shared-target-manifests$' \
+              <(unzip -p "$archive" addons/gdpp/PACKAGE_MANIFEST.txt)
+            grep -q "^target_godot_apis ${expected_csv}$" \
+              <(unzip -p "$archive" addons/gdpp/PACKAGE_MANIFEST.txt)
+            test "$(grep -Ec '^addons/gdpp/binary/[^/]+$' "$contents")" -eq 6
+            for binary in \
+              libgdpp_compiler.macos.universal.dylib \
+              libgdpp_fallback.macos.universal.dylib \
+              libgdpp_compiler.linux.x86_64.so \
+              libgdpp_fallback.linux.x86_64.so \
+              gdpp_compiler.windows.x86_64.dll \
+              gdpp_fallback.windows.x86_64.dll; do
+              grep -Fqx "addons/gdpp/binary/$binary" "$contents"
+            done
+            mapfile -t actual_versions < <(
+              grep -Eo '^addons/gdpp/sdk/[0-9]+\.[0-9]+/' "$contents" \
+                | cut -d/ -f4 \
+                | sort -Vu
+            )
+            test "${actual_versions[*]}" = "$*"
+            if grep -Eq '^addons/gdpp/sdk/[^/]+/sdk\.manifest$' "$contents"; then
+              echo 'A multi-host package contains an ambiguous root SDK manifest.'
+              exit 1
+            fi
+            for godot in "$@"; do
+              for manifest in \
+                macos.universal \
+                linux.x86_64 \
+                windows.x86_64 \
+                android.arm64 \
+                ios.arm64 \
+                web.wasm32.nothreads \
+                web.wasm32.threads; do
+                grep -Fqx \
+                  "addons/gdpp/sdk/$godot/manifests/$manifest.sdk.manifest" \
+                  "$contents"
+              done
+              test "$(grep -Ec "^addons/gdpp/sdk/$godot/lib/[^/]+$" "$contents")" -eq 8
+            done
+            if grep -Eq \
+                'template_debug|\.editor\.|\.zip$|/build/|gdpp_project|(^|/)(lib)?gdpp\.(debug|release)\.|(^|/)gdpp\.lib$|\.DS_Store$|/\._' \
+                "$contents"; then
+              echo 'Release ZIP contains a forbidden binding or generated product.'
+              exit 1
+            fi
+            if grep -Eq '^addons/gdpp/sdk/[^/]+/(android|ios|web|macos|linux|windows)/' \
+                "$contents"; then
+              echo 'Release ZIP contains a retired per-target SDK directory.'
+              exit 1
+            fi
+          }
+          audit_archive build/release/gdpp.zip 4.6 4.7
+          audit_archive build/release/gdpp-all.zip 4.4 4.5 4.6 4.7
+          test "$(find build/release -maxdepth 1 -type f -name '*.zip' | wc -l)" -eq 2
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: gdpp-release-${{ matrix.package_host }}
-          path: build/release/${{ matrix.archive }}
+          name: gdpp-release-packages
+          path: |
+            build/release/gdpp.zip
+            build/release/gdpp-all.zip
           if-no-files-found: error
           retention-days: 14
