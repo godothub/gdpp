@@ -579,6 +579,27 @@ class ReleasePackagingTest(unittest.TestCase):
         )
         self.assertFalse((destination / "build").exists())
 
+    def test_host_staging_canonicalizes_generated_godot_cpp_line_endings(self) -> None:
+        source = create_host_component(self.temporary / "source", "windows-x64")
+        generated = (
+            source / "sdk/4.6/godot-cpp/gen/include/godot_cpp/classes/node.hpp"
+        )
+        generated.write_bytes(b"first\r\nsecond\r\n")
+        destination = self.temporary / "staged/addons/gdpp"
+
+        stage_host_component.stage_host_component(
+            source, destination, "windows-x64"
+        )
+
+        self.assertEqual(generated.read_bytes(), b"first\r\nsecond\r\n")
+        self.assertEqual(
+            (
+                destination
+                / "sdk/4.6/godot-cpp/gen/include/godot_cpp/classes/node.hpp"
+            ).read_bytes(),
+            b"first\nsecond\n",
+        )
+
     def test_host_artifact_preserves_required_hidden_addon_files(self) -> None:
         workflow = (
             SOURCE_ROOT / ".github/workflows/host-components.yml"

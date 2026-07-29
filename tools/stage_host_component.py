@@ -23,6 +23,26 @@ def require_no_symlinks(root: Path) -> None:
             fail(f"host add-on cannot contain symbolic links: {path}")
 
 
+def normalize_godot_cpp_sources(addon: Path) -> None:
+    for godot_version in package_release.SUPPORTED_GODOT_VERSIONS:
+        source_root = addon / "sdk" / godot_version / "godot-cpp"
+        if not source_root.is_dir():
+            fail(f"host SDK godot-cpp source tree is missing: {source_root}")
+        files = sorted(
+            candidate for candidate in source_root.rglob("*") if candidate.is_file()
+        )
+        for path in files:
+            try:
+                content = path.read_bytes().decode("utf-8")
+            except UnicodeDecodeError as error:
+                raise ValueError(
+                    f"host SDK godot-cpp source is not UTF-8 text: {path}"
+                ) from error
+            normalized = content.replace("\r\n", "\n").replace("\r", "\n")
+            if normalized != content:
+                path.write_bytes(normalized.encode("utf-8"))
+
+
 def stage_host_component(source: Path, destination: Path, component_host: str) -> None:
     if component_host not in package_release.HOSTS:
         fail(f"unsupported host component: {component_host}")
@@ -50,6 +70,7 @@ def stage_host_component(source: Path, destination: Path, component_host: str) -
         return set()
 
     shutil.copytree(source, destination, ignore=ignore_root_products)
+    normalize_godot_cpp_sources(destination)
     destination_binary = destination / "binary"
     destination_binary.mkdir()
     for library in expected_binaries:
