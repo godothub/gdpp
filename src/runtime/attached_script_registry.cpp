@@ -7,6 +7,7 @@
 #include <cctype>
 #include <map>
 #include <mutex>
+#include <shared_mutex>
 #include <string>
 #include <unordered_set>
 #include <utility>
@@ -81,6 +82,16 @@ std::map<std::string, std::string>& behavior_registry() {
 
 std::map<std::string, godot::Ref<AttachedCompiledScript>>& script_resources() {
     static std::map<std::string, godot::Ref<AttachedCompiledScript>> value;
+    return value;
+}
+
+std::mutex& script_resource_materialization_mutex() {
+    static std::mutex value;
+    return value;
+}
+
+std::shared_mutex& script_resource_lifecycle_mutex() {
+    static std::shared_mutex value;
     return value;
 }
 
@@ -290,7 +301,8 @@ bool register_attached_script(AttachedScriptDescriptor descriptor, godot::String
             }
         }
     } else if (!descriptor.static_properties.empty()) {
-        set_error(error, "editor-only attached metadata must not contain static property accessors");
+        set_error(error,
+                  "editor-only attached metadata must not contain static property accessors");
         return false;
     }
     if (!names_are_unique(
@@ -376,6 +388,7 @@ void unregister_all_attached_scripts() {
     // can still dispatch into this library. This also makes temporary editor metadata resets safe
     // during repeated exports and extension reloads.
     detach_all_attached_script_instances();
+    std::unique_lock<std::shared_mutex> lifecycle_lock{script_resource_lifecycle_mutex()};
     std::lock_guard<std::mutex> lock{registry_mutex()};
     script_resources().clear();
     behavior_registry().clear();
@@ -393,8 +406,7 @@ std::optional<AttachedScriptDescriptor> find_attached_script(const godot::String
 std::optional<AttachedScriptDescriptor>
 find_attached_script_by_behavior_class(const godot::StringName& behavior_class) {
     std::lock_guard<std::mutex> lock{registry_mutex()};
-    const auto behavior =
-        behavior_registry().find(registry_key(godot::String{behavior_class}));
+    const auto behavior = behavior_registry().find(registry_key(godot::String{behavior_class}));
     if (behavior == behavior_registry().end())
         return std::nullopt;
     const auto descriptor = registry().find(behavior->second);
@@ -407,6 +419,11 @@ godot::Ref<AttachedCompiledScript> attached_script_resource(const godot::String&
                                                             godot::String* error) {
     const auto normalized = source_path.simplify_path();
     const auto key = registry_key(normalized);
+    std::shared_lock<std::shared_mutex> lifecycle_lock{script_resource_lifecycle_mutex()};
+    // ResourceFormatLoader callbacks may arrive concurrently from Godot's threaded loader.
+    // Construct and publish each canonical Script resource as one transaction: a losing
+    // duplicate must never escape to ResourceLoader, and contract metadata must not be mutated
+    // concurrently on the published object.
     godot::Ref<AttachedCompiledScript> script;
     godot::String contract_hash;
     {
@@ -421,6 +438,22 @@ godot::Ref<AttachedCompiledScript> attached_script_resource(const godot::String&
         if (cached != script_resources().end())
             script = cached->second;
     }
+    if (script.is_valid() && script->get_contract_hash() == contract_hash)
+        return script;
+
+    std::lock_guard<std::mutex> materialization_lock{script_resource_materialization_mutex()};
+    {
+        std::lock_guard<std::mutex> lock{registry_mutex()};
+        const auto descriptor = registry().find(key);
+        if (descriptor == registry().end()) {
+            set_error(error, "attached script is not registered: " + normalized);
+            return {};
+        }
+        contract_hash = descriptor->second.contract_hash;
+        const auto cached = script_resources().find(key);
+        script = cached == script_resources().end() ? godot::Ref<AttachedCompiledScript>{}
+                                                    : cached->second;
+    }
     if (script.is_null()) {
         script.instantiate();
         if (script.is_null()) {
@@ -428,10 +461,10 @@ godot::Ref<AttachedCompiledScript> attached_script_resource(const godot::String&
             return {};
         }
         script->set_source_path(normalized);
+        script->set_contract_hash(contract_hash);
         std::lock_guard<std::mutex> lock{registry_mutex()};
-        const auto [stored, inserted] = script_resources().emplace(key, script);
-        if (!inserted)
-            script = stored->second;
+        script_resources().emplace(key, script);
+        return script;
     }
     if (script->get_contract_hash() != contract_hash)
         script->set_contract_hash(contract_hash);
@@ -442,6 +475,7 @@ godot::Ref<AttachedCompiledScript>
 attached_container_script_resource(const godot::String& source_path) {
     const auto normalized = source_path.simplify_path();
     const auto key = registry_key(normalized);
+    std::shared_lock<std::shared_mutex> lifecycle_lock{script_resource_lifecycle_mutex()};
     godot::Ref<AttachedCompiledScript> script;
     godot::String contract_hash;
     {
@@ -452,20 +486,33 @@ attached_container_script_resource(const godot::String& source_path) {
         if (cached != script_resources().end())
             script = cached->second;
     }
-    if (script.is_valid()) {
-        if (!contract_hash.is_empty() && script->get_contract_hash() != contract_hash)
+    if (script.is_valid() &&
+        (contract_hash.is_empty() || script->get_contract_hash() == contract_hash))
+        return script;
+
+    std::lock_guard<std::mutex> materialization_lock{script_resource_materialization_mutex()};
+    {
+        std::lock_guard<std::mutex> lock{registry_mutex()};
+        if (const auto descriptor = registry().find(key); descriptor != registry().end())
+            contract_hash = descriptor->second.contract_hash;
+        const auto cached = script_resources().find(key);
+        script = cached == script_resources().end() ? godot::Ref<AttachedCompiledScript>{}
+                                                    : cached->second;
+    }
+    if (script.is_null()) {
+        script.instantiate();
+        ERR_FAIL_COND_V_MSG(script.is_null(), {},
+                            "Failed to instantiate attached container Script");
+        script->set_source_path(normalized);
+        if (!contract_hash.is_empty())
             script->set_contract_hash(contract_hash);
+        std::lock_guard<std::mutex> lock{registry_mutex()};
+        script_resources().emplace(key, script);
         return script;
     }
-
-    script.instantiate();
-    ERR_FAIL_COND_V_MSG(script.is_null(), {}, "Failed to instantiate attached container Script");
-    script->set_source_path(normalized);
-    if (!contract_hash.is_empty())
+    if (!contract_hash.is_empty() && script->get_contract_hash() != contract_hash)
         script->set_contract_hash(contract_hash);
-    std::lock_guard<std::mutex> lock{registry_mutex()};
-    const auto [stored, inserted] = script_resources().emplace(key, script);
-    return inserted ? script : stored->second;
+    return script;
 }
 
 std::optional<AttachedScriptDescriptor> resolve_attached_script(const godot::String& source_path,
@@ -580,11 +627,9 @@ bool get_attached_script_constant(const AttachedScriptDescriptor& descriptor,
         value = descriptor.constants[name];
         return true;
     }
-    const auto found =
-        std::find_if(descriptor.deferred_constants.begin(), descriptor.deferred_constants.end(),
-                     [&](const AttachedScriptDeferredConstant& constant) {
-                         return constant.name == name;
-                     });
+    const auto found = std::find_if(
+        descriptor.deferred_constants.begin(), descriptor.deferred_constants.end(),
+        [&](const AttachedScriptDeferredConstant& constant) { return constant.name == name; });
     if (found == descriptor.deferred_constants.end() || !found->resolver)
         return false;
     value = found->resolver();
