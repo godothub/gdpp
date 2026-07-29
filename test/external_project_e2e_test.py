@@ -113,7 +113,8 @@ class ExternalProjectE2ETest(unittest.TestCase):
             baseline = root / "baseline.log"
             baseline.write_text(
                 "SCRIPT ERROR: existing customer failure\n"
-                "WARNING: ObjectDB instances leaked at exit\n",
+                "WARNING: ObjectDB instances leaked at exit\n"
+                "   at: cleanup (core/object/object.cpp:2663)\n",
                 encoding="utf-8",
             )
             baseline_diagnostics, report = E2E.report_diagnostics(baseline)
@@ -123,13 +124,21 @@ class ExternalProjectE2ETest(unittest.TestCase):
                     {
                         "message": "SCRIPT ERROR: existing customer failure",
                         "count": 1,
-                    }
+                    },
+                    {
+                        "message": (
+                            "WARNING: ObjectDB instances leaked at exit | "
+                            "at: cleanup (core/object/object.cpp:2663)"
+                        ),
+                        "count": 1,
+                    },
                 ],
             )
             unchanged = root / "unchanged.log"
             unchanged.write_text(
                 "\x1b[31mSCRIPT ERROR: existing customer failure\x1b[0m\n"
-                "WARNING: ObjectDB instances leaked at exit\n",
+                "WARNING: ObjectDB instances leaked at exit\n"
+                "   at: cleanup (core/object/object.cpp:2663)\n",
                 encoding="utf-8",
             )
             E2E.assert_no_new_diagnostics(
@@ -226,6 +235,30 @@ class ExternalProjectE2ETest(unittest.TestCase):
             "baseline_runtime_diagnostics",
             source,
         )
+
+    def test_objectdb_cleanup_context_is_owned_by_the_leak_diagnostic(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            log = Path(temporary) / "runtime.log"
+            log.write_text(
+                "ERROR: Shader parameter mismatch\n"
+                "   at: set_shader_parameter (scene/resources/material.cpp:1)\n"
+                "WARNING: ObjectDB instances leaked at exit\n"
+                "   at: cleanup (core/object/object.cpp:2663)\n",
+                encoding="utf-8",
+            )
+            self.assertEqual(
+                E2E.diagnostic_fingerprints(log),
+                [
+                    (
+                        "ERROR: Shader parameter mismatch | "
+                        "at: set_shader_parameter (scene/resources/material.cpp:1)"
+                    ),
+                    (
+                        "WARNING: ObjectDB instances leaked at exit | "
+                        "at: cleanup (core/object/object.cpp:2663)"
+                    ),
+                ],
+            )
 
     def test_enable_plugin_preserves_existing_multiline_entries(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

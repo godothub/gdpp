@@ -21,7 +21,7 @@ E2E_PRESET_NAME = "GDPP External Project E2E"
 FORBIDDEN_DIAGNOSTICS = re.compile(
     r"(^|\s)(SCRIPT ERROR:|ERROR:|CRASH:|FATAL:)|"
     r"Parse Error:|Segmentation fault|EXC_BAD_ACCESS|"
-    r"ObjectDB instances were leaked|resources still in use at exit|"
+    r"ObjectDB instances (?:were )?leaked|resources still in use at exit|"
     r"Resource still in use",
     re.MULTILINE | re.IGNORECASE,
 )
