@@ -619,6 +619,8 @@ add_custom_command(
         "${GDPP_SMOKE_DIR}/static_context_case.gd.cpp"
         "${GDPP_SMOKE_DIR}/enum_dictionary.gd.hpp"
         "${GDPP_SMOKE_DIR}/enum_dictionary.gd.cpp"
+        "${GDPP_SMOKE_DIR}/assert_callable.gd.hpp"
+        "${GDPP_SMOKE_DIR}/assert_callable.gd.cpp"
     COMMAND "${CMAKE_COMMAND}" -E make_directory "${GDPP_SMOKE_DIR}"
     COMMAND $<TARGET_FILE:gdpp> compile "${CMAKE_SOURCE_DIR}/example/hello.gd"
             --output "${GDPP_SMOKE_DIR}"
@@ -631,6 +633,8 @@ add_custom_command(
             --output "${GDPP_SMOKE_DIR}"
     COMMAND $<TARGET_FILE:gdpp> compile "${CMAKE_SOURCE_DIR}/test/fixtures/enum_dictionary.gd"
             --output "${GDPP_SMOKE_DIR}"
+    COMMAND $<TARGET_FILE:gdpp> compile "${CMAKE_SOURCE_DIR}/test/fixtures/assert_callable.gd"
+            --output "${GDPP_SMOKE_DIR}"
     DEPENDS
         gdpp
         "${CMAKE_SOURCE_DIR}/example/hello.gd"
@@ -638,6 +642,7 @@ add_custom_command(
         "${CMAKE_SOURCE_DIR}/test/fixtures/transactional_initialization.gd"
         "${CMAKE_SOURCE_DIR}/example/static_context_case.gd"
         "${CMAKE_SOURCE_DIR}/test/fixtures/enum_dictionary.gd"
+        "${CMAKE_SOURCE_DIR}/test/fixtures/assert_callable.gd"
     VERBATIM
 )
 add_library(
@@ -648,10 +653,12 @@ add_library(
     "${GDPP_SMOKE_DIR}/transactional_initialization.gd.cpp"
     "${GDPP_SMOKE_DIR}/static_context_case.gd.cpp"
     "${GDPP_SMOKE_DIR}/enum_dictionary.gd.cpp"
+    "${GDPP_SMOKE_DIR}/assert_callable.gd.cpp"
 )
 target_include_directories(gdpp_generated_smoke PRIVATE "${GDPP_SMOKE_DIR}")
 target_link_libraries(gdpp_generated_smoke PRIVATE gdpp::runtime godot::cpp)
 target_compile_features(gdpp_generated_smoke PRIVATE cxx_std_17)
+target_compile_definitions(gdpp_generated_smoke PRIVATE GDPP_SCRIPT_DEBUG_ENABLED)
 gdpp_set_project_warnings(gdpp_generated_smoke)
 
 set(GDPP_SCRIPT_RESOURCE_SMOKE_SOURCE

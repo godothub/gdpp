@@ -5982,7 +5982,11 @@ std::string CodeGenerator::emit_assert_failure(const typed::Statement& statement
         return result + prefix + "ERR_FAIL_V_EDMSG(gdpp::runtime::coroutine_result(" +
                current_coroutine_state_ + "), " + message + ");\n";
     }
-    if (continuation_context || current_return_type_.kind == TypeKind::void_type)
+    if (continuation_context)
+        return prefix + "ERR_FAIL_EDMSG(" + message + ");\n";
+    if (in_callable_lambda_)
+        return prefix + "ERR_FAIL_V_EDMSG(godot::Variant{}, " + message + ");\n";
+    if (current_return_type_.kind == TypeKind::void_type)
         return prefix + "ERR_FAIL_EDMSG(" + message + ");\n";
     return prefix + "ERR_FAIL_V_EDMSG({}, " + message + ");\n";
 }

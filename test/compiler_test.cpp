@@ -2438,6 +2438,19 @@ TEST_CASE("compiler preserves typed returns for non-suspending awaited asserts")
     REQUIRE(assertion.unit.source.find(" = static_cast<int64_t>(7);") != std::string::npos);
 }
 
+TEST_CASE("compiler returns a Variant when an assertion fails inside a Callable adapter") {
+    const auto assertion =
+        gdpp::Compiler{}.compile("callable_assert.gd", "extends RefCounted\n"
+                                                       "func make_validator() -> Callable:\n"
+                                                       "    return func(value: Variant) -> void:\n"
+                                                       "        assert(value != null)\n");
+
+    REQUIRE(assertion.success);
+    REQUIRE(assertion.unit.source.find(
+                "ERR_FAIL_V_EDMSG(godot::Variant{}, godot::String(\"Assertion failed") !=
+            std::string::npos);
+}
+
 TEST_CASE("compiler applies truthiness to typed containers with short circuiting") {
     const gdpp::Compiler compiler;
     const auto result =
