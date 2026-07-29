@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fixture tests for the three cross-version desktop release packages."""
+"""Fixture tests for the two multi-host release packages."""
 
 from __future__ import annotations
 
@@ -226,11 +226,11 @@ class ReleasePackagingTest(unittest.TestCase):
     def tearDown(self) -> None:
         shutil.rmtree(self.temporary)
 
-    def stage(self, host: str) -> tuple[Path, str]:
-        stage, archive_name, version = package_platform_release.stage_platform_package(
+    def stage(self, package_name: str) -> tuple[Path, str]:
+        stage, archive_name, version = package_platform_release.stage_release_package(
             self.components,
-            self.temporary / f"release-{host}",
-            host,
+            self.temporary / f"release-{package_name}",
+            package_name,
         )
         self.assertEqual(version, "1.7.10")
         return stage, archive_name
@@ -254,59 +254,65 @@ class ReleasePackagingTest(unittest.TestCase):
         self.assertIn('--version "$version"', workflow)
         self.assertNotRegex(workflow, r"--version [0-9]+\\.[0-9]+\\.[0-9]+")
 
-    def test_three_packages_contain_all_versions_and_only_supported_targets(self) -> None:
+    def test_two_multi_host_packages_contain_their_exact_version_ranges(self) -> None:
         expected_names = {
-            "mac": "gdpp-mac",
-            "linux": "gdpp-linux",
-            "win": "gdpp-win",
+            "standard": ("gdpp", ("4.6", "4.7")),
+            "all": ("gdpp-all", ("4.4", "4.5", "4.6", "4.7")),
         }
-        for package_name, expected_archive in expected_names.items():
+        expected_binaries = {
+            filename
+            for host in package_release.HOSTS.values()
+            for filename in (host.compiler_library, host.fallback_library)
+        }
+        expected_manifests = {
+            *(f"{host.platform}.{host.architecture}.sdk.manifest"
+              for host in package_release.HOSTS.values()),
+            "android.arm64.sdk.manifest",
+            "ios.arm64.sdk.manifest",
+            "web.wasm32.nothreads.sdk.manifest",
+            "web.wasm32.threads.sdk.manifest",
+        }
+        for package_name, (expected_archive, expected_versions) in expected_names.items():
             with self.subTest(package=package_name):
                 stage, archive_name = self.stage(package_name)
                 self.assertEqual(archive_name, expected_archive)
                 addon = stage / "addons" / "gdpp"
-                package = package_platform_release.PLATFORM_PACKAGES[package_name]
-                host = package_release.HOSTS[package.component_host]
                 self.assertEqual(
                     {path.name for path in (addon / "binary").iterdir()},
-                    {host.compiler_library, host.fallback_library},
+                    expected_binaries,
                 )
                 self.assertEqual(
                     sorted(path.name for path in (addon / "sdk").iterdir() if path.is_dir()),
-                    list(package_release.SUPPORTED_GODOT_VERSIONS),
+                    list(expected_versions),
                 )
-                for godot_version in package_release.SUPPORTED_GODOT_VERSIONS:
+                for godot_version in expected_versions:
                     sdk = addon / "sdk" / godot_version
-                    self.assertTrue((sdk / "sdk.manifest").is_file())
+                    self.assertFalse((sdk / "sdk.manifest").exists())
                     manifests = sdk / "manifests"
-                    self.assertTrue(
-                        (manifests / "android.arm64.sdk.manifest").is_file()
-                    )
-                    self.assertTrue(
-                        (manifests / "web.wasm32.nothreads.sdk.manifest").is_file()
-                    )
-                    self.assertTrue(
-                        (manifests / "web.wasm32.threads.sdk.manifest").is_file()
-                    )
                     self.assertEqual(
-                        (manifests / "ios.arm64.sdk.manifest").is_file(),
-                        package_name == "mac",
+                        {path.name for path in manifests.iterdir() if path.is_file()},
+                        expected_manifests,
                     )
-                    self.assertEqual(
-                        len(list((sdk / "lib").iterdir())),
-                        6 if package_name == "mac" else 4,
-                    )
+                    self.assertEqual(len(list((sdk / "lib").iterdir())), 8)
                     for retired in ("android", "ios", "web", "macos", "linux", "windows"):
                         self.assertFalse((sdk / retired).exists())
                 manifest = (addon / "PACKAGE_MANIFEST.txt").read_text(encoding="utf-8")
-                self.assertTrue(manifest.startswith("GDPP_PACKAGE 5\n"))
+                self.assertTrue(manifest.startswith("GDPP_PACKAGE 6\n"))
+                self.assertIn("kind multi-host", manifest)
+                self.assertIn(f"edition {package_name}", manifest)
                 self.assertIn("archive_layout addons/gdpp", manifest)
-                self.assertIn("target_godot_apis 4.4,4.5,4.6,4.7", manifest)
-                self.assertIn(f"host {package_name}", manifest)
+                self.assertIn(
+                    f"target_godot_apis {','.join(expected_versions)}",
+                    manifest,
+                )
+                self.assertIn(
+                    "editor_hosts macos-universal,linux-x86_64,windows-x86_64",
+                    manifest,
+                )
                 self.assertIn("sdk_layout shared-target-manifests", manifest)
 
     def test_zip_is_reproducible_and_contains_no_nested_or_debug_products(self) -> None:
-        stage, archive_name = self.stage("mac")
+        stage, archive_name = self.stage("standard")
         first_archive = self.temporary / "first.zip"
         package_release.create_zip(stage, first_archive)
         first_hash = package_release.sha256(first_archive)
@@ -328,10 +334,10 @@ class ReleasePackagingTest(unittest.TestCase):
             self.assertIn(f"addons/gdpp/{relative}", names)
         self.assertFalse(any(path.startswith("gdpp/") for path in names))
 
-        second_stage, second_name, _ = package_platform_release.stage_platform_package(
+        second_stage, second_name, _ = package_platform_release.stage_release_package(
             self.components,
             self.temporary / "second-release",
-            "mac",
+            "standard",
         )
         self.assertEqual(second_name, archive_name)
         second_archive = self.temporary / "second.zip"
@@ -365,19 +371,19 @@ class ReleasePackagingTest(unittest.TestCase):
             self.components / "gdpp-host-linux-x64/addons/gdpp/sdk/4.7"
         )
         with self.assertRaisesRegex(ValueError, "must contain Godot SDKs"):
-            package_platform_release.stage_platform_package(
+            package_platform_release.stage_release_package(
                 self.components,
                 self.temporary / "release",
-                "linux",
+                "standard",
             )
 
     def test_missing_required_target_fails_closed(self) -> None:
         shutil.rmtree(self.components / "gdpp-web-godot-4.6-threads")
         with self.assertRaisesRegex(ValueError, "component is missing"):
-            package_platform_release.stage_platform_package(
+            package_platform_release.stage_release_package(
                 self.components,
                 self.temporary / "release",
-                "win",
+                "standard",
             )
 
     def test_runtime_contract_conflict_fails_closed_across_versions(self) -> None:
@@ -389,39 +395,53 @@ class ReleasePackagingTest(unittest.TestCase):
             encoding="utf-8",
         )
         with self.assertRaisesRegex(ValueError, "runtime contract conflicts"):
-            package_platform_release.stage_platform_package(
+            package_platform_release.stage_release_package(
                 self.components,
                 self.temporary / "release",
-                "mac",
+                "standard",
+            )
+
+    def test_shared_host_payload_conflict_fails_closed(self) -> None:
+        write(
+            self.components
+            / "gdpp-host-linux-x64/addons/gdpp/sdk/4.6/include/host-only.hpp"
+        )
+        with self.assertRaisesRegex(ValueError, "differs between desktop host components"):
+            package_platform_release.stage_release_package(
+                self.components,
+                self.temporary / "release",
+                "standard",
             )
 
     def test_editor_or_debug_binding_fails_closed(self) -> None:
         sdk = self.components / "gdpp-host-windows-x64/addons/gdpp/sdk/4.6/lib"
         write(sdk / "libgodot-cpp.windows.editor.x86_64.lib")
         with self.assertRaisesRegex(ValueError, "unexpected bindings"):
-            package_platform_release.stage_platform_package(
+            package_platform_release.stage_release_package(
                 self.components,
                 self.temporary / "release",
-                "win",
+                "standard",
             )
         (sdk / "libgodot-cpp.windows.editor.x86_64.lib").unlink()
         write(sdk / "libgodot-cpp.windows.template_debug.x86_64.lib")
         with self.assertRaisesRegex(ValueError, "unexpected bindings"):
-            package_platform_release.stage_platform_package(
+            package_platform_release.stage_release_package(
                 self.components,
                 self.temporary / "release-debug",
-                "win",
+                "standard",
             )
 
-    def test_release_workflow_declares_only_the_three_platform_archives(self) -> None:
+    def test_release_workflow_declares_only_the_two_multi_host_archives(self) -> None:
         workflow_root = SOURCE_ROOT / ".github/workflows"
         orchestrator = (workflow_root / "release.yml").read_text(encoding="utf-8")
         host_components = (workflow_root / "host-components.yml").read_text(
             encoding="utf-8"
         )
         packages = (workflow_root / "package-release.yml").read_text(encoding="utf-8")
-        for archive in ("gdpp-mac.zip", "gdpp-linux.zip", "gdpp-win.zip"):
+        for archive in ("gdpp.zip", "gdpp-all.zip"):
             self.assertIn(archive, packages)
+        for retired in ("gdpp-mac.zip", "gdpp-linux.zip", "gdpp-win.zip"):
+            self.assertNotIn(retired, packages)
         self.assertIn("python3 tools/stage_host_component.py", host_components)
         self.assertIn("--host '${{ matrix.host }}'", host_components)
         self.assertIn(
@@ -439,7 +459,7 @@ class ReleasePackagingTest(unittest.TestCase):
         installed_smoke = (
             workflow_root / "release-package-smoke.yml"
         ).read_text(encoding="utf-8")
-        self.assertIn("name: gdpp-release-${{ matrix.package_host }}", installed_smoke)
+        self.assertIn("name: gdpp-release-packages", installed_smoke)
         self.assertIn("Install the final ZIP into a clean customer project", installed_smoke)
         self.assertIn("PCK_AUDIT_VIOLATIONS=0", installed_smoke)
         self.assertIn("PCK_AUDIT_PROJECT_LIBRARIES=1", installed_smoke)
