@@ -48,11 +48,10 @@ TEST_CASE("compiler generates bindable GDExtension C++") {
 }
 
 TEST_CASE("scripts without extends use the GDScript RefCounted base") {
-    const auto result =
-        gdpp::Compiler{}.compile("default_base.gd", "class_name DefaultBase\n"
-                                                   "class Inner:\n"
-                                                   "    var value := 7\n"
-                                                   "var inner := Inner.new()\n");
+    const auto result = gdpp::Compiler{}.compile("default_base.gd", "class_name DefaultBase\n"
+                                                                    "class Inner:\n"
+                                                                    "    var value := 7\n"
+                                                                    "var inner := Inner.new()\n");
 
     REQUIRE(result.success);
     REQUIRE(result.unit.header.find("GDCLASS(GDPPNative_DefaultBase, godot::RefCounted)") !=
@@ -1331,25 +1330,23 @@ TEST_CASE("compiler routes GDScript resource construction through the AOT runtim
 
 TEST_CASE("compiler preserves GDScript annotations across AOT script resources and containers") {
     const gdpp::Compiler compiler;
-    const auto result = compiler.compile(
-        "script_storage.gd",
-        "extends Node\n"
-        "var factory: GDScript\n"
-        "var factories: Array[GDScript] = []\n"
-        "var lookup: Dictionary[String, GDScript] = {}\n"
-        "func replace(value: Variant) -> void:\n"
-        "    factory = value\n"
-        "    factories[0] = value\n"
-        "    lookup[\"main\"] = value\n");
+    const auto result =
+        compiler.compile("script_storage.gd", "extends Node\n"
+                                              "var factory: GDScript\n"
+                                              "var factories: Array[GDScript] = []\n"
+                                              "var lookup: Dictionary[String, GDScript] = {}\n"
+                                              "func replace(value: Variant) -> void:\n"
+                                              "    factory = value\n"
+                                              "    factories[0] = value\n"
+                                              "    lookup[\"main\"] = value\n");
 
     REQUIRE(result.success);
     REQUIRE(result.unit.header.find("godot::Ref<godot::Script> factory") != std::string::npos);
     REQUIRE(result.unit.header.find(
                 "gdpp::runtime::ScriptTypedArray<gdpp::runtime::GDScriptContainerTag>") !=
             std::string::npos);
-    REQUIRE(result.unit.header.find(
-                "gdpp::runtime::ScriptTypedDictionary<godot::String, "
-                "gdpp::runtime::GDScriptContainerTag>") != std::string::npos);
+    REQUIRE(result.unit.header.find("gdpp::runtime::ScriptTypedDictionary<godot::String, "
+                                    "gdpp::runtime::GDScriptContainerTag>") != std::string::npos);
     REQUIRE(result.unit.source.find("strict_gdscript_storage") != std::string::npos);
 }
 
@@ -1458,34 +1455,30 @@ TEST_CASE("attached descriptors expose the complete dynamic script member surfac
     options.attached_script = true;
     options.attached_native_base = "Node";
     options.script_contract_hash = std::string(64, 'a');
-    const auto result =
-        compiler.compile("dynamic_members.gd",
-                         "extends Node\n"
-                         "enum { FIRST = 3 }\n"
-                         "enum Mode { IDLE = 5, ACTIVE = 8 }\n"
-                         "static var shared: int = 13\n"
-                         "class Payload:\n"
-                         "    var value: int\n"
-                         "    func _init(initial: int) -> void:\n"
-                         "        value = initial\n",
-                         options);
+    const auto result = compiler.compile("dynamic_members.gd",
+                                         "extends Node\n"
+                                         "enum { FIRST = 3 }\n"
+                                         "enum Mode { IDLE = 5, ACTIVE = 8 }\n"
+                                         "static var shared: int = 13\n"
+                                         "class Payload:\n"
+                                         "    var value: int\n"
+                                         "    func _init(initial: int) -> void:\n"
+                                         "        value = initial\n",
+                                         options);
 
     REQUIRE(result.success);
-    REQUIRE(result.unit.source.find(
-                "descriptor.constants[godot::StringName(\"FIRST\")] = "
-                "int64_t{_gdpp_enum_FIRST}") !=
-            std::string::npos);
-    REQUIRE(result.unit.source.find(
-                "descriptor.constants[godot::StringName(\"Mode\")] = values") !=
+    REQUIRE(result.unit.source.find("descriptor.constants[godot::StringName(\"FIRST\")] = "
+                                    "int64_t{_gdpp_enum_FIRST}") != std::string::npos);
+    REQUIRE(result.unit.source.find("descriptor.constants[godot::StringName(\"Mode\")] = values") !=
             std::string::npos);
     REQUIRE(result.unit.source.find("values.make_read_only()") != std::string::npos);
-    REQUIRE(result.unit.source.find(
-                "property.name = godot::StringName(\"shared\")") != std::string::npos);
-    REQUIRE(result.unit.source.find(
-                "GDPPNative_DynamicMembers::_gdpp_get_shared()") != std::string::npos);
-    REQUIRE(result.unit.source.find(
-                "gdpp::runtime::attached_script_resource(godot::String("
-                "\"res://dynamic_members.gd::Payload\"))") != std::string::npos);
+    REQUIRE(result.unit.source.find("property.name = godot::StringName(\"shared\")") !=
+            std::string::npos);
+    REQUIRE(result.unit.source.find("GDPPNative_DynamicMembers::_gdpp_get_shared()") !=
+            std::string::npos);
+    REQUIRE(result.unit.source.find("gdpp::runtime::attached_script_resource(godot::String("
+                                    "\"res://dynamic_members.gd::Payload\"))") !=
+            std::string::npos);
 }
 
 TEST_CASE("compiler preserves explicit Variant exports and rejects untyped exports") {
@@ -1734,15 +1727,14 @@ TEST_CASE("script initialization is transactional across roots and internal clas
 
 TEST_CASE("compiler releases script static storage before Godot servers stop") {
     const gdpp::Compiler compiler;
-    const auto result =
-        compiler.compile("static_cache.gd",
-                         "extends Node\n"
-                         "class Entry:\n"
-                         "    var score := 1\n"
-                         "static var cached_values: Array[Entry] = []\n"
-                         "static var cached_node: Node\n"
-                         "const DEFAULT_VALUES: Array[Entry] = []\n"
-                         "var cached_scene = preload(\"res://cached_scene.tscn\")\n");
+    const auto result = compiler.compile(
+        "static_cache.gd", "extends Node\n"
+                           "class Entry:\n"
+                           "    var score := 1\n"
+                           "static var cached_values: Array[Entry] = []\n"
+                           "static var cached_node: Node\n"
+                           "const DEFAULT_VALUES: Array[Entry] = []\n"
+                           "var cached_scene = preload(\"res://cached_scene.tscn\")\n");
 
     REQUIRE(result.success);
     const auto release = result.unit.source.find("::_gdpp_release_preloaded_resources() {");
@@ -1753,8 +1745,8 @@ TEST_CASE("compiler releases script static storage before Godot servers stop") {
             std::string::npos);
     REQUIRE(result.unit.source.find("godot::Variant GDPPNative_StaticCache::cached_values") ==
             std::string::npos);
-    REQUIRE(result.unit.source.find(
-                "static std::atomic<gdpp::runtime::ScriptTypedArray<") != std::string::npos);
+    REQUIRE(result.unit.source.find("static std::atomic<gdpp::runtime::ScriptTypedArray<") !=
+            std::string::npos);
     REQUIRE(result.unit.source.find(
                 "static std::atomic<gdpp::runtime::ObjectStorage<godot::Node>*> value{nullptr}") !=
             std::string::npos);
@@ -4193,13 +4185,13 @@ TEST_CASE("compiler resolves unqualified inherited engine enum types before dyna
     gdpp::CompileOptions options;
     options.target_version = gdpp::GodotVersion::v4_7;
     const gdpp::Compiler compiler;
-    const auto result = compiler.compile(
-        "inherited_engine_enum.gd",
-        "extends SubViewport\n"
-        "func disable_processing(toggle: bool) -> void:\n"
-        "    set_process_mode(ProcessMode.PROCESS_MODE_DISABLED if toggle "
-        "else ProcessMode.PROCESS_MODE_INHERIT)\n",
-        options);
+    const auto result =
+        compiler.compile("inherited_engine_enum.gd",
+                         "extends SubViewport\n"
+                         "func disable_processing(toggle: bool) -> void:\n"
+                         "    set_process_mode(ProcessMode.PROCESS_MODE_DISABLED if toggle "
+                         "else ProcessMode.PROCESS_MODE_INHERIT)\n",
+                         options);
 
     REQUIRE(result.success);
     REQUIRE(result.unit.source.find("find_engine_singleton") == std::string::npos);
@@ -4422,8 +4414,7 @@ TEST_CASE("compiler lowers Dictionary named access through its keyed native ABI"
 
     REQUIRE(result.success);
     REQUIRE(result.unit.source.find("_gdpp_dictionary_target_") != std::string::npos);
-    REQUIRE(result.unit.source.find(
-                "engine_lifetime_static_ptr([] { return godot::StringName(") !=
+    REQUIRE(result.unit.source.find("engine_lifetime_static_ptr([] { return godot::StringName(") !=
             std::string::npos);
     REQUIRE(result.unit.source.find("static const godot::StringName _gdpp_dictionary_read_key_") ==
             std::string::npos);
@@ -5825,8 +5816,7 @@ TEST_CASE("internal static function values use owner-free callables") {
     REQUIRE(result.unit.source.find(
                 "gdpp::runtime::make_named_callable(nullptr, "
                 "godot::StringName(\"GDPPNative_InternalStaticCallable__Sorter::compare\"), "
-                "1, 2, false") !=
-            std::string::npos);
+                "1, 2, false") != std::string::npos);
     REQUIRE(result.unit.source.find("::_gdpp_script_method_compare(") != std::string::npos);
     REQUIRE(result.unit.source.find("godot::Callable(this") == std::string::npos);
 }
@@ -5845,10 +5835,10 @@ TEST_CASE("static variadic function values preserve their callable ABI metadata"
                          options);
 
     REQUIRE(result.success);
-    REQUIRE(result.unit.source.find(
-                "gdpp::runtime::make_named_callable(nullptr, "
-                "godot::StringName(\"GDPPNative_StaticVarargCallable::collect\"), "
-                "1, 1, true") != std::string::npos);
+    REQUIRE(
+        result.unit.source.find("gdpp::runtime::make_named_callable(nullptr, "
+                                "godot::StringName(\"GDPPNative_StaticVarargCallable::collect\"), "
+                                "1, 1, true") != std::string::npos);
 }
 
 TEST_CASE("internal static method calls use their isolated native symbol") {
@@ -6046,6 +6036,19 @@ TEST_CASE("Godot singleton calls lower to native get_singleton access") {
     REQUIRE(result.unit.header.find("#include <godot_cpp/classes/input.hpp>") != std::string::npos);
     REQUIRE(result.unit.source.find("godot::Input::get_singleton()") != std::string::npos);
     REQUIRE(result.unit.source.find("->is_action_pressed(") != std::string::npos);
+}
+
+TEST_CASE("Godot singleton default arguments retain their native dependencies") {
+    const gdpp::Compiler compiler;
+    const auto result = compiler.compile("locale_reader.gd",
+                                         "extends Node\n"
+                                         "func locale(value: String = OS.get_locale()) -> String:\n"
+                                         "    return value\n");
+
+    REQUIRE(result.success);
+    REQUIRE(result.unit.header.find("#include <godot_cpp/classes/os.hpp>") != std::string::npos);
+    REQUIRE(result.unit.source.find("godot::OS::get_singleton()") != std::string::npos);
+    REQUIRE(result.unit.source.find("->get_locale()") != std::string::npos);
 }
 
 TEST_CASE("Godot scalar API returns cross the native ABI with explicit conversions") {

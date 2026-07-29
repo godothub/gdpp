@@ -907,8 +907,10 @@ NativeTypeIncludes collect_native_types(const typed::Module& module, const Godot
                 collect_header_statement_dependencies(statement, includes);
                 collect_statement_types(statement, includes, api, script_symbols);
             }
-            if (parameter.default_value)
+            if (parameter.default_value) {
                 collect_header_expression_dependencies(*parameter.default_value, includes);
+                collect_expression_types(*parameter.default_value, includes, api, script_symbols);
+            }
         }
         for (const auto& statement : function.body)
             collect_statement_types(statement, includes, api, script_symbols);
@@ -1417,8 +1419,7 @@ std::string CodeGenerator::cpp_type(const Type& type) const {
             const auto value_type = container_argument_type(container->arguments.at(1));
             const auto script_typed =
                 (key_type.kind == TypeKind::object &&
-                 (key_type.name == "GDScript" ||
-                  !attached_script_source_path(key_type).empty())) ||
+                 (key_type.name == "GDScript" || !attached_script_source_path(key_type).empty())) ||
                 (value_type.kind == TypeKind::object &&
                  (value_type.name == "GDScript" ||
                   !attached_script_source_path(value_type).empty()));
@@ -3204,9 +3205,9 @@ std::string CodeGenerator::emit_dictionary_member_assignment(const typed::Statem
         const auto slot = "_gdpp_dictionary_slot_" + suffix;
         result += "const auto& " + key +
                   " = *gdpp::runtime::engine_lifetime_static_ptr([] { return godot::Variant{" +
-                  godot_string_name(target.value) + "}; });\n" + nested_prefix + "godot::Variant &" +
-                  slot + " = " + dictionary + "[" + key + "];\n" + nested_prefix + "const auto " +
-                  value + " = " +
+                  godot_string_name(target.value) + "}; });\n" + nested_prefix +
+                  "godot::Variant &" + slot + " = " + dictionary + "[" + key + "];\n" +
+                  nested_prefix + "const auto " + value + " = " +
                   emit_expression(*statement.expression) + ";\n" +
                   emit_script_failure_return(indentation + 1, in_async_continuation_);
         const auto operation = statement.operation.substr(0, statement.operation.size() - 1);
@@ -3223,15 +3224,14 @@ std::string CodeGenerator::emit_dictionary_member_assignment(const typed::Statem
         result += emit_script_failure_return(indentation + 1, in_async_continuation_);
     } else if (statement.operation != "=") {
         const auto current = "_gdpp_dictionary_current_" + suffix;
-        result += "const auto& " + key +
-                  " = *gdpp::runtime::engine_lifetime_static_ptr([] { return " +
-                  godot_string_name(target.value) + "; });\n" + nested_prefix + "godot::Variant " +
-                  current + " = gdpp::runtime::checked_dictionary_get_named(" + dictionary +
-                  ", " + key + ", " + script_location(target.span) + ");\n" +
-                  emit_script_failure_return(indentation + 1, in_async_continuation_) +
-                  nested_prefix + "const auto " + value + " = " +
-                  emit_expression(*statement.expression) + ";\n" +
-                  emit_script_failure_return(indentation + 1, in_async_continuation_);
+        result +=
+            "const auto& " + key + " = *gdpp::runtime::engine_lifetime_static_ptr([] { return " +
+            godot_string_name(target.value) + "; });\n" + nested_prefix + "godot::Variant " +
+            current + " = gdpp::runtime::checked_dictionary_get_named(" + dictionary + ", " + key +
+            ", " + script_location(target.span) + ");\n" +
+            emit_script_failure_return(indentation + 1, in_async_continuation_) + nested_prefix +
+            "const auto " + value + " = " + emit_expression(*statement.expression) + ";\n" +
+            emit_script_failure_return(indentation + 1, in_async_continuation_);
         const auto operation = statement.operation.substr(0, statement.operation.size() - 1);
         if (statement.expression->type.kind == TypeKind::integer ||
             statement.expression->type.kind == TypeKind::enumeration) {
@@ -3248,15 +3248,14 @@ std::string CodeGenerator::emit_dictionary_member_assignment(const typed::Statem
                   ", " + key + ", " + current + ", " + script_location(target.span) + ");\n" +
                   emit_script_failure_return(indentation + 1, in_async_continuation_);
     } else {
-        result += "const auto& " + key +
-                  " = *gdpp::runtime::engine_lifetime_static_ptr([] { return " +
-                  godot_string_name(target.value) + "; });\n" + nested_prefix +
-                  "const godot::Variant " + value + " = " + "gdpp::runtime::to_variant(" +
-                  emit_expression(*statement.expression) + ");\n" +
-                  emit_script_failure_return(indentation + 1, in_async_continuation_) +
-                  nested_prefix + "gdpp::runtime::checked_dictionary_set_named(" + dictionary +
-                  ", " + key + ", " + value + ", " + script_location(target.span) + ");\n" +
-                  emit_script_failure_return(indentation + 1, in_async_continuation_);
+        result +=
+            "const auto& " + key + " = *gdpp::runtime::engine_lifetime_static_ptr([] { return " +
+            godot_string_name(target.value) + "; });\n" + nested_prefix + "const godot::Variant " +
+            value + " = " + "gdpp::runtime::to_variant(" + emit_expression(*statement.expression) +
+            ");\n" + emit_script_failure_return(indentation + 1, in_async_continuation_) +
+            nested_prefix + "gdpp::runtime::checked_dictionary_set_named(" + dictionary + ", " +
+            key + ", " + value + ", " + script_location(target.span) + ");\n" +
+            emit_script_failure_return(indentation + 1, in_async_continuation_);
     }
     return result + prefix + "}\n";
 }
@@ -3658,11 +3657,10 @@ std::string CodeGenerator::emit_script_static_callable(const typed::Expression& 
     const bool is_vararg =
         local_function ? local_function->rest_parameter.has_value() : project_function->is_vararg;
     const auto return_type = local_function ? local_function->return_type : project_function->type;
-    std::string result =
-        "gdpp::runtime::make_named_callable(nullptr, " +
-        godot_string_name(native_owner + "::" + expression.value) + ", " +
-        std::to_string(required) + ", " + std::to_string(parameter_count) +
-        (is_vararg ? ", true" : ", false");
+    std::string result = "gdpp::runtime::make_named_callable(nullptr, " +
+                         godot_string_name(native_owner + "::" + expression.value) + ", " +
+                         std::to_string(required) + ", " + std::to_string(parameter_count) +
+                         (is_vararg ? ", true" : ", false");
     result += ", [](const godot::Array& _gdpp_static_arguments) -> godot::Variant { ";
     if (is_vararg) {
         result += "godot::Array _gdpp_static_rest; "
@@ -4362,9 +4360,9 @@ std::string CodeGenerator::emit_expression(const typed::Expression& expression) 
                 ? api_.find_constructor(callee.resolved_owner, expression.operands.size() - 1,
                                         static_cast<std::size_t>(callee.indexed_argument))
                 : nullptr;
-        const bool node_get_node_method =
-            godot_method && std::string_view{godot_method->owner} == "Node" &&
-            std::string_view{godot_method->name} == "get_node";
+        const bool node_get_node_method = godot_method &&
+                                          std::string_view{godot_method->owner} == "Node" &&
+                                          std::string_view{godot_method->name} == "get_node";
         const ScriptMemberSymbol* script_method = nullptr;
         const ScriptClassSymbol* script_method_owner = nullptr;
         const ScriptInnerClassSymbol* inner_method_owner = nullptr;
@@ -4926,17 +4924,16 @@ std::string CodeGenerator::emit_expression(const typed::Expression& expression) 
             const auto target_name = "_gdpp_dynamic_target_" + suffix;
             const auto method_name = "_gdpp_dynamic_method_" + suffix;
             const auto capture = in_function_body_ ? "[&]" : "[]";
-            std::string result = "(" + std::string{capture} +
-                                 "() -> godot::Variant { godot::Variant " + target_name +
-                                 " = gdpp::runtime::to_variant(" +
-                                 (attached_behavior_dynamic_call ? "this"
-                                  : callee.kind == typed::ExpressionKind::identifier
-                                      ? self_object_expression()
-                                      : emit_expression(*callee.operands.at(0))) +
-                                 "); if (script_function_failed()) return {}; const auto& " +
-                                 method_name +
-                                 " = *gdpp::runtime::engine_lifetime_static_ptr([] { return " +
-                                 godot_string_name(callee.value) + "; }); ";
+            std::string result =
+                "(" + std::string{capture} + "() -> godot::Variant { godot::Variant " +
+                target_name + " = gdpp::runtime::to_variant(" +
+                (attached_behavior_dynamic_call ? "this"
+                 : callee.kind == typed::ExpressionKind::identifier
+                     ? self_object_expression()
+                     : emit_expression(*callee.operands.at(0))) +
+                "); if (script_function_failed()) return {}; const auto& " + method_name +
+                " = *gdpp::runtime::engine_lifetime_static_ptr([] { return " +
+                godot_string_name(callee.value) + "; }); ";
             for (std::size_t index = 1; index < expression.operands.size(); ++index) {
                 result += "const godot::Variant _gdpp_dynamic_argument_" + suffix + "_" +
                           std::to_string(index - 1) + " = gdpp::runtime::to_variant(" +
@@ -5212,11 +5209,11 @@ std::string CodeGenerator::emit_expression(const typed::Expression& expression) 
                                     proof->second.find(expression.value) != proof->second.end();
                 if (proven) {
                     const auto key = "_gdpp_proven_dictionary_read_key_" + suffix;
-                    const auto value =
-                        "([&]() -> const godot::Variant& { const auto& " + key +
-                        " = *gdpp::runtime::engine_lifetime_static_ptr([] { return godot::Variant{" +
-                        godot_string_name(expression.value) + "}; }); return " + object + "[" +
-                        key + "]; }())";
+                    const auto value = "([&]() -> const godot::Variant& { const auto& " + key +
+                                       " = *gdpp::runtime::engine_lifetime_static_ptr([] { return "
+                                       "godot::Variant{" +
+                                       godot_string_name(expression.value) + "}; }); return " +
+                                       object + "[" + key + "]; }())";
                     return emit_conversion(expression.type, {TypeKind::variant, "Variant"}, value,
                                            &expression.span);
                 }
@@ -5786,8 +5783,7 @@ std::string CodeGenerator::emit_flat_async(const typed::Function& source,
 
     std::string result;
     if (attached_script_ && !current_static_context_) {
-        result += prefix +
-                  "const godot::Ref<gdpp::runtime::AttachedScriptBehavior> " +
+        result += prefix + "const godot::Ref<gdpp::runtime::AttachedScriptBehavior> " +
                   behavior_lifetime + "{this};\n";
     }
     result += prefix + "using " + step_type +
@@ -5796,8 +5792,12 @@ std::string CodeGenerator::emit_flat_async(const typed::Function& source,
     result += prefix + "const std::weak_ptr<" + step_type + "> " + weak_step + " = " + step + ";\n";
     result += prefix + "*" + step + " = [=](std::size_t " + pc + ", const godot::Array &" + values +
               ") mutable {\n";
-    if (attached_script_ && !current_static_context_)
+    if (attached_script_ && !current_static_context_) {
         result += indent(indentation + 1) + "static_cast<void>(" + behavior_lifetime + ");\n";
+        result += indent(indentation + 1) +
+                  "if (!gdpp::runtime::is_current_attached_script_behavior(" + behavior_lifetime +
+                  ".ptr())) return;\n";
+    }
     for (const auto& parameter : source.parameters) {
         result += indent(indentation + 1) + "static_cast<void>(" +
                   parameter_native_name(parameter) + ");\n";
@@ -6049,8 +6049,7 @@ std::string CodeGenerator::emit_async_statements(
                       ");\n";
             result += emit_script_failure_return(indentation, continuation_context);
             if (attached_script_ && !current_static_context_) {
-                result += prefix +
-                          "const godot::Ref<gdpp::runtime::AttachedScriptBehavior> " +
+                result += prefix + "const godot::Ref<gdpp::runtime::AttachedScriptBehavior> " +
                           behavior_lifetime + "{this};\n";
             }
             result += prefix + "auto " + resume_name + " = [=](const godot::Array &" + result_name +
@@ -6060,6 +6059,9 @@ std::string CodeGenerator::emit_async_statements(
             if (attached_script_ && !current_static_context_) {
                 result +=
                     indent(indentation + 1) + "static_cast<void>(" + behavior_lifetime + ");\n";
+                result += indent(indentation + 1) +
+                          "if (!gdpp::runtime::is_current_attached_script_behavior(" +
+                          behavior_lifetime + ".ptr())) return;\n";
             }
             result += emit_suspension_lifetime(statement, indentation + 1);
             if (statement.kind == typed::StatementKind::await_variable) {
@@ -7770,8 +7772,8 @@ void CodeGenerator::emit_attached_descriptor_definition(
                << "        godot::Dictionary values;\n";
         for (const auto& entry : enumeration.entries) {
             source << "        values[" << godot_string(entry.name) << "] = int64_t{"
-                   << sanitize_identifier(enumeration.name) << "::"
-                   << enum_identifier(entry.name) << "};\n";
+                   << sanitize_identifier(enumeration.name) << "::" << enum_identifier(entry.name)
+                   << "};\n";
         }
         source << "        values.make_read_only();\n"
                << "        descriptor.constants[" << godot_string_name(enumeration.name)
@@ -7779,9 +7781,9 @@ void CodeGenerator::emit_attached_descriptor_definition(
                << "    }\n";
     }
     for (const auto& inner_class : classes) {
-        const auto inner_source_path =
-            source_path + (source_path.find("::") == std::string::npos ? "::" : ".") +
-            inner_class.name;
+        const auto inner_source_path = source_path +
+                                       (source_path.find("::") == std::string::npos ? "::" : ".") +
+                                       inner_class.name;
         source << "    descriptor.deferred_constants.push_back({"
                << godot_string_name(inner_class.name)
                << ", []() -> godot::Variant { return gdpp::runtime::to_variant("
@@ -7973,8 +7975,7 @@ void CodeGenerator::emit_inner_class_declaration(const typed::Class& declaration
         const auto type = cpp_type(field.type);
         header << "    static std::atomic<" << type << "*>& _gdpp_constant_" << name
                << "_pointer();\n"
-               << "    static " << type << "& _gdpp_constant_" << name
-               << "_storage();\n"
+               << "    static " << type << "& _gdpp_constant_" << name << "_storage();\n"
                << "    static bool& _gdpp_constant_" << name << "_ready();\n"
                << "    static std::mutex& _gdpp_constant_" << name << "_mutex();\n"
                << "    static void _gdpp_constant_" << name << "_release();\n";
@@ -8256,8 +8257,7 @@ void CodeGenerator::emit_inner_class_definition(const typed::Class& declaration,
         source << "std::atomic<" << type << "*>& " << native_name << "::_gdpp_constant_" << name
                << "_pointer() {\n    static std::atomic<" << type
                << "*> value{nullptr};\n    return value;\n}\n\n"
-               << type << "& " << native_name << "::_gdpp_constant_" << name
-               << "_storage() {\n"
+               << type << "& " << native_name << "::_gdpp_constant_" << name << "_storage() {\n"
                << "    auto* value = _gdpp_constant_" << name
                << "_pointer().load(std::memory_order_acquire);\n"
                << "    if (value) return *value;\n"
@@ -8313,24 +8313,24 @@ void CodeGenerator::emit_inner_class_definition(const typed::Class& declaration,
                    << "*> value{nullptr};\n    return value;\n}\n\n"
                    << "std::mutex& " << native_name << "::_gdpp_static_" << name
                    << "_mutex() {\n    static std::mutex value;\n    return value;\n}\n\n"
-                   << type << "& " << native_name << "::_gdpp_static_" << name
-                   << "_storage() {\n"
+                   << type << "& " << native_name << "::_gdpp_static_" << name << "_storage() {\n"
                    << "    bool initialize = true;\n";
             if (!tool_mode) {
                 source << "    if (gdpp::runtime::is_editor_hint()) initialize = false;\n";
             }
-            source << "    if (initialize && !_gdpp_ensure_static_initialized()) initialize = false;\n"
-                   << "    auto* value = _gdpp_static_" << name
-                   << "_pointer().load(std::memory_order_acquire);\n"
-                   << "    if (value) return *value;\n"
-                   << "    std::lock_guard<std::mutex> lock(_gdpp_static_" << name << "_mutex());\n"
-                   << "    value = _gdpp_static_" << name
-                   << "_pointer().load(std::memory_order_relaxed);\n"
-                   << "    if (!value) {\n"
-                   << "        value = new " << type << "{};\n"
-                   << "        _gdpp_static_" << name
-                   << "_pointer().store(value, std::memory_order_release);\n"
-                   << "        if (initialize) {\n";
+            source
+                << "    if (initialize && !_gdpp_ensure_static_initialized()) initialize = false;\n"
+                << "    auto* value = _gdpp_static_" << name
+                << "_pointer().load(std::memory_order_acquire);\n"
+                << "    if (value) return *value;\n"
+                << "    std::lock_guard<std::mutex> lock(_gdpp_static_" << name << "_mutex());\n"
+                << "    value = _gdpp_static_" << name
+                << "_pointer().load(std::memory_order_relaxed);\n"
+                << "    if (!value) {\n"
+                << "        value = new " << type << "{};\n"
+                << "        _gdpp_static_" << name
+                << "_pointer().store(value, std::memory_order_release);\n"
+                << "        if (initialize) {\n";
             if (field.initializer && !field.onready) {
                 source << "            "
                        << emit_storage_assignment(
@@ -8658,10 +8658,9 @@ void CodeGenerator::emit_inner_class_definition(const typed::Class& declaration,
                        : "value")
                << ") {\n";
         if (field.type == Type{TypeKind::object, "GDScript"}) {
-            const auto parameter =
-                field.setter && field.setter->method.empty()
-                    ? sanitize_identifier(field.setter->parameter)
-                    : std::string{"value"};
+            const auto parameter = field.setter && field.setter->method.empty()
+                                       ? sanitize_identifier(field.setter->parameter)
+                                       : std::string{"value"};
             source << "    gdpp::runtime::ScriptFunctionScope _gdpp_gdscript_storage_scope("
                       "gdpp::runtime::ScriptFaultPolicy::inherit_existing);\n"
                    << "    " << parameter
@@ -9510,8 +9509,7 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
         const auto type = cpp_type(variable.type);
         header << "    static std::atomic<" << type << "*>& _gdpp_constant_" << name
                << "_pointer();\n"
-               << "    static " << type << "& _gdpp_constant_" << name
-               << "_storage();\n"
+               << "    static " << type << "& _gdpp_constant_" << name << "_storage();\n"
                << "    static bool& _gdpp_constant_" << name << "_ready();\n"
                << "    static std::mutex& _gdpp_constant_" << name << "_mutex();\n"
                << "    static void _gdpp_constant_" << name << "_release();\n";
@@ -9728,8 +9726,7 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
         source << "std::atomic<" << type << "*>& " << unit.class_name << "::_gdpp_constant_" << name
                << "_pointer() {\n    static std::atomic<" << type
                << "*> value{nullptr};\n    return value;\n}\n\n"
-               << type << "& " << unit.class_name << "::_gdpp_constant_" << name
-               << "_storage() {\n"
+               << type << "& " << unit.class_name << "::_gdpp_constant_" << name << "_storage() {\n"
                << "    auto* value = _gdpp_constant_" << name
                << "_pointer().load(std::memory_order_acquire);\n"
                << "    if (value) return *value;\n"
@@ -9798,18 +9795,19 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
             if (!module.is_tool) {
                 source << "    if (gdpp::runtime::is_editor_hint()) initialize = false;\n";
             }
-            source << "    if (initialize && !_gdpp_ensure_static_initialized()) initialize = false;\n"
-                   << "    auto* value = _gdpp_static_" << name
-                   << "_pointer().load(std::memory_order_acquire);\n"
-                   << "    if (value) return *value;\n"
-                   << "    std::lock_guard<std::mutex> lock(_gdpp_static_" << name << "_mutex());\n"
-                   << "    value = _gdpp_static_" << name
-                   << "_pointer().load(std::memory_order_relaxed);\n"
-                   << "    if (!value) {\n"
-                   << "        value = new " << type << "{};\n"
-                   << "        _gdpp_static_" << name
-                   << "_pointer().store(value, std::memory_order_release);\n"
-                   << "        if (initialize) {\n";
+            source
+                << "    if (initialize && !_gdpp_ensure_static_initialized()) initialize = false;\n"
+                << "    auto* value = _gdpp_static_" << name
+                << "_pointer().load(std::memory_order_acquire);\n"
+                << "    if (value) return *value;\n"
+                << "    std::lock_guard<std::mutex> lock(_gdpp_static_" << name << "_mutex());\n"
+                << "    value = _gdpp_static_" << name
+                << "_pointer().load(std::memory_order_relaxed);\n"
+                << "    if (!value) {\n"
+                << "        value = new " << type << "{};\n"
+                << "        _gdpp_static_" << name
+                << "_pointer().store(value, std::memory_order_release);\n"
+                << "        if (initialize) {\n";
             if (variable.initializer && !variable.onready) {
                 source << "            "
                        << emit_storage_assignment(
