@@ -35,7 +35,7 @@ const ARCHITECTURE_FEATURES := [
 ]
 const SCRIPT_CLASS_CACHE := "res://.godot/global_script_class_cache.cfg"
 const GODOT_EXPORT_CACHE_DIRECTORY := "res://.godot/exported"
-const EXPORT_TRANSFORM_REVISION := 24
+const EXPORT_TRANSFORM_REVISION := 25
 
 var _compiler: Object
 var _build_progress: CanvasLayer
@@ -419,7 +419,29 @@ func _export_file(path: String, _type: String, _features: PackedStringArray) -> 
 
     var source_path := path.trim_suffix("c") if path.ends_with(".gdc") else path
     if _ready and _compiled_scripts.has(source_path):
+        if _editor_only_scripts.has(source_path):
+            skip()
+            return
+        _export_compiled_script(source_path)
+
+
+func _export_compiled_script(source_path: String) -> void:
+    var contract_hash := str(_script_contract_hashes.get(source_path, ""))
+    if contract_hash.is_empty():
+        _fail_export("compiled script '%s' has no runtime ABI digest" % source_path)
         skip()
+        return
+    var runtime_path := RUNTIME_RESOURCE_PREFIX.path_join(
+        "scripts/%s-%s.gdppscript" % [
+            _build_id.left(12),
+            source_path.md5_text(),
+        ]
+    )
+    # Replacing each compiled source with a source-free Script resource preserves Godot's normal
+    # `.gd.remap` package topology. Runtime directory scanners, ResourceLoader.exists(), dynamic
+    # load(), UIDs and script identity therefore observe the same paths as an ordinary GDScript
+    # export without shipping source or bytecode.
+    add_file(runtime_path, (source_path + "\n").to_utf8_buffer(), true)
 
 
 func _resource_requires_aot(path: String) -> bool:

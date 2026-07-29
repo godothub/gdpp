@@ -120,6 +120,8 @@ func _allowed_runtime_path(path: String) -> bool:
         return path.ends_with(".scn")
     if path.begins_with("res://addons/gdpp/runtime/resources/"):
         return path.ends_with(".res")
+    if path.begins_with("res://addons/gdpp/runtime/scripts/"):
+        return path.ends_with(".gdppscript")
     if path.begins_with("res://addons/gdpp/binary/"):
         var filename := path.get_file().to_lower()
         return _is_project_library(filename, true)

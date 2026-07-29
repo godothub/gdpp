@@ -343,6 +343,33 @@ func _verify_export_runtime() -> void:
         _fail("dynamic compiled Script construction lost behavior or canonical identity")
         return
 
+    # Some runtime plugin systems discover modules by enumerating directories that contain only
+    # scripts. Binary-only export must retain that directory and source-path topology even though
+    # no GDScript source or bytecode is shipped.
+    var discovery_root := DirAccess.open("res://runtime_discovery")
+    if discovery_root == null:
+        _fail("compiled script remaps did not preserve the runtime discovery root")
+        return
+    var discovery_directories := discovery_root.get_directories()
+    if not discovery_directories.has("OnlyScripts"):
+        _fail("compiled script remaps did not preserve a source-only module directory")
+        return
+    var discovered_path := "res://runtime_discovery/OnlyScripts/index.gd"
+    if not ResourceLoader.exists(discovered_path, "Script"):
+        _fail("compiled script remap did not preserve source-path existence semantics")
+        return
+    var discovered_script: Variant = ResourceLoader.load(discovered_path, "Script")
+    var discovered_instance: Variant = (
+        discovered_script.new() if discovered_script is Script else null
+    )
+    if (
+        discovered_instance == null
+        or discovered_instance.evaluate(2) != 42
+        or discovered_instance.get_script() != discovered_script
+    ):
+        _fail("directory-discovered compiled Script lost behavior or canonical identity")
+        return
+
     # Exercise the complete runtime attachment path used by third-party systems that construct a
     # native base first and attach a dynamically loaded GDScript afterwards. The cast intentionally
     # targets the script base so the check also covers attached inheritance identity.

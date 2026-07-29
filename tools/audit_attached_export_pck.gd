@@ -4,6 +4,7 @@ const EXTENSION_REGISTRY := "res://.godot/extension_list.cfg"
 const VENDOR_DESCRIPTOR := "res://addons/vendor/vendor.gdextension"
 const PROJECT_DESCRIPTOR := "res://addons/gdpp/gdpp.gdextension"
 const PROJECT_LIBRARY_ENTRY := 'entry_symbol = "gdpp_library_init"'
+const DISCOVERED_SCRIPT_REMAP := "res://runtime_discovery/OnlyScripts/index.gd.remap"
 const HARNESS_FILES := {
     "res://audit_attached_export_pck.gd": true,
     "res://audit_attached_export_pck.gd.uid": true,
@@ -29,6 +30,7 @@ func _init() -> void:
         return
     var transformed_scene_count := 0
     var transformed_resource_count := 0
+    var transformed_script_count := 0
     for path in files:
         if HARNESS_FILES.has(path):
             continue
@@ -44,6 +46,8 @@ func _init() -> void:
             transformed_scene_count += 1
         elif path.begins_with("res://addons/gdpp/runtime/resources/"):
             transformed_resource_count += 1
+        elif path.begins_with("res://addons/gdpp/runtime/scripts/"):
+            transformed_script_count += 1
 
     var registry_order := _audit_extension_registry(violations)
     if not FileAccess.file_exists(VENDOR_DESCRIPTOR):
@@ -54,10 +58,15 @@ func _init() -> void:
         violations.append("export contains no transformed attached scene")
     if transformed_resource_count == 0:
         violations.append("export contains no transformed attached resource")
+    if transformed_script_count == 0:
+        violations.append("export contains no transformed compiled Script resource")
+    if not FileAccess.file_exists(DISCOVERED_SCRIPT_REMAP):
+        violations.append("export omitted the source-only module Script remap")
 
     print("GDPP_ATTACHED_PCK_FILES=%d" % files.size())
     print("GDPP_ATTACHED_PCK_SCENES=%d" % transformed_scene_count)
     print("GDPP_ATTACHED_PCK_RESOURCES=%d" % transformed_resource_count)
+    print("GDPP_ATTACHED_PCK_SCRIPTS=%d" % transformed_script_count)
     print("GDPP_ATTACHED_PCK_REGISTRY_ORDER=%s" % registry_order)
     print("GDPP_ATTACHED_PCK_VIOLATIONS=%d" % violations.size())
     for violation in violations:

@@ -177,10 +177,11 @@ get_attached_script_constant(const AttachedScriptDescriptor& descriptor,
 class AttachedCompiledScript;
 
 // Binary-only exports retain the source `res://*.gd` identity even though the source bytes are
-// deliberately absent. This loader makes every ResourceLoader entry point resolve that identity
-// to the process-local canonical AttachedCompiledScript. It is registered only by generated
-// project libraries, never by the editor compiler bridge, so ordinary editor GDScript loading is
-// unaffected. Unknown `.gd` paths fail closed instead of falling through to a source loader.
+// deliberately absent. Godot's `.gd.remap` sidecars point to source-free `.gdppscript` identity
+// records handled by this loader. Every ResourceLoader entry point then resolves to the
+// process-local canonical AttachedCompiledScript. It is registered only by generated project
+// libraries, never by the editor compiler bridge, so ordinary editor GDScript loading is
+// unaffected. Unknown identities fail closed instead of falling through to a source loader.
 class AttachedScriptResourceLoader : public godot::ResourceFormatLoader {
     GDCLASS(AttachedScriptResourceLoader, godot::ResourceFormatLoader)
 

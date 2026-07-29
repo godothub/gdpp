@@ -411,6 +411,16 @@ foreach(required_editor_only_contract IN ITEMS
             "Editor-only runtime export guard is missing: ${required_editor_only_contract}")
     endif()
 endforeach()
+foreach(required_script_remap_contract IN ITEMS
+        "func _export_compiled_script(source_path: String) -> void:"
+        "\"scripts/%s-%s.gdppscript\""
+        "add_file(runtime_path, (source_path + \"\\n\").to_utf8_buffer(), true)")
+    string(FIND "${export_plugin}" "${required_script_remap_contract}" script_remap_offset)
+    if(script_remap_offset EQUAL -1)
+        message(FATAL_ERROR
+            "Binary-only compiled Script remapping is missing: ${required_script_remap_contract}")
+    endif()
+endforeach()
 foreach(required_autoload_rewrite IN ITEMS
         "func _resolve_resource_uid(path: String) -> String:"
         "ResourceUID.get_id_path(resource_id)"
