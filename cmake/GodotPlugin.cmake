@@ -749,12 +749,19 @@ if(GDPP_CUSTOM_GDEXTENSION_API_FILE)
     )
     set(GDPP_CUSTOM_ADDON_STATIC_COMMANDS)
     foreach(GDPP_CUSTOM_ADDON_STATIC_FILE IN ITEMS
+            .gitignore
             build_progress.gd
+            build_progress.gd.uid
             native_build_job.gd
+            native_build_job.gd.uid
             export_plugin.gd
+            export_plugin.gd.uid
             scene_transform_worker.gd
+            scene_transform_worker.gd.uid
+            gdpp.gdextension.uid
             plugin.cfg
-            plugin.gd)
+            plugin.gd
+            plugin.gd.uid)
         list(APPEND GDPP_CUSTOM_ADDON_STATIC_COMMANDS
             COMMAND "${CMAKE_COMMAND}" -E copy_if_different
                 "${GDPP_ADDON_DIRECTORY}/${GDPP_CUSTOM_ADDON_STATIC_FILE}"

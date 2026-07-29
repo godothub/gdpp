@@ -15,13 +15,20 @@ from pathlib import Path
 SUPPORTED_GODOT_VERSIONS = ("4.4", "4.5", "4.6", "4.7")
 SDK_SCHEMA = 12
 STATIC_ADDON_FILES = (
+    ".gitignore",
     "build_progress.gd",
+    "build_progress.gd.uid",
     "native_build_job.gd",
+    "native_build_job.gd.uid",
     "export_plugin.gd",
+    "export_plugin.gd.uid",
     "scene_transform_worker.gd",
+    "scene_transform_worker.gd.uid",
     "gdpp.gdextension",
+    "gdpp.gdextension.uid",
     "plugin.cfg",
     "plugin.gd",
+    "plugin.gd.uid",
 )
 HOST_SDK_PATHS = ("godot-cpp", "include", "lib", "src", "sdk.manifest")
 FIXED_ZIP_TIMESTAMP = (1980, 1, 1, 0, 0, 0)

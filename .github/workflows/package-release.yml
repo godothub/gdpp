@@ -63,9 +63,23 @@ jobs:
             echo 'Release ZIP must contain exactly one addons/gdpp plugin directory.'
             exit 1
           fi
-          grep -q '^addons/gdpp/build_progress.gd$' "$contents"
-          grep -q '^addons/gdpp/native_build_job.gd$' "$contents"
-          grep -q '^addons/gdpp/scene_transform_worker.gd$' "$contents"
+          for static_file in \
+            .gitignore \
+            build_progress.gd \
+            build_progress.gd.uid \
+            native_build_job.gd \
+            native_build_job.gd.uid \
+            export_plugin.gd \
+            export_plugin.gd.uid \
+            scene_transform_worker.gd \
+            scene_transform_worker.gd.uid \
+            gdpp.gdextension \
+            gdpp.gdextension.uid \
+            plugin.cfg \
+            plugin.gd \
+            plugin.gd.uid; do
+            grep -Fqx "addons/gdpp/${static_file}" "$contents"
+          done
           grep -q '^addons/gdpp/PACKAGE_MANIFEST.txt$' "$contents"
           grep -q '^archive_layout addons/gdpp$' \
             <(unzip -p "$archive" addons/gdpp/PACKAGE_MANIFEST.txt)
