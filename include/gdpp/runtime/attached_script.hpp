@@ -170,9 +170,9 @@ resolve_attached_script(const godot::String& source_path, godot::String* error =
 materialize_attached_script_constants(const AttachedScriptDescriptor& descriptor);
 // Reads one eager or deferred constant without materializing unrelated constants. Internal
 // classes use the same deferred constant contract and resolve to canonical Script resources.
-[[nodiscard]] bool
-get_attached_script_constant(const AttachedScriptDescriptor& descriptor,
-                             const godot::StringName& name, godot::Variant& value);
+[[nodiscard]] bool get_attached_script_constant(const AttachedScriptDescriptor& descriptor,
+                                                const godot::StringName& name,
+                                                godot::Variant& value);
 
 class AttachedCompiledScript;
 
@@ -223,6 +223,10 @@ attached_container_script_resource(const godot::String& source_path);
 // ever casting an owner pointer to a generated behavior implementation.
 [[nodiscard]] bool is_attached_script_instance(godot::Object* object,
                                                const godot::String& source_path);
+// Await continuations retain their behavior so suspended local state remains alive, but scene
+// inheritance and Object::set_script() may replace the authoritative ScriptInstance before a
+// signal resumes it. Only the behavior still published for its owner may execute a continuation.
+[[nodiscard]] bool is_current_attached_script_behavior(const AttachedScriptBehavior* behavior);
 // Restricts export-time ScriptInstance property-state serialization to fields that were actually
 // stored by the source scene/resource. Target runtime instances reject this metadata-only API.
 [[nodiscard]] bool
@@ -241,8 +245,7 @@ void detach_all_attached_script_instances();
 // annotation and reflection contract as GDScript while accepting exactly those two providers at
 // generated storage boundaries.
 [[nodiscard]] godot::Ref<godot::Script>
-strict_gdscript_storage(const godot::Variant& value,
-                        const ScriptSourceLocation& location);
+strict_gdscript_storage(const godot::Variant& value, const ScriptSourceLocation& location);
 [[nodiscard]] godot::Object* strict_attached_script_storage(const godot::Variant& value,
                                                             const godot::String& source_path,
                                                             const ScriptSourceLocation& location);

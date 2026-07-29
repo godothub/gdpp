@@ -93,11 +93,20 @@ GDExtensionInterfaceObjectSetScriptInstance object_set_script_instance_interface
     // The project library is compiled against the 4.4 compatibility surface, whose generated
     // godot-cpp loader intentionally omits interfaces introduced later. Resolve this optional 4.5
     // hook through Godot's canonical procedure table so one binary remains ABI-compatible across
-    // every supported 4.x minor.
+    // every supported 4.x minor. Godot reports a missing procedure as an engine error, so do not
+    // query the table on 4.4: absence there is an ABI fact rather than an exceptional condition.
     static const auto value = reinterpret_cast<GDExtensionInterfaceObjectSetScriptInstance>(
-        godot::gdextension_interface::get_proc_address
-            ? godot::gdextension_interface::get_proc_address("object_set_script_instance")
-            : nullptr);
+        []() -> GDExtensionInterfaceFunctionPtr {
+            const godot::Dictionary version = godot::Engine::get_singleton()->get_version_info();
+            const auto major = static_cast<std::int64_t>(version.get("major", 0));
+            const auto minor = static_cast<std::int64_t>(version.get("minor", 0));
+            if (major < 4 || (major == 4 && minor < 5))
+                return nullptr;
+            return godot::gdextension_interface::get_proc_address
+                       ? godot::gdextension_interface::get_proc_address(
+                             "object_set_script_instance")
+                       : nullptr;
+        }());
     return value;
 }
 
@@ -121,9 +130,9 @@ const AttachedScriptProperty* find_property(const AttachedScriptInstance* instan
 
 const AttachedScriptStaticProperty* find_static_property(const AttachedScriptInstance* instance,
                                                          const godot::StringName& name) {
-    const auto found = std::find_if(
-        instance->descriptor.static_properties.begin(), instance->descriptor.static_properties.end(),
-        [&](const auto& item) { return item.name == name; });
+    const auto found = std::find_if(instance->descriptor.static_properties.begin(),
+                                    instance->descriptor.static_properties.end(),
+                                    [&](const auto& item) { return item.name == name; });
     return found == instance->descriptor.static_properties.end() ? nullptr : &*found;
 }
 
@@ -596,8 +605,8 @@ void* AttachedCompiledScript::_instance_create(godot::Object* object) const {
     const auto object_set_script_instance = object_set_script_instance_interface();
     const bool can_pre_attach = object_set_script_instance != nullptr;
     if (can_pre_attach) {
-        instance->godot_instance_handle =
-            godot::gdextension_interface::script_instance_create3(&script_instance_info(), instance);
+        instance->godot_instance_handle = godot::gdextension_interface::script_instance_create3(
+            &script_instance_info(), instance);
         if (!instance->godot_instance_handle) {
             godot::memdelete(instance);
             return nullptr;
@@ -646,8 +655,8 @@ void* AttachedCompiledScript::_instance_create(godot::Object* object) const {
         }
     }
     if (!can_pre_attach) {
-        instance->godot_instance_handle =
-            godot::gdextension_interface::script_instance_create3(&script_instance_info(), instance);
+        instance->godot_instance_handle = godot::gdextension_interface::script_instance_create3(
+            &script_instance_info(), instance);
         if (!instance->godot_instance_handle) {
             godot::memdelete(instance);
             return nullptr;
@@ -691,6 +700,18 @@ bool is_attached_script_instance(godot::Object* object, const godot::String& sou
         current_path = descriptor->base_script_path.simplify_path();
     }
     return false;
+}
+
+bool is_current_attached_script_behavior(const AttachedScriptBehavior* behavior) {
+    if (!behavior)
+        return false;
+    auto* object = behavior->owner();
+    if (!object)
+        return false;
+    std::lock_guard<std::mutex> lock{AttachedScriptInstance::instances_mutex()};
+    const auto found = AttachedScriptInstance::instances().find(object);
+    return found != AttachedScriptInstance::instances().end() &&
+           found->second->behavior.ptr() == behavior;
 }
 
 void* attached_script_instance_handle(godot::Object* object) {
@@ -793,9 +814,8 @@ godot::Ref<godot::Script> strict_gdscript_storage(const godot::Variant& value,
     if (!object)
         return {};
     auto* script = godot::Object::cast_to<godot::Script>(object);
-    if (script &&
-        (godot::Object::cast_to<godot::GDScript>(script) ||
-         godot::Object::cast_to<AttachedCompiledScript>(script))) {
+    if (script && (godot::Object::cast_to<godot::GDScript>(script) ||
+                   godot::Object::cast_to<AttachedCompiledScript>(script))) {
         return godot::Ref<godot::Script>(script);
     }
     report_script_failure(godot::String{"Cannot assign object of type "} +
