@@ -1,5 +1,6 @@
 ## 1.8.3
 
+- 将宿主专用压缩包收敛为面向 Godot 4.6～4.7 的 `gdpp.zip` 和面向 4.4～4.7 的 `gdpp-all.zip`；两者均包含三种桌面编辑器插件及全部支持的导出 SDK。
 - 增加 Konado、Pixelorama、Godot Open RPG 和 Source of Mana 的完整项目兼容性测试。
 - 统一解析跨脚本类、继承、枚举、常量、静态调用、方法覆盖和名称冲突中的类型身份。
 - 完善脚本成员、Inspector 元数据、自定义访问器和 Attached 实例的反射与恢复。

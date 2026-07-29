@@ -1,5 +1,6 @@
 ## 1.8.3
 
+- Replace host-specific archives with `gdpp.zip` for Godot 4.6-4.7 and `gdpp-all.zip` for 4.4-4.7; both contain all three desktop editor plugins and every supported export SDK.
 - Add full-project compatibility tests for Konado, Pixelorama, Godot Open RPG, and Source of Mana.
 - Resolve cross-script classes, inheritance, enums, constants, static calls, method overrides, and name collisions with consistent type identity.
 - Complete reflection and restoration for script members, Inspector metadata, custom accessors, and attached instances.
