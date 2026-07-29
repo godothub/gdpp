@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Assemble one cross-version GDPP plugin package for a desktop host."""
+"""Assemble deterministic multi-host GDPP plugin release packages."""
 
 from __future__ import annotations
 
@@ -29,24 +29,24 @@ API_FIELDS = ("api_kind", "api_sha256", "precision")
 
 
 @dataclass(frozen=True)
-class PlatformPackage:
-    component_host: str
+class ReleasePackage:
     archive_name: str
-    include_ios: bool
+    godot_versions: tuple[str, ...]
 
 
-PLATFORM_PACKAGES = {
-    "mac": PlatformPackage("mac-universal", "gdpp-mac", True),
-    "linux": PlatformPackage("linux-x64", "gdpp-linux", False),
-    "win": PlatformPackage("windows-x64", "gdpp-win", False),
+RELEASE_PACKAGES = {
+    "standard": ReleasePackage("gdpp", ("4.6", "4.7")),
+    "all": ReleasePackage("gdpp-all", package_release.SUPPORTED_GODOT_VERSIONS),
 }
+DESKTOP_HOSTS = tuple(package_release.HOSTS)
+SHARED_HOST_SDK_PATHS = ("godot-cpp", "include", "src")
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--components", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--host", choices=sorted(PLATFORM_PACKAGES), required=True)
+    parser.add_argument("--package", choices=sorted(RELEASE_PACKAGES), required=True)
     return parser.parse_args()
 
 
@@ -120,7 +120,7 @@ def require_api_contract(
     return contract
 
 
-def validate_static_addon(addon: Path, package: PlatformPackage) -> str:
+def validate_static_addon(addon: Path, component_host: str) -> str:
     if addon.name != "gdpp" or addon.parent.name != "addons":
         fail(f"host component path must end in addons/gdpp: {addon}")
     require_no_symlinks(addon)
@@ -131,13 +131,13 @@ def validate_static_addon(addon: Path, package: PlatformPackage) -> str:
     if package_release.read_extension_minimum(addon / "gdpp.gdextension") != "4.4":
         fail("compiler GDExtension must retain the Godot 4.4 compatibility baseline")
 
-    host = package_release.HOSTS[package.component_host]
+    host = package_release.HOSTS[component_host]
     expected_binaries = {host.compiler_library, host.fallback_library}
     binary = addon / "binary"
     actual_binaries = {path.name for path in binary.iterdir() if path.is_file()}
     if actual_binaries != expected_binaries:
         fail(
-            f"{package.component_host} component must contain exactly its compiler and fallback "
+            f"{component_host} component must contain exactly its compiler and fallback "
             f"binaries; expected {sorted(expected_binaries)}, got {sorted(actual_binaries)}"
         )
 
@@ -146,7 +146,7 @@ def validate_static_addon(addon: Path, package: PlatformPackage) -> str:
     )
     if actual_versions != list(package_release.SUPPORTED_GODOT_VERSIONS):
         fail(
-            f"{package.component_host} component must contain Godot SDKs "
+            f"{component_host} component must contain Godot SDKs "
             f"{list(package_release.SUPPORTED_GODOT_VERSIONS)}, got {actual_versions}"
         )
     return version
@@ -158,6 +158,7 @@ def validate_host_sdk(
     godot_version: str,
     gdpp_version: str,
     runtime_contract: dict[str, str] | None,
+    api_contract: dict[str, str] | None,
 ) -> tuple[dict[str, str], dict[str, str]]:
     require_no_symlinks(sdk)
     for relative in package_release.HOST_SDK_PATHS:
@@ -191,7 +192,7 @@ def validate_host_sdk(
     package_release.require_profile_libraries(sdk / "lib", ("template_release",))
     return (
         require_runtime_contract(sdk, fields, runtime_contract),
-        require_api_contract(sdk, fields, None),
+        require_api_contract(sdk, fields, api_contract),
     )
 
 
@@ -309,8 +310,8 @@ def validate_web_sdk(
     require_api_contract(sdk, fields, api_contract)
 
 
-def host_component(components: Path, package: PlatformPackage) -> Path:
-    return components / f"gdpp-host-{package.component_host}" / "addons/gdpp"
+def host_component(components: Path, component_host: str) -> Path:
+    return components / f"gdpp-host-{component_host}" / "addons/gdpp"
 
 
 def android_component(components: Path, godot_version: str) -> Path:
@@ -349,25 +350,72 @@ def copy_target_manifest(source_sdk: Path, staged_sdk: Path, target: str) -> Non
     )
 
 
-def stage_platform_package(
+def tree_contract(root: Path) -> dict[str, str]:
+    return {
+        path.relative_to(root).as_posix(): package_release.sha256(path)
+        for path in package_release.iter_files(root)
+    }
+
+
+def require_identical_tree(reference: Path, candidate: Path, label: str) -> None:
+    if tree_contract(reference) != tree_contract(candidate):
+        fail(f"{label} differs between desktop host components: {reference} and {candidate}")
+
+
+def stage_release_package(
     components: Path,
     output: Path,
     package_name: str,
 ) -> tuple[Path, str, str]:
-    package = PLATFORM_PACKAGES[package_name]
-    host = package_release.HOSTS[package.component_host]
-    addon = host_component(components, package)
-    gdpp_version = validate_static_addon(addon, package)
+    package = RELEASE_PACKAGES[package_name]
+    addons: dict[str, Path] = {}
+    gdpp_version = ""
+    static_contract: dict[str, str] | None = None
+    for component_host in DESKTOP_HOSTS:
+        addon = host_component(components, component_host)
+        component_version = validate_static_addon(addon, component_host)
+        if gdpp_version and component_version != gdpp_version:
+            fail(
+                "desktop host component plugin versions conflict: "
+                f"{gdpp_version} and {component_version}"
+            )
+        gdpp_version = component_version
+        component_static_contract = {
+            relative: package_release.sha256(addon / relative)
+            for relative in package_release.STATIC_ADDON_FILES
+        }
+        if static_contract is not None and component_static_contract != static_contract:
+            fail(f"{component_host} static add-on files conflict with another host component")
+        static_contract = component_static_contract
+        addons[component_host] = addon
+
+    canonical_host = DESKTOP_HOSTS[0]
+    canonical_addon = addons[canonical_host]
     runtime_contract: dict[str, str] | None = None
 
-    for godot_version in package_release.SUPPORTED_GODOT_VERSIONS:
-        runtime_contract, api_contract = validate_host_sdk(
-            addon / "sdk" / godot_version,
-            host,
-            godot_version,
-            gdpp_version,
-            runtime_contract,
-        )
+    for godot_version in package.godot_versions:
+        canonical_sdk = canonical_addon / "sdk" / godot_version
+        api_contract: dict[str, str] | None = None
+        for component_host in DESKTOP_HOSTS:
+            host = package_release.HOSTS[component_host]
+            host_sdk = addons[component_host] / "sdk" / godot_version
+            runtime_contract, api_contract = validate_host_sdk(
+                host_sdk,
+                host,
+                godot_version,
+                gdpp_version,
+                runtime_contract,
+                api_contract,
+            )
+            if component_host != canonical_host:
+                for relative in SHARED_HOST_SDK_PATHS:
+                    require_identical_tree(
+                        canonical_sdk / relative,
+                        host_sdk / relative,
+                        f"Godot {godot_version} {relative}",
+                    )
+        if api_contract is None:
+            fail(f"Godot {godot_version} package has no desktop API contract")
         validate_android_sdk(
             android_component(components, godot_version),
             godot_version,
@@ -384,17 +432,16 @@ def stage_platform_package(
                 runtime_contract,
                 api_contract,
             )
-        if package.include_ios:
-            validate_ios_sdk(
-                ios_component(components, godot_version),
-                godot_version,
-                gdpp_version,
-                runtime_contract,
-                api_contract,
-            )
+        validate_ios_sdk(
+            ios_component(components, godot_version),
+            godot_version,
+            gdpp_version,
+            runtime_contract,
+            api_contract,
+        )
 
     if runtime_contract is None:
-        fail("platform package has no SDK runtime contract")
+        fail("release package has no SDK runtime contract")
 
     stage_root = output / ".staging" / package.archive_name
     if stage_root.exists():
@@ -403,18 +450,29 @@ def stage_platform_package(
     staged_addon.mkdir(parents=True)
 
     for relative in package_release.STATIC_ADDON_FILES:
-        package_release.copy_path(addon / relative, staged_addon / relative)
-    for filename in (host.compiler_library, host.fallback_library):
-        package_release.copy_path(
-            addon / "binary" / filename,
-            staged_addon / "binary" / filename,
-        )
+        package_release.copy_path(canonical_addon / relative, staged_addon / relative)
+    for component_host in DESKTOP_HOSTS:
+        host = package_release.HOSTS[component_host]
+        for filename in (host.compiler_library, host.fallback_library):
+            package_release.copy_path(
+                addons[component_host] / "binary" / filename,
+                staged_addon / "binary" / filename,
+            )
 
-    for godot_version in package_release.SUPPORTED_GODOT_VERSIONS:
-        source_sdk = addon / "sdk" / godot_version
+    for godot_version in package.godot_versions:
+        source_sdk = canonical_addon / "sdk" / godot_version
         staged_sdk = staged_addon / "sdk" / godot_version
-        for relative in package_release.HOST_SDK_PATHS:
+        for relative in SHARED_HOST_SDK_PATHS:
             package_release.copy_path(source_sdk / relative, staged_sdk / relative)
+        for component_host in DESKTOP_HOSTS:
+            host = package_release.HOSTS[component_host]
+            host_sdk = addons[component_host] / "sdk" / godot_version
+            copy_component_libraries(host_sdk / "lib", staged_sdk / "lib")
+            copy_target_manifest(
+                host_sdk,
+                staged_sdk,
+                f"{host.platform}.{host.architecture}",
+            )
         android_sdk = android_component(components, godot_version)
         copy_component_libraries(android_sdk / "lib", staged_sdk / "lib")
         copy_target_manifest(android_sdk, staged_sdk, "android.arm64")
@@ -426,31 +484,35 @@ def stage_platform_package(
                 staged_sdk,
                 f"web.wasm32.{variant}",
             )
-        if package.include_ios:
-            ios_sdk = ios_component(components, godot_version)
-            copy_component_libraries(ios_sdk / "lib", staged_sdk / "lib")
-            copy_target_manifest(ios_sdk, staged_sdk, "ios.arm64")
+        ios_sdk = ios_component(components, godot_version)
+        copy_component_libraries(ios_sdk / "lib", staged_sdk / "lib")
+        copy_target_manifest(ios_sdk, staged_sdk, "ios.arm64")
 
     (staged_addon / "sdk/.gdignore").write_text("", encoding="utf-8")
+    target_versions = ",".join(package.godot_versions)
+    editor_hosts = ",".join(
+        f"{host.platform}-{host.architecture}" for host in package_release.HOSTS.values()
+    )
     (staged_addon / "PACKAGE_MANIFEST.txt").write_text(
-        "GDPP_PACKAGE 5\n"
-        "kind desktop-host\n"
+        "GDPP_PACKAGE 6\n"
+        "kind multi-host\n"
+        f"edition {package_name}\n"
         "archive_layout addons/gdpp\n"
         "sdk_layout shared-target-manifests\n"
         f"version {gdpp_version}\n"
         "compiler_godot_api 4.4\n"
-        "target_godot_apis 4.4,4.5,4.6,4.7\n"
+        f"target_godot_apis {target_versions}\n"
         "godot_precision single\n"
         "api_fingerprints sha256-verified\n"
-        f"host {package_name}\n"
-        f"editor_host {host.platform}-{host.architecture}\n"
-        f"host_platform_minimum {host.platform_minimum}\n"
-        f"export_targets {','.join(host.export_targets)}\n"
+        f"editor_hosts {editor_hosts}\n"
+        "host_platform_minimums macos=macOS_11.0,linux=Ubuntu_22.04,windows=Windows_10\n"
+        "export_targets macos-universal,linux-x64,windows-x64,android-arm64,ios-arm64,"
+        "web-wasm32-nothreads,web-wasm32-threads\n"
         "android_platform_minimum Android_9_API_28\n"
-        + ("ios_platform_minimum iOS_16.0\n" if package.include_ios else ""),
+        "ios_platform_minimum iOS_16.0\n",
         encoding="utf-8",
     )
-    validate_platform_stage(staged_addon, package_name, gdpp_version)
+    validate_release_stage(staged_addon, package_name, gdpp_version)
     return stage_root, package.archive_name, gdpp_version
 
 
@@ -513,57 +575,86 @@ def validate_shared_target_manifest(
         fail(f"shared target manifest Godot API contract conflicts with the host SDK: {manifest}")
 
 
-def validate_platform_stage(addon: Path, package_name: str, gdpp_version: str) -> None:
-    package = PLATFORM_PACKAGES[package_name]
-    host = package_release.HOSTS[package.component_host]
+def validate_release_stage(addon: Path, package_name: str, gdpp_version: str) -> None:
+    package = RELEASE_PACKAGES[package_name]
     require_no_symlinks(addon)
     if package_release.read_plugin_version(addon / "plugin.cfg") != gdpp_version:
-        fail("platform package metadata version changed during staging")
+        fail("release package metadata version changed during staging")
 
-    expected_binaries = {host.compiler_library, host.fallback_library}
+    expected_binaries = {
+        filename
+        for host in package_release.HOSTS.values()
+        for filename in (host.compiler_library, host.fallback_library)
+    }
     actual_binaries = {path.name for path in (addon / "binary").iterdir() if path.is_file()}
     if actual_binaries != expected_binaries:
         fail(
-            f"{package_name} package must contain exactly its compiler and fallback pair; "
+            f"{package_name} package must contain all desktop compiler and fallback pairs; "
             f"expected {sorted(expected_binaries)}, got {sorted(actual_binaries)}"
         )
 
     actual_versions = sorted(
         path.name for path in (addon / "sdk").iterdir() if path.is_dir()
     )
-    if actual_versions != list(package_release.SUPPORTED_GODOT_VERSIONS):
+    if actual_versions != list(package.godot_versions):
         fail(
             f"{package_name} package must contain exactly Godot SDKs "
-            f"{list(package_release.SUPPORTED_GODOT_VERSIONS)}, got {actual_versions}"
+            f"{list(package.godot_versions)}, got {actual_versions}"
         )
-    for godot_version in package_release.SUPPORTED_GODOT_VERSIONS:
+    for godot_version in package.godot_versions:
         version_root = addon / "sdk" / godot_version
-        for relative in package_release.HOST_SDK_PATHS:
+        for relative in SHARED_HOST_SDK_PATHS:
             if not (version_root / relative).exists():
-                fail(f"{package_name} package shared SDK input is missing: {version_root / relative}")
-        host_manifest = version_root / "sdk.manifest"
-        schema, host_fields = package_release.read_sdk_manifest(host_manifest)
-        package_release.require_fields(
-            host_manifest,
-            schema,
-            host_fields,
-            {
-                "api": godot_version,
-                "platform": host.platform,
-                "arch": host.architecture,
-                "gdpp_version": gdpp_version,
-                "profiles": "debug,release",
-                "distribution_binding": "template_release",
-                "distribution_optimization": "Release",
-            },
+                fail(
+                    f"{package_name} package shared SDK input is missing: "
+                    f"{version_root / relative}"
+                )
+        if (version_root / "sdk.manifest").exists():
+            fail(
+                f"{package_name} package contains an ambiguous single-host manifest: "
+                f"{version_root / 'sdk.manifest'}"
+            )
+        manifests = version_root / "manifests"
+        expected_manifest_names = {
+            *(f"{host.platform}.{host.architecture}.sdk.manifest"
+              for host in package_release.HOSTS.values()),
+            "android.arm64.sdk.manifest",
+            "ios.arm64.sdk.manifest",
+            *(f"web.wasm32.{variant}.sdk.manifest" for variant in WEB_VARIANTS),
+        }
+        actual_manifest_names = {
+            path.name for path in manifests.iterdir() if path.is_file()
+        }
+        if actual_manifest_names != expected_manifest_names:
+            fail(
+                f"{package_name} Godot {godot_version} target manifests differ; "
+                f"expected {sorted(expected_manifest_names)}, got {sorted(actual_manifest_names)}"
+            )
+
+        canonical_host = package_release.HOSTS[DESKTOP_HOSTS[0]]
+        canonical_manifest = (
+            manifests
+            / f"{canonical_host.platform}.{canonical_host.architecture}.sdk.manifest"
         )
+        _, host_fields = package_release.read_sdk_manifest(canonical_manifest)
         runtime_contract = require_runtime_contract(
             version_root,
             host_fields,
             None,
         )
         api_contract = require_api_contract(version_root, host_fields, None)
-        manifests = version_root / "manifests"
+        for host in package_release.HOSTS.values():
+            validate_shared_target_manifest(
+                manifests / f"{host.platform}.{host.architecture}.sdk.manifest",
+                {
+                    "api": godot_version,
+                    "platform": host.platform,
+                    "arch": host.architecture,
+                    "gdpp_version": gdpp_version,
+                },
+                runtime_contract,
+                api_contract,
+            )
         validate_shared_target_manifest(
             manifests / "android.arm64.sdk.manifest",
             {
@@ -588,38 +679,34 @@ def validate_platform_stage(addon: Path, package_name: str, gdpp_version: str) -
                 runtime_contract,
                 api_contract,
             )
-        ios_manifest = manifests / "ios.arm64.sdk.manifest"
-        if package.include_ios:
-            validate_shared_target_manifest(
-                ios_manifest,
-                {
-                    "api": godot_version,
-                    "platform": "ios",
-                    "arch": "arm64",
-                    "gdpp_version": gdpp_version,
-                },
-                runtime_contract,
-                api_contract,
-            )
-        elif ios_manifest.exists():
-            fail(f"{package_name} package cannot contain an iOS SDK manifest")
+        validate_shared_target_manifest(
+            manifests / "ios.arm64.sdk.manifest",
+            {
+                "api": godot_version,
+                "platform": "ios",
+                "arch": "arm64",
+                "gdpp_version": gdpp_version,
+            },
+            runtime_contract,
+            api_contract,
+        )
 
         libraries = {
             path.name for path in (version_root / "lib").iterdir() if path.is_file()
         }
-        expected_count = 6 if package.include_ios else 4
+        expected_count = 8
         if len(libraries) != expected_count:
             fail(
                 f"{package_name} shared Godot {godot_version} SDK must contain "
                 f"{expected_count} target libraries, found {sorted(libraries)}"
             )
-        require_one_binding(libraries, host.platform, host.architecture)
+        for host in package_release.HOSTS.values():
+            require_one_binding(libraries, host.platform, host.architecture)
         require_one_binding(libraries, "android", "arm64")
         require_one_binding(libraries, "web", "wasm32", "nothreads")
         require_one_binding(libraries, "web", "wasm32", "threads")
-        if package.include_ios:
-            require_one_binding(libraries, "ios", "arm64")
-            require_one_binding(libraries, "ios", "universal")
+        require_one_binding(libraries, "ios", "arm64")
+        require_one_binding(libraries, "ios", "universal")
 
         for retired_directory in ("android", "web", "ios", "macos", "linux", "windows"):
             if (version_root / retired_directory).exists():
@@ -640,7 +727,7 @@ def validate_platform_stage(addon: Path, package_name: str, gdpp_version: str) -
         or path.name == "build"
     ]
     if forbidden:
-        fail(f"platform package contains forbidden products: {forbidden[:5]}")
+        fail(f"release package contains forbidden products: {forbidden[:5]}")
 
 
 def main() -> int:
@@ -651,15 +738,15 @@ def main() -> int:
     try:
         package_release.require_descendant(components, source_root / "build", "component root")
         package_release.require_descendant(output, source_root / "build", "release output")
-        stage_root, archive_name, _ = stage_platform_package(
-            components, output, args.host
+        stage_root, archive_name, _ = stage_release_package(
+            components, output, args.package
         )
         archive = output / f"{archive_name}.zip"
         package_release.create_zip(stage_root, archive)
         shutil.rmtree(stage_root)
         print(f"{archive}  sha256={package_release.sha256(archive)}")
     except (OSError, ValueError, zipfile.BadZipFile) as error:
-        print(f"platform release packaging failed: {error}", file=sys.stderr)
+        print(f"release packaging failed: {error}", file=sys.stderr)
         return 1
     return 0
 
