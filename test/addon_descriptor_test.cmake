@@ -507,10 +507,11 @@ foreach(required_legacy_transaction_recovery IN ITEMS
 endforeach()
 foreach(required_complete_package_sdk_probe IN ITEMS
         "var single_host_manifest := version_root.path_join(\"sdk.manifest\")"
-        "var complete_host_manifest := version_root.path_join("
+        "var multi_host_manifest := version_root.path_join("
         "_compiler.get_host_platform()"
         "_compiler.get_host_architecture()"
-        "FileAccess.file_exists(complete_host_manifest)")
+        "\"manifests/%s.%s.sdk.manifest\""
+        "FileAccess.file_exists(multi_host_manifest)")
     string(FIND "${editor_plugin}" "${required_complete_package_sdk_probe}"
         complete_package_sdk_probe_offset)
     if(complete_package_sdk_probe_offset EQUAL -1)

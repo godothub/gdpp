@@ -126,15 +126,16 @@ func _default_sdk_root() -> String:
     for version: String in _compiler.get_supported_godot_versions():
         var version_root := "res://addons/gdpp/sdk/%s" % version
         var single_host_manifest := version_root.path_join("sdk.manifest")
-        var complete_host_manifest := version_root.path_join(
-            "%s/%s/sdk.manifest" % [
-                _compiler.get_host_platform(),
-                _compiler.get_host_architecture(),
-            ]
+        var host_platform: String = _compiler.get_host_platform()
+        var host_architecture: String = _compiler.get_host_architecture()
+        if host_platform == "macos":
+            host_architecture = "universal"
+        var multi_host_manifest := version_root.path_join(
+            "manifests/%s.%s.sdk.manifest" % [host_platform, host_architecture]
         )
         if (
             FileAccess.file_exists(single_host_manifest)
-            or FileAccess.file_exists(complete_host_manifest)
+            or FileAccess.file_exists(multi_host_manifest)
         ):
             return ProjectSettings.globalize_path("res://addons/gdpp/sdk")
     return _compiler.get_default_sdk_root()
