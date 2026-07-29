@@ -35,7 +35,7 @@ const ARCHITECTURE_FEATURES := [
 ]
 const SCRIPT_CLASS_CACHE := "res://.godot/global_script_class_cache.cfg"
 const GODOT_EXPORT_CACHE_DIRECTORY := "res://.godot/exported"
-const EXPORT_TRANSFORM_REVISION := 25
+const EXPORT_TRANSFORM_REVISION := 26
 
 var _compiler: Object
 var _build_progress: CanvasLayer
@@ -67,7 +67,6 @@ var _extension_registry_modified := false
 var _provider_descriptor_overrides: Dictionary = {}
 var _registered_shared_objects: Dictionary = {}
 var _registered_apple_entries: Dictionary = {}
-var _has_resource_scripts := false
 var _export_output_path := ""
 var _autoload_files: Dictionary = {}
 var _autoload_replacements: Dictionary = {}
@@ -82,6 +81,7 @@ var _prepared_export_transforms: Dictionary = {}
 var _transform_worker_directory := ""
 var _worker_mode := false
 var _worker_error := ""
+var _deferred_transform_error := ""
 
 
 func configure(compiler: Object, build_progress: CanvasLayer) -> void:
@@ -407,7 +407,6 @@ func _export_file(path: String, _type: String, _features: PackedStringArray) -> 
 
     if (
         _ready
-        and _has_resource_scripts
         and path.get_extension().to_lower() in ["tres", "res"]
         and _resource_requires_aot(path)
     ):
@@ -533,6 +532,12 @@ func _export_prepared_transform(
     var entry: Dictionary = _prepared_export_transforms[source_path]
     var status := str(entry.get("status", "failed"))
     if status == "unchanged":
+        return false
+    if status == "deferred_failure":
+        _fail_export(
+            "exported resource '%s' cannot enter the runtime package: %s"
+            % [source_path, str(entry.get("error", "unsafe editor-only dependency"))]
+        )
         return false
     if status != "transformed":
         _fail_export(
@@ -793,6 +798,7 @@ func finish_isolated_transform_worker() -> void:
     _editor_script_descriptors.clear()
     _abstract_scripts.clear()
     _editor_only_scripts.clear()
+    _deferred_transform_error = ""
     _prepared_export_transforms.clear()
     _compiler = null
 
@@ -801,6 +807,7 @@ func _run_isolated_transform(path: String, output_root: String) -> Dictionary:
     _ready = true
     _strict_failure_injected = false
     _worker_error = ""
+    _deferred_transform_error = ""
     var before := [
         _customized_scene_count,
         _replaced_node_count,
@@ -871,7 +878,10 @@ func _run_isolated_transform(path: String, output_root: String) -> Dictionary:
                 else:
                     status = "transformed"
 
-    if status == "failed" and _worker_error.is_empty():
+    if not _deferred_transform_error.is_empty():
+        status = "deferred_failure"
+        _worker_error = _deferred_transform_error
+    elif status == "failed" and _worker_error.is_empty():
         _worker_error = "resource graph cannot be transformed safely"
     return {
         "status": status,
@@ -1118,7 +1128,6 @@ func _install_editor_script_descriptors() -> bool:
 
 
 func _validate_native_classes() -> bool:
-    _has_resource_scripts = false
     if not ClassDB.class_exists(&"AttachedCompiledScript"):
         _fail_export("attached script runtime class is unavailable")
         return false
@@ -1148,8 +1157,6 @@ func _validate_native_classes() -> bool:
                 ]
             )
             return false
-        if ClassDB.is_parent_class(attached_base, &"Resource"):
-            _has_resource_scripts = true
     return true
 
 
@@ -2143,7 +2150,12 @@ func _transform_resource_graph(
     var script_path := _script_path(resource)
     if not script_path.is_empty():
         if _editor_only_scripts.has(script_path):
-            _fail_export(
+            # Export presets commonly exclude editor tools and their resources. The isolated
+            # worker intentionally scans the complete project before Godot reveals the selected
+            # export file set, so record the unsafe graph here and fail only if Godot later asks
+            # `_export_file()` to package this root. Excluded editor resources therefore remain
+            # harmless, while a runtime-reachable editor script is still rejected fail-closed.
+            _deferred_transform_error = (
                 "runtime resource graph '%s' uses editor-only script '%s'"
                 % [context_path, script_path]
             )
@@ -2869,7 +2881,6 @@ func _reset_export_state() -> void:
     _registered_shared_objects.clear()
     _registered_apple_entries.clear()
     _include_project_extension = false
-    _has_resource_scripts = false
     _export_output_path = ""
     _autoload_files.clear()
     _autoload_replacements.clear()
@@ -2878,6 +2889,7 @@ func _reset_export_state() -> void:
     _transform_worker_directory = ""
     _worker_mode = false
     _worker_error = ""
+    _deferred_transform_error = ""
     _metrics_mutex.lock()
     _customized_scene_count = 0
     _replaced_node_count = 0

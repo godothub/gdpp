@@ -411,6 +411,7 @@ endforeach()
 foreach(forbidden_scene_customization_contract IN ITEMS
         "return _uses_native_scene_customizer()"
         "func _uses_native_scene_customizer() -> bool:"
+        "_has_resource_scripts"
         "func _export_transformed_scene("
         "func _export_transformed_resource("
         "_compiler.load_export_scene(path)")
@@ -435,6 +436,8 @@ endforeach()
 foreach(required_editor_only_contract IN ITEMS
         "\"editor_only_scripts\", PackedStringArray()"
         "if _editor_only_scripts.has(script_path):"
+        "status == \"deferred_failure\""
+        "_deferred_transform_error = ("
         "autoload '%s' uses an editor-only script"
         "runtime scene '%s' uses editor-only script '%s'"
         "runtime resource graph '%s' uses editor-only script '%s'")

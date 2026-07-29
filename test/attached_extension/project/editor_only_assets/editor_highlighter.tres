@@ -1,0 +1,6 @@
+[gd_resource type="EditorSyntaxHighlighter" script_class="GDPPEditorHighlighterFixture" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://editor_only_assets/editor_highlighter.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
