@@ -267,6 +267,32 @@ def validate_attached_method_dispatch_contract(errors: list[str]) -> None:
         )
 
 
+def validate_compile_time_branch_contract(errors: list[str]) -> None:
+    header = PUBLIC_ROOT / "runtime" / "variant_ops.hpp"
+    source = header.read_text(encoding="utf-8")
+    required = (
+        (
+            "static godot::Ref<godot::Script> materialize()",
+            "} else {\n            return {};\n        }",
+        ),
+        (
+            "local_callable_argument(const LocalCallableArguments<Values...>& arguments)",
+            "} else {\n        return {};\n    }",
+        ),
+        (
+            "argument_count < RequiredArguments",
+            "} else {\n            LocalCallableArguments<std::decay_t<Arguments>...> values",
+        ),
+    )
+    for anchor, contract in required:
+        start = source.find(anchor)
+        if start < 0 or contract not in source[start : start + 2500]:
+            errors.append(
+                f"{header.relative_to(ROOT)}: compile-time branch {anchor!r} must keep "
+                "returning alternatives structurally exclusive"
+            )
+
+
 def validate_performance_contract(errors: list[str]) -> None:
     path = ROOT / "test" / "performance" / "runtime_matrix.json"
     config = json.loads(path.read_text(encoding="utf-8"))
@@ -297,6 +323,7 @@ def main() -> int:
     validate_packed_subscript_contract(errors)
     validate_local_signal_contract(errors)
     validate_attached_method_dispatch_contract(errors)
+    validate_compile_time_branch_contract(errors)
     validate_performance_contract(errors)
     if errors:
         print("GDPP architecture validation failed:", file=sys.stderr)

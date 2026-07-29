@@ -610,8 +610,9 @@ template <typename T> class ScriptResource final {
                 return {};
             }
             return script;
+        } else {
+            return {};
         }
-        return {};
     }
 
     [[nodiscard]] static godot::Ref<godot::Script>
@@ -781,9 +782,11 @@ template <typename... Values> class LocalCallableArguments final {
 template <std::size_t Index, typename... Values>
 [[nodiscard]] godot::Variant
 local_callable_argument(const LocalCallableArguments<Values...>& arguments) {
-    if constexpr (Index < sizeof...(Values))
+    if constexpr (Index < sizeof...(Values)) {
         return to_variant(arguments.template get<Index>());
-    return {};
+    } else {
+        return {};
+    }
 }
 
 template <std::size_t Index>
@@ -906,9 +909,10 @@ class LocalCallable final : public godot::Callable {
                     ".",
                 location);
             return {};
+        } else {
+            LocalCallableArguments<std::decay_t<Arguments>...> values(arguments...);
+            return callback_(values);
         }
-        LocalCallableArguments<std::decay_t<Arguments>...> values(arguments...);
-        return callback_(values);
     }
 
   private:
