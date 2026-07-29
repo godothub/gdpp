@@ -267,6 +267,42 @@ def validate_attached_method_dispatch_contract(errors: list[str]) -> None:
         )
 
 
+def validate_attached_script_resource_contract(errors: list[str]) -> None:
+    registry = SOURCE_ROOT / "runtime" / "attached_script_registry.cpp"
+    source = registry.read_text(encoding="utf-8")
+    required = (
+        "std::mutex& script_resource_materialization_mutex()",
+        "std::shared_mutex& script_resource_lifecycle_mutex()",
+    )
+    for contract in required:
+        if contract not in source:
+            errors.append(
+                f"{registry.relative_to(ROOT)}: canonical attached Script resources must "
+                f"retain the threaded single-publication contract {contract!r}"
+            )
+    shutdown = source.find("void unregister_all_attached_scripts()")
+    if shutdown < 0 or "script_resource_lifecycle_mutex()" not in source[shutdown : shutdown + 900]:
+        errors.append(
+            f"{registry.relative_to(ROOT)}: attached Script shutdown must exclude concurrent "
+            "resource publication"
+        )
+    for anchor in (
+        "attached_script_resource(const godot::String& source_path",
+        "attached_container_script_resource(const godot::String& source_path)",
+    ):
+        start = source.find(anchor)
+        body = source[start : start + 2400] if start >= 0 else ""
+        if (
+            start < 0
+            or "script_resource_lifecycle_mutex()" not in body
+            or "script_resource_materialization_mutex()" not in body
+        ):
+            errors.append(
+                f"{registry.relative_to(ROOT)}: {anchor!r} must synchronize canonical Script "
+                "materialization with publication and shutdown"
+            )
+
+
 def validate_compile_time_branch_contract(errors: list[str]) -> None:
     header = PUBLIC_ROOT / "runtime" / "variant_ops.hpp"
     source = header.read_text(encoding="utf-8")
@@ -323,6 +359,7 @@ def main() -> int:
     validate_packed_subscript_contract(errors)
     validate_local_signal_contract(errors)
     validate_attached_method_dispatch_contract(errors)
+    validate_attached_script_resource_contract(errors)
     validate_compile_time_branch_contract(errors)
     validate_performance_contract(errors)
     if errors:
