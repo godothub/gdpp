@@ -1,4 +1,4 @@
-[gd_scene load_steps=12 format=3]
+[gd_scene load_steps=13 format=3]
 
 [ext_resource type="Script" path="res://export_main.gd" id="1_script"]
 [ext_resource type="Shader" path="res://runtime_shader.gdshader" id="2_shader"]
@@ -8,6 +8,7 @@
 [ext_resource type="Script" path="res://inner_onready_probe.gd" id="6_inner_onready"]
 [ext_resource type="Script" path="res://message_dispatch_probe.gd" id="7_message_dispatch"]
 [ext_resource type="Script" path="res://animation_storage_probe.gd" id="8_animation_storage"]
+[ext_resource type="Script" path="res://attached_await_lifetime_probe.gd" id="9_await_lifetime"]
 
 [sub_resource type="ShaderMaterial" id="ShaderMaterial_inline"]
 shader = ExtResource("2_shader")
@@ -71,6 +72,12 @@ script = ExtResource("7_message_dispatch")
 [node name="KuaishouGift" type="Sprite2D" parent="MessageDispatchProbe"]
 
 [node name="DouyinGift" type="Sprite2D" parent="MessageDispatchProbe"]
+
+[node name="AttachedAwaitLifetimeProbe" type="Node" parent="."]
+script = ExtResource("9_await_lifetime")
+value = 42
+
+[node name="Marker" type="Node" parent="AttachedAwaitLifetimeProbe"]
 
 [connection signal="child_ping" from="." to="." method="_on_child_ping"]
 [connection signal="vendor_contract" from="." to="." method="_on_vendor_contract"]

@@ -2894,6 +2894,57 @@ TEST_CASE("project variadic ABI changes invalidate dependent script caches") {
     REQUIRE(native_class_for(changed, "base.gd") != native_class_for(initial, "base.gd"));
 }
 
+TEST_CASE("attached project coroutines retain their behavior across every suspension strategy") {
+    const auto root = fixture_root("project-attached-coroutine-lifetime");
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
+    write_text(
+        root / "probe.gd",
+        "extends Node\n"
+        "signal resumed\n"
+        "var value := 0\n"
+        "func structured() -> void:\n"
+        "    await resumed\n"
+        "    value = 42\n"
+        "func flat() -> void:\n"
+        "    await resumed\n"
+        "    await resumed\n"
+        "    await resumed\n"
+        "    await resumed\n"
+        "    await resumed\n"
+        "    await resumed\n"
+        "    await resumed\n"
+        "    await resumed\n"
+        "    value = 43\n");
+    const auto options = project_options(root);
+    const auto result = gdpp::ProjectCompiler{}.compile(options);
+
+    REQUIRE(result.success);
+    REQUIRE_EQ(result.scripts.size(), std::size_t{1});
+    REQUIRE(result.scripts.front().is_attached);
+    const auto source =
+        read_text(options.output_directory / "generated" / result.scripts.front().source_file_name);
+    const auto lifetime_declaration = source.find(
+        "const godot::Ref<gdpp::runtime::AttachedScriptBehavior> "
+        "_gdpp_attached_behavior_lifetime_");
+    const auto lifetime_capture =
+        source.find("static_cast<void>(_gdpp_attached_behavior_lifetime_");
+    const auto flat_dispatch = source.find("using _gdpp_async_step_type_");
+    const auto flat_lifetime = source.rfind(
+        "const godot::Ref<gdpp::runtime::AttachedScriptBehavior> "
+        "_gdpp_attached_behavior_lifetime_",
+        flat_dispatch);
+    const auto flat_capture =
+        source.find("static_cast<void>(_gdpp_attached_behavior_lifetime_", flat_dispatch);
+    REQUIRE(lifetime_declaration != std::string::npos);
+    REQUIRE(lifetime_capture != std::string::npos);
+    REQUIRE(flat_dispatch != std::string::npos);
+    REQUIRE(flat_lifetime != std::string::npos);
+    REQUIRE(flat_dispatch - flat_lifetime < std::size_t{192});
+    REQUIRE(flat_capture != std::string::npos);
+    REQUIRE(flat_capture - flat_dispatch < std::size_t{512});
+}
+
 TEST_CASE("project coroutine ABI changes invalidate callers and require cross-script await") {
     const auto root = fixture_root("project-coroutine-abi-cache");
     std::error_code error;

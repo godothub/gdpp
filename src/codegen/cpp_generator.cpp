@@ -5780,16 +5780,24 @@ std::string CodeGenerator::emit_flat_async(const typed::Function& source,
     const auto step = "_gdpp_async_step_" + identity;
     const auto weak_step = "_gdpp_async_weak_step_" + identity;
     const auto keep_alive = "_gdpp_async_keep_alive_" + identity;
+    const auto behavior_lifetime = "_gdpp_attached_behavior_lifetime_" + identity;
     const auto pc = "_gdpp_async_pc_" + identity;
     const auto values = "_gdpp_async_values_" + identity;
 
     std::string result;
+    if (attached_script_ && !current_static_context_) {
+        result += prefix +
+                  "const godot::Ref<gdpp::runtime::AttachedScriptBehavior> " +
+                  behavior_lifetime + "{this};\n";
+    }
     result += prefix + "using " + step_type +
               " = std::function<void(std::size_t, const godot::Array &)>;\n";
     result += prefix + "const auto " + step + " = std::make_shared<" + step_type + ">();\n";
     result += prefix + "const std::weak_ptr<" + step_type + "> " + weak_step + " = " + step + ";\n";
     result += prefix + "*" + step + " = [=](std::size_t " + pc + ", const godot::Array &" + values +
               ") mutable {\n";
+    if (attached_script_ && !current_static_context_)
+        result += indent(indentation + 1) + "static_cast<void>(" + behavior_lifetime + ");\n";
     for (const auto& parameter : source.parameters) {
         result += indent(indentation + 1) + "static_cast<void>(" +
                   parameter_native_name(parameter) + ");\n";
@@ -6031,14 +6039,24 @@ std::string CodeGenerator::emit_async_statements(
             const auto result_name = "_gdpp_await_values_" + identity;
             const auto resume_name = "_gdpp_resume_" + identity;
             const auto immediate_name = "_gdpp_immediate_" + identity;
+            const auto behavior_lifetime = "_gdpp_attached_behavior_lifetime_" + identity;
             result += prefix + "const godot::Variant " + awaitable_name +
                       " = gdpp::runtime::to_variant(" + emit_expression(*statement.expression) +
                       ");\n";
             result += emit_script_failure_return(indentation, continuation_context);
+            if (attached_script_ && !current_static_context_) {
+                result += prefix +
+                          "const godot::Ref<gdpp::runtime::AttachedScriptBehavior> " +
+                          behavior_lifetime + "{this};\n";
+            }
             result += prefix + "auto " + resume_name + " = [=](const godot::Array &" + result_name +
                       ") mutable {\n";
             result += emit_script_function_scope(indentation + 1);
             result += indent(indentation + 1) + "static_cast<void>(" + result_name + ");\n";
+            if (attached_script_ && !current_static_context_) {
+                result +=
+                    indent(indentation + 1) + "static_cast<void>(" + behavior_lifetime + ");\n";
+            }
             result += emit_suspension_lifetime(statement, indentation + 1);
             if (statement.kind == typed::StatementKind::await_variable) {
                 result += indent(indentation + 1) + "[[maybe_unused]] " +

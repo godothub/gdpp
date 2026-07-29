@@ -546,6 +546,14 @@ func _verify_export_runtime() -> void:
         _fail("attached internal class did not receive implicit ready initialization")
         return
 
+    var attached_await_lifetime_probe: Variant = get_node("AttachedAwaitLifetimeProbe")
+    if (
+        attached_await_lifetime_probe == null
+        or attached_await_lifetime_probe.resumed_value() != 42
+    ):
+        _fail("attached behavior was not retained across a pre-tree await continuation")
+        return
+
     var message_dispatch_probe: Variant = get_node("MessageDispatchProbe")
     if message_dispatch_probe == null or not message_dispatch_probe.dispatch_burst(128):
         _fail(
