@@ -8,20 +8,21 @@ permissions:
 
 jobs:
   desktop:
-    name: Installed ZIP / ${{ matrix.package_host }} / Godot 4.7.1
+    name: Installed gdpp.zip / ${{ matrix.platform_host }} / Godot 4.7.1
     runs-on: ${{ matrix.os }}
     timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
         include:
-          - package_host: mac
+          - platform_host: mac
             os: macos-15
-            archive: gdpp-mac.zip
             preset: macOS Universal
-          - package_host: win
+          - platform_host: linux
+            os: ubuntu-22.04
+            preset: Linux x86_64
+          - platform_host: win
             os: windows-2025
-            archive: gdpp-win.zip
             preset: Windows x86_64
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
@@ -38,7 +39,7 @@ jobs:
           templates: host
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
-          name: gdpp-release-${{ matrix.package_host }}
+          name: gdpp-release-packages
           path: build/release-package-smoke/archive
       - name: Install the final ZIP into a clean customer project
         shell: bash
@@ -46,7 +47,7 @@ jobs:
           set -euo pipefail
           root="$GITHUB_WORKSPACE/build/release-package-smoke"
           project="$root/project"
-          archive="$root/archive/${{ matrix.archive }}"
+          archive="$root/archive/gdpp.zip"
           test -f "$archive"
           rm -rf "$project"
           cp -R example "$project"
@@ -55,7 +56,9 @@ jobs:
           test -f "$project/addons/gdpp/plugin.cfg"
           test -f "$project/addons/gdpp/gdpp.gdextension"
           test "$(find "$project/addons/gdpp/sdk" -mindepth 1 -maxdepth 1 \
-            -type d | wc -l)" -eq 4
+            -type d | wc -l)" -eq 2
+          test -d "$project/addons/gdpp/sdk/4.6"
+          test -d "$project/addons/gdpp/sdk/4.7"
       - name: Import, export, run and audit the installed package
         shell: bash
         env:
@@ -70,10 +73,14 @@ jobs:
             output="$output_root/GDPPExample.app"
             runtime="$output/Contents/MacOS/GDPP Example"
             project_library="$output/Contents/Frameworks/libgdpp.release.macos.universal.dylib"
-          else
+          elif [[ "$RUNNER_OS" == Windows ]]; then
             output="$output_root/GDPPExample.exe"
             runtime="$output"
             project_library="$output_root/gdpp.release.windows.x86_64.dll"
+          else
+            output="$output_root/GDPPExample.x86_64"
+            runtime="$output"
+            project_library="$output_root/libgdpp.release.linux.x86_64.so"
           fi
 
           "$GODOT" --headless --editor --path "$project" --quit-after 120 \

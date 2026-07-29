@@ -87,6 +87,12 @@ fail_check("release-package-smoke.yml must support workflow_call") unless
   package_smoke_triggers.key?("workflow_call")
 fail_check("release-package-smoke.yml cannot run without assembled package artifacts") if
   package_smoke_triggers.key?("workflow_dispatch")
+smoke_matrix = package_smoke_workflow.fetch("jobs").fetch("desktop")
+  .fetch("strategy").fetch("matrix").fetch("include")
+smoke_systems = smoke_matrix.map { |entry| entry.fetch("os") }.sort
+expected_smoke_systems = ["macos-15", "ubuntu-22.04", "windows-2025"].sort
+fail_check("installed package smoke must cover macOS, Linux, and Windows") unless
+  smoke_systems == expected_smoke_systems
 
 package_smoke_job = release_jobs.fetch("package-smoke")
 fail_check("package-smoke must invoke release-package-smoke.yml") unless
@@ -109,5 +115,5 @@ fail_check("release.yml must be the only pull-request entrypoint") unless
 
 puts(
   "Validated #{parallel_workflows.length} parallel producers, " \
-  "one gated package stage, installed macOS/Windows package smokes, and one publish stage.",
+  "one gated package stage, installed macOS/Linux/Windows package smokes, and one publish stage.",
 )
