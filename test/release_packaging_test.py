@@ -498,6 +498,19 @@ class ReleasePackagingTest(unittest.TestCase):
         packages = (workflow_root / "package-release.yml").read_text(encoding="utf-8")
         self.assertIn("(lib)?gdpp\\.(debug|release)\\.", packages)
 
+    def test_android_workflow_skips_legacy_default_sdk_packages(self) -> None:
+        workflow = (
+            SOURCE_ROOT / ".github/workflows/android.yml"
+        ).read_text(encoding="utf-8")
+        self.assertEqual(
+            workflow.count("uses: android-actions/setup-android@"),
+            2,
+        )
+        self.assertEqual(workflow.count("          packages: ''"), 2)
+        self.assertIn('run: sdkmanager "ndk;$GDPP_ANDROID_NDK_VERSION"', workflow)
+        self.assertIn('"platforms;android-35"', workflow)
+        self.assertIn('"build-tools;35.0.0"', workflow)
+
     def test_ios_upstream_warning_allowlist_is_exact_and_fail_closed(self) -> None:
         workflow = (
             SOURCE_ROOT / ".github/workflows/ios.yml"
