@@ -18,6 +18,8 @@
 - Make engine-lifetime static references explicit across generated and runtime code for warning-clean GCC builds.
 - Keep compile-time Script and Callable branches structurally exclusive for strict MSVC builds.
 - Use one native type, storage, and attachment ABI across all generated translation units.
+- Preserve the complete GDScript, Script, Resource, RefCounted, and Object identity of compiled script resources across assignments and explicit casts.
+- Respect customer export exclusions for editor-only resource graphs while continuing to reject any editor-only resource selected for a runtime package.
 
 ## 1.8.2
 
