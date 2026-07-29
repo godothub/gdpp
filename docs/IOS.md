@@ -14,8 +14,8 @@ Apple Silicon 模拟器 arm64 和 Intel 模拟器 x86_64 三种切片。
 - 能提供 iOS 16 SDK 的完整 Xcode、该 Xcode 要求的 macOS 宿主版本，以及通过 `xcode-select`
   选中的有效 Developer 目录；因此“插件可在 macOS 11.0 加载”不等于“macOS 11.0 可以安装
   当前 Xcode 并执行 iOS 导出”；
-- `gdpp-mac.zip`，其中同时包含 Godot 4.4～4.7 的 macOS Universal 2、iOS、Android 与 Web
-  release SDK；
+- `gdpp.zip`（Godot 4.6～4.7）或 `gdpp-all.zip`（Godot 4.4～4.7）；两个包都包含 macOS
+  Universal 2 编辑器插件及 iOS、桌面、Android 与 Web release SDK；
 - 已安装对应 Godot iOS 导出模板；
 - 真机或 App Store 导出所需的 Apple Developer Team、Bundle ID、证书和描述文件。
 
@@ -26,7 +26,7 @@ binding，它们只参与链接，不会整包进入游戏。
 
 ## 导出流程
 
-1. 将 `gdpp-mac.zip` 解压到项目根目录，得到 `addons/gdpp/`；iOS 依赖已经合并到
+1. 将所需版本范围的插件 ZIP 解压到项目根目录，得到 `addons/gdpp/`；iOS 依赖已经合并到
    `addons/gdpp/sdk/<Godot版本>/`，不需要再下载或拼接 target pack。
 2. 使用 macOS 上对应版本的 Godot 打开项目并启用 GDPP。
 3. 安装 Godot iOS 导出模板，在 iOS 预设中设置 Team ID、Bundle ID 和应用信息。

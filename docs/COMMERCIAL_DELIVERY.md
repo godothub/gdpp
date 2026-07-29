@@ -2,16 +2,15 @@
 
 ## 发行物
 
-正式发布只提供三个插件 ZIP 和一个校验和文件：
+正式发布只提供两个多宿主插件 ZIP 和一个校验和文件：
 
-| 归档 | 桌面 compiler/SDK | 额外导出目标 |
+| 归档 | Godot SDK | 编辑器与导出目标 |
 |---|---|---|
-| `gdpp-mac.zip` | macOS Universal 2 | Android arm64、iOS device/Universal Simulator、Web |
-| `gdpp-linux.zip` | Linux x86_64 | Android arm64、Web |
-| `gdpp-win.zip` | Windows x86_64 | Android arm64、Web |
-| `SHA256SUMS` | 三个 ZIP 的 SHA-256 | 不含插件内容 |
+| `gdpp.zip` | 4.6、4.7 | macOS Universal 2、Linux x86_64、Windows x86_64 编辑器，以及全部支持的桌面、Android、iOS、Web 导出 SDK |
+| `gdpp-all.zip` | 4.4～4.7 | 与 `gdpp.zip` 相同的平台集合，额外提供 4.4、4.5 SDK |
+| `SHA256SUMS` | 两个 ZIP 的 SHA-256 | 不含插件内容 |
 
-每个 ZIP 都是可以直接解压到项目根目录的完整布局：
+两个 ZIP 都可以直接解压到项目根目录；默认包布局为：
 
 ```text
 addons/
@@ -21,16 +20,14 @@ addons/
     ├── *.gd
     ├── binary/
     └── sdk/
-        ├── 4.4/
-        ├── 4.5/
         ├── 4.6/
         └── 4.7/
 ```
 
-外层必须是 `addons/gdpp`，不是裸 `gdpp/`，也不是把多个平台插件 ZIP 再压一次。
-
-每个包只包含当前桌面宿主的 compiler/fallback 和桌面 SDK，不携带另外两种桌面插件。Android/
-Web 目标进入三个宿主包；iOS 只进入 mac 包。
+`gdpp-all.zip` 在相同布局中增加 `4.4/` 和 `4.5/`。外层必须是 `addons/gdpp`，不是裸
+`gdpp/`，也不是把多个平台插件 ZIP 再压一次。每个包都包含三种桌面宿主的 compiler/fallback；
+每个版本的公共头文件和 runtime 只保留一份，macOS、Linux、Windows、Android、iOS 与 Web
+Release 绑定合并到共享 `lib/`，平台 ABI 由独立 target manifest 选择。
 
 ## 交付目标
 
@@ -73,9 +70,9 @@ SDK schema 12、runtime ABI 21 由源码、打包器和发布门禁共同校验�
 
 打包器拒绝：
 
-- 缺少任一 Godot 4.4～4.7 SDK；
+- 缺少当前归档声明的任一 Godot SDK；
 - schema/runtime ABI 或文件摘要冲突；
-- 额外桌面宿主、editor/template_debug 静态库；
+- 缺少任一桌面宿主、混入 editor/template_debug 静态库；
 - 项目生成库、build 目录、嵌套 ZIP；
 - symlink、AppleDouble、`.DS_Store`、`__MACOSX`；
 - 来源组件中的客户路径或不允许的产物。
@@ -164,11 +161,11 @@ editor-only 物理文件不变，在导出回调中跳过它，并在成品同�
 - Android 4.4～4.7 SDK 与 4.5.2 APK；
 - iOS 4.4～4.7 SDK 与 4.6.2 无签名 Simulator Xcode 导出；
 - Web 4.4～4.7 双 SDK 与 4.5.2 Chromium 双模式；
-- 三个最终 ZIP 组装；
-- macOS/Windows 最终 ZIP 在干净项目中的安装、导出、运行和 PCK 审计；
+- 两个最终 ZIP 组装；
+- 默认 ZIP 在 macOS/Linux/Windows 干净项目中的安装、导出、运行和 PCK 审计；
 - Release readiness、GitHub Release 与资产合同验证。
 
-发布前测试和构建并行，只有全部成功后才组装/验证最终包并创建 Release。正式资产固定为三个
+发布前测试和构建并行，只有全部成功后才组装/验证最终包并创建 Release。正式资产固定为两个
 ZIP 加 `SHA256SUMS`。
 
 ## 失败关闭

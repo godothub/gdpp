@@ -2,7 +2,7 @@
 
 ## 用户需要什么
 
-正式插件包已经包含 compiler、GDPP runtime、生成所需头文件和 Godot 4.4～4.7 的
+正式插件包已经包含三种桌面 compiler、GDPP runtime、生成所需头文件和所选 Godot 版本的
 `template_release` 静态绑定。客户不需要 CMake、Ninja、Python、SCons，也不需要自行构建
 godot-cpp。
 
@@ -21,7 +21,7 @@ godot-cpp。
 
 ## 安装
 
-下载当前桌面宿主包并直接解压到项目根目录：
+下载所需版本范围的插件包并直接解压到项目根目录：
 
 ```text
 project/
@@ -31,21 +31,17 @@ project/
         ├── gdpp.gdextension
         ├── binary/
         └── sdk/
-            ├── 4.4/
-            ├── 4.5/
             ├── 4.6/
             └── 4.7/
 ```
 
 ZIP 外层包含 `addons/gdpp`，不需要手工移动文件。然后在 Godot 的插件设置中启用 GDPP。
 
-三个发布包：
+两个发布包都包含 macOS Universal 2、Linux x86_64 和 Windows x86_64 编辑器插件，以及全部
+支持的桌面、Android、iOS 和 Web 导出 SDK：
 
-- `gdpp-mac.zip`：macOS Universal 2 + Android + iOS + Web；
-- `gdpp-linux.zip`：Linux x86_64 + Android + Web；
-- `gdpp-win.zip`：Windows x86_64 + Android + Web。
-
-每个包都同时包含 4.4～4.7，不按 SDK 版本拆成多个 ZIP。
+- `gdpp.zip`：Godot 4.6、4.7；
+- `gdpp-all.zip`：Godot 4.4、4.5、4.6、4.7。
 
 ## 项目设置
 
