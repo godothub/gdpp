@@ -579,6 +579,19 @@ class ReleasePackagingTest(unittest.TestCase):
         )
         self.assertFalse((destination / "build").exists())
 
+    def test_host_artifact_preserves_required_hidden_addon_files(self) -> None:
+        workflow = (
+            SOURCE_ROOT / ".github/workflows/host-components.yml"
+        ).read_text(encoding="utf-8")
+        self.assertIn(
+            "name: gdpp-host-${{ matrix.host }}\n"
+            "          path: build/host-component\n"
+            "          if-no-files-found: error\n"
+            "          include-hidden-files: true\n"
+            "          retention-days: 7",
+            workflow,
+        )
+
     def test_changelog_uses_unprefixed_exact_version_section(self) -> None:
         content = "## 1.1.0\n\n- New\n\n## 1.0.0\n\n- Initial release\n"
         self.assertEqual(extract_changelog.extract(content, "1.0.0"), "- Initial release\n")

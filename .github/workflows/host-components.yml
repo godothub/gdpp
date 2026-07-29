@@ -383,4 +383,5 @@ jobs:
           name: gdpp-host-${{ matrix.host }}
           path: build/host-component
           if-no-files-found: error
+          include-hidden-files: true
           retention-days: 7
