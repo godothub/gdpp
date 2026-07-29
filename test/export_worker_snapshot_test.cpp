@@ -40,8 +40,11 @@ TEST_CASE("export worker snapshot physically isolates project and extension file
     write_snapshot_file(root / ".godot/extension_list.cfg",
                         "res://addons/vendor/vendor.gdextension\n");
     write_snapshot_file(root / ".git/config", "repository");
+    write_snapshot_file(root / ".hidden/private.txt", "hidden");
     write_snapshot_file(root / "generated/.gdignore", "");
     write_snapshot_file(root / "generated/private.txt", "ignored");
+    write_snapshot_file(root / "nested/project.godot", "[application]\n");
+    write_snapshot_file(root / "nested/private.txt", "nested-project");
     write_snapshot_file(root / "addons/gdpp/sdk/.gdignore", "");
     write_snapshot_file(root / "addons/gdpp/sdk/large.lib", "package-cache");
     write_snapshot_file(root / "addons/gdpp/build/stale.bin", "compiler-cache");
@@ -57,7 +60,9 @@ TEST_CASE("export worker snapshot physically isolates project and extension file
     REQUIRE(std::filesystem::is_regular_file(snapshot / ".godot/extension_list.cfg"));
     REQUIRE(!std::filesystem::exists(snapshot / "addons/vendor/bin/~vendor.dll"));
     REQUIRE(!std::filesystem::exists(snapshot / ".git"));
+    REQUIRE(!std::filesystem::exists(snapshot / ".hidden"));
     REQUIRE(!std::filesystem::exists(snapshot / "generated"));
+    REQUIRE(!std::filesystem::exists(snapshot / "nested"));
     REQUIRE(!std::filesystem::exists(snapshot / "addons/gdpp/sdk"));
     REQUIRE(!std::filesystem::exists(snapshot / "addons/gdpp/build"));
 

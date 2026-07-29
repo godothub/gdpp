@@ -49,14 +49,22 @@ bool is_editor_temp_library(const std::filesystem::path& path) {
 bool is_reserved_directory(const std::filesystem::path& relative,
                            const std::filesystem::path& source) {
     const auto name = path_to_utf8(relative.filename());
-    if (name == ".git" || name == ".hg" || name == ".svn" || name == "__MACOSX")
+    const std::filesystem::path engine_cache{".godot"};
+    if (
+        name == "__MACOSX" ||
+        (!name.empty() && name.front() == '.' && relative != engine_cache)
+    )
         return true;
     const std::filesystem::path gdpp_root{"addons/gdpp"};
     if (starts_with(relative, gdpp_root / "build") || starts_with(relative, gdpp_root / "sdk"))
         return true;
-    const bool engine_cache = starts_with(relative, std::filesystem::path{".godot"});
+    const bool inside_engine_cache = starts_with(relative, engine_cache);
     std::error_code error;
-    return !engine_cache && std::filesystem::is_regular_file(source / ".gdignore", error);
+    if (!inside_engine_cache && std::filesystem::is_regular_file(source / ".gdignore", error))
+        return true;
+    error.clear();
+    return !inside_engine_cache &&
+           std::filesystem::is_regular_file(source / "project.godot", error);
 }
 
 std::string path_error(const std::string& operation, const std::filesystem::path& path,
