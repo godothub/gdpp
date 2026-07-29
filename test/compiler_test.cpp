@@ -143,7 +143,10 @@ TEST_CASE("compiler centralizes packed values at every generated Variant boundar
     REQUIRE(result.success);
     REQUIRE(result.unit.source.find("] = gdpp::runtime::to_variant(_gdpp_call_argument_") !=
             std::string::npos);
-    REQUIRE(result.unit.source.find("static const godot::Variant _gdpp_signal_name_") !=
+    REQUIRE(result.unit.source.find(
+                "engine_lifetime_static([] { return godot::Variant{godot::StringName(") !=
+            std::string::npos);
+    REQUIRE(result.unit.source.find("static const godot::Variant _gdpp_signal_name_") ==
             std::string::npos);
     REQUIRE(result.unit.source.find("gdpp::runtime::emit_local_signal_at(") != std::string::npos);
     REQUIRE(result.unit.source.find(", this, _gdpp_signal_name_") != std::string::npos);
@@ -1393,7 +1396,10 @@ TEST_CASE("compiler emits local signals through their owner without temporary Si
                                                            "    self.pulse.emit(value + 2)\n");
 
     REQUIRE(result.success);
-    REQUIRE(result.unit.source.find("static const godot::Variant _gdpp_signal_name_") !=
+    REQUIRE(result.unit.source.find(
+                "engine_lifetime_static([] { return godot::Variant{godot::StringName(") !=
+            std::string::npos);
+    REQUIRE(result.unit.source.find("static const godot::Variant _gdpp_signal_name_") ==
             std::string::npos);
     REQUIRE(result.unit.source.find("gdpp::runtime::emit_local_signal_at(") != std::string::npos);
     REQUIRE(result.unit.source.find(", this, _gdpp_signal_name_") != std::string::npos);
@@ -1658,15 +1664,17 @@ TEST_CASE("compiler preloads member resources before instances are constructed")
     REQUIRE(result.unit.source.find("gdpp::runtime::load_resource(") != std::string::npos);
     REQUIRE(result.unit.header.find("static void _gdpp_release_preloaded_resources()") !=
             std::string::npos);
+    REQUIRE(result.unit.header.find("static std::atomic<godot::Variant*>& "
+                                    "_gdpp_preloaded_scene_pointer()") != std::string::npos);
+    REQUIRE(result.unit.header.find("static void _gdpp_preloaded_scene_release()") !=
+            std::string::npos);
     REQUIRE(result.unit.header.find("_gdpp_preload_initialization()") != std::string::npos);
     REQUIRE(result.unit.source.find("_gdpp_preload_initialization().run(") != std::string::npos);
     REQUIRE(result.unit.source.find("_gdpp_preload_initialization().reset(") != std::string::npos);
     REQUIRE(result.unit.source.find("std::once_flag") == std::string::npos);
     REQUIRE(result.unit.source.find("std::call_once") == std::string::npos);
-    REQUIRE(
-        result.unit.source.find("_gdpp_preloaded_scene() = "
-                                "std::remove_reference_t<decltype(_gdpp_preloaded_scene())>{};") !=
-        std::string::npos);
+    REQUIRE(result.unit.source.find("_gdpp_preloaded_scene_release();") != std::string::npos);
+    REQUIRE(result.unit.source.find("static godot::Variant value{}") == std::string::npos);
     REQUIRE(result.unit.source.find("if (!gdpp_editor_hint) _gdpp_preload_resources();") !=
             std::string::npos);
 }
@@ -1710,9 +1718,15 @@ TEST_CASE("script initialization is transactional across roots and internal clas
 
 TEST_CASE("compiler releases script static storage before Godot servers stop") {
     const gdpp::Compiler compiler;
-    const auto result = compiler.compile("static_cache.gd", "extends Node\n"
-                                                            "static var cached_values: Array = []\n"
-                                                            "static var cached_node: Node\n");
+    const auto result =
+        compiler.compile("static_cache.gd",
+                         "extends Node\n"
+                         "class Entry:\n"
+                         "    var score := 1\n"
+                         "static var cached_values: Array[Entry] = []\n"
+                         "static var cached_node: Node\n"
+                         "const DEFAULT_VALUES: Array[Entry] = []\n"
+                         "var cached_scene = preload(\"res://cached_scene.tscn\")\n");
 
     REQUIRE(result.success);
     const auto release = result.unit.source.find("::_gdpp_release_preloaded_resources() {");
@@ -1723,11 +1737,18 @@ TEST_CASE("compiler releases script static storage before Godot servers stop") {
             std::string::npos);
     REQUIRE(result.unit.source.find("godot::Variant GDPPNative_StaticCache::cached_values") ==
             std::string::npos);
-    REQUIRE(result.unit.source.find("static std::atomic<godot::Array*> value{nullptr}") !=
-            std::string::npos);
+    REQUIRE(result.unit.source.find(
+                "static std::atomic<gdpp::runtime::ScriptTypedArray<") != std::string::npos);
     REQUIRE(result.unit.source.find(
                 "static std::atomic<gdpp::runtime::ObjectStorage<godot::Node>*> value{nullptr}") !=
             std::string::npos);
+    REQUIRE(result.unit.source.find("_gdpp_constant_DEFAULT_VALUES_release();", release) !=
+            std::string::npos);
+    REQUIRE(result.unit.source.find("_gdpp_preloaded_cached_scene_release();", release) !=
+            std::string::npos);
+    REQUIRE(result.unit.source.find("static thread_local gdpp::runtime::ScriptTypedArray") ==
+            std::string::npos);
+    REQUIRE(result.unit.source.find("static gdpp::runtime::ScriptTypedArray") == std::string::npos);
 }
 
 TEST_CASE("compiler lazily initializes and explicitly releases resource constants") {
@@ -1747,10 +1768,9 @@ TEST_CASE("compiler lazily initializes and explicitly releases resource constant
             std::string::npos);
     const auto release = result.unit.source.find("::_gdpp_release_preloaded_resources() {");
     REQUIRE(release != std::string::npos);
-    REQUIRE(result.unit.source.find(
-                "_gdpp_constant_SCENE_storage() = "
-                "std::remove_reference_t<decltype(_gdpp_constant_SCENE_storage())>{};",
-                release) != std::string::npos);
+    REQUIRE(result.unit.source.find("_gdpp_constant_SCENE_release();", release) !=
+            std::string::npos);
+    REQUIRE(result.unit.source.find("_gdpp_constant_SCENE_pointer()") != std::string::npos);
 }
 
 TEST_CASE("compiler safely assigns every reference-backed Godot storage family") {
@@ -1780,17 +1800,13 @@ TEST_CASE("compiler safely assigns every reference-backed Godot storage family")
                          "    callback = callback\n");
 
     REQUIRE(result.success);
-    REQUIRE(result.unit.source.find(
-                "gdpp::runtime::assign_native_storage(_gdpp_constant_STREAMS_storage(),") !=
+    REQUIRE(result.unit.source.find("gdpp::runtime::assign_native_storage(value,") !=
             std::string::npos);
     REQUIRE(result.unit.source.find("gdpp::runtime::assign_native_storage(state,") !=
             std::string::npos);
     REQUIRE(result.unit.source.find("gdpp::runtime::assign_native_storage(ready_state,") !=
             std::string::npos);
-    REQUIRE(result.unit.source.find(
-                "gdpp::runtime::assign_native_storage(_gdpp_constant_STREAMS_storage(), "
-                "std::remove_reference_t<decltype(_gdpp_constant_STREAMS_storage())>{})") !=
-            std::string::npos);
+    REQUIRE(result.unit.source.find("_gdpp_constant_STREAMS_release();") != std::string::npos);
     for (const auto* storage :
          {"state", "typed_state", "labels", "bytes", "title", "key", "path", "callback"}) {
         REQUIRE(
@@ -4038,14 +4054,12 @@ last"""
     REQUIRE(result.unit.header.find("_gdpp_enum_HEX = 65280") != std::string::npos);
     REQUIRE(result.unit.header.find("_gdpp_enum_BINARY = 165") != std::string::npos);
     REQUIRE(result.unit.header.find("_gdpp_enum_DECIMAL = 12345") != std::string::npos);
-    REQUIRE(result.unit.source.find("_gdpp_constant_LEADING_storage() = 0.5") != std::string::npos);
-    REQUIRE(result.unit.source.find("_gdpp_constant_TRAILING_storage() = 4.0") !=
-            std::string::npos);
+    REQUIRE(result.unit.source.find("value = 0.5") != std::string::npos);
+    REQUIRE(result.unit.source.find("value = 4.0") != std::string::npos);
     REQUIRE(result.unit.source.find("12.50e+10") != std::string::npos);
     REQUIRE(result.unit.source.find("Math_INF") != std::string::npos);
     REQUIRE(result.unit.source.find("Math_NAN") != std::string::npos);
-    REQUIRE(result.unit.source.find("_gdpp_constant_UNDERFLOW_storage() = 0.0") !=
-            std::string::npos);
+    REQUIRE(result.unit.source.find("value = 0.0") != std::string::npos);
     REQUIRE(result.unit.source.find("0xff_00") == std::string::npos);
     REQUIRE(result.unit.source.find("0b1010_0101") == std::string::npos);
     REQUIRE(result.unit.source.find("\\a\\b\\f\\vA") != std::string::npos);
@@ -4379,7 +4393,10 @@ TEST_CASE("compiler lowers Dictionary named access through its keyed native ABI"
 
     REQUIRE(result.success);
     REQUIRE(result.unit.source.find("_gdpp_dictionary_target_") != std::string::npos);
-    REQUIRE(result.unit.source.find("static const godot::StringName _gdpp_dictionary_read_key_") !=
+    REQUIRE(result.unit.source.find(
+                "engine_lifetime_static([] { return godot::StringName(") !=
+            std::string::npos);
+    REQUIRE(result.unit.source.find("static const godot::StringName _gdpp_dictionary_read_key_") ==
             std::string::npos);
     REQUIRE(result.unit.source.find("gdpp::runtime::checked_dictionary_get_named(") !=
             std::string::npos);
@@ -4416,8 +4433,11 @@ TEST_CASE("compiler only updates proven local Dictionary slots in place") {
                                                      "    return values.score\n");
     REQUIRE(local.success);
     REQUIRE(local.unit.source.find("godot::Variant &_gdpp_dictionary_slot_") != std::string::npos);
-    REQUIRE(local.unit.source.find("const godot::Variant "
-                                   "_gdpp_proven_dictionary_read_key_") != std::string::npos);
+    REQUIRE(local.unit.source.find("const auto& _gdpp_proven_dictionary_read_key_") !=
+            std::string::npos);
+    REQUIRE(local.unit.source.find(
+                "engine_lifetime_static([] { return godot::Variant{godot::StringName(") !=
+            std::string::npos);
     REQUIRE(local.unit.source.find("checked_dictionary_get_named(") == std::string::npos);
     REQUIRE(local.unit.source.find("unchecked_dictionary_set_named(") == std::string::npos);
     const auto compound = local.unit.source.find("gdpp::runtime::compound_assign_integer(");
@@ -5548,7 +5568,9 @@ TEST_CASE("static constructors are validated and run through the class initializ
     REQUIRE(valid.unit.source.find("static thread_local bool active = false") == std::string::npos);
     REQUIRE(valid.unit.source.find("if (gdpp::runtime::is_editor_hint()) return true;") !=
             std::string::npos);
-    REQUIRE(valid.unit.source.find("static thread_local bool editor_value{}") != std::string::npos);
+    REQUIRE(valid.unit.source.find("if (gdpp::runtime::is_editor_hint()) initialize = false;") !=
+            std::string::npos);
+    REQUIRE(valid.unit.source.find("static thread_local bool") == std::string::npos);
     const auto valid_guard = valid.unit.source.find("::_gdpp_ensure_static_initialized() {");
     REQUIRE(valid_guard != std::string::npos);
     REQUIRE(valid.unit.source.find("            _gdpp_script_method__static_init();",
@@ -6029,7 +6051,11 @@ TEST_CASE("third-party GDExtension singletons resolve through Engine at runtime"
                 "gdpp::runtime::ScriptSourceLocation{_gdpp_source_path, 3, 5})") !=
             std::string::npos);
     REQUIRE(result.unit.source.find("gdpp::runtime::call_dynamic") != std::string::npos);
-    REQUIRE(result.unit.source.find("static const godot::StringName _gdpp_dynamic_method_") !=
+    REQUIRE(result.unit.source.find("const auto& _gdpp_dynamic_method_") != std::string::npos);
+    REQUIRE(result.unit.source.find(
+                "engine_lifetime_static([] { return godot::StringName(\"run_callbacks\")") !=
+            std::string::npos);
+    REQUIRE(result.unit.source.find("static const godot::StringName _gdpp_dynamic_method_") ==
             std::string::npos);
     const auto singleton = result.unit.source.find("::_gdpp_script_method_singleton(");
     const auto lookup = result.unit.source.find("find_engine_singleton_at(", singleton);

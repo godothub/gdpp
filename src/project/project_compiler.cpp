@@ -1028,6 +1028,7 @@ std::string generated_registration(const std::vector<CompiledProjectScript>& scr
                << "    gdpp::runtime::unregister_all_attached_scripts();\n";
     }
     output << "    gdpp::runtime::shutdown_coroutine_runtime();\n"
+           << "    gdpp::runtime::release_engine_lifetime_statics();\n"
            << "}\n"
            << "} // namespace\n\n"
            << "extern \"C\" GDExtensionBool GDE_EXPORT\n"

@@ -174,6 +174,58 @@ class ScriptInitializationState final {
     std::mutex mutex_;
 };
 
+// Immutable Godot values cached by generated hot paths must be released from the extension
+// terminator, before Variant, StringName, container, Resource, and Script services stop. A raw
+// function-local static would instead run its destructor during dynamic-library teardown, which
+// is later than Godot's ObjectDB cleanup on several supported hosts.
+using EngineLifetimeStaticReleaser = void (*)(void*) noexcept;
+void register_engine_lifetime_static(void* storage, EngineLifetimeStaticReleaser release);
+void release_engine_lifetime_statics() noexcept;
+
+template <typename Value>
+class EngineLifetimeStatic final {
+  public:
+    EngineLifetimeStatic() = default;
+
+    EngineLifetimeStatic(const EngineLifetimeStatic&) = delete;
+    EngineLifetimeStatic& operator=(const EngineLifetimeStatic&) = delete;
+
+    template <typename Factory>
+    [[nodiscard]] const Value& get(Factory&& factory) {
+        auto* value = pointer_.load(std::memory_order_acquire);
+        if (value)
+            return *value;
+        std::lock_guard lock{mutex_};
+        value = pointer_.load(std::memory_order_relaxed);
+        if (!value) {
+            value = new Value(std::invoke(std::forward<Factory>(factory)));
+            pointer_.store(value, std::memory_order_release);
+            register_engine_lifetime_static(this, &EngineLifetimeStatic::release_registered);
+        }
+        return *value;
+    }
+
+    void release() noexcept {
+        std::lock_guard lock{mutex_};
+        delete pointer_.exchange(nullptr, std::memory_order_acq_rel);
+    }
+
+  private:
+    static void release_registered(void* storage) noexcept {
+        static_cast<EngineLifetimeStatic*>(storage)->release();
+    }
+
+    std::atomic<Value*> pointer_{nullptr};
+    std::mutex mutex_;
+};
+
+template <typename Factory>
+[[nodiscard]] const auto& engine_lifetime_static(Factory&& factory) {
+    using Value = std::remove_cv_t<std::remove_reference_t<std::invoke_result_t<Factory&>>>;
+    static EngineLifetimeStatic<Value> storage;
+    return storage.get(std::forward<Factory>(factory));
+}
+
 inline void mark_script_failure() noexcept {
     if (detail::active_script_fault)
         detail::active_script_fault->failed = true;

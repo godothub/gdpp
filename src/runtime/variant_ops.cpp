@@ -23,6 +23,7 @@
 #include <godot_cpp/variant/string.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
+#include <algorithm>
 #include <atomic>
 #include <condition_variable>
 #include <mutex>
@@ -67,6 +68,21 @@ thread_local ScriptFaultState* active_script_fault = nullptr;
 } // namespace detail
 
 namespace {
+
+struct EngineLifetimeStaticRegistry final {
+    struct Entry final {
+        void* storage{nullptr};
+        EngineLifetimeStaticReleaser release{nullptr};
+    };
+
+    std::mutex mutex;
+    std::vector<Entry> entries;
+};
+
+EngineLifetimeStaticRegistry& engine_lifetime_static_registry() {
+    static EngineLifetimeStaticRegistry value;
+    return value;
+}
 
 struct CoroutineRuntime final {
     std::mutex mutex;
@@ -119,8 +135,7 @@ godot::ObjectID variant_object_id(const godot::Variant& value) {
 }
 
 const godot::StringName& coroutine_completed_signal() {
-    static const godot::StringName name{"completed"};
-    return name;
+    return engine_lifetime_static([] { return godot::StringName{"completed"}; });
 }
 
 struct ActiveInitialization final {
@@ -159,6 +174,31 @@ ScriptFaultState* coroutine_script_fault(const CoroutineStatePtr& coroutine) noe
 }
 
 } // namespace
+
+void register_engine_lifetime_static(void* storage, EngineLifetimeStaticReleaser release) {
+    if (!storage || !release)
+        return;
+    auto& registry = engine_lifetime_static_registry();
+    std::lock_guard lock{registry.mutex};
+    const auto existing =
+        std::find_if(registry.entries.begin(), registry.entries.end(),
+                     [storage](const auto& entry) { return entry.storage == storage; });
+    if (existing == registry.entries.end())
+        registry.entries.push_back({storage, release});
+}
+
+void release_engine_lifetime_statics() noexcept {
+    auto& registry = engine_lifetime_static_registry();
+    std::vector<EngineLifetimeStaticRegistry::Entry> entries;
+    {
+        std::lock_guard lock{registry.mutex};
+        entries.swap(registry.entries);
+    }
+    for (auto entry = entries.rbegin(); entry != entries.rend(); ++entry) {
+        if (entry->release)
+            entry->release(entry->storage);
+    }
+}
 
 CoroutineFunctionState::CoroutineFunctionState() {
     auto& runtime = coroutine_runtime();
@@ -482,7 +522,8 @@ godot::Variant strict_external_object_storage(const godot::Variant& value,
 void emit_local_signal_variants(godot::Object* owner, const godot::Variant** arguments,
                                 const std::int64_t argument_count,
                                 const ScriptSourceLocation location) {
-    static const godot::StringName method_name{"emit_signal"};
+    const auto& method_name =
+        engine_lifetime_static([] { return godot::StringName{"emit_signal"}; });
     static GDExtensionMethodBindPtr method_bind =
         godot::gdextension_interface::classdb_get_method_bind(
             godot::Object::get_class_static()._native_ptr(), method_name._native_ptr(), 4047867050);
@@ -507,9 +548,10 @@ void emit_local_signal_variants(godot::Object* owner, const godot::Variant** arg
 namespace {
 
 const godot::StringName& default_argument_marker() {
-    static const godot::StringName marker{
-        "__gdpp_internal_omitted_argument_7f7b20d940d64b33aebdbdc51ca21ab3__"};
-    return marker;
+    return engine_lifetime_static([] {
+        return godot::StringName{
+            "__gdpp_internal_omitted_argument_7f7b20d940d64b33aebdbdc51ca21ab3__"};
+    });
 }
 
 std::optional<integer::Result> evaluate_integer_operator(const godot::Variant::Operator operation,
@@ -1307,7 +1349,7 @@ godot::Variant call_callable_impl(const godot::Callable& callable, const godot::
     // Callable's CallError. godot-cpp's variadic Callable::call() deliberately discards that
     // error, which would let generated execution continue after invalid arity, invalid argument,
     // unbind, and freed-target failures even though GDScript stops the current function.
-    static const godot::StringName call_method{"call"};
+    const auto& call_method = engine_lifetime_static([] { return godot::StringName{"call"}; });
     godot::Variant callable_value{callable};
     godot::Variant result;
     GDExtensionCallError error{GDEXTENSION_CALL_OK, 0, 0};
@@ -1353,7 +1395,8 @@ godot::Variant call_external_static_impl(const godot::StringName& class_name,
         return {};
     }
 
-    static const godot::StringName class_call_static_method{"class_call_static"};
+    const auto& class_call_static_method =
+        engine_lifetime_static([] { return godot::StringName{"class_call_static"}; });
     godot::Variant class_db_value{class_db};
     godot::Variant result;
     GDExtensionCallError error{GDEXTENSION_CALL_OK, 0, 0};
@@ -1807,9 +1850,11 @@ godot::Variant call_dynamic_impl(godot::Variant& target, const godot::StringName
                                  const ScriptSourceLocation location) {
     if (reject_invalid_object_target(target, "call method", &method, location))
         return {};
-    static const godot::StringName get_script_method{"get_script"};
-    static const godot::StringName new_method{"new"};
-    static const godot::StringName set_script_method{"set_script"};
+    const auto& get_script_method =
+        engine_lifetime_static([] { return godot::StringName{"get_script"}; });
+    const auto& new_method = engine_lifetime_static([] { return godot::StringName{"new"}; });
+    const auto& set_script_method =
+        engine_lifetime_static([] { return godot::StringName{"set_script"}; });
     if (argument_count == 0 && method == get_script_method &&
         target.get_type() == godot::Variant::OBJECT) {
         return script_identity(static_cast<godot::Object*>(target));

@@ -460,8 +460,9 @@ TEST_CASE("project compiler isolates tool access to runtime script state") {
                              "::_gdpp_set_shared") != std::string::npos);
     REQUIRE(tool_source.find(runtime->class_name + "::_gdpp_script_method_answer()") !=
             std::string::npos);
-    REQUIRE(runtime_source.find("static thread_local godot::Variant editor_value{}") !=
+    REQUIRE(runtime_source.find("if (gdpp::runtime::is_editor_hint()) initialize = false;") !=
             std::string::npos);
+    REQUIRE(runtime_source.find("static thread_local godot::Variant") == std::string::npos);
 }
 
 TEST_CASE("project compiler preserves mixed tool inheritance metadata") {
@@ -1972,11 +1973,15 @@ TEST_CASE("project compiler attaches scripts to third-party GDExtension instance
         registration.find("gdpp::runtime::shutdown_coroutine_runtime()");
     const auto second_shutdown_coroutines = registration.find(
         "gdpp::runtime::shutdown_coroutine_runtime()", first_shutdown_coroutines + 1);
+    const auto release_engine_statics =
+        registration.find("gdpp::runtime::release_engine_lifetime_statics()");
     REQUIRE(initialize_coroutines != std::string::npos);
     REQUIRE(first_shutdown_coroutines != std::string::npos);
     REQUIRE(second_shutdown_coroutines != std::string::npos);
+    REQUIRE(release_engine_statics != std::string::npos);
     REQUIRE(first_shutdown_coroutines < detach_instances);
     REQUIRE(unregister_descriptors < second_shutdown_coroutines);
+    REQUIRE(second_shutdown_coroutines < release_engine_statics);
     REQUIRE(registration.find("GDREGISTER_CLASS(" + result.scripts.front().class_name + ")") !=
             std::string::npos);
     REQUIRE(registration.find("GDREGISTER_CLASS(" +
@@ -3713,10 +3718,11 @@ TEST_CASE("project compiler lowers cross-script constants enums and resource fac
     REQUIRE(consumer_source.find("godot::StringName(\"" + base_class + "\")") == std::string::npos);
     REQUIRE(consumer_source.find("_gdpp_call_argument_") != std::string::npos);
     REQUIRE(consumer_source.find("IDLE:0,ACTIVE:4,BOOST:8") != std::string::npos);
-    REQUIRE(consumer_source.find("_gdpp_constant_Factory_storage())>::missing()") !=
+    REQUIRE(consumer_source.find("_gdpp_constant_Factory_pointer()") != std::string::npos);
+    REQUIRE(consumer_source.find("_gdpp_constant_Factory_release()") != std::string::npos);
+    REQUIRE(consumer_source.find("value = new gdpp::runtime::ScriptResource<") !=
             std::string::npos);
-    REQUIRE(consumer_source.find("value = gdpp::runtime::ScriptResource<") != std::string::npos);
-    REQUIRE(consumer_source.find(">::missing();\n    return value;") != std::string::npos);
+    REQUIRE(consumer_source.find("::missing()};") != std::string::npos);
     const auto count_occurrences = [](const std::string_view text, const std::string_view needle) {
         std::size_t count = 0;
         for (auto position = text.find(needle); position != std::string_view::npos;
@@ -3724,14 +3730,13 @@ TEST_CASE("project compiler lowers cross-script constants enums and resource fac
             ++count;
         return count;
     };
-    REQUIRE_EQ(count_occurrences(consumer_source, "_gdpp_constant_Factory_storage())>::missing()"),
+    REQUIRE_EQ(count_occurrences(consumer_source, "_gdpp_constant_Factory_release();"),
                std::size_t{2});
+    REQUIRE_EQ(count_occurrences(consumer_source, "_gdpp_constant_InnerFactory_release();"),
+               std::size_t{1});
     REQUIRE_EQ(
-        count_occurrences(consumer_source, "_gdpp_constant_InnerFactory_storage())>::missing()"),
-        std::size_t{1});
-    REQUIRE_EQ(count_occurrences(consumer_source,
-                                 "_gdpp_constant_TransactionalFactory_storage())>::missing()"),
-               std::size_t{2});
+        count_occurrences(consumer_source, "_gdpp_constant_TransactionalFactory_release();"),
+        std::size_t{2});
 }
 
 TEST_CASE("project compiler folds cross-script resource path constants") {
