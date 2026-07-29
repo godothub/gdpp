@@ -1,19 +1,17 @@
 ## 1.8.3
 
 - Add full-project compatibility tests for Konado, Pixelorama, Godot Open RPG, and Source of Mana.
-- Preserve cross-script type identity across global classes, inner classes, inherited scripts, native base types, enum scopes, constant graphs, static calls, method shadowing, override families, and otherwise colliding generated namespaces.
-- Complete dynamic script reflection for methods, signals, constants, properties, Inspector category markers, Script resource paths, construction identity, type tests, and runtime attachment, including scripts restored from serialized resources or supplied by another script language.
-- Restore attached ScriptInstance state transactionally with typed raw member storage, descriptor-driven custom accessors, instance-to-Dictionary utilities, dynamic Object properties, duplicate-attachment serialization, cyclic materialization guards, and safe release outside registry locks.
-- Preserve bound Godot method Callables, internal and static script Callable identity, vararg metadata and arguments, default parameters, typed returns, and the Boolean return ABI required by `assert(Callable(...))`.
-- Match GDScript container and value semantics for typed Array assignment, widened override containers, named Dictionary keys, nested built-in writes, packed-array API returns, dynamic `len` failures, enum-backed Dictionary values, and receiver-preserving built-in member calls.
-- Match Godot operator and conversion behavior across integer enums, numeric headers, native and Variant operators, conditional storage ownership, native Object receivers, global script values, and explicit Array/Dictionary/Object materialization.
-- Preserve asynchronous initialization, `super` receivers across `await`, abstract and attached coroutine ABIs, attached behavior lifetime during suspension, deterministic continuation ownership, and cancellation of pending awaits before extension teardown.
-- Treat scripts without an explicit base as `RefCounted`, matching GDScript construction and lifetime semantics instead of generating a bare `Object` base.
-- Preserve compiled Script resources as canonical Godot resources across UID rescans, cache reuse, attachment, inheritance, preload/load storage, rollback, and shutdown without duplicate instances or stale language bindings.
-- Transform customer resources in isolated export copies while preserving external-language scripts, foreign-language scenes, nested foreign resource owners, serialized Object references, native serialization state, export preset behavior, and original diagnostic severity.
-- Preserve the complete relative path topology of generated sources and compiled Script resources, preventing equal filenames in different customer directories from collapsing into one native identity.
-- Release generated Godot static state, detach compiled scripts, cancel asynchronous work, and clear non-materializing Script caches in teardown order so extension unloading cannot retain engine objects or recreate resources after class unregistration.
-- Enforce one project-wide native type system and attachment ABI across generated translation units, including initializer inheritance, reflected typed-storage descriptors, script resource binding, and runtime validation of native Script variants.
+- Resolve cross-script classes, inheritance, enums, constants, static calls, method overrides, and name collisions with consistent type identity.
+- Complete reflection and restoration for script members, Inspector metadata, custom accessors, and attached instances.
+- Preserve bound, internal, and static Callables with their varargs, default parameters, typed results, and `assert` behavior.
+- Match GDScript container semantics for typed arrays, dictionaries, enum values, packed-array returns, nested writes, and dynamic `len`.
+- Match Godot operator and conversion semantics for numeric, enum, Variant, Object, and built-in value expressions.
+- Preserve asynchronous initialization, awaited `super` calls, coroutine ABIs, and attached lifetimes; cancel pending awaits on shutdown.
+- Make scripts without an explicit base inherit `RefCounted`, matching GDScript.
+- Preserve compiled Script identity across paths, UIDs, `load`/`preload`, caches, attachment, inheritance, rollback, and shutdown.
+- Preserve foreign scripts, scenes, nested resource owners, serialized references, presets, diagnostics, and customer sources during export.
+- Release generated static state, compiled scripts, asynchronous work, and Script caches safely during extension shutdown.
+- Use one native type, storage, and attachment ABI across all generated translation units.
 
 ## 1.8.2
 

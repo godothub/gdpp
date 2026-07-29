@@ -1,19 +1,17 @@
 ## 1.8.3
 
 - 增加 Konado、Pixelorama、Godot Open RPG 和 Source of Mana 的完整项目兼容性测试。
-- 在全局类、内部类、脚本继承、原生基类、枚举作用域、常量图、静态调用、方法遮蔽、override 家族及生成命名空间冲突场景中完整保留跨脚本类型身份。
-- 完善脚本方法、信号、常量、属性、Inspector 分类标记、Script 资源路径、构造身份、类型判断和运行时附加的动态反射，包括从序列化资源恢复或由其他脚本语言提供的脚本。
-- 以事务方式恢复 Attached ScriptInstance 状态，覆盖强类型原始成员存储、描述符驱动的自定义访问器、实例到 Dictionary 工具、动态 Object 属性、重复附加串行化、循环物化防护及注册表锁外安全释放。
-- 保留绑定 Godot 方法、内部脚本方法和静态脚本方法的 Callable 身份，并完整传递 vararg 元数据与参数、默认参数和类型化返回值，同时匹配 `assert(Callable(...))` 所需的布尔返回 ABI。
-- 对强类型 Array 赋值、扩宽 override 容器、Dictionary 命名键、嵌套内建值写入、PackedArray API 返回、动态 `len` 失败、枚举字典值及保留接收者的内建成员调用匹配 GDScript 容器和值语义。
-- 在整数枚举、数值头文件、原生与 Variant 运算符、条件分支存储所有权、原生 Object 接收者、全局脚本值及 Array/Dictionary/Object 显式物化中匹配 Godot 运算和转换行为。
-- 保留异步初始化、跨 `await` 的 `super` 接收者、抽象与 Attached 协程 ABI、挂起期间的 Attached 行为生命周期和确定的 continuation 所有权，并在扩展终止前取消仍在等待的异步任务。
-- 未显式声明基类的脚本默认继承 `RefCounted`，使构造和生命周期匹配 GDScript，而不是生成裸 `Object` 基类。
-- 已编译 Script 在 UID 重扫、缓存复用、附加、继承、preload/load 存储、回滚及终止阶段保持为规范 Godot 资源，不产生重复实例或陈旧语言绑定。
-- 仅在隔离的导出副本中转换客户资源，同时保留外部语言脚本、外部语言场景、嵌套外部资源 owner、序列化 Object 引用、原生序列化状态、导出预设行为及原始诊断级别。
-- 保留生成源码和已编译 Script 资源的完整相对路径拓扑，避免客户不同目录中的同名文件折叠为同一个原生身份。
-- 按终止顺序释放生成的 Godot 静态状态、分离已编译脚本、取消异步任务并清理不触发物化的 Script 缓存，避免扩展卸载后继续持有引擎对象或在类注销后重新创建资源。
-- 所有生成翻译单元统一使用一套项目级原生类型系统和 Attached ABI，覆盖初始化器继承、反射强类型存储描述符、Script 资源绑定及原生 Script Variant 运行时验证。
+- 统一解析跨脚本类、继承、枚举、常量、静态调用、方法覆盖和名称冲突中的类型身份。
+- 完善脚本成员、Inspector 元数据、自定义访问器和 Attached 实例的反射与恢复。
+- 保留绑定、内部和静态 Callable 的 vararg、默认参数、类型化返回值及 `assert` 行为。
+- 对强类型数组、字典、枚举值、PackedArray 返回、嵌套写入和动态 `len` 匹配 GDScript 容器语义。
+- 对数值、枚举、Variant、Object 和内建值表达式匹配 Godot 运算及转换语义。
+- 保留异步初始化、`await` 中的 `super`、协程 ABI 和 Attached 生命周期，并在终止时取消等待。
+- 未显式声明基类的脚本默认继承 `RefCounted`，与 GDScript 保持一致。
+- 在路径、UID、`load`/`preload`、缓存、附加、继承、回滚和终止过程中保持已编译 Script 的唯一身份。
+- 导出时保留外部脚本、场景、嵌套资源 owner、序列化引用、预设、诊断信息和客户源码。
+- 扩展终止时安全释放生成的静态状态、已编译脚本、异步任务和 Script 缓存。
+- 所有生成翻译单元统一使用同一套原生类型、存储和 Attached ABI。
 
 ## 1.8.2
 
