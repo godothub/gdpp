@@ -4089,6 +4089,10 @@ std::string CodeGenerator::emit_expression(const typed::Expression& expression) 
             const auto& value = *expression.operands.at(0);
             const auto& target = *expression.operands.at(1);
             const auto emitted_value = emit_expression(value);
+            if (target.type.kind == TypeKind::object && target.type.name == "GDScript") {
+                return "gdpp::runtime::cast_gdscript(gdpp::runtime::to_variant(" +
+                       emitted_value + "))";
+            }
             if (target.resolution == typed::ResolutionKind::external_type) {
                 const auto suffix = std::to_string(temporary_counter_++);
                 const auto temporary = "_gdpp_external_cast_" + suffix;
@@ -4109,6 +4113,8 @@ std::string CodeGenerator::emit_expression(const typed::Expression& expression) 
                         return target_cpp + "(godot::Object::cast_to<godot::RefCounted>(" + object +
                                "))";
                     }
+                    if (target_cpp.rfind("gdpp::runtime::ObjectStorage<", 0) == 0)
+                        return target_cpp + "(" + object + ")";
                     return object;
                 }
             }
@@ -4121,15 +4127,35 @@ std::string CodeGenerator::emit_expression(const typed::Expression& expression) 
                     : target.resolution == typed::ResolutionKind::inner_type
                         ? inner_cpp_type(target.resolved_owner)
                         : "godot::" + godot_cpp_class_name(target.resolved_owner);
-                auto object = value.type.is_dynamic()
-                                  ? "(" + emitted_value + ").get_validated_object()"
-                                  : emitted_value;
-                if (!value.type.is_dynamic() && value.type.kind == TypeKind::object) {
+                std::string object;
+                if (value.type.is_dynamic()) {
+                    object = "(" + emitted_value + ").get_validated_object()";
+                } else if (value.type.kind == TypeKind::nil) {
+                    object = "nullptr";
+                } else if (value.type.kind == TypeKind::script_resource) {
+                    object = "(" + emitted_value + ").resource().ptr()";
+                } else {
+                    object = emitted_value;
+                }
+                if (value.type.kind == TypeKind::object) {
+                    const bool external_value =
+                        script_symbols_ && script_symbols_->find_external(value.type.name);
+                    if (external_value) {
+                        object = "(gdpp::runtime::to_variant(" + object +
+                                 ")).get_validated_object()";
+                    }
                     const bool ref_counted = is_ref_counted_object(value.type);
-                    if (ref_counted && emitted_value != "this")
+                    if (ref_counted && !external_value && emitted_value != "this")
                         object = "(" + object + ").ptr()";
                 }
-                return "godot::Object::cast_to<" + target_cpp + ">(" + object + ")";
+                const auto cast =
+                    "godot::Object::cast_to<" + target_cpp + ">(" + object + ")";
+                const auto storage_cpp = cpp_type(expression.type);
+                if (storage_cpp.rfind("godot::Ref<", 0) == 0 ||
+                    storage_cpp.rfind("gdpp::runtime::ObjectStorage<", 0) == 0) {
+                    return storage_cpp + "(" + cast + ")";
+                }
+                return cast;
             }
             return emit_explicit_conversion(expression.type, value.type, emitted_value);
         }

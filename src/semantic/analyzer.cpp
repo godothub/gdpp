@@ -1359,8 +1359,10 @@ Type SemanticAnalyzer::resolve_binary_expression(const ast::Expression& expressi
             // GDScript object casts are runtime-checked and return null for unrelated object
             // classes. Requiring a statically provable inheritance relationship would reject
             // legal downcasts from broad engine properties such as Material.
-            valid_conversion = left.kind == TypeKind::nil || left.kind == TypeKind::object ||
-                               left.kind == TypeKind::script_resource;
+            valid_conversion =
+                left.kind == TypeKind::nil || left.kind == TypeKind::object ||
+                (left.kind == TypeKind::script_resource &&
+                 is_explicitly_convertible(target_type, left));
         } else {
             valid_conversion = is_explicitly_convertible(target_type, left);
         }

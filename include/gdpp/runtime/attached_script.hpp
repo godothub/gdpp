@@ -246,6 +246,10 @@ void detach_all_attached_script_instances();
 // generated storage boundaries.
 [[nodiscard]] godot::Ref<godot::Script>
 strict_gdscript_storage(const godot::Variant& value, const ScriptSourceLocation& location);
+// Implements non-failing `as GDScript` across interpreted and source-free compiled providers.
+// The binary-only provider is a ScriptExtension rather than a concrete GDScript, but retains the
+// source language's logical GDScript identity.
+[[nodiscard]] godot::Ref<godot::Script> cast_gdscript(const godot::Variant& value);
 [[nodiscard]] godot::Object* strict_attached_script_storage(const godot::Variant& value,
                                                             const godot::String& source_path,
                                                             const ScriptSourceLocation& location);

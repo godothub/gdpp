@@ -798,6 +798,20 @@ void detach_all_attached_script_instances() {
     native_bind_cache().clear();
 }
 
+godot::Ref<godot::Script> cast_gdscript(const godot::Variant& value) {
+    if (value.get_type() != godot::Variant::OBJECT)
+        return {};
+    auto* object = value.get_validated_object();
+    if (!object)
+        return {};
+    auto* script = godot::Object::cast_to<godot::Script>(object);
+    if (!script || (!godot::Object::cast_to<godot::GDScript>(script) &&
+                    !godot::Object::cast_to<AttachedCompiledScript>(script))) {
+        return {};
+    }
+    return godot::Ref<godot::Script>(script);
+}
+
 godot::Ref<godot::Script> strict_gdscript_storage(const godot::Variant& value,
                                                   const ScriptSourceLocation& location) {
     if (script_function_failed())
@@ -813,11 +827,8 @@ godot::Ref<godot::Script> strict_gdscript_storage(const godot::Variant& value,
     auto* object = value.get_validated_object();
     if (!object)
         return {};
-    auto* script = godot::Object::cast_to<godot::Script>(object);
-    if (script && (godot::Object::cast_to<godot::GDScript>(script) ||
-                   godot::Object::cast_to<AttachedCompiledScript>(script))) {
-        return godot::Ref<godot::Script>(script);
-    }
+    if (auto script = cast_gdscript(value); script.is_valid())
+        return script;
     report_script_failure(godot::String{"Cannot assign object of type "} +
                               godot::String{object->get_class()} + " to GDScript.",
                           location);

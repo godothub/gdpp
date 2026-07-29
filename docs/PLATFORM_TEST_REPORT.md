@@ -42,7 +42,7 @@
 故障/Callable/Signal oracle 输出 `GDPP_CALLABLE_SIGNAL_RUNTIME_OK`，FunctionState 差分输出
 `GDPP_FUNCTION_STATE_RUNTIME_OK`。await 默认参数和协程访问器另输出
 `GDPP_AWAIT_DEFAULT_AOT_RUNTIME_OK`、`GDPP_COROUTINE_ACCESSOR_AOT_RUNTIME_OK`。这组本地证据
-用于在正式矩阵前验证 runtime ABI 22、breakpoint、静态与 lambda 协程、异步虚函数、严格存储、
+用于在正式矩阵前验证 runtime ABI 23、breakpoint、静态与 lambda 协程、异步虚函数、严格存储、
 故障隔离、项目脚本 `Object.free()` 和生命周期语义；
 它不替代下述跨 runner 发布门禁。
 

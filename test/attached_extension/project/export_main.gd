@@ -146,6 +146,26 @@ func _verify_fault_matrix() -> void:
 
 
 func _verify_export_runtime() -> void:
+    var cast_gdscript := COROUTINE_ACCESSOR_PROBE as GDScript
+    var cast_script := COROUTINE_ACCESSOR_PROBE as Script
+    var cast_resource := COROUTINE_ACCESSOR_PROBE as Resource
+    var cast_ref_counted := COROUTINE_ACCESSOR_PROBE as RefCounted
+    var cast_object := COROUTINE_ACCESSOR_PROBE as Object
+    var assigned_gdscript: GDScript = COROUTINE_ACCESSOR_PROBE
+    var assigned_script: Script = COROUTINE_ACCESSOR_PROBE
+    var assigned_resource: Resource = COROUTINE_ACCESSOR_PROBE
+    if (
+        cast_gdscript == null
+        or cast_script != cast_gdscript
+        or cast_resource != cast_script
+        or cast_ref_counted != cast_script
+        or cast_object != cast_script
+        or assigned_gdscript != cast_script
+        or assigned_script != cast_script
+        or assigned_resource != cast_script
+    ):
+        _fail("compiled script resource lost its native Script base hierarchy")
+        return
     if (
         _dynamic_len("gdpp") != 4
         or _dynamic_len(&"native") != 6

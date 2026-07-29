@@ -1330,6 +1330,80 @@ TEST_CASE("project compiler exposes preloaded scripts as typed namespaces") {
     REQUIRE(source.find(item_class + "::Mode::_gdpp_enum_HOT") != std::string::npos);
 }
 
+TEST_CASE("project compiler preserves the native base hierarchy of script resources") {
+    const auto root = fixture_root("project-script-resource-native-bases");
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
+    write_text(root / "library.gd", "extends RefCounted\n");
+    write_text(
+        root / "consumer.gd",
+        "extends Node\n"
+        "const Library = preload(\"res://library.gd\")\n"
+        "func cast_gdscript() -> GDScript:\n"
+        "    return Library as GDScript\n"
+        "func cast_script() -> Script:\n"
+        "    return Library as Script\n"
+        "func cast_resource() -> Resource:\n"
+        "    return Library as Resource\n"
+        "func cast_ref_counted() -> RefCounted:\n"
+        "    return Library as RefCounted\n"
+        "func cast_object() -> Object:\n"
+        "    return Library as Object\n"
+        "func assign_script() -> Script:\n"
+        "    var value: Script = Library\n"
+        "    return value\n"
+        "func assign_gdscript() -> GDScript:\n"
+        "    var value: GDScript = Library\n"
+        "    return value\n"
+        "func assign_resource() -> Resource:\n"
+        "    var value: Resource = Library\n"
+        "    return value\n");
+    const auto options = project_options(root);
+
+    const auto valid = gdpp::ProjectCompiler{}.compile(options);
+
+    REQUIRE(valid.success);
+    REQUIRE(std::none_of(valid.diagnostics.begin(), valid.diagnostics.end(),
+                         [](const auto& diagnostic) {
+                             return diagnostic.diagnostic.code == "GDS4156";
+                         }));
+    const auto consumer =
+        std::find_if(valid.scripts.begin(), valid.scripts.end(), [](const auto& script) {
+            return script.relative_path == std::filesystem::path{"consumer.gd"};
+        });
+    REQUIRE(consumer != valid.scripts.end());
+    const auto source =
+        read_text(options.output_directory / "generated" / consumer->source_file_name);
+    REQUIRE(source.find("gdpp::runtime::cast_gdscript(") != std::string::npos);
+    REQUIRE(source.find("gdpp::runtime::strict_gdscript_storage(") != std::string::npos);
+    REQUIRE(source.find(".resource().ptr()") != std::string::npos);
+    REQUIRE(source.find("godot::Ref<godot::Script>(godot::Object::cast_to<godot::Script>(") !=
+            std::string::npos);
+    REQUIRE(source.find("godot::Ref<godot::Resource>(godot::Object::cast_to<godot::Resource>(") !=
+            std::string::npos);
+    REQUIRE(source.find(
+                "godot::Ref<godot::RefCounted>(godot::Object::cast_to<godot::RefCounted>(") !=
+            std::string::npos);
+    REQUIRE(source.find("gdpp::runtime::ObjectStorage<godot::Object>("
+                        "godot::Object::cast_to<godot::Object>(") != std::string::npos);
+
+    write_text(root / "invalid.gd", "extends Node\n"
+                                    "const Library = preload(\"res://library.gd\")\n"
+                                    "func reject() -> Node:\n"
+                                    "    return Library as Node\n");
+    const auto invalid = gdpp::ProjectCompiler{}.compile(options);
+
+    REQUIRE(!invalid.success);
+    REQUIRE(std::any_of(invalid.diagnostics.begin(), invalid.diagnostics.end(),
+                        [](const auto& diagnostic) {
+                            return diagnostic.diagnostic.code == "GDS4075";
+                        }));
+    REQUIRE(std::none_of(invalid.diagnostics.begin(), invalid.diagnostics.end(),
+                         [](const auto& diagnostic) {
+                             return diagnostic.diagnostic.code == "GDS4156";
+                         }));
+}
+
 TEST_CASE("project compiler rejects cross-script native class collisions transactionally") {
     const auto root = fixture_root("project-collision");
     std::error_code error;

@@ -156,6 +156,14 @@ bool compatible_container_shape(const Type& target, const Type& source) noexcept
     return !target_typed || !source_typed || target.name == source.name;
 }
 
+bool is_script_resource_object_base(const Type& target) noexcept {
+    if (target.kind != TypeKind::object)
+        return false;
+    return target.name == "GDScript" || target.name == "Script" ||
+           target.name == "Resource" || target.name == "RefCounted" ||
+           target.name == "Object";
+}
+
 } // namespace
 
 ConversionKind classify_conversion(const Type& target, const Type& source) noexcept {
@@ -180,11 +188,11 @@ ConversionKind classify_conversion(const Type& target, const Type& source) noexc
         return ConversionKind::implicit;
     if (target.kind == TypeKind::script_resource && source.kind == TypeKind::nil)
         return ConversionKind::implicit;
-    // A resolved `.gd` resource is a source-level GDScript value. Binary-only exports replace its
-    // concrete provider with AttachedCompiledScript, but that representational change must not
-    // make valid GDScript annotations fail semantic analysis.
-    if (target.kind == TypeKind::object && target.name == "GDScript" &&
-        source.kind == TypeKind::script_resource) {
+    // A resolved `.gd` resource is a source-level GDScript value, and therefore also a Script,
+    // Resource, RefCounted and Object. Binary-only exports replace its concrete provider with
+    // AttachedCompiledScript, but preserve that complete native base hierarchy.
+    if (source.kind == TypeKind::script_resource &&
+        is_script_resource_object_base(target)) {
         return ConversionKind::implicit;
     }
     if (target.kind == TypeKind::script_resource || source.kind == TypeKind::script_resource)
