@@ -24,6 +24,8 @@ struct ScriptMemberSymbol {
     std::size_t required_arguments{0};
     bool is_static{false};
     bool has_accessor{false};
+    std::string getter_method;
+    std::string setter_method;
     bool getter_is_coroutine{false};
     bool setter_is_coroutine{false};
     // Source-level annotation metadata is kept separate from the resolved native ABI.

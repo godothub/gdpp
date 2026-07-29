@@ -997,10 +997,9 @@ Type SemanticAnalyzer::type_from_name(const std::string& name, SourceSpan span) 
         return {TypeKind::enumeration, name};
     if (const auto* owner = api_.find_class_enum_owner(base_type_, name))
         return {TypeKind::enumeration, std::string{owner->name} + "." + name};
-    if (const auto separator = name.rfind('.');
-        separator != std::string::npos) {
-        if (const auto* owner = api_.find_class_enum_owner(
-                name.substr(0, separator), name.substr(separator + 1))) {
+    if (const auto separator = name.rfind('.'); separator != std::string::npos) {
+        if (const auto* owner =
+                api_.find_class_enum_owner(name.substr(0, separator), name.substr(separator + 1))) {
             return {TypeKind::enumeration,
                     std::string{owner->name} + "." + name.substr(separator + 1)};
         }
@@ -1899,8 +1898,7 @@ Type SemanticAnalyzer::analyze_expression(const ast::Expression& expression) {
             model_.api_resolutions_.emplace(
                 &expression,
                 ApiResolution{ApiResolutionKind::global_enum_type,
-                              "godot::" + std::string{enum_owner->name} + "::" +
-                                  expression.value(),
+                              "godot::" + std::string{enum_owner->name} + "::" + expression.value(),
                               "", "", result, 0, 0, false, true});
         } else if (const auto* enum_value = api_.find_global_enum_value(expression.value())) {
             result = {TypeKind::integer, "int"};
@@ -5566,6 +5564,10 @@ void SemanticAnalyzer::analyze_class(const ast::ClassDeclaration& declaration) {
                                                     member.kind == ScriptMemberKind::enum_value});
         if (member.kind == ScriptMemberKind::field && member.has_accessor)
             accessor_fields_.insert(member.name);
+        if (member.kind == ScriptMemberKind::field && !member.getter_method.empty())
+            bound_accessor_fields_[member.getter_method].insert(member.name);
+        if (member.kind == ScriptMemberKind::field && !member.setter_method.empty())
+            bound_accessor_fields_[member.setter_method].insert(member.name);
         if (member.kind == ScriptMemberKind::field && member.getter_is_coroutine)
             coroutine_getter_fields_.insert(member.name);
         if (member.kind == ScriptMemberKind::field && member.is_static)
@@ -6445,6 +6447,10 @@ SemanticModel SemanticAnalyzer::analyze(const ast::Script& script) {
                                                member->kind == ScriptMemberKind::enum_value});
             if (member->kind == ScriptMemberKind::field && member->has_accessor)
                 accessor_fields_.insert(member->name);
+            if (member->kind == ScriptMemberKind::field && !member->getter_method.empty())
+                bound_accessor_fields_[member->getter_method].insert(member->name);
+            if (member->kind == ScriptMemberKind::field && !member->setter_method.empty())
+                bound_accessor_fields_[member->setter_method].insert(member->name);
             if (member->kind == ScriptMemberKind::field && member->getter_is_coroutine)
                 coroutine_getter_fields_.insert(member->name);
             if (member->kind == ScriptMemberKind::field && member->is_static)
@@ -6616,6 +6622,10 @@ SemanticModel SemanticAnalyzer::analyze(const ast::Script& script) {
                     variable.type ? type_from_name(*variable.type, variable.span) : variant_type;
                 member.is_static = variable.is_constant || variable.is_static;
                 member.has_accessor = variable.getter.has_value() || variable.setter.has_value();
+                if (variable.getter)
+                    member.getter_method = variable.getter->method;
+                if (variable.setter)
+                    member.setter_method = variable.setter->method;
                 const auto accessor_suspends =
                     [&](const std::optional<ast::PropertyAccessor>& accessor) {
                         if (!accessor)
@@ -6714,6 +6724,10 @@ SemanticModel SemanticAnalyzer::analyze(const ast::Script& script) {
                                         member.kind == ScriptMemberKind::enum_value});
             if (member.kind == ScriptMemberKind::field && member.has_accessor)
                 accessor_fields_.insert(member.name);
+            if (member.kind == ScriptMemberKind::field && !member.getter_method.empty())
+                bound_accessor_fields_[member.getter_method].insert(member.name);
+            if (member.kind == ScriptMemberKind::field && !member.setter_method.empty())
+                bound_accessor_fields_[member.setter_method].insert(member.name);
             if (member.kind == ScriptMemberKind::field && member.getter_is_coroutine)
                 coroutine_getter_fields_.insert(member.name);
             if (member.kind == ScriptMemberKind::field && member.is_static)

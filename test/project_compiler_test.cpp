@@ -1969,14 +1969,11 @@ TEST_CASE("project compiler attaches scripts to third-party GDExtension instance
             std::string::npos);
     REQUIRE(registration.find("register_attached_script_resource_loader") != std::string::npos);
     REQUIRE(registration.find("unregister_attached_script_resource_loader") != std::string::npos);
-    const auto detach_instances =
-        registration.find("detach_all_attached_script_instances");
-    const auto unregister_loader =
-        registration.find("unregister_attached_script_resource_loader");
+    const auto detach_instances = registration.find("detach_all_attached_script_instances");
+    const auto unregister_loader = registration.find("unregister_attached_script_resource_loader");
     const auto unregister_language =
         registration.find("AttachedCompiledLanguage::unregister_singleton");
-    const auto unregister_descriptors =
-        registration.find("unregister_all_attached_scripts");
+    const auto unregister_descriptors = registration.find("unregister_all_attached_scripts");
     REQUIRE(detach_instances != std::string::npos);
     REQUIRE(unregister_loader != std::string::npos);
     REQUIRE(unregister_language != std::string::npos);
@@ -2915,28 +2912,26 @@ TEST_CASE("project variadic ABI changes invalidate dependent script caches") {
     REQUIRE(native_class_for(changed, "base.gd") != native_class_for(initial, "base.gd"));
 }
 
-TEST_CASE("attached project coroutines retain their behavior across every suspension strategy") {
+TEST_CASE("attached project coroutines retain and validate behavior across every suspension") {
     const auto root = fixture_root("project-attached-coroutine-lifetime");
     std::error_code error;
     std::filesystem::remove_all(root, error);
-    write_text(
-        root / "probe.gd",
-        "extends Node\n"
-        "signal resumed\n"
-        "var value := 0\n"
-        "func structured() -> void:\n"
-        "    await resumed\n"
-        "    value = 42\n"
-        "func flat() -> void:\n"
-        "    await resumed\n"
-        "    await resumed\n"
-        "    await resumed\n"
-        "    await resumed\n"
-        "    await resumed\n"
-        "    await resumed\n"
-        "    await resumed\n"
-        "    await resumed\n"
-        "    value = 43\n");
+    write_text(root / "probe.gd", "extends Node\n"
+                                  "signal resumed\n"
+                                  "var value := 0\n"
+                                  "func structured() -> void:\n"
+                                  "    await resumed\n"
+                                  "    value = 42\n"
+                                  "func flat() -> void:\n"
+                                  "    await resumed\n"
+                                  "    await resumed\n"
+                                  "    await resumed\n"
+                                  "    await resumed\n"
+                                  "    await resumed\n"
+                                  "    await resumed\n"
+                                  "    await resumed\n"
+                                  "    await resumed\n"
+                                  "    value = 43\n");
     const auto options = project_options(root);
     const auto result = gdpp::ProjectCompiler{}.compile(options);
 
@@ -2945,25 +2940,33 @@ TEST_CASE("attached project coroutines retain their behavior across every suspen
     REQUIRE(result.scripts.front().is_attached);
     const auto source =
         read_text(options.output_directory / "generated" / result.scripts.front().source_file_name);
-    const auto lifetime_declaration = source.find(
-        "const godot::Ref<gdpp::runtime::AttachedScriptBehavior> "
-        "_gdpp_attached_behavior_lifetime_");
+    const auto lifetime_declaration =
+        source.find("const godot::Ref<gdpp::runtime::AttachedScriptBehavior> "
+                    "_gdpp_attached_behavior_lifetime_");
     const auto lifetime_capture =
         source.find("static_cast<void>(_gdpp_attached_behavior_lifetime_");
+    const auto current_behavior_guard = source.find("is_current_attached_script_behavior("
+                                                    "_gdpp_attached_behavior_lifetime_");
     const auto flat_dispatch = source.find("using _gdpp_async_step_type_");
-    const auto flat_lifetime = source.rfind(
-        "const godot::Ref<gdpp::runtime::AttachedScriptBehavior> "
-        "_gdpp_attached_behavior_lifetime_",
-        flat_dispatch);
+    const auto flat_lifetime =
+        source.rfind("const godot::Ref<gdpp::runtime::AttachedScriptBehavior> "
+                     "_gdpp_attached_behavior_lifetime_",
+                     flat_dispatch);
     const auto flat_capture =
         source.find("static_cast<void>(_gdpp_attached_behavior_lifetime_", flat_dispatch);
+    const auto flat_current_behavior_guard = source.find("is_current_attached_script_behavior("
+                                                         "_gdpp_attached_behavior_lifetime_",
+                                                         flat_dispatch);
     REQUIRE(lifetime_declaration != std::string::npos);
     REQUIRE(lifetime_capture != std::string::npos);
+    REQUIRE(current_behavior_guard != std::string::npos);
     REQUIRE(flat_dispatch != std::string::npos);
     REQUIRE(flat_lifetime != std::string::npos);
     REQUIRE(flat_dispatch - flat_lifetime < std::size_t{192});
     REQUIRE(flat_capture != std::string::npos);
     REQUIRE(flat_capture - flat_dispatch < std::size_t{512});
+    REQUIRE(flat_current_behavior_guard != std::string::npos);
+    REQUIRE(flat_current_behavior_guard - flat_dispatch < std::size_t{640});
 }
 
 TEST_CASE("project coroutine ABI changes invalidate callers and require cross-script await") {
@@ -3107,6 +3110,69 @@ TEST_CASE("project symbols propagate coroutine property accessors across scripts
     REQUIRE(producer_header.find("godot::Variant _gdpp_get_value()") != std::string::npos);
     REQUIRE(consumer_source.find("gdpp::runtime::is_awaitable(") != std::string::npos);
     REQUIRE(consumer_source.find("gdpp::runtime::await_result(") != std::string::npos);
+}
+
+TEST_CASE("inherited property accessor overrides use the original backing storage") {
+    const auto root = fixture_root("project-inherited-accessor-storage");
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
+    write_text(root / "base.gd", "extends RefCounted\n"
+                                 "class_name InheritedAccessorBase\n"
+                                 "var value: int = 1:\n"
+                                 "    get = read_value,\n"
+                                 "    set = write_value\n"
+                                 "func read_value() -> int:\n"
+                                 "    return value\n"
+                                 "func write_value(next: int) -> void:\n"
+                                 "    value = next\n");
+    write_text(root / "derived.gd", "extends InheritedAccessorBase\n"
+                                    "class_name InheritedAccessorDerived\n"
+                                    "func read_value() -> int:\n"
+                                    "    return value\n"
+                                    "func write_value(next: int) -> void:\n"
+                                    "    value = next\n");
+    write_text(root / "inner.gd", "extends RefCounted\n"
+                                  "class Base:\n"
+                                  "    var score: int = 1:\n"
+                                  "        get = read_score,\n"
+                                  "        set = write_score\n"
+                                  "    func read_score() -> int:\n"
+                                  "        return score\n"
+                                  "    func write_score(next: int) -> void:\n"
+                                  "        score = next\n"
+                                  "class Child extends Base:\n"
+                                  "    func read_score() -> int:\n"
+                                  "        return score\n"
+                                  "    func write_score(next: int) -> void:\n"
+                                  "        score = next\n");
+
+    const auto options = project_options(root);
+    const auto result = gdpp::ProjectCompiler{}.compile(options);
+    REQUIRE(result.success);
+    const auto derived =
+        std::find_if(result.scripts.begin(), result.scripts.end(), [](const auto& script) {
+            return script.relative_path.filename() == "derived.gd";
+        });
+    const auto inner =
+        std::find_if(result.scripts.begin(), result.scripts.end(), [](const auto& script) {
+            return script.relative_path.filename() == "inner.gd";
+        });
+    REQUIRE(derived != result.scripts.end());
+    REQUIRE(inner != result.scripts.end());
+
+    const auto derived_source =
+        read_text(options.output_directory / "generated" / derived->source_file_name);
+    REQUIRE(derived_source.find("_gdpp_set_value(std::move(_gdpp_assignment_result_") ==
+            std::string::npos);
+    REQUIRE(derived_source.find("return _gdpp_get_value();") == std::string::npos);
+    REQUIRE(derived_source.find("value = std::move(_gdpp_assignment_result_") != std::string::npos);
+    REQUIRE(derived_source.find("const auto _gdpp_return_value_0 = value;") != std::string::npos);
+
+    const auto inner_source =
+        read_text(options.output_directory / "generated" / inner->source_file_name);
+    REQUIRE(inner_source.find("_gdpp_set_score(std::move(_gdpp_assignment_result_") ==
+            std::string::npos);
+    REQUIRE(inner_source.find("return _gdpp_get_score();") == std::string::npos);
 }
 
 TEST_CASE("preload alias casts preserve void coroutine ABI at call sites") {
@@ -3719,6 +3785,8 @@ TEST_CASE("project compiler lowers cross-script constants enums and resource fac
     write_text(root / "base.gd", "extends Node\nclass_name SharedValues\n"
                                  "const LIMIT: int = 5\n"
                                  "const MASK = 1 << 2\n"
+                                 "const MAX_MIB := 64\n"
+                                 "const MAX_SIZE := MAX_MIB * 1024 * 1024\n"
                                  "enum State { IDLE, ACTIVE = 4, BOOST = ACTIVE * 2 }\n"
                                  "enum { ANONYMOUS = 11 }\n"
                                  "var constructed: int = 0\n"
@@ -3741,6 +3809,8 @@ TEST_CASE("project compiler lowers cross-script constants enums and resource fac
         "            return SharedValues.LIMIT + SharedValues.ANONYMOUS + SharedValues.MASK\n"
         "        _:\n"
         "            return 0\n"
+        "func oversized() -> int:\n"
+        "    return SharedValues.MAX_SIZE + 1\n"
         "func create() -> SharedValues:\n"
         "    return Factory.new(5)\n"
         "func type_token():\n"
@@ -3757,6 +3827,7 @@ TEST_CASE("project compiler lowers cross-script constants enums and resource fac
     const auto base_header = read_text(options.output_directory / "generated/shared_values.gd.hpp");
     REQUIRE(base_header.find("static const int64_t& LIMIT();") != std::string::npos);
     REQUIRE(base_header.find("static const int64_t& MASK();") != std::string::npos);
+    REQUIRE(base_header.find("static const int64_t& MAX_SIZE();") != std::string::npos);
     const auto& base_class = native_class_for(result, "base.gd");
     REQUIRE(base_header.find("void _gdpp_script_method__init("
                              "godot::Variant _gdpp_argument_value = "
@@ -3778,6 +3849,8 @@ TEST_CASE("project compiler lowers cross-script constants enums and resource fac
     REQUIRE(consumer_source.find("::LIMIT()") != std::string::npos);
     REQUIRE(consumer_source.find("::_gdpp_enum_ANONYMOUS") != std::string::npos);
     REQUIRE(consumer_source.find("::MASK()") != std::string::npos);
+    REQUIRE(consumer_source.find("::MAX_SIZE()") != std::string::npos);
+    REQUIRE(consumer_source.find("binary_integer(godot::Variant::OP_ADD") == std::string::npos);
     REQUIRE(consumer_source.find("gdpp::runtime::ScriptResource<GDPPNative_SharedValues_") !=
             std::string::npos);
     REQUIRE(consumer_source.find(".instantiate(") != std::string::npos);
@@ -3806,9 +3879,8 @@ TEST_CASE("project compiler lowers cross-script constants enums and resource fac
                std::size_t{2});
     REQUIRE_EQ(count_occurrences(consumer_source, "_gdpp_constant_InnerFactory_release();"),
                std::size_t{1});
-    REQUIRE_EQ(
-        count_occurrences(consumer_source, "_gdpp_constant_TransactionalFactory_release();"),
-        std::size_t{2});
+    REQUIRE_EQ(count_occurrences(consumer_source, "_gdpp_constant_TransactionalFactory_release();"),
+               std::size_t{2});
 }
 
 TEST_CASE("project compiler folds cross-script resource path constants") {

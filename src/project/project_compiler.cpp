@@ -693,6 +693,10 @@ ScriptInnerClassSymbol inner_class_symbol(const ast::ClassDeclaration& declarati
             api);
         member.is_static = variable.is_constant || variable.is_static;
         member.has_accessor = variable.getter.has_value() || variable.setter.has_value();
+        if (variable.getter)
+            member.getter_method = variable.getter->method;
+        if (variable.setter)
+            member.setter_method = variable.setter->method;
         member.getter_is_coroutine =
             accessor_contains_await(variable.getter, declaration.functions);
         member.setter_is_coroutine =
@@ -1401,6 +1405,10 @@ ProjectCompileResult ProjectCompiler::compile_impl(const ProjectCompileOptions& 
                 target_api);
             member.is_static = variable.is_constant || variable.is_static;
             member.has_accessor = variable.getter.has_value() || variable.setter.has_value();
+            if (variable.getter)
+                member.getter_method = variable.getter->method;
+            if (variable.setter)
+                member.setter_method = variable.setter->method;
             member.getter_is_coroutine = accessor_contains_await(variable.getter, script.functions);
             member.setter_is_coroutine = accessor_contains_await(variable.setter, script.functions);
             for (const auto& annotation : variable.annotations) {
@@ -2256,7 +2264,8 @@ ProjectCompileResult ProjectCompiler::compile_impl(const ProjectCompileOptions& 
             identity << static_cast<int>(member.kind) << ':' << member.name << ':'
                      << static_cast<int>(member.type.kind) << ':' << member.type.name << ':'
                      << member.required_arguments << ':' << member.is_static << ':'
-                     << member.has_accessor << ':' << member.getter_is_coroutine << ':'
+                     << member.has_accessor << ':' << member.getter_method << ':'
+                     << member.setter_method << ':' << member.getter_is_coroutine << ':'
                      << member.setter_is_coroutine << ':' << member.has_explicit_type << ':'
                      << member.is_vararg << ':' << member.is_coroutine << ':' << member.is_abstract
                      << ':' << member.property_storage << ':' << member.property_editor;
@@ -2297,7 +2306,8 @@ ProjectCompileResult ProjectCompiler::compile_impl(const ProjectCompileOptions& 
                 identity << "inner-member:" << static_cast<int>(member.kind) << ':' << member.name
                          << ':' << static_cast<int>(member.type.kind) << ':' << member.type.name
                          << ':' << member.required_arguments << ':' << member.is_static << ':'
-                         << member.has_accessor << ':' << member.getter_is_coroutine << ':'
+                         << member.has_accessor << ':' << member.getter_method << ':'
+                         << member.setter_method << ':' << member.getter_is_coroutine << ':'
                          << member.setter_is_coroutine << ':' << member.is_vararg << ':'
                          << member.is_coroutine << ':' << member.is_abstract;
                 if (const auto bridge = bridge_classes.find(member.type.name);
@@ -2661,13 +2671,14 @@ ProjectCompileResult ProjectCompiler::compile_impl(const ProjectCompileOptions& 
                                                  coroutine);
                 }
             };
-            const auto refine_accessors =
+            const auto refine_variables =
                 [&](auto& members, const std::vector<ast::VariableDeclaration>& variables,
                     const std::string& inner_name) {
                     for (const auto& variable : variables) {
                         const auto member = std::find_if(
                             members.begin(), members.end(), [&](const auto& candidate) {
-                                return candidate.kind == ScriptMemberKind::field &&
+                                return (candidate.kind == ScriptMemberKind::field ||
+                                        candidate.kind == ScriptMemberKind::constant) &&
                                        candidate.name == variable.name;
                             });
                         if (member == members.end())
@@ -2682,6 +2693,8 @@ ProjectCompileResult ProjectCompiler::compile_impl(const ProjectCompileOptions& 
                                 changed = true;
                             }
                         }
+                        if (member->kind != ScriptMemberKind::field)
+                            continue;
                         const bool getter_coroutine =
                             variable.getter && semantic.is_coroutine(*variable.getter);
                         const bool setter_coroutine =
@@ -2698,7 +2711,7 @@ ProjectCompileResult ProjectCompiler::compile_impl(const ProjectCompileOptions& 
                     }
                 };
             refine_members(input.members, input.script.functions, "");
-            refine_accessors(input.members, input.script.variables, "");
+            refine_variables(input.members, input.script.variables, "");
             const auto refine_inner = [&](const auto& self,
                                           const std::vector<ast::ClassDeclaration>& classes,
                                           const std::string& parent) -> void {
@@ -2710,7 +2723,7 @@ ProjectCompileResult ProjectCompiler::compile_impl(const ProjectCompileOptions& 
                         [&](const auto& candidate) { return candidate.name == qualified; });
                     if (symbol != input.inner_classes.end()) {
                         refine_members(symbol->members, declaration.functions, qualified);
-                        refine_accessors(symbol->members, declaration.variables, qualified);
+                        refine_variables(symbol->members, declaration.variables, qualified);
                     }
                     self(self, declaration.classes, qualified);
                 }
