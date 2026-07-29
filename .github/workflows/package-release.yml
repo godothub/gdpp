@@ -46,7 +46,8 @@ jobs:
           audit_archive() {
             local archive="$1"
             shift
-            local contents="build/$(basename "$archive").contents"
+            local contents
+            contents="build/$(basename "$archive").contents"
             local expected_csv
             expected_csv="$(IFS=,; echo "$*")"
             test -f "$archive"
