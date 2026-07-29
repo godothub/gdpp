@@ -372,6 +372,27 @@ class ExternalProjectE2ETest(unittest.TestCase):
                     "GDPP AOT export",
                     allow_editor_tls_transport=True,
                 )
+            completed_detail = E2E.assert_no_new_diagnostics(
+                detail_only,
+                Counter(),
+                "GDPP AOT export",
+                allow_editor_tls_transport=True,
+                completed_aot_export=True,
+            )
+            self.assertEqual(completed_detail, Counter({detail: 1}))
+            different_detail = root / "different-detail.log"
+            different_detail.write_text(
+                "mbedtls error: returned -0x7780\n",
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(RuntimeError, "introduced a diagnostic"):
+                E2E.assert_no_new_diagnostics(
+                    different_detail,
+                    Counter(),
+                    "GDPP AOT export",
+                    allow_editor_tls_transport=True,
+                    completed_aot_export=True,
+                )
 
             project_origin = root / "project-origin.log"
             project_origin.write_text(
@@ -402,6 +423,7 @@ class ExternalProjectE2ETest(unittest.TestCase):
                     Counter(),
                     "GDPP AOT export",
                     allow_editor_tls_transport=True,
+                    completed_aot_export=True,
                 )
 
     def test_objectdb_cleanup_context_is_owned_by_the_leak_diagnostic(self) -> None:

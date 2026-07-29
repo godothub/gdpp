@@ -39,7 +39,7 @@ EDITOR_TLS_TRANSPORT_DIAGNOSTIC = re.compile(
     r"at: _do_handshake \(modules/mbedtls/stream_peer_mbedtls\.cpp:\d+\)$"
 )
 EDITOR_TLS_TRANSPORT_DETAIL = re.compile(
-    r"^mbedtls error: returned -0x[0-9a-f]+$",
+    r"^mbedtls error: returned -0x6c00$",
     re.IGNORECASE,
 )
 
@@ -370,20 +370,33 @@ def is_editor_tls_transport_diagnostic(fingerprint: str) -> bool:
     return EDITOR_TLS_TRANSPORT_DIAGNOSTIC.fullmatch(fingerprint) is not None
 
 
-def editor_tls_transport_diagnostics(diagnostics: Counter[str]) -> Counter[str]:
+def editor_tls_transport_diagnostics(
+    diagnostics: Counter[str],
+    *,
+    completed_aot_export: bool = False,
+) -> Counter[str]:
     primary = {
         fingerprint
         for fingerprint in diagnostics
         if is_editor_tls_transport_diagnostic(fingerprint)
     }
-    if not primary:
+    detail = {
+        fingerprint
+        for fingerprint in diagnostics
+        if EDITOR_TLS_TRANSPORT_DETAIL.fullmatch(fingerprint) is not None
+    }
+    # Godot may emit only mbedTLS's companion error after a successful, long-running editor
+    # export. That origin-less line is control-plane evidence only after the caller has verified
+    # both the process result and GDPP's AOT completion marker. In every other phase, or before
+    # completion, an unpaired detail remains a product-facing diagnostic and fails closed.
+    if not primary and not (completed_aot_export and detail):
         return Counter()
     return Counter(
         {
             fingerprint: count
             for fingerprint, count in diagnostics.items()
             if fingerprint in primary
-            or EDITOR_TLS_TRANSPORT_DETAIL.fullmatch(fingerprint) is not None
+            or fingerprint in detail
         }
     )
 
@@ -394,10 +407,14 @@ def assert_no_new_diagnostics(
     phase: str,
     *,
     allow_editor_tls_transport: bool = False,
+    completed_aot_export: bool = False,
 ) -> Counter[str]:
     current = Counter(diagnostic_fingerprints(log))
     editor_transport = (
-        editor_tls_transport_diagnostics(current)
+        editor_tls_transport_diagnostics(
+            current,
+            completed_aot_export=completed_aot_export,
+        )
         if allow_editor_tls_transport
         else Counter()
     )
@@ -1115,12 +1132,16 @@ def main() -> int:
             timeout=args.export_timeout,
             log=export_log,
         )
+        export_text = export_log.read_text(encoding="utf-8", errors="replace")
+        if "GDPP_AOT_SUMMARY scenes=" not in export_text:
+            fail("export did not report a completed GDPP AOT project build")
         report["export_editor_tls_transport_diagnostics"] = diagnostic_report(
             assert_no_new_diagnostics(
                 export_log,
                 baseline_export_diagnostics,
                 "GDPP AOT export",
                 allow_editor_tls_transport=True,
+                completed_aot_export=True,
             )
         )
         customer_state_after_export = customer_worktree_state(project)
@@ -1129,9 +1150,6 @@ def main() -> int:
         ).hexdigest()
         if customer_state_after_export != customer_state:
             fail("GDPP export modified customer project files outside addons/gdpp")
-        export_text = export_log.read_text(encoding="utf-8", errors="replace")
-        if "GDPP_AOT_SUMMARY scenes=" not in export_text:
-            fail("export did not report a completed GDPP AOT project build")
 
         report["phases"]["immutability_verify"] = run(
             [
