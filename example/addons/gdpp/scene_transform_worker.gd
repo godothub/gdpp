@@ -50,6 +50,7 @@ func _run_worker(arguments: PackedStringArray) -> void:
     )
     var result: Dictionary
     if bool(setup.get("success", false)):
+        print("GDPP_EXPORT_TRANSFORM_WORKER_BEGIN")
         result = transformer.run_isolated_transform_worker(worker_state)
     else:
         result = {

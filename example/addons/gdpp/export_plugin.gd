@@ -648,8 +648,18 @@ func _prepare_export_transforms() -> bool:
         )
         return false
     var report: Dictionary = result
-    if int(report.get("schema", 0)) != 1 or not bool(report.get("success", false)):
-        _fail_export("isolated resource transformer rejected the project resource graph")
+    if int(report.get("schema", 0)) != 1:
+        _fail_export("isolated resource transformer returned an unsupported result")
+        return false
+    if not bool(report.get("success", false)):
+        var report_error := str(report.get("error", ""))
+        _fail_export(
+            (
+                report_error
+                if not report_error.is_empty()
+                else "isolated resource transformer rejected the project resource graph"
+            )
+        )
         return false
     var entries: Variant = report.get("entries")
     if not (entries is Dictionary):
@@ -752,12 +762,23 @@ func run_isolated_transform_worker(state: Dictionary) -> Dictionary:
             "error": "cannot create isolated transformed-resource output",
         }
     var entries: Dictionary = {}
+    var errors := PackedStringArray()
     for path: String in state.get("paths", PackedStringArray()):
-        entries[path] = _run_isolated_transform(path, output_root)
+        var entry := _run_isolated_transform(path, output_root)
+        entries[path] = entry
+        if str(entry.get("status", "")) == "failed":
+            errors.append(
+                "%s: %s"
+                % [
+                    path,
+                    str(entry.get("error", "resource graph cannot be transformed safely")),
+                ]
+            )
     return {
         "schema": 1,
-        "success": true,
+        "success": errors.is_empty(),
         "entries": entries,
+        "error": "\n".join(errors),
     }
 
 

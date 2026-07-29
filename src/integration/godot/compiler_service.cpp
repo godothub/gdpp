@@ -1923,25 +1923,34 @@ GDPPCompiler::run_export_transform_worker(const godot::String& state_path,
     std::error_code snapshot_cleanup_error;
     std::filesystem::remove_all(snapshot_root, snapshot_cleanup_error);
     const auto captured = trimmed_toolchain_output(std::move(process.output));
+    constexpr std::string_view begin_marker{"GDPP_EXPORT_TRANSFORM_WORKER_BEGIN"};
     constexpr std::string_view committed_marker{"GDPP_EXPORT_TRANSFORM_WORKER_COMMITTED"};
-    const auto committed_offset = captured.find(committed_marker);
+    const auto begin_offset = captured.find(begin_marker);
+    const bool worker_began = begin_offset != std::string::npos;
+    const auto audited_begin =
+        worker_began ? begin_offset + begin_marker.size() : std::string::npos;
+    const auto committed_offset =
+        worker_began ? captured.find(committed_marker, audited_begin) : std::string::npos;
     const bool worker_committed = committed_offset != std::string::npos;
-    // A custom editor SceneTree owns the worker lifecycle instead of EditorNode. Godot can report
-    // editor-only server teardown diagnostics after SceneTree.quit(), so audit only the
-    // transaction output before the worker's authenticated commit marker. Every transform,
-    // serialization and cleanup diagnostic occurs before that marker and remains fail-closed.
-    const auto audited_output =
-        worker_committed ? captured.substr(0, committed_offset) : captured;
+    // The editor can report project-scan warnings before the worker starts and editor-owned
+    // teardown diagnostics after SceneTree.quit(). Audit only the authenticated transaction
+    // interval. Resource loads, transforms, serialization and cleanup all occur inside it.
+    const auto audited_output = worker_began && worker_committed
+                                    ? captured.substr(audited_begin,
+                                                      committed_offset - audited_begin)
+                                    : captured;
     const auto child_diagnostics = export_worker_diagnostics(audited_output);
     godot::Dictionary output;
     output["success"] =
         process.exit_code == 0 &&
         std::filesystem::is_regular_file(path_from_utf8(result_absolute)) &&
-        worker_committed && child_diagnostics.empty();
+        worker_began && worker_committed && child_diagnostics.empty();
     output["exit_code"] = process.exit_code;
     godot::PackedStringArray diagnostics;
     if (!process.launch_error.empty())
         diagnostics.push_back(godot::String::utf8(process.launch_error.c_str()));
+    if (!worker_began)
+        diagnostics.push_back("isolated Godot resource transformer did not begin its transaction");
     if (!worker_committed)
         diagnostics.push_back("isolated Godot resource transformer did not commit its transaction");
     for (const auto& diagnostic : child_diagnostics)

@@ -15,6 +15,7 @@ foreach(required_worker_contract IN ITEMS
         "prepare_isolated_transform_worker("
         "run_isolated_transform_worker("
         "finish_isolated_transform_worker()"
+        "GDPP_EXPORT_TRANSFORM_WORKER_BEGIN"
         "GDPP_EXPORT_TRANSFORM_WORKER_COMMITTED"
         "result_file.store_var(result, true)")
     string(FIND "${scene_transform_worker}" "${required_worker_contract}"
@@ -92,6 +93,8 @@ foreach(required_runtime_export IN ITEMS
         "func _is_ignored_export_transform_directory(path: String) -> bool:"
         "FileAccess.file_exists(normalized.path_join(\".gdignore\"))"
         "FileAccess.file_exists(normalized.path_join(\"project.godot\"))"
+        "\"success\": errors.is_empty()"
+        "str(entry.get(\"status\", \"\")) == \"failed\""
         "add_file(COMPILER_DESCRIPTOR, _runtime_descriptor.to_utf8_buffer(), false)"
         "func _register_runtime_library() -> bool:"
         "func _register_shared_object_once("
