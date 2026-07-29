@@ -483,7 +483,11 @@ def install_addon(addon: Path, project: Path, target_godot: str) -> Path:
     if not (addon / "plugin.cfg").is_file():
         fail(f"GDPP add-on source is incomplete: {addon}")
     sdk = addon / "sdk" / target_godot
-    if not (sdk / "sdk.manifest").is_file():
+    target_manifests = sdk / "manifests"
+    if not (sdk / "sdk.manifest").is_file() and not (
+        target_manifests.is_dir()
+        and any(target_manifests.glob("*.sdk.manifest"))
+    ):
         fail(f"GDPP add-on does not contain the required {target_godot} SDK")
     destination = project / "addons/gdpp"
     if destination.exists():

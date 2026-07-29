@@ -367,7 +367,13 @@ class ExternalProjectE2ETest(unittest.TestCase):
             for version in ("4.6", "4.7"):
                 sdk = addon / "sdk" / version
                 sdk.mkdir(parents=True)
-                (sdk / "sdk.manifest").write_text(version, encoding="utf-8")
+                manifest = (
+                    sdk / "sdk.manifest"
+                    if version == "4.6"
+                    else sdk / "manifests/linux.x86_64.sdk.manifest"
+                )
+                manifest.parent.mkdir(parents=True, exist_ok=True)
+                manifest.write_text(version, encoding="utf-8")
             (addon / "binary").mkdir()
             (addon / "binary/compiler.so").write_text("compiler", encoding="utf-8")
             (addon / "binary/libgdpp.release.linux.x86_64.so").write_text(
@@ -377,7 +383,12 @@ class ExternalProjectE2ETest(unittest.TestCase):
             (addon / "build/cache").write_text("cache", encoding="utf-8")
             (addon / "plugin.cfg").write_text("[plugin]\n", encoding="utf-8")
             destination = E2E.install_addon(addon, project, "4.7")
-            self.assertTrue((destination / "sdk/4.7/sdk.manifest").is_file())
+            self.assertTrue(
+                (
+                    destination
+                    / "sdk/4.7/manifests/linux.x86_64.sdk.manifest"
+                ).is_file()
+            )
             self.assertFalse((destination / "sdk/4.6").exists())
             self.assertTrue((destination / "binary/compiler.so").is_file())
             self.assertFalse(
