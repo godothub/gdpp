@@ -17,7 +17,13 @@
     ]
   },
   "runtime": {
-    "quit_after": 2,
+    "mode": "liveness",
+    "observation_seconds": 10,
+    "baseline_samples": 3,
+    "ready_markers": [
+      "[Server] Initialized with: ENet",
+      "[Server] Initialized with: WebSocket"
+    ],
     "arguments": [
       "--server"
     ]

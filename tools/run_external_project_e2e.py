@@ -51,7 +51,10 @@ def load_manifest(path: Path) -> dict:
     if not isinstance(godot, dict) or not godot.get("target") or not godot.get("engine"):
         fail("external project manifest must define its Godot target and exact engine")
     runtime_user_arguments(manifest)
-    runtime_quit_after(manifest)
+    runtime_mode(manifest)
+    runtime_duration(manifest)
+    runtime_ready_markers(manifest)
+    runtime_baseline_samples(manifest)
     return manifest
 
 
@@ -73,9 +76,11 @@ def runtime_user_arguments(manifest: dict) -> list[str]:
         "--audio-driver",
         "--editor",
         "--export",
+        "--headless",
         "--path",
         "--project-manager",
         "--quit",
+        "--quit-after",
         "--script",
     )
     if any(
@@ -87,11 +92,49 @@ def runtime_user_arguments(manifest: dict) -> list[str]:
     return arguments
 
 
-def runtime_quit_after(manifest: dict) -> int:
+def runtime_mode(manifest: dict) -> str:
     runtime = manifest.get("runtime", {})
-    value = runtime.get("quit_after", 300) if isinstance(runtime, dict) else 300
+    mode = runtime.get("mode", "exit") if isinstance(runtime, dict) else "exit"
+    if mode not in ("exit", "liveness"):
+        fail("external project runtime mode must be 'exit' or 'liveness'")
+    if mode == "exit" and isinstance(runtime, dict) and "observation_seconds" in runtime:
+        fail("exit runtime contracts must use quit_after, not observation_seconds")
+    if mode == "liveness" and isinstance(runtime, dict) and "quit_after" in runtime:
+        fail("liveness runtime contracts must use observation_seconds, not quit_after")
+    return mode
+
+
+def runtime_duration(manifest: dict) -> int:
+    runtime = manifest.get("runtime", {})
+    mode = runtime_mode(manifest)
+    key = "observation_seconds" if mode == "liveness" else "quit_after"
+    value = runtime.get(key, 300) if isinstance(runtime, dict) else 300
     if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= 3600:
-        fail("external project runtime quit_after must be an integer from 1 through 3600")
+        fail(f"external project runtime {key} must be an integer from 1 through 3600")
+    return value
+
+
+def runtime_ready_markers(manifest: dict) -> list[str]:
+    runtime = manifest.get("runtime", {})
+    markers = runtime.get("ready_markers", []) if isinstance(runtime, dict) else []
+    if not isinstance(markers, list) or len(markers) > 16:
+        fail("external project runtime ready_markers must be an array of at most 16 strings")
+    if any(
+        not isinstance(marker, str)
+        or not marker.strip()
+        or "\n" in marker
+        or "\r" in marker
+        for marker in markers
+    ):
+        fail("external project runtime ready_markers must contain non-empty single-line strings")
+    return markers
+
+
+def runtime_baseline_samples(manifest: dict) -> int:
+    runtime = manifest.get("runtime", {})
+    value = runtime.get("baseline_samples", 1) if isinstance(runtime, dict) else 1
+    if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= 10:
+        fail("external project runtime baseline_samples must be an integer from 1 through 10")
     return value
 
 
@@ -99,15 +142,57 @@ def project_runtime_command(executable: Path, manifest: dict) -> list[str]:
     # Project-specific flags remain visible to OS.get_cmdline_args(), which many real projects use
     # instead of get_cmdline_user_args(). The boundary above prevents them from replacing the
     # executable, project, export, script, audio or lifecycle controls owned by this runner.
-    return [
+    command = [
         str(executable),
         "--headless",
         "--audio-driver",
         "Dummy",
-        "--quit-after",
-        str(runtime_quit_after(manifest)),
-        *runtime_user_arguments(manifest),
     ]
+    if runtime_mode(manifest) == "exit":
+        command.extend(("--quit-after", str(runtime_duration(manifest))))
+    command.extend(runtime_user_arguments(manifest))
+    return command
+
+
+def run_project_runtime(
+    executable: Path,
+    manifest: dict,
+    *,
+    cwd: Path,
+    timeout: float,
+    log: Path,
+) -> dict:
+    mode = runtime_mode(manifest)
+    command_timeout = timeout
+    if mode == "liveness":
+        command_timeout = float(runtime_duration(manifest))
+        if command_timeout > timeout:
+            fail(
+                f"external project liveness observation requires {command_timeout:.0f}s but "
+                f"the runtime timeout is {timeout:.0f}s"
+            )
+    result = run(
+        project_runtime_command(executable, manifest),
+        cwd=cwd,
+        timeout=command_timeout,
+        log=log,
+        allow_timeout=mode == "liveness",
+    )
+    if mode == "liveness":
+        if not result["timed_out"]:
+            fail(f"long-running project exited before its liveness observation completed; see {log}")
+        result["liveness_observed"] = True
+    markers = runtime_ready_markers(manifest)
+    if markers:
+        content = log.read_text(encoding="utf-8", errors="replace")
+        missing = [marker for marker in markers if marker not in content]
+        if missing:
+            fail(
+                "project did not emit its required runtime readiness markers "
+                f"{missing!r}; see {log}"
+            )
+        result["ready_markers_observed"] = markers
+    return result
 
 
 def atomic_json(path: Path, value: dict) -> None:
@@ -424,6 +509,15 @@ def prepare_pristine_e2e_state(project: Path) -> dict[str, bytes | None]:
         ):
             fail("refusing to remove an untracked addons/gdpp directory not identified as GDPP")
         shutil.rmtree(addon)
+
+    # Godot's generated extension list survives an interrupted run and is evaluated before the
+    # next editor scan can notice that GDPP was removed. A pristine comparison must therefore
+    # start without the previous run's imported extension/resource cache.
+    godot_cache = project / ".godot"
+    if godot_cache.is_symlink():
+        fail("refusing to remove a symbolic .godot cache from the external project")
+    if godot_cache.exists():
+        shutil.rmtree(godot_cache)
 
     managed: dict[str, bytes | None] = {}
     project_file = project / "project.godot"
@@ -870,16 +964,30 @@ def main() -> int:
         )
 
         baseline_executable = find_executable(baseline_product, args.host)
-        baseline_runtime_log = output / "baseline-runtime.log"
-        report["phases"]["baseline_runtime"] = run(
-            project_runtime_command(baseline_executable, manifest),
-            cwd=baseline_product.parent,
-            timeout=args.runtime_timeout,
-            log=baseline_runtime_log,
-        )
-        baseline_runtime_diagnostics, report["baseline_runtime_diagnostics"] = (
-            report_diagnostics(baseline_runtime_log)
-        )
+        baseline_runtime_logs: list[Path] = []
+        baseline_runtime_runs: list[dict] = []
+        for sample in range(1, runtime_baseline_samples(manifest) + 1):
+            baseline_runtime_log = output / (
+                "baseline-runtime.log"
+                if sample == 1
+                else f"baseline-runtime-{sample}.log"
+            )
+            baseline_runtime_logs.append(baseline_runtime_log)
+            baseline_runtime_runs.append(
+                run_project_runtime(
+                    baseline_executable,
+                    manifest,
+                    cwd=baseline_product.parent,
+                    timeout=args.runtime_timeout,
+                    log=baseline_runtime_log,
+                )
+            )
+        report["phases"]["baseline_runtime"] = {"samples": baseline_runtime_runs}
+        baseline_runtime_diagnostics = diagnostic_envelope(*baseline_runtime_logs)
+        report["baseline_runtime_diagnostics"] = [
+            {"message": message, "maximum_pristine_count": count}
+            for message, count in sorted(baseline_runtime_diagnostics.items())
+        ]
         shutil.rmtree(output / "baseline-product")
 
         installed_addon = install_addon(addon_source, project, manifest["godot"]["target"])
@@ -1023,8 +1131,9 @@ def main() -> int:
 
         executable = find_executable(product, args.host)
         runtime_log = output / "runtime.log"
-        report["phases"]["runtime"] = run(
-            project_runtime_command(executable, manifest),
+        report["phases"]["runtime"] = run_project_runtime(
+            executable,
+            manifest,
             cwd=product.parent,
             timeout=args.runtime_timeout,
             log=runtime_log,

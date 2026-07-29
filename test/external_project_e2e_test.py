@@ -48,7 +48,97 @@ class ExternalProjectE2ETest(unittest.TestCase):
                 {"runtime": {"arguments": ["--server", "--path=/tmp/other"]}}
             )
         with self.assertRaisesRegex(RuntimeError, "1 through 3600"):
-            E2E.runtime_quit_after({"runtime": {"quit_after": 0}})
+            E2E.runtime_duration({"runtime": {"quit_after": 0}})
+
+    def test_long_running_server_uses_a_liveness_observation(self) -> None:
+        manifest = {
+            "runtime": {
+                "mode": "liveness",
+                "observation_seconds": 2,
+                "ready_markers": ["server ready"],
+                "arguments": ["--server"],
+            }
+        }
+        command = E2E.project_runtime_command(Path("/product"), manifest)
+        self.assertEqual(
+            command,
+            [
+                str(Path("/product")),
+                "--headless",
+                "--audio-driver",
+                "Dummy",
+                "--server",
+            ],
+        )
+        observed = {
+            "exit_code": None,
+            "timed_out": True,
+            "elapsed_seconds": 2.0,
+            "log": "/output/runtime.log",
+        }
+        with (
+            mock.patch.object(E2E, "run", return_value=observed) as runner,
+            mock.patch.object(Path, "read_text", return_value="server ready\n"),
+        ):
+            result = E2E.run_project_runtime(
+                Path("/product"),
+                manifest,
+                cwd=Path("/output"),
+                timeout=60,
+                log=Path("/output/runtime.log"),
+            )
+        self.assertTrue(result["liveness_observed"])
+        self.assertEqual(result["ready_markers_observed"], ["server ready"])
+        self.assertEqual(runner.call_args.kwargs["timeout"], 2.0)
+        self.assertTrue(runner.call_args.kwargs["allow_timeout"])
+        exited = {
+            "exit_code": 0,
+            "timed_out": False,
+            "elapsed_seconds": 0.5,
+            "log": "/output/runtime.log",
+        }
+        with mock.patch.object(E2E, "run", return_value=exited):
+            with self.assertRaisesRegex(RuntimeError, "exited before"):
+                E2E.run_project_runtime(
+                    Path("/product"),
+                    manifest,
+                    cwd=Path("/output"),
+                    timeout=60,
+                    log=Path("/output/runtime.log"),
+                )
+        with self.assertRaisesRegex(RuntimeError, "must use observation_seconds"):
+            E2E.runtime_mode(
+                {
+                    "runtime": {
+                        "mode": "liveness",
+                        "quit_after": 2,
+                    }
+                }
+            )
+        with self.assertRaisesRegex(RuntimeError, "runner-owned"):
+            E2E.runtime_user_arguments(
+                {"runtime": {"arguments": ["--server", "--quit-after=1"]}}
+            )
+        with self.assertRaisesRegex(RuntimeError, "single-line"):
+            E2E.runtime_ready_markers(
+                {"runtime": {"ready_markers": ["server ready\nforged"]}}
+            )
+        with self.assertRaisesRegex(RuntimeError, "1 through 10"):
+            E2E.runtime_baseline_samples(
+                {"runtime": {"baseline_samples": 0}}
+            )
+        with (
+            mock.patch.object(E2E, "run", return_value=observed),
+            mock.patch.object(Path, "read_text", return_value="not ready\n"),
+            self.assertRaisesRegex(RuntimeError, "required runtime readiness"),
+        ):
+            E2E.run_project_runtime(
+                Path("/product"),
+                manifest,
+                cwd=Path("/output"),
+                timeout=60,
+                log=Path("/output/runtime.log"),
+            )
 
     def test_bootstrap_import_retries_only_failed_processes(self) -> None:
         failed = {"exit_code": -6, "timed_out": False, "log": "attempt-1.log"}
@@ -352,12 +442,19 @@ class ExternalProjectE2ETest(unittest.TestCase):
             # A killed previous run is also recovered before the next pristine baseline.
             E2E.enable_plugin(project / "project.godot")
             E2E.append_export_preset(project, "linux", project / "output")
+            godot_cache = project / ".godot"
+            godot_cache.mkdir()
+            (godot_cache / "extension_list.cfg").write_text(
+                'res://addons/gdpp/gdpp.gdextension\n',
+                encoding="utf-8",
+            )
             recovered = E2E.prepare_pristine_e2e_state(project)
             self.assertEqual(recovered["project.godot"], original_project.encode())
             self.assertEqual(
                 (project / "project.godot").read_text(encoding="utf-8"),
                 original_project,
             )
+            self.assertFalse(godot_cache.exists())
 
     def test_install_addon_selects_one_sdk_and_excludes_generated_state(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
