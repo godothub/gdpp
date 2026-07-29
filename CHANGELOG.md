@@ -1,3 +1,20 @@
+## 1.8.3
+
+- Gate Konado, Pixelorama, Godot Open RPG, and Source of Mana through one complete moving-upstream lifecycle that clones each full default branch, honors its declared Godot version, installs GDPP, imports the pristine project, performs the project-wide AOT build and export, audits the binary-only package, launches the product, and verifies that customer sources remain unchanged.
+- Preserve cross-script type identity across global classes, inner classes, inherited scripts, native base types, enum scopes, constant graphs, static calls, method shadowing, override families, and otherwise colliding generated namespaces.
+- Complete dynamic script reflection for methods, signals, constants, properties, Inspector category markers, Script resource paths, construction identity, type tests, and runtime attachment, including scripts restored from serialized resources or supplied by another script language.
+- Restore attached ScriptInstance state transactionally with typed raw member storage, descriptor-driven custom accessors, instance-to-Dictionary utilities, dynamic Object properties, duplicate-attachment serialization, cyclic materialization guards, and safe release outside registry locks.
+- Preserve bound Godot method Callables, internal and static script Callable identity, vararg metadata and arguments, default parameters, typed returns, and the Boolean return ABI required by `assert(Callable(...))`.
+- Match GDScript container and value semantics for typed Array assignment, widened override containers, named Dictionary keys, nested built-in writes, packed-array API returns, dynamic `len` failures, enum-backed Dictionary values, and receiver-preserving built-in member calls.
+- Match Godot operator and conversion behavior across integer enums, numeric headers, native and Variant operators, conditional storage ownership, native Object receivers, global script values, and explicit Array/Dictionary/Object materialization.
+- Preserve asynchronous initialization, `super` receivers across `await`, abstract and attached coroutine ABIs, attached behavior lifetime during suspension, deterministic continuation ownership, and cancellation of pending awaits before extension teardown.
+- Treat scripts without an explicit base as `RefCounted`, matching GDScript construction and lifetime semantics instead of generating a bare `Object` base.
+- Preserve compiled Script resources as canonical Godot resources across UID rescans, cache reuse, attachment, inheritance, preload/load storage, rollback, and shutdown without duplicate instances or stale language bindings.
+- Transform customer resources in isolated export copies while preserving external-language scripts, foreign-language scenes, nested foreign resource owners, serialized Object references, native serialization state, export preset behavior, and original diagnostic severity.
+- Preserve the complete relative path topology of generated sources and compiled Script resources, preventing equal filenames in different customer directories from collapsing into one native identity.
+- Release generated Godot static state, detach compiled scripts, cancel asynchronous work, and clear non-materializing Script caches in teardown order so extension unloading cannot retain engine objects or recreate resources after class unregistration.
+- Enforce one project-wide native type system and attachment ABI across generated translation units, including initializer inheritance, reflected typed-storage descriptors, script resource binding, and runtime validation of native Script variants.
+
 ## 1.8.2
 
 - Accept contextual-keyword iterator names and enum bodies whose opening brace follows the declaration on a new line.
