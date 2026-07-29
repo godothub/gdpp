@@ -755,6 +755,11 @@ def append_export_preset(project: Path, host: str, output: Path) -> tuple[str, P
     options_body = replace_preset_assignment(
         options_body, architecture_key, architecture_value
     )
+    # The binary-only audit opens the exported PCK independently from the executable. Keep the
+    # runner-owned preset deterministic even when the customer's shipping preset embeds its PCK.
+    options_body = replace_preset_assignment(
+        options_body, "binary_format/embed_pck", "false"
+    )
     block = (
         f"\n[preset.{index}]"
         f"{preset_body.rstrip()}\n\n"

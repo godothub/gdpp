@@ -509,6 +509,7 @@ class ExternalProjectE2ETest(unittest.TestCase):
             self.assertIn("script_export_mode=2", content)
             self.assertIn("gdpp/strip_gdscript_sources=true", content)
             self.assertIn("gdpp/allow_source_fallback=false", content)
+            self.assertIn("binary_format/embed_pck=false", content)
             self.assertTrue((project / "artifacts").is_dir())
 
     def test_export_preset_clones_customer_platform_resource_contract(self) -> None:
@@ -551,6 +552,28 @@ class ExternalProjectE2ETest(unittest.TestCase):
             self.assertIn("script_export_mode=2", cloned)
             self.assertIn("gdpp/strip_gdscript_sources=true", cloned)
             self.assertIn("gdpp/allow_source_fallback=false", cloned)
+            self.assertIn("binary_format/embed_pck=false", cloned)
+
+    def test_export_preset_overrides_an_embedded_customer_pck_for_audit(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary)
+            (project / "export_presets.cfg").write_text(
+                '[preset.0]\n\n'
+                'name="Customer Linux"\n'
+                'platform="Linux"\n'
+                'export_path="customer.x86_64"\n\n'
+                "[preset.0.options]\n\n"
+                'binary_format/architecture="x86_64"\n'
+                "binary_format/embed_pck=true\n",
+                encoding="utf-8",
+            )
+
+            E2E.append_export_preset(project, "linux", project / "artifacts")
+            content = (project / "export_presets.cfg").read_text(encoding="utf-8")
+            cloned = content[content.index("[preset.1]") :]
+
+            self.assertIn("binary_format/embed_pck=false", cloned)
+            self.assertNotIn("binary_format/embed_pck=true", cloned)
 
     def test_macos_export_matches_the_official_universal_template(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
