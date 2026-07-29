@@ -14,6 +14,7 @@ add_executable(
     ir_test.cpp
     mir_test.cpp
     godot_api_test.cpp
+    export_worker_snapshot_test.cpp
     native_builder_test.cpp
     project_compiler_test.cpp
     compiler_test.cpp

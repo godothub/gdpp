@@ -575,6 +575,7 @@ set(GDPP_COMPILER_SOURCES
     src/compiler/compiler.cpp
 )
 set(GDPP_PROJECT_SOURCES
+    src/project/export_worker_snapshot.cpp
     src/project/extension_bridge.cpp
     src/project/native_builder.cpp
     src/project/project_compiler.cpp
