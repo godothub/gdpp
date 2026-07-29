@@ -456,38 +456,44 @@ jobs:
           - name: Konado
             id: konado
             manifest: test/compatibility/konado.json
-            godot: 4.7.1
-            target: "4.7"
           - name: Pixelorama
             id: pixelorama
             manifest: test/compatibility/pixelorama.json
-            godot: 4.6.3
-            target: "4.6"
           - name: Open RPG
             id: open-rpg
             manifest: test/compatibility/open_rpg.json
-            godot: 4.6.2
-            target: "4.6"
           - name: Source of Mana
             id: source-of-mana
             manifest: test/compatibility/source_of_mana.json
-            godot: 4.7.1
-            target: "4.7"
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
           submodules: recursive
+      - id: contract
+        name: Read the upstream project's declared Godot contract
+        env:
+          MANIFEST: ${{ matrix.manifest }}
+        run: |
+          python3 - "$MANIFEST" >> "$GITHUB_OUTPUT" <<'PY'
+          import sys
+          from pathlib import Path
+          from tools.validate_compatibility_godot import load_manifest, manifest_contract
+
+          target, engine = manifest_contract(load_manifest(Path(sys.argv[1])))
+          print(f"target={target}")
+          print(f"engine={engine}")
+          PY
       - id: godot
         uses: ./.github/actions/setup-godot
         with:
-          version: ${{ matrix.godot }}
+          version: ${{ steps.contract.outputs.engine }}
           templates: linux
       - name: Build the installed add-on and matching SDK
         shell: bash
         run: >-
           cmake --preset plugin
           -DGDPP_GODOT_EXECUTABLE=${{ steps.godot.outputs.executable }}
-          -DGDPP_PACKAGE_GODOT_VERSIONS=${{ matrix.target }}
+          -DGDPP_PACKAGE_GODOT_VERSIONS=${{ steps.contract.outputs.target }}
           &&
           cmake --build --preset plugin --parallel
       - name: Fetch the complete moving upstream project

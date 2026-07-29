@@ -551,6 +551,18 @@ class ReleasePackagingTest(unittest.TestCase):
             workflow.count("Import, AOT build, export, audit and launch"),
             1,
         )
+        self.assertIn(
+            "from tools.validate_compatibility_godot import "
+            "load_manifest, manifest_contract",
+            workflow,
+        )
+        self.assertIn("version: ${{ steps.contract.outputs.engine }}", workflow)
+        self.assertIn(
+            "-DGDPP_PACKAGE_GODOT_VERSIONS=${{ steps.contract.outputs.target }}",
+            workflow,
+        )
+        self.assertNotIn("matrix.godot", workflow)
+        self.assertNotIn("matrix.target", workflow)
         self.assertNotRegex(
             workflow,
             r"if:\s*\$\{\{[^}]*matrix\.(?:id|name)[^}]*\}\}",
@@ -569,7 +581,10 @@ class ReleasePackagingTest(unittest.TestCase):
             self.assertIn("branch", manifest["repository"])
             self.assertNotIn("commit", manifest["repository"])
             self.assertEqual(manifest["godot"]["engine"], expected_engine)
-            self.assertIn(f"godot: {expected_engine}", workflow)
+            self.assertEqual(
+                manifest["godot"]["target"],
+                ".".join(expected_engine.split(".")[:2]),
+            )
 
     def test_host_staging_excludes_msvc_import_products(self) -> None:
         source = create_host_component(self.temporary / "source", "windows-x64")
