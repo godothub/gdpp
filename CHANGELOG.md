@@ -13,6 +13,7 @@
 - Preserve foreign scripts, scenes, nested resource owners, serialized references, presets, diagnostics, and customer sources during export.
 - Release generated static state, compiled scripts, asynchronous work, and Script caches safely during extension shutdown.
 - Make engine-lifetime static references explicit across generated and runtime code for warning-clean GCC builds.
+- Keep compile-time Script and Callable branches structurally exclusive for strict MSVC builds.
 - Use one native type, storage, and attachment ABI across all generated translation units.
 
 ## 1.8.2
