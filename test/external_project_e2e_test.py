@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import Counter
 import importlib.util
 from pathlib import Path
 import subprocess
@@ -325,6 +326,83 @@ class ExternalProjectE2ETest(unittest.TestCase):
             "baseline_runtime_diagnostics",
             source,
         )
+
+    def test_editor_tls_transport_noise_is_isolated_only_during_aot_export(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            transport = root / "transport.log"
+            fingerprint = (
+                "ERROR: TLS handshake error: -27648 | "
+                "at: _do_handshake (modules/mbedtls/stream_peer_mbedtls.cpp:88)"
+            )
+            transport.write_text(
+                "ERROR: TLS handshake error: -27648\n"
+                "   at: _do_handshake (modules/mbedtls/stream_peer_mbedtls.cpp:88)\n"
+                "mbedtls error: returned -0x6c00\n",
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(RuntimeError, "introduced a diagnostic"):
+                E2E.assert_no_new_diagnostics(
+                    transport,
+                    Counter(),
+                    "exported runtime",
+                )
+            isolated = E2E.assert_no_new_diagnostics(
+                transport,
+                Counter(),
+                "GDPP AOT export",
+                allow_editor_tls_transport=True,
+            )
+            detail = "mbedtls error: returned -0x6c00"
+            self.assertEqual(isolated, Counter({fingerprint: 1, detail: 1}))
+            self.assertEqual(
+                E2E.diagnostic_report(isolated),
+                [
+                    {"message": fingerprint, "count": 1},
+                    {"message": detail, "count": 1},
+                ],
+            )
+            detail_only = root / "detail-only.log"
+            detail_only.write_text(detail + "\n", encoding="utf-8")
+            with self.assertRaisesRegex(RuntimeError, "introduced a diagnostic"):
+                E2E.assert_no_new_diagnostics(
+                    detail_only,
+                    Counter(),
+                    "GDPP AOT export",
+                    allow_editor_tls_transport=True,
+                )
+
+            project_origin = root / "project-origin.log"
+            project_origin.write_text(
+                "ERROR: TLS handshake error: -27648\n"
+                "   at: request (res://network/client.gd:42)\n",
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(RuntimeError, "introduced a diagnostic"):
+                E2E.assert_no_new_diagnostics(
+                    project_origin,
+                    Counter(),
+                    "GDPP AOT export",
+                    allow_editor_tls_transport=True,
+                )
+
+            mixed = root / "mixed.log"
+            mixed.write_text(
+                transport.read_text(encoding="utf-8")
+                + "ERROR: GDPP project library failed to load\n",
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "GDPP project library failed to load",
+            ):
+                E2E.assert_no_new_diagnostics(
+                    mixed,
+                    Counter(),
+                    "GDPP AOT export",
+                    allow_editor_tls_transport=True,
+                )
 
     def test_objectdb_cleanup_context_is_owned_by_the_leak_diagnostic(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

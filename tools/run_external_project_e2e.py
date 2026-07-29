@@ -34,6 +34,14 @@ LEAK_MAGNITUDE = re.compile(
     r"\b(\d+)\s+(?=(?:ObjectDB instances|resources|RID allocations|RIDs of type)\b)",
     re.IGNORECASE,
 )
+EDITOR_TLS_TRANSPORT_DIAGNOSTIC = re.compile(
+    r"^ERROR: TLS handshake error: -\d+ \| "
+    r"at: _do_handshake \(modules/mbedtls/stream_peer_mbedtls\.cpp:\d+\)$"
+)
+EDITOR_TLS_TRANSPORT_DETAIL = re.compile(
+    r"^mbedtls error: returned -0x[0-9a-f]+$",
+    re.IGNORECASE,
+)
 
 
 def fail(message: str) -> None:
@@ -354,12 +362,45 @@ def leak_magnitude(fingerprint: str) -> int | None:
     return int(match.group(1)) if match else None
 
 
+def is_editor_tls_transport_diagnostic(fingerprint: str) -> bool:
+    # Customer editor plugins may perform background update checks while the editor remains open
+    # for a long AOT build. A runner-side TLS failure belongs to that control plane only when the
+    # complete fingerprint originates in Godot's mbedTLS transport. Script, GDPP, project and
+    # exported-runtime diagnostics never satisfy this exact contract.
+    return EDITOR_TLS_TRANSPORT_DIAGNOSTIC.fullmatch(fingerprint) is not None
+
+
+def editor_tls_transport_diagnostics(diagnostics: Counter[str]) -> Counter[str]:
+    primary = {
+        fingerprint
+        for fingerprint in diagnostics
+        if is_editor_tls_transport_diagnostic(fingerprint)
+    }
+    if not primary:
+        return Counter()
+    return Counter(
+        {
+            fingerprint: count
+            for fingerprint, count in diagnostics.items()
+            if fingerprint in primary
+            or EDITOR_TLS_TRANSPORT_DETAIL.fullmatch(fingerprint) is not None
+        }
+    )
+
+
 def assert_no_new_diagnostics(
     log: Path,
     baseline: Counter[str],
     phase: str,
-) -> None:
+    *,
+    allow_editor_tls_transport: bool = False,
+) -> Counter[str]:
     current = Counter(diagnostic_fingerprints(log))
+    editor_transport = (
+        editor_tls_transport_diagnostics(current)
+        if allow_editor_tls_transport
+        else Counter()
+    )
     baseline_leaks: dict[str, int] = {}
     for fingerprint in baseline:
         magnitude = leak_magnitude(fingerprint)
@@ -370,6 +411,8 @@ def assert_no_new_diagnostics(
 
     regressions: list[str] = []
     for fingerprint in current:
+        if fingerprint in editor_transport:
+            continue
         if fingerprint in baseline:
             continue
         magnitude = leak_magnitude(fingerprint)
@@ -384,11 +427,16 @@ def assert_no_new_diagnostics(
             f"{phase} introduced a diagnostic signature or leak magnitude "
             f"not present in the pristine project: {message}"
         )
+    return editor_transport
 
 
 def report_diagnostics(log: Path) -> tuple[Counter[str], list[dict]]:
     diagnostics = Counter(diagnostic_fingerprints(log))
-    return diagnostics, [
+    return diagnostics, diagnostic_report(diagnostics)
+
+
+def diagnostic_report(diagnostics: Counter[str]) -> list[dict]:
+    return [
         {"message": message, "count": count}
         for message, count in sorted(diagnostics.items())
     ]
@@ -1067,10 +1115,13 @@ def main() -> int:
             timeout=args.export_timeout,
             log=export_log,
         )
-        assert_no_new_diagnostics(
-            export_log,
-            baseline_export_diagnostics,
-            "GDPP AOT export",
+        report["export_editor_tls_transport_diagnostics"] = diagnostic_report(
+            assert_no_new_diagnostics(
+                export_log,
+                baseline_export_diagnostics,
+                "GDPP AOT export",
+                allow_editor_tls_transport=True,
+            )
         )
         customer_state_after_export = customer_worktree_state(project)
         report["customer_worktree_sha256_after_export"] = hashlib.sha256(
