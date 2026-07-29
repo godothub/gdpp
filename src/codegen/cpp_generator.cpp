@@ -9092,13 +9092,13 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
             : file_stem + ".gd.cpp";
     unit.symbol_file_name =
         std::filesystem::path{unit.source_file_name}.replace_extension(".symbols").string();
-    auto base = module.base_type.value_or("Node");
+    auto base = module.base_type.value_or("RefCounted");
     if (native_base_class.empty() && !is_valid_base_type(base)) {
         diagnostics_.error("GDS3002",
                            "script-path inheritance requires semantic resolution and is not yet "
                            "supported",
                            module.span);
-        base = "Node";
+        base = "RefCounted";
     }
     const auto base_cpp = attached_script && native_base_class.empty()
                               ? std::string{"gdpp::runtime::AttachedScriptBehavior"}

@@ -372,7 +372,7 @@ class SemanticAnalyzer final {
     bool script_tool_{false};
     Type expected_return_{TypeKind::void_type, "void"};
     std::string current_function_name_;
-    std::string base_type_{"Node"};
+    std::string base_type_{"RefCounted"};
     std::size_t loop_depth_{0};
     std::size_t await_operand_depth_{0};
     const ast::Expression* discarded_expression_{nullptr};

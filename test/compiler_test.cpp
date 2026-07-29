@@ -47,6 +47,22 @@ TEST_CASE("compiler generates bindable GDExtension C++") {
             std::string::npos);
 }
 
+TEST_CASE("scripts without extends use the GDScript RefCounted base") {
+    const auto result =
+        gdpp::Compiler{}.compile("default_base.gd", "class_name DefaultBase\n"
+                                                   "class Inner:\n"
+                                                   "    var value := 7\n"
+                                                   "var inner := Inner.new()\n");
+
+    REQUIRE(result.success);
+    REQUIRE(result.unit.header.find("GDCLASS(GDPPNative_DefaultBase, godot::RefCounted)") !=
+            std::string::npos);
+    REQUIRE(result.unit.header.find("GDCLASS(GDPPNative_DefaultBase, godot::Node)") ==
+            std::string::npos);
+    REQUIRE(result.unit.source.find("descriptor.native_base_type = "
+                                    "godot::StringName(\"RefCounted\")") != std::string::npos);
+}
+
 TEST_CASE("compiler accepts nested terminal branches after MIR CFG pruning") {
     const auto result = gdpp::Compiler{}.compile(
         "nested_terminal_branches.gd", "extends Node\n"

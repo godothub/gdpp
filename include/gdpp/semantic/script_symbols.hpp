@@ -84,8 +84,8 @@ struct ScriptClassSymbol {
     std::string script_name;
     std::string native_class_name;
     std::string header_file_name;
-    std::string godot_base_type{"Node"};
-    std::string attached_native_base{"Node"};
+    std::string godot_base_type{"RefCounted"};
+    std::string attached_native_base{"RefCounted"};
     std::string base_script_path;
     // Non-empty when this script hierarchy is rooted in a ClassDB class owned by another
     // GDExtension. It selects the provider MethodBind contract; all project scripts use the

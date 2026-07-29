@@ -6453,7 +6453,7 @@ SemanticModel SemanticAnalyzer::analyze(const ast::Script& script) {
     }
     scopes_.push_back(std::move(inherited_scope));
     scopes_.emplace_back();
-    const auto declared_base = script.base_type.value_or("Node");
+    const auto declared_base = script.base_type.value_or("RefCounted");
     base_type_ = semantic_base_type_.empty() ? declared_base : semantic_base_type_;
     if (semantic_base_type_.empty() && !api_.find_class(base_type_)) {
         diagnostics_.error("GDS4052",

@@ -1224,13 +1224,13 @@ ProjectCompileResult ProjectCompiler::compile_impl(const ProjectCompileOptions& 
         std::vector<std::string> extension_abis;
         std::string script_class_name;
         std::string native_class_stem;
-        std::string base_reference{"Node"};
-        std::string semantic_base_type{"Node"};
+        std::string base_reference{"RefCounted"};
+        std::string semantic_base_type{"RefCounted"};
         std::optional<std::size_t> script_base;
         std::optional<std::size_t> local_inner_base;
         BridgeClassReference extension_base;
         std::string external_base_name;
-        std::string attached_native_base{"Node"};
+        std::string attached_native_base{"RefCounted"};
         bool attached{false};
         bool globally_named{false};
         std::string autoload_name;
@@ -1389,7 +1389,7 @@ ProjectCompileResult ProjectCompiler::compile_impl(const ProjectCompileOptions& 
             autoload != project_autoloads.end()) {
             input.autoload_name = autoload->second;
         }
-        input.base_reference = script.base_type.value_or("Node");
+        input.base_reference = script.base_type.value_or("RefCounted");
         for (const auto& variable : script.variables) {
             ScriptMemberSymbol member;
             member.kind =
