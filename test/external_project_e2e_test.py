@@ -33,7 +33,7 @@ class ExternalProjectE2ETest(unittest.TestCase):
         self.assertEqual(
             command,
             [
-                "/product",
+                str(Path("/product")),
                 "--headless",
                 "--audio-driver",
                 "Dummy",
