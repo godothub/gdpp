@@ -12,6 +12,7 @@
 - Preserve compiled Script identity across paths, UIDs, `load`/`preload`, caches, attachment, inheritance, rollback, and shutdown.
 - Preserve foreign scripts, scenes, nested resource owners, serialized references, presets, diagnostics, and customer sources during export.
 - Release generated static state, compiled scripts, asynchronous work, and Script caches safely during extension shutdown.
+- Make engine-lifetime static references explicit across generated and runtime code for warning-clean GCC builds.
 - Use one native type, storage, and attachment ABI across all generated translation units.
 
 ## 1.8.2

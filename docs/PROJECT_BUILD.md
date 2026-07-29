@@ -141,7 +141,7 @@ SDK schema 12 固定以下契约：
 - C++17、异常关闭、工具链族和 MSVC 静态 CRT；
 - `debug,release` 项目 profile；
 - 唯一 `distribution_binding template_release`；
-- runtime ABI 21 和所有 runtime 文件 SHA-256；
+- runtime ABI 22 和所有 runtime 文件 SHA-256；
 - Android API/STL、iOS slices、Web threads 等目标字段。
 
 NativeBuilder 在创建第一条编译命令前验证完整 manifest。旧 schema、错误 API/架构、损坏
