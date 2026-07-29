@@ -1,6 +1,6 @@
 ## 1.8.3
 
-- Gate Konado, Pixelorama, Godot Open RPG, and Source of Mana through one complete moving-upstream lifecycle that clones each full default branch, honors its declared Godot version, installs GDPP, imports the pristine project, performs the project-wide AOT build and export, audits the binary-only package, launches the product, and verifies that customer sources remain unchanged.
+- Add full-project compatibility tests for Konado, Pixelorama, Godot Open RPG, and Source of Mana.
 - Preserve cross-script type identity across global classes, inner classes, inherited scripts, native base types, enum scopes, constant graphs, static calls, method shadowing, override families, and otherwise colliding generated namespaces.
 - Complete dynamic script reflection for methods, signals, constants, properties, Inspector category markers, Script resource paths, construction identity, type tests, and runtime attachment, including scripts restored from serialized resources or supplied by another script language.
 - Restore attached ScriptInstance state transactionally with typed raw member storage, descriptor-driven custom accessors, instance-to-Dictionary utilities, dynamic Object properties, duplicate-attachment serialization, cyclic materialization guards, and safe release outside registry locks.

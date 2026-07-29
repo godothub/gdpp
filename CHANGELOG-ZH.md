@@ -1,6 +1,6 @@
 ## 1.8.3
 
-- Konado、Pixelorama、Godot Open RPG 与 Source of Mana 统一进入同一套持续跟踪上游的完整生命周期门禁：完整克隆各自默认分支，遵循项目声明的 Godot 版本，安装 GDPP，导入原始项目，执行全项目 AOT 构建与导出，审计二进制交付包，启动产物，并验证客户源码没有被修改。
+- 增加 Konado、Pixelorama、Godot Open RPG 和 Source of Mana 的完整项目兼容性测试。
 - 在全局类、内部类、脚本继承、原生基类、枚举作用域、常量图、静态调用、方法遮蔽、override 家族及生成命名空间冲突场景中完整保留跨脚本类型身份。
 - 完善脚本方法、信号、常量、属性、Inspector 分类标记、Script 资源路径、构造身份、类型判断和运行时附加的动态反射，包括从序列化资源恢复或由其他脚本语言提供的脚本。
 - 以事务方式恢复 Attached ScriptInstance 状态，覆盖强类型原始成员存储、描述符驱动的自定义访问器、实例到 Dictionary 工具、动态 Object 属性、重复附加串行化、循环物化防护及注册表锁外安全释放。
