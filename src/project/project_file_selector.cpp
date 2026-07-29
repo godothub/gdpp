@@ -37,9 +37,33 @@ bool is_platform_metadata(const std::filesystem::path& path) {
 
 ProjectFileSelector::ProjectFileSelector(std::filesystem::path project_root,
                                          std::filesystem::path compiler_output)
-    : output_relative_(std::move(compiler_output)
-                           .lexically_relative(std::move(project_root))
+    : project_root_(std::move(project_root).lexically_normal()),
+      output_relative_(std::move(compiler_output)
+                           .lexically_relative(project_root_)
                            .lexically_normal()) {}
+
+bool ProjectFileSelector::is_godot_ignored(
+    const std::filesystem::path& project_relative_path) const {
+    std::filesystem::path prefix;
+    for (const auto& component : project_relative_path) {
+        prefix /= component;
+        const auto name = path_to_utf8(component.filename());
+        if (!name.empty() && name.front() == '.')
+            return true;
+
+        std::error_code error;
+        const auto directory = project_root_ / prefix;
+        if (std::filesystem::is_regular_file(directory / ".gdignore", error))
+            return true;
+        error.clear();
+        if (std::filesystem::is_directory(directory, error)) {
+            error.clear();
+            if (std::filesystem::is_regular_file(directory / "project.godot", error))
+                return true;
+        }
+    }
+    return false;
+}
 
 PathDisposition
 ProjectFileSelector::classify(const std::filesystem::path& project_relative_path) const {
@@ -60,6 +84,8 @@ ProjectFileSelector::classify(const std::filesystem::path& project_relative_path
     const std::filesystem::path gdpp_root{"addons/gdpp"};
     if (starts_with(normalized, gdpp_root))
         return PathDisposition::gdpp_plugin;
+    if (is_godot_ignored(normalized))
+        return PathDisposition::godot_ignored;
     return PathDisposition::project_content;
 }
 

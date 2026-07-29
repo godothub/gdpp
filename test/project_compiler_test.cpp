@@ -303,6 +303,27 @@ TEST_CASE("project compiler ignores cross-platform filesystem metadata") {
     REQUIRE(result.diagnostics.empty());
 }
 
+TEST_CASE("project compiler follows Godot project visibility boundaries") {
+    const auto root = fixture_root("project-godot-visibility");
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
+    write_text(root / "runtime.gd",
+               "extends Node\nclass_name VisibleRuntime\nfunc value() -> int:\n    return 1\n");
+    write_text(root / "ignored/.gdignore", "");
+    write_text(root / "ignored/invalid.gd", "this is not gdscript");
+    write_text(root / ".hidden/invalid.gd", "this is not gdscript");
+    write_text(root / "nested/project.godot", "[application]\nconfig/name=\"nested\"\n");
+    write_text(root / "nested/invalid.gd", "this is not gdscript");
+
+    const auto result = gdpp::ProjectCompiler{}.compile(project_options(root));
+
+    REQUIRE(result.success);
+    REQUIRE_EQ(result.scripts.size(), std::size_t{1});
+    REQUIRE_EQ(result.compiled_count, std::size_t{1});
+    REQUIRE_EQ(result.scripts.front().relative_path.generic_string(), std::string{"runtime.gd"});
+    REQUIRE(result.diagnostics.empty());
+}
+
 TEST_CASE("project compiler preserves tool mode across incremental cache hits") {
     const auto root = fixture_root("project-tool-metadata");
     std::error_code error;

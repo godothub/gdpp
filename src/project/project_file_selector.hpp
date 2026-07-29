@@ -12,6 +12,7 @@ enum class PathDisposition {
     gdpp_plugin,
     compiler_output,
     platform_metadata,
+    godot_ignored,
 };
 
 // Keeps project discovery and source-protection boundaries in one path-aware policy.  Names such
@@ -27,6 +28,10 @@ class ProjectFileSelector final {
     [[nodiscard]] bool should_compile(const std::filesystem::path& project_relative_path) const;
 
   private:
+    [[nodiscard]] bool
+    is_godot_ignored(const std::filesystem::path& project_relative_path) const;
+
+    std::filesystem::path project_root_;
     std::filesystem::path output_relative_;
 };
 
