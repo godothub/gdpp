@@ -1966,6 +1966,17 @@ TEST_CASE("project compiler attaches scripts to third-party GDExtension instance
             registration.find("unregister_all_attached_scripts"));
     REQUIRE(registration.find("GDREGISTER_CLASS(gdpp::runtime::CoroutineFunctionState)") !=
             std::string::npos);
+    const auto initialize_coroutines =
+        registration.find("gdpp::runtime::initialize_coroutine_runtime()");
+    const auto first_shutdown_coroutines =
+        registration.find("gdpp::runtime::shutdown_coroutine_runtime()");
+    const auto second_shutdown_coroutines = registration.find(
+        "gdpp::runtime::shutdown_coroutine_runtime()", first_shutdown_coroutines + 1);
+    REQUIRE(initialize_coroutines != std::string::npos);
+    REQUIRE(first_shutdown_coroutines != std::string::npos);
+    REQUIRE(second_shutdown_coroutines != std::string::npos);
+    REQUIRE(first_shutdown_coroutines < detach_instances);
+    REQUIRE(unregister_descriptors < second_shutdown_coroutines);
     REQUIRE(registration.find("GDREGISTER_CLASS(" + result.scripts.front().class_name + ")") !=
             std::string::npos);
     REQUIRE(registration.find("GDREGISTER_CLASS(" +

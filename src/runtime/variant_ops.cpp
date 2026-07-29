@@ -24,10 +24,12 @@
 #include <godot_cpp/variant/utility_functions.hpp>
 
 #include <atomic>
+#include <condition_variable>
 #include <mutex>
 #include <optional>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace gdpp::runtime {
@@ -65,6 +67,49 @@ thread_local ScriptFaultState* active_script_fault = nullptr;
 } // namespace detail
 
 namespace {
+
+struct CoroutineRuntime final {
+    std::mutex mutex;
+    std::condition_variable idle;
+    std::unordered_set<std::uint64_t> states;
+    std::size_t active_operations{0};
+    bool shutting_down{true};
+};
+
+CoroutineRuntime& coroutine_runtime() {
+    static CoroutineRuntime value;
+    return value;
+}
+
+class CoroutineRuntimeOperation final {
+  public:
+    CoroutineRuntimeOperation() {
+        auto& runtime = coroutine_runtime();
+        std::lock_guard lock{runtime.mutex};
+        if (runtime.shutting_down)
+            return;
+        ++runtime.active_operations;
+        active_ = true;
+    }
+
+    ~CoroutineRuntimeOperation() {
+        if (!active_)
+            return;
+        auto& runtime = coroutine_runtime();
+        std::lock_guard lock{runtime.mutex};
+        --runtime.active_operations;
+        if (runtime.active_operations == 0)
+            runtime.idle.notify_all();
+    }
+
+    CoroutineRuntimeOperation(const CoroutineRuntimeOperation&) = delete;
+    CoroutineRuntimeOperation& operator=(const CoroutineRuntimeOperation&) = delete;
+
+    [[nodiscard]] explicit operator bool() const noexcept { return active_; }
+
+  private:
+    bool active_{false};
+};
 
 godot::ObjectID variant_object_id(const godot::Variant& value) {
     // Calling the conversion operator explicitly is intentional. MSVC otherwise considers the
@@ -115,6 +160,50 @@ ScriptFaultState* coroutine_script_fault(const CoroutineStatePtr& coroutine) noe
 
 } // namespace
 
+CoroutineFunctionState::CoroutineFunctionState() {
+    auto& runtime = coroutine_runtime();
+    std::lock_guard lock{runtime.mutex};
+    runtime.states.insert(static_cast<std::uint64_t>(get_instance_id()));
+}
+
+CoroutineFunctionState::~CoroutineFunctionState() {
+    auto& runtime = coroutine_runtime();
+    std::lock_guard lock{runtime.mutex};
+    runtime.states.erase(static_cast<std::uint64_t>(get_instance_id()));
+}
+
+void initialize_coroutine_runtime() {
+    auto& runtime = coroutine_runtime();
+    std::lock_guard lock{runtime.mutex};
+    ERR_FAIL_COND_MSG(
+        !runtime.states.empty() || runtime.active_operations != 0,
+        "GDPP cannot initialize its coroutine runtime while states from a previous "
+        "extension lifetime remain active");
+    runtime.shutting_down = false;
+}
+
+void shutdown_coroutine_runtime() {
+    auto& runtime = coroutine_runtime();
+    std::vector<std::uint64_t> state_ids;
+    {
+        std::unique_lock lock{runtime.mutex};
+        runtime.shutting_down = true;
+        runtime.idle.wait(lock, [&runtime] { return runtime.active_operations == 0; });
+        state_ids.assign(runtime.states.begin(), runtime.states.end());
+    }
+
+    std::vector<godot::Ref<CoroutineFunctionState>> states;
+    states.reserve(state_ids.size());
+    for (const auto id : state_ids) {
+        auto* object = godot::ObjectDB::get_instance(id);
+        auto* state = godot::Object::cast_to<CoroutineFunctionState>(object);
+        if (state)
+            states.emplace_back(state);
+    }
+    for (const auto& state : states)
+        state->finish();
+}
+
 void CoroutineFunctionState::_bind_methods() {
     godot::ClassDB::bind_method(godot::D_METHOD("resume", "arg"), &CoroutineFunctionState::resume,
                                 DEFVAL(godot::Variant{}));
@@ -154,6 +243,12 @@ void CoroutineFunctionState::clear_incoming_connections() {
 }
 
 godot::Variant CoroutineFunctionState::resume(const godot::Variant& argument) {
+    CoroutineRuntimeOperation runtime_operation;
+    if (!runtime_operation) {
+        godot::UtilityFunctions::push_error(
+            "GDPP: cannot resume a coroutine while its project extension is shutting down");
+        return {};
+    }
     AwaitContinuation continuation;
     CoroutineStatePtr coroutine;
     {
@@ -216,6 +311,8 @@ void CoroutineFunctionState::finish() {
     {
         std::lock_guard lock{mutex_};
         continuation_ = {};
+        coroutine_.reset();
+        owner_ = godot::ObjectID{};
     }
     clear_incoming_connections();
 }
@@ -1486,6 +1583,12 @@ godot::Variant await_result(const godot::Array& arguments) {
 }
 
 CoroutineStatePtr begin_coroutine(godot::Object* owner) {
+    CoroutineRuntimeOperation runtime_operation;
+    if (!runtime_operation) {
+        godot::UtilityFunctions::push_error(
+            "GDPP: cannot start a coroutine while its project extension is shutting down");
+        return {};
+    }
     auto state = std::make_shared<CoroutineState>();
     state->initial_function_state.instantiate();
     if (state->initial_function_state.is_null()) {

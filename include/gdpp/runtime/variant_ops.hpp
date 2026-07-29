@@ -54,6 +54,9 @@ class CoroutineFunctionState final : public godot::RefCounted {
     GDCLASS(CoroutineFunctionState, godot::RefCounted)
 
   public:
+    CoroutineFunctionState();
+    ~CoroutineFunctionState() override;
+
     [[nodiscard]] bool is_valid(bool extended_check = false) const;
     godot::Variant resume(const godot::Variant& argument = {});
     [[nodiscard]] godot::String _to_string() const;
@@ -65,6 +68,7 @@ class CoroutineFunctionState final : public godot::RefCounted {
     friend bool await_signal(const godot::Variant&, godot::Object*, const CoroutineStatePtr&,
                              AwaitContinuation);
     friend void complete_coroutine(const CoroutineStatePtr&, const godot::Variant&);
+    friend void shutdown_coroutine_runtime();
 
     godot::Variant signal_callback(const godot::Variant** arguments, GDExtensionInt argument_count,
                                    GDExtensionCallError& error);
@@ -78,6 +82,14 @@ class CoroutineFunctionState final : public godot::RefCounted {
     std::weak_ptr<CoroutineState> coroutine_;
     AwaitContinuation continuation_;
 };
+
+// Pending awaits can be retained by signals whose owners outlive the project SceneTree. Their
+// continuations and Callables still point into the project GDExtension, so every generated
+// library owns an explicit runtime lifetime: initialization admits new states, while shutdown
+// atomically rejects new work, waits for active resumptions, and disconnects every pending await
+// before extension classes are unregistered.
+void initialize_coroutine_runtime();
+void shutdown_coroutine_runtime();
 
 struct ScriptFaultState final {
     // A fault state is only installed in the thread-local active invocation. Coroutine states

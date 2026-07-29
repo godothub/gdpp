@@ -935,7 +935,8 @@ std::string generated_registration(const std::vector<CompiledProjectScript>& scr
            << "namespace {\n"
            << "void initialize_gdpp_project(godot::ModuleInitializationLevel level) {\n"
            << "    if (level != godot::MODULE_INITIALIZATION_LEVEL_SCENE) return;\n"
-           << "    GDREGISTER_CLASS(gdpp::runtime::CoroutineFunctionState);\n";
+           << "    GDREGISTER_CLASS(gdpp::runtime::CoroutineFunctionState);\n"
+           << "    gdpp::runtime::initialize_coroutine_runtime();\n";
     if (has_editor_only_classes) {
         output << "    auto* gdpp_engine = godot::Engine::get_singleton();\n"
                << "    ERR_FAIL_NULL_MSG(gdpp_engine, "
@@ -1007,7 +1008,8 @@ std::string generated_registration(const std::vector<CompiledProjectScript>& scr
     }
     output << "}\n"
            << "void uninitialize_gdpp_project(godot::ModuleInitializationLevel level) {\n"
-           << "    if (level != godot::MODULE_INITIALIZATION_LEVEL_SCENE) return;\n";
+           << "    if (level != godot::MODULE_INITIALIZATION_LEVEL_SCENE) return;\n"
+           << "    gdpp::runtime::shutdown_coroutine_runtime();\n";
     // Generated preload caches and script static fields can own Godot resources
     // for the lifetime of the project extension. Release them while the
     // scene-level servers are still alive; C++ static destructors run too late
@@ -1025,7 +1027,8 @@ std::string generated_registration(const std::vector<CompiledProjectScript>& scr
                << "    gdpp::runtime::AttachedCompiledLanguage::unregister_singleton();\n"
                << "    gdpp::runtime::unregister_all_attached_scripts();\n";
     }
-    output << "}\n"
+    output << "    gdpp::runtime::shutdown_coroutine_runtime();\n"
+           << "}\n"
            << "} // namespace\n\n"
            << "extern \"C\" GDExtensionBool GDE_EXPORT\n"
            << project_library_entry_symbol << "(GDExtensionInterfaceGetProcAddress address,\n"

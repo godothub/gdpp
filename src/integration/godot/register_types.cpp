@@ -15,6 +15,7 @@ void initialize_gdpp(godot::ModuleInitializationLevel level) {
     if (level != godot::MODULE_INITIALIZATION_LEVEL_SCENE)
         return;
     GDREGISTER_CLASS(gdpp::runtime::CoroutineFunctionState);
+    gdpp::runtime::initialize_coroutine_runtime();
     GDREGISTER_CLASS(gdpp::runtime::AttachedScriptBehavior);
     GDREGISTER_CLASS(gdpp::runtime::AttachedCompiledLanguage);
     GDREGISTER_CLASS(gdpp::runtime::AttachedCompiledScript);
@@ -27,9 +28,11 @@ void initialize_gdpp(godot::ModuleInitializationLevel level) {
 void uninitialize_gdpp(godot::ModuleInitializationLevel level) {
     if (level != godot::MODULE_INITIALIZATION_LEVEL_SCENE)
         return;
+    gdpp::runtime::shutdown_coroutine_runtime();
     gdpp::runtime::detach_all_attached_script_instances();
     gdpp::runtime::AttachedCompiledLanguage::unregister_singleton();
     gdpp::runtime::unregister_all_attached_scripts();
+    gdpp::runtime::shutdown_coroutine_runtime();
 }
 
 } // namespace

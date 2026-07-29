@@ -84,6 +84,10 @@ func _make_delayed_adder(captured: int) -> Callable:
         return captured + addend
 
 
+func _await_shutdown_signal(signal_value: Signal) -> void:
+    await signal_value
+
+
 func _ready() -> void:
     super._ready()
     var user_args := OS.get_cmdline_user_args()
@@ -178,6 +182,7 @@ func _verify_export_runtime() -> void:
     ):
         _fail("dynamic compiled Script construction lost internal-class inheritance identity")
         return
+    Engine.set_meta(&"gdpp_retained_attached_owner", dynamic_derived)
     var animation_storage_probe := get_node("AnimationStorageProbe")
     if (
         animation_storage_probe == null
@@ -749,6 +754,9 @@ func _process(_delta: float) -> void:
         ):
             _fail("network ImageTexture or per-frame shader parameter state was not preserved")
             return
+        if not Engine.has_user_signal(&"gdpp_shutdown_resume"):
+            Engine.add_user_signal(&"gdpp_shutdown_resume")
+        _await_shutdown_signal(Signal(Engine, &"gdpp_shutdown_resume"))
         print("GDPP_ATTACHED_EXPORT_RUNTIME_OK")
         get_tree().quit(0)
         return
