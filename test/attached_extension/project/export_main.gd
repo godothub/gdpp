@@ -84,6 +84,10 @@ func _make_delayed_adder(captured: int) -> Callable:
         return captured + addend
 
 
+func _dynamic_len(value: Variant) -> int:
+    return len(value)
+
+
 func _await_shutdown_signal(signal_value: Signal) -> void:
     await signal_value
 
@@ -142,6 +146,24 @@ func _verify_fault_matrix() -> void:
 
 
 func _verify_export_runtime() -> void:
+    if (
+        _dynamic_len("gdpp") != 4
+        or _dynamic_len(&"native") != 6
+        or _dynamic_len({"runtime": true}) != 1
+        or _dynamic_len([1, 2, 3]) != 3
+        or _dynamic_len(PackedByteArray([1, 2])) != 2
+        or _dynamic_len(PackedInt32Array([1, 2, 3])) != 3
+        or _dynamic_len(PackedInt64Array([1])) != 1
+        or _dynamic_len(PackedFloat32Array([1.0, 2.0])) != 2
+        or _dynamic_len(PackedFloat64Array([1.0])) != 1
+        or _dynamic_len(PackedStringArray(["a", "b"])) != 2
+        or _dynamic_len(PackedVector2Array([Vector2.ZERO])) != 1
+        or _dynamic_len(PackedVector3Array([Vector3.ZERO, Vector3.ONE])) != 2
+        or _dynamic_len(PackedColorArray([Color.WHITE])) != 1
+        or _dynamic_len(PackedVector4Array([Vector4.ZERO])) != 1
+    ):
+        _fail("dynamic len() diverged from GDScript container semantics")
+        return
     var dynamic_owner: Variant = self
     var instance_inner: Variant = dynamic_owner.ContainerItem.new(42)
     var instance_mode: Dictionary = dynamic_owner.InstanceMode

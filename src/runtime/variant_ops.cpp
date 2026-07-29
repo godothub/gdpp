@@ -1051,10 +1051,41 @@ godot::Array make_range(std::int64_t start, std::int64_t stop, std::int64_t step
 }
 
 std::int64_t length(const godot::Variant& value, const ScriptSourceLocation location) {
-    godot::Variant target = value;
-    const auto result =
-        call_dynamic_impl(target, godot::StringName("size"), nullptr, 0, location);
-    return static_cast<std::int64_t>(result);
+    switch (value.get_type()) {
+    case godot::Variant::STRING:
+    case godot::Variant::STRING_NAME:
+        return static_cast<godot::String>(value).length();
+    case godot::Variant::DICTIONARY:
+        return static_cast<godot::Dictionary>(value).size();
+    case godot::Variant::ARRAY:
+        return static_cast<godot::Array>(value).size();
+    case godot::Variant::PACKED_BYTE_ARRAY:
+        return static_cast<godot::PackedByteArray>(value).size();
+    case godot::Variant::PACKED_INT32_ARRAY:
+        return static_cast<godot::PackedInt32Array>(value).size();
+    case godot::Variant::PACKED_INT64_ARRAY:
+        return static_cast<godot::PackedInt64Array>(value).size();
+    case godot::Variant::PACKED_FLOAT32_ARRAY:
+        return static_cast<godot::PackedFloat32Array>(value).size();
+    case godot::Variant::PACKED_FLOAT64_ARRAY:
+        return static_cast<godot::PackedFloat64Array>(value).size();
+    case godot::Variant::PACKED_STRING_ARRAY:
+        return static_cast<godot::PackedStringArray>(value).size();
+    case godot::Variant::PACKED_VECTOR2_ARRAY:
+        return static_cast<godot::PackedVector2Array>(value).size();
+    case godot::Variant::PACKED_VECTOR3_ARRAY:
+        return static_cast<godot::PackedVector3Array>(value).size();
+    case godot::Variant::PACKED_COLOR_ARRAY:
+        return static_cast<godot::PackedColorArray>(value).size();
+    case godot::Variant::PACKED_VECTOR4_ARRAY:
+        return static_cast<godot::PackedVector4Array>(value).size();
+    default:
+        report_script_failure(godot::String{"Value of type '"} +
+                                  godot::Variant::get_type_name(value.get_type()) +
+                                  "' can't provide a length.",
+                              location);
+        return 0;
+    }
 }
 
 godot::Array get_stack() { return attached_debug_stack(); }
