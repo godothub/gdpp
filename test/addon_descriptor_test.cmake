@@ -389,6 +389,19 @@ foreach(required_worker_isolation_contract IN ITEMS
             "${required_worker_isolation_contract}")
     endif()
 endforeach()
+foreach(required_optional_cli_contract IN ITEMS
+        "if(GDPP_BUILD_CLI)\nset(GDPP_SMOKE_DIR"
+        "COMMAND $<TARGET_FILE:gdpp> compile"
+        "COMMAND $<TARGET_FILE:gdpp> project"
+        "gdpp_set_project_warnings(gdpp_script_resource_smoke)\nendif()\n\nadd_custom_target(")
+    string(FIND "${godot_plugin_build}" "${required_optional_cli_contract}"
+        optional_cli_contract_offset)
+    if(optional_cli_contract_offset EQUAL -1)
+        message(FATAL_ERROR
+            "Optional CLI smoke-target boundary is missing: "
+            "${required_optional_cli_contract}")
+    endif()
+endforeach()
 foreach(forbidden_scene_customization_contract IN ITEMS
         "return _uses_native_scene_customizer()"
         "func _uses_native_scene_customizer() -> bool:"
