@@ -3,6 +3,7 @@
 #include "gdpp/compiler/compiler.hpp"
 #include "gdpp/core/diagnostic.hpp"
 #include "gdpp/core/source.hpp"
+#include "gdpp/project/export_worker_snapshot.hpp"
 #include "gdpp/project/native_builder.hpp"
 #include "gdpp/project/project_compiler.hpp"
 #include "gdpp/runtime/attached_script.hpp"
@@ -1205,8 +1206,7 @@ MsvcEnvironmentSnapshot parse_msvc_environment(std::string output) {
     MsvcEnvironmentSnapshot snapshot;
     for (std::size_t begin = 0; begin <= output.size();) {
         const auto end = output.find('\n', begin);
-        auto line =
-            output.substr(begin, end == std::string::npos ? std::string::npos : end - begin);
+        auto line = output.substr(begin, end == std::string::npos ? std::string::npos : end - begin);
         if (!line.empty() && line.back() == '\r')
             line.pop_back();
         if (!line.empty() && line.find('=') != std::string::npos) {
@@ -1514,7 +1514,8 @@ std::vector<std::string> export_worker_diagnostics(const std::string& output) {
     std::vector<std::string> diagnostics;
     for (std::size_t begin = 0; begin <= output.size();) {
         const auto end = output.find('\n', begin);
-        auto line = output.substr(begin, end == std::string::npos ? std::string::npos : end - begin);
+        auto line =
+            output.substr(begin, end == std::string::npos ? std::string::npos : end - begin);
         while (!line.empty() && (line.back() == '\r' || line.back() == ' ' || line.back() == '\t'))
             line.pop_back();
         const auto first = line.find_first_not_of(" \t");
@@ -1893,13 +1894,25 @@ GDPPCompiler::run_export_transform_worker(const godot::String& state_path,
         !std::filesystem::is_regular_file(path_from_utf8(state_absolute)))
         return failure_result("export transform worker state is unavailable");
 
+    const auto state_native = path_from_utf8(state_absolute);
+    const auto result_native = path_from_utf8(result_absolute);
+    const auto transaction_root = state_native.parent_path();
+    if (result_native.parent_path() != transaction_root)
+        return failure_result("export transform worker state and result must share a transaction");
+    const auto snapshot_root = transaction_root / "project-snapshot";
+    const auto snapshot =
+        create_export_worker_snapshot(path_from_utf8(project_root), snapshot_root);
+    if (!snapshot.success)
+        return failure_result("cannot isolate the export transform worker: " +
+                              godot::String::utf8(snapshot.diagnostic.c_str()));
+
     const auto executable =
         native_string(godot::OS::get_singleton()->get_executable_path());
     const std::vector<std::string> arguments{
         "--headless",
         "--editor",
         "--path",
-        project_root,
+        path_to_utf8(snapshot_root),
         "--script",
         "res://addons/gdpp/scene_transform_worker.gd",
         "--",
@@ -1907,6 +1920,8 @@ GDPPCompiler::run_export_transform_worker(const godot::String& state_path,
         result_absolute,
     };
     auto process = execute_native_process(executable, arguments);
+    std::error_code snapshot_cleanup_error;
+    std::filesystem::remove_all(snapshot_root, snapshot_cleanup_error);
     const auto captured = trimmed_toolchain_output(std::move(process.output));
     constexpr std::string_view committed_marker{"GDPP_EXPORT_TRANSFORM_WORKER_COMMITTED"};
     const auto committed_offset = captured.find(committed_marker);
@@ -1937,6 +1952,10 @@ GDPPCompiler::run_export_transform_worker(const godot::String& state_path,
         if (!captured.empty())
             diagnostics.push_back(godot::String::utf8(captured.c_str()));
     }
+    if (snapshot_cleanup_error)
+        diagnostics.push_back(
+            "isolated project snapshot cleanup will be retried on the next export: " +
+            godot::String::utf8(snapshot_cleanup_error.message().c_str()));
     output["diagnostics"] = diagnostics;
     return output;
 }

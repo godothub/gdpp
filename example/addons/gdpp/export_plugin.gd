@@ -604,7 +604,9 @@ func _prepare_export_transforms() -> bool:
     state_file.store_var({
         "schema": 1,
         "paths": paths,
-        "output_root": _transform_worker_directory.path_join("resources"),
+        "output_root": ProjectSettings.globalize_path(
+            _transform_worker_directory.path_join("resources")
+        ),
         "script_classes": _script_classes,
         "attached_script_bases": _attached_script_bases,
         "script_contract_hashes": _script_contract_hashes,

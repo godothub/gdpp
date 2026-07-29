@@ -45,9 +45,9 @@ class GDPPCompiler final : public godot::RefCounted {
     set_editor_script_storage_state(godot::Object* object,
                                     const godot::PackedStringArray& stored_properties) const;
     void clear_editor_script_descriptors() const;
-    // Runs the editor-owned resource transformer in an isolated, hidden Godot process. Customer
-    // ResourceFormatLoader and shader diagnostics stay inside that process while its structured
-    // result remains fail-closed.
+    // Runs the editor-owned resource transformer in a hidden Godot process with a physically
+    // independent project snapshot. Customer GDExtension libraries, ResourceFormatLoader and
+    // shader diagnostics stay inside that process while its structured result remains fail-closed.
     [[nodiscard]] godot::Dictionary
     run_export_transform_worker(const godot::String& state_path,
                                 const godot::String& result_path) const;
