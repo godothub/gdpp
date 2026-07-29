@@ -72,7 +72,10 @@ AST 的表达式、语句和 match pattern 使用有名结构的 `std::variant`�
 
 全局类、内部类和嵌套枚举在项目符号图中使用声明身份，不通过裸名字重新查找。命名枚举的静态
 类型保留其声明身份，运行值则遵守 Godot 的只读 Dictionary 合同。导出的裸 `Variant` 属性使用
-Godot 的 NIL_IS_VARIANT 元数据，而不是因为没有更窄类型就省略 Inspector/存储登记。
+Godot 的 NIL_IS_VARIANT 元数据，而不是因为没有更窄类型就省略 Inspector/存储登记。推导字段、
+常量、参数和协程状态在生成跨脚本公开 ABI 前共同收敛到项目级固定点。
+命名访问器也是公开 ABI 的一部分；派生脚本覆盖访问器时，对关联继承属性的裸访问直接指向原后备
+字段，与 GDScript 防止 getter/setter 自重入的语义一致。
 
 ## HIR 与 MIR
 
@@ -126,6 +129,10 @@ GDExtension 创建，生成行为通过下列层附着：
 - 动态 Signal/Callable、FunctionState await 和跨脚本调用经统一 runtime ABI。
 
 该设计避免 Godot 尚不支持的跨 GDExtension C++ 继承，也不需要供应商头文件或链接库。
+Godot 4.4 使用其原生 ScriptInstance 创建回调顺序；只有 4.5 及更高版本才查询并使用提前附着
+接口，因此正常的版本兼容分支不会向客户日志写入“接口不存在”错误。
+await continuation 保留行为和局部状态，但恢复前必须确认该行为仍是 owner 当前发布的
+ScriptInstance；场景继承或 `set_script()` 替换产生的过期 continuation 会直接取消。
 
 编译脚本本身也是有状态的 `Script` 资源。生成 `ScriptResource<T>` 保存规范 `Ref<Script>`，
 因此 load/preload、资源缓存、可空性、Object/Resource/Script 参数、Script 属性与 Signal、
