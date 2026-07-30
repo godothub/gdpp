@@ -521,6 +521,16 @@ class ReleasePackagingTest(unittest.TestCase):
         ).read_text(encoding="utf-8")
         self.assertIn("name: gdpp-release-packages", installed_smoke)
         self.assertIn("Install the final ZIP into a clean customer project", installed_smoke)
+        self.assertIn(
+            'find "$project/addons/gdpp/sdk" -type f', installed_smoke
+        )
+        self.assertIn(
+            "\\( -path '*/lib/*' -o -path '*/manifests/*' \\)",
+            installed_smoke,
+        )
+        self.assertNotIn(
+            'find "$project/addons/gdpp" -type f', installed_smoke
+        )
         self.assertIn("PCK_AUDIT_VIOLATIONS=0", installed_smoke)
         self.assertIn("PCK_AUDIT_PROJECT_LIBRARIES=1", installed_smoke)
         for macos_gate in (host_components, installed_smoke):

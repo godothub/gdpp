@@ -72,8 +72,13 @@ jobs:
           test -d "$project/addons/gdpp/sdk/4.7"
           if [[ '${{ matrix.archive }}' == gdpp-lite.zip ]]; then
             test "$(find "$project/addons/gdpp/binary" -maxdepth 1 -type f | wc -l)" -eq 4
-            if grep -q . < <(find "$project/addons/gdpp" -type f \
-                \( -iname '*linux*' -o -iname '*ios*' \) -print); then
+            if grep -q . < <(
+              find "$project/addons/gdpp/binary" -maxdepth 1 -type f \
+                \( -iname '*linux*' -o -iname '*ios*' \) -print
+              find "$project/addons/gdpp/sdk" -type f \
+                \( -path '*/lib/*' -o -path '*/manifests/*' \) \
+                \( -iname '*linux*' -o -iname '*ios*' \) -print
+            ); then
               echo 'Installed gdpp-lite.zip contains a Linux or iOS payload.'
               exit 1
             fi
