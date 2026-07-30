@@ -4,8 +4,10 @@
 
 #include <algorithm>
 #include <cctype>
+#include <chrono>
 #include <fstream>
 #include <limits>
+#include <thread>
 #include <unordered_set>
 
 namespace gdpp {
@@ -46,14 +48,38 @@ bool is_editor_temp_library(const std::filesystem::path& path) {
            extension == ".dylib";
 }
 
+bool is_engine_cache_path(const std::filesystem::path& relative) {
+    return starts_with(relative, std::filesystem::path{".godot"});
+}
+
+bool is_stable_engine_cache_entry(const std::filesystem::path& relative) {
+    const std::filesystem::path engine_cache{".godot"};
+    if (relative == engine_cache)
+        return true;
+    if (starts_with(relative, engine_cache / "imported") ||
+        starts_with(relative, engine_cache / "mono"))
+        return true;
+    return relative == engine_cache / ".gdignore" ||
+           relative == engine_cache / "extension_list.cfg" ||
+           relative == engine_cache / "global_script_class_cache.cfg" ||
+           relative == engine_cache / "uid_cache.bin";
+}
+
+bool is_volatile_engine_cache_entry(const std::filesystem::path& relative) {
+    const std::filesystem::path engine_cache{".godot"};
+    return starts_with(relative, engine_cache / "imported") ||
+           starts_with(relative, engine_cache / "mono");
+}
+
+bool is_missing(const std::error_code& error) {
+    return error == std::errc::no_such_file_or_directory;
+}
+
 bool is_reserved_directory(const std::filesystem::path& relative,
                            const std::filesystem::path& source) {
     const auto name = path_to_utf8(relative.filename());
     const std::filesystem::path engine_cache{".godot"};
-    if (
-        name == "__MACOSX" ||
-        (!name.empty() && name.front() == '.' && relative != engine_cache)
-    )
+    if (name == "__MACOSX" || (!name.empty() && name.front() == '.' && relative != engine_cache))
         return true;
     const std::filesystem::path gdpp_root{"addons/gdpp"};
     if (starts_with(relative, gdpp_root / "build") || starts_with(relative, gdpp_root / "sdk"))
@@ -153,9 +179,22 @@ class SnapshotBuilder final {
             const auto name = entry_source.filename();
             const auto entry_relative = relative / name;
             const auto entry_destination = destination / name;
-            if (!is_platform_metadata(entry_relative)) {
+            if (!is_platform_metadata(entry_relative) &&
+                (!is_engine_cache_path(entry_relative) ||
+                 is_stable_engine_cache_entry(entry_relative))) {
                 const auto status = std::filesystem::status(entry_source, error);
                 if (error) {
+                    if (is_missing(error) && is_volatile_engine_cache_entry(entry_relative)) {
+                        error.clear();
+                        iterator.increment(error);
+                        if (error) {
+                            diagnostic_ =
+                                path_error("cannot continue project enumeration", source, error);
+                            leave_directory(source);
+                            return false;
+                        }
+                        continue;
+                    }
                     diagnostic_ = path_error("cannot inspect project entry", entry_source, error);
                     leave_directory(source);
                     return false;
@@ -167,7 +206,7 @@ class SnapshotBuilder final {
                     }
                 } else if (std::filesystem::is_regular_file(status)) {
                     if (!is_editor_temp_library(entry_source) &&
-                        !copy_file(entry_source, entry_destination)) {
+                        !copy_file(entry_source, entry_destination, entry_relative)) {
                         leave_directory(source);
                         return false;
                     }
@@ -189,48 +228,95 @@ class SnapshotBuilder final {
         return true;
     }
 
-    bool copy_file(const std::filesystem::path& source, const std::filesystem::path& destination) {
-        std::error_code error;
-        const auto size_before = std::filesystem::file_size(source, error);
-        if (error) {
-            diagnostic_ = path_error("cannot measure project file", source, error);
-            return false;
+    bool copy_file(const std::filesystem::path& source, const std::filesystem::path& destination,
+                   const std::filesystem::path& relative) {
+        constexpr std::size_t maximum_attempts = 4;
+        const auto temporary = destination.string() + ".gdpp-snapshot-copy";
+        for (std::size_t attempt = 0; attempt < maximum_attempts; ++attempt) {
+            std::error_code error;
+            const auto size_before = std::filesystem::file_size(source, error);
+            if (error) {
+                if (is_missing(error) && is_volatile_engine_cache_entry(relative))
+                    return true;
+                diagnostic_ = path_error("cannot measure project file", source, error);
+                return false;
+            }
+            const auto time_before = std::filesystem::last_write_time(source, error);
+            if (error) {
+                if (is_missing(error) && is_volatile_engine_cache_entry(relative))
+                    return true;
+                diagnostic_ = path_error("cannot inspect project file timestamp", source, error);
+                return false;
+            }
+            std::filesystem::copy_file(source, temporary,
+                                       std::filesystem::copy_options::overwrite_existing, error);
+            if (error) {
+                const auto copy_error = error;
+                std::error_code cleanup_error;
+                std::filesystem::remove(temporary, cleanup_error);
+                if (attempt + 1 < maximum_attempts) {
+                    std::this_thread::sleep_for(std::chrono::milliseconds{5U << attempt});
+                    continue;
+                }
+                if (is_missing(copy_error) && is_volatile_engine_cache_entry(relative))
+                    return true;
+                diagnostic_ =
+                    path_error("cannot copy project file into worker snapshot", source, copy_error);
+                return false;
+            }
+            const auto size_after = std::filesystem::file_size(source, error);
+            if (error) {
+                const auto size_error = error;
+                std::error_code cleanup_error;
+                std::filesystem::remove(temporary, cleanup_error);
+                if (is_missing(size_error) && is_volatile_engine_cache_entry(relative))
+                    return true;
+                diagnostic_ = path_error("cannot remeasure project file", source, size_error);
+                return false;
+            }
+            const auto time_after = std::filesystem::last_write_time(source, error);
+            if (error) {
+                const auto time_error = error;
+                std::error_code cleanup_error;
+                std::filesystem::remove(temporary, cleanup_error);
+                if (is_missing(time_error) && is_volatile_engine_cache_entry(relative))
+                    return true;
+                diagnostic_ =
+                    path_error("cannot recheck project file timestamp", source, time_error);
+                return false;
+            }
+            if (size_before != size_after || time_before != time_after) {
+                std::error_code cleanup_error;
+                std::filesystem::remove(temporary, cleanup_error);
+                if (attempt + 1 < maximum_attempts) {
+                    std::this_thread::sleep_for(std::chrono::milliseconds{5U << attempt});
+                    continue;
+                }
+                diagnostic_ = "project file changed while creating export-worker snapshot: '" +
+                              path_to_utf8(source) + "'";
+                return false;
+            }
+            std::filesystem::rename(temporary, destination, error);
+            if (error) {
+                const auto rename_error = error;
+                std::error_code cleanup_error;
+                std::filesystem::remove(temporary, cleanup_error);
+                diagnostic_ = path_error("cannot commit project file into worker snapshot",
+                                         destination, rename_error);
+                return false;
+            }
+            if (result_.file_count == std::numeric_limits<std::uint64_t>::max() ||
+                size_before > std::numeric_limits<std::uint64_t>::max() - result_.byte_count) {
+                diagnostic_ = "export-worker snapshot accounting overflowed";
+                return false;
+            }
+            ++result_.file_count;
+            result_.byte_count += static_cast<std::uint64_t>(size_before);
+            return true;
         }
-        const auto time_before = std::filesystem::last_write_time(source, error);
-        if (error) {
-            diagnostic_ = path_error("cannot inspect project file timestamp", source, error);
-            return false;
-        }
-        std::filesystem::copy_file(source, destination,
-                                   std::filesystem::copy_options::overwrite_existing, error);
-        if (error) {
-            diagnostic_ =
-                path_error("cannot copy project file into worker snapshot", source, error);
-            return false;
-        }
-        const auto size_after = std::filesystem::file_size(source, error);
-        if (error) {
-            diagnostic_ = path_error("cannot remeasure project file", source, error);
-            return false;
-        }
-        const auto time_after = std::filesystem::last_write_time(source, error);
-        if (error) {
-            diagnostic_ = path_error("cannot recheck project file timestamp", source, error);
-            return false;
-        }
-        if (size_before != size_after || time_before != time_after) {
-            diagnostic_ = "project file changed while creating export-worker snapshot: '" +
-                          path_to_utf8(source) + "'";
-            return false;
-        }
-        if (result_.file_count == std::numeric_limits<std::uint64_t>::max() ||
-            size_before > std::numeric_limits<std::uint64_t>::max() - result_.byte_count) {
-            diagnostic_ = "export-worker snapshot accounting overflowed";
-            return false;
-        }
-        ++result_.file_count;
-        result_.byte_count += static_cast<std::uint64_t>(size_before);
-        return true;
+        diagnostic_ =
+            "cannot create a stable export-worker snapshot of '" + path_to_utf8(source) + "'";
+        return false;
     }
 
     std::filesystem::path source_root_;

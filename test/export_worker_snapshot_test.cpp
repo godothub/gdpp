@@ -2,10 +2,12 @@
 
 #include "gdpp/project/export_worker_snapshot.hpp"
 
+#include <atomic>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
 #include <string>
+#include <thread>
 
 namespace {
 
@@ -39,6 +41,13 @@ TEST_CASE("export worker snapshot physically isolates project and extension file
     write_snapshot_file(root / ".godot/.gdignore", "");
     write_snapshot_file(root / ".godot/extension_list.cfg",
                         "res://addons/vendor/vendor.gdextension\n");
+    write_snapshot_file(root / ".godot/global_script_class_cache.cfg", "list=[]\n");
+    write_snapshot_file(root / ".godot/uid_cache.bin", "uid-cache");
+    write_snapshot_file(root / ".godot/imported/texture.ctex", "imported-texture");
+    write_snapshot_file(root / ".godot/mono/temp/bin/provider.dll", "managed-provider");
+    write_snapshot_file(root / ".godot/editor/filesystem_cache10", "volatile-editor-cache");
+    write_snapshot_file(root / ".godot/exported/123/main.scn", "volatile-export-cache");
+    write_snapshot_file(root / ".godot/shader_cache/cache.bin", "volatile-shader-cache");
     write_snapshot_file(root / ".git/config", "repository");
     write_snapshot_file(root / ".hidden/private.txt", "hidden");
     write_snapshot_file(root / "generated/.gdignore", "");
@@ -58,6 +67,13 @@ TEST_CASE("export worker snapshot physically isolates project and extension file
     REQUIRE(std::filesystem::is_regular_file(snapshot / "addons/vendor/vendor.gdextension"));
     REQUIRE(std::filesystem::is_regular_file(snapshot / "addons/vendor/bin/vendor.dll"));
     REQUIRE(std::filesystem::is_regular_file(snapshot / ".godot/extension_list.cfg"));
+    REQUIRE(std::filesystem::is_regular_file(snapshot / ".godot/global_script_class_cache.cfg"));
+    REQUIRE(std::filesystem::is_regular_file(snapshot / ".godot/uid_cache.bin"));
+    REQUIRE(std::filesystem::is_regular_file(snapshot / ".godot/imported/texture.ctex"));
+    REQUIRE(std::filesystem::is_regular_file(snapshot / ".godot/mono/temp/bin/provider.dll"));
+    REQUIRE(!std::filesystem::exists(snapshot / ".godot/editor"));
+    REQUIRE(!std::filesystem::exists(snapshot / ".godot/exported"));
+    REQUIRE(!std::filesystem::exists(snapshot / ".godot/shader_cache"));
     REQUIRE(!std::filesystem::exists(snapshot / "addons/vendor/bin/~vendor.dll"));
     REQUIRE(!std::filesystem::exists(snapshot / ".git"));
     REQUIRE(!std::filesystem::exists(snapshot / ".hidden"));
@@ -69,6 +85,42 @@ TEST_CASE("export worker snapshot physically isolates project and extension file
     write_snapshot_file(snapshot / "addons/vendor/bin/vendor.dll", "worker-change");
     REQUIRE_EQ(read_snapshot_file(root / "addons/vendor/bin/vendor.dll"),
                std::string{"native-library"});
+    std::filesystem::remove_all(root, error);
+}
+
+TEST_CASE("export worker snapshot ignores concurrently changing editor caches") {
+    const auto root = snapshot_fixture("export-worker-volatile-editor-cache");
+    const auto snapshot = root / "addons/gdpp/build/project/export-worker/transaction/project";
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
+    write_snapshot_file(root / "project.godot", "[application]\nconfig/name=\"snapshot\"\n");
+    write_snapshot_file(root / "scenes/main.tscn", "[gd_scene]\n");
+    write_snapshot_file(root / ".godot/.gdignore", "");
+    write_snapshot_file(root / ".godot/extension_list.cfg", "");
+    write_snapshot_file(root / ".godot/editor/volatile.cfg", "initial");
+
+    std::atomic_bool stop{false};
+    std::thread mutator{[&] {
+        std::uint64_t revision = 0;
+        while (!stop.load(std::memory_order_relaxed)) {
+            write_snapshot_file(root / ".godot/editor/volatile.cfg",
+                                "revision-" + std::to_string(revision++));
+            std::filesystem::remove(root / ".godot/editor/volatile.cfg", error);
+        }
+    }};
+
+    bool successful = true;
+    for (std::size_t iteration = 0; iteration < 16; ++iteration) {
+        const auto result = gdpp::create_export_worker_snapshot(root, snapshot);
+        successful = successful && result.success;
+        successful = successful && !std::filesystem::exists(snapshot / ".godot/editor");
+    }
+    stop.store(true, std::memory_order_relaxed);
+    mutator.join();
+
+    REQUIRE(successful);
+    REQUIRE(std::filesystem::is_regular_file(snapshot / "project.godot"));
+    REQUIRE(std::filesystem::is_regular_file(snapshot / ".godot/extension_list.cfg"));
     std::filesystem::remove_all(root, error);
 }
 
