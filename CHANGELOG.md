@@ -1,5 +1,6 @@
 ## 1.8.4
 
+- Add `gdpp-lite.zip` for Godot 4.6-4.7 with macOS and Windows editor/desktop export support plus Android and Web, excluding Linux and iOS payloads.
 - Isolate export workers from volatile Godot editor, export, and shader caches; copy only required import and script metadata through bounded consistency checks and atomic commits so repeated AOT exports remain stable during concurrent cache updates.
 
 ## 1.8.3
