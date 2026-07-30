@@ -8,7 +8,7 @@ permissions:
 
 jobs:
   desktop:
-    name: Installed gdpp.zip / ${{ matrix.platform_host }} / Godot 4.7.1
+    name: Installed ${{ matrix.archive }} / ${{ matrix.platform_host }} / Godot 4.7.1
     runs-on: ${{ matrix.os }}
     timeout-minutes: 90
     strategy:
@@ -18,12 +18,23 @@ jobs:
           - platform_host: mac
             os: macos-15
             preset: macOS Universal
+            archive: gdpp.zip
           - platform_host: linux
             os: ubuntu-22.04
             preset: Linux x86_64
+            archive: gdpp.zip
           - platform_host: win
             os: windows-2025
             preset: Windows x86_64
+            archive: gdpp.zip
+          - platform_host: mac-lite
+            os: macos-15
+            preset: macOS Universal
+            archive: gdpp-lite.zip
+          - platform_host: win-lite
+            os: windows-2025
+            preset: Windows x86_64
+            archive: gdpp-lite.zip
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
       - name: Initialize the MSVC x64 toolchain
@@ -47,7 +58,7 @@ jobs:
           set -euo pipefail
           root="$GITHUB_WORKSPACE/build/release-package-smoke"
           project="$root/project"
-          archive="$root/archive/gdpp.zip"
+          archive="$root/archive/${{ matrix.archive }}"
           test -f "$archive"
           rm -rf "$project"
           cp -R example "$project"
@@ -59,6 +70,24 @@ jobs:
             -type d | wc -l)" -eq 2
           test -d "$project/addons/gdpp/sdk/4.6"
           test -d "$project/addons/gdpp/sdk/4.7"
+          if [[ '${{ matrix.archive }}' == gdpp-lite.zip ]]; then
+            test "$(find "$project/addons/gdpp/binary" -maxdepth 1 -type f | wc -l)" -eq 4
+            if grep -q . < <(find "$project/addons/gdpp" -type f \
+                \( -iname '*linux*' -o -iname '*ios*' \) -print); then
+              echo 'Installed gdpp-lite.zip contains a Linux or iOS payload.'
+              exit 1
+            fi
+            for godot in 4.6 4.7; do
+              test "$(find "$project/addons/gdpp/sdk/$godot/lib" \
+                -maxdepth 1 -type f | wc -l)" -eq 5
+              test "$(find "$project/addons/gdpp/sdk/$godot/manifests" \
+                -maxdepth 1 -type f | wc -l)" -eq 5
+            done
+            grep -q '^editor_hosts macos-universal,windows-x86_64$' \
+              "$project/addons/gdpp/PACKAGE_MANIFEST.txt"
+            grep -q '^export_targets macos-universal,windows-x64,android-arm64,web-wasm32-nothreads,web-wasm32-threads$' \
+              "$project/addons/gdpp/PACKAGE_MANIFEST.txt"
+          fi
       - name: Import, export, run and audit the installed package
         shell: bash
         env:

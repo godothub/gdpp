@@ -89,10 +89,18 @@ fail_check("release-package-smoke.yml cannot run without assembled package artif
   package_smoke_triggers.key?("workflow_dispatch")
 smoke_matrix = package_smoke_workflow.fetch("jobs").fetch("desktop")
   .fetch("strategy").fetch("matrix").fetch("include")
-smoke_systems = smoke_matrix.map { |entry| entry.fetch("os") }.sort
-expected_smoke_systems = ["macos-15", "ubuntu-22.04", "windows-2025"].sort
-fail_check("installed package smoke must cover macOS, Linux, and Windows") unless
-  smoke_systems == expected_smoke_systems
+smoke_pairs = smoke_matrix.map do |entry|
+  [entry.fetch("archive"), entry.fetch("os")]
+end.sort
+expected_smoke_pairs = [
+  ["gdpp.zip", "macos-15"],
+  ["gdpp.zip", "ubuntu-22.04"],
+  ["gdpp.zip", "windows-2025"],
+  ["gdpp-lite.zip", "macos-15"],
+  ["gdpp-lite.zip", "windows-2025"],
+].sort
+fail_check("installed package smoke matrix is incomplete") unless
+  smoke_pairs == expected_smoke_pairs
 
 package_smoke_job = release_jobs.fetch("package-smoke")
 fail_check("package-smoke must invoke release-package-smoke.yml") unless
