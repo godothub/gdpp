@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fixture tests for the two multi-host release packages."""
+"""Fixture tests for the multi-host release package editions."""
 
 from __future__ import annotations
 
@@ -254,29 +254,58 @@ class ReleasePackagingTest(unittest.TestCase):
         self.assertIn('--version "$version"', workflow)
         self.assertNotRegex(workflow, r"--version [0-9]+\\.[0-9]+\\.[0-9]+")
 
-    def test_two_multi_host_packages_contain_their_exact_version_ranges(self) -> None:
+    def test_multi_host_packages_contain_their_exact_capability_matrices(self) -> None:
         expected_names = {
-            "standard": ("gdpp", ("4.6", "4.7")),
-            "all": ("gdpp-all", ("4.4", "4.5", "4.6", "4.7")),
+            "standard": (
+                "gdpp",
+                ("4.6", "4.7"),
+                ("mac-universal", "linux-x64", "windows-x64"),
+                True,
+            ),
+            "all": (
+                "gdpp-all",
+                ("4.4", "4.5", "4.6", "4.7"),
+                ("mac-universal", "linux-x64", "windows-x64"),
+                True,
+            ),
+            "lite": (
+                "gdpp-lite",
+                ("4.6", "4.7"),
+                ("mac-universal", "windows-x64"),
+                False,
+            ),
         }
-        expected_binaries = {
-            filename
-            for host in package_release.HOSTS.values()
-            for filename in (host.compiler_library, host.fallback_library)
-        }
-        expected_manifests = {
-            *(f"{host.platform}.{host.architecture}.sdk.manifest"
-              for host in package_release.HOSTS.values()),
-            "android.arm64.sdk.manifest",
-            "ios.arm64.sdk.manifest",
-            "web.wasm32.nothreads.sdk.manifest",
-            "web.wasm32.threads.sdk.manifest",
-        }
-        for package_name, (expected_archive, expected_versions) in expected_names.items():
+        for package_name, (
+            expected_archive,
+            expected_versions,
+            expected_hosts,
+            includes_ios,
+        ) in expected_names.items():
             with self.subTest(package=package_name):
                 stage, archive_name = self.stage(package_name)
                 self.assertEqual(archive_name, expected_archive)
                 addon = stage / "addons" / "gdpp"
+                expected_binaries = {
+                    filename
+                    for host in (
+                        package_release.HOSTS[name] for name in expected_hosts
+                    )
+                    for filename in (host.compiler_library, host.fallback_library)
+                }
+                expected_manifests = {
+                    *(f"{host.platform}.{host.architecture}.sdk.manifest"
+                      for host in (
+                          package_release.HOSTS[name] for name in expected_hosts
+                      )),
+                    "android.arm64.sdk.manifest",
+                    *(
+                        ("ios.arm64.sdk.manifest",)
+                        if includes_ios
+                        else ()
+                    ),
+                    "web.wasm32.nothreads.sdk.manifest",
+                    "web.wasm32.threads.sdk.manifest",
+                }
                 self.assertEqual(
                     {path.name for path in (addon / "binary").iterdir()},
                     expected_binaries,
@@ -293,7 +322,10 @@ class ReleasePackagingTest(unittest.TestCase):
                         {path.name for path in manifests.iterdir() if path.is_file()},
                         expected_manifests,
                     )
-                    self.assertEqual(len(list((sdk / "lib").iterdir())), 8)
+                    self.assertEqual(
+                        len(list((sdk / "lib").iterdir())),
+                        8 if includes_ios else 5,
+                    )
                     for retired in ("android", "ios", "web", "macos", "linux", "windows"):
                         self.assertFalse((sdk / retired).exists())
                 manifest = (addon / "PACKAGE_MANIFEST.txt").read_text(encoding="utf-8")
@@ -306,10 +338,38 @@ class ReleasePackagingTest(unittest.TestCase):
                     manifest,
                 )
                 self.assertIn(
-                    "editor_hosts macos-universal,linux-x86_64,windows-x86_64",
+                    "editor_hosts "
+                    + ",".join(
+                        f"{package_release.HOSTS[name].platform}-"
+                        f"{package_release.HOSTS[name].architecture}"
+                        for name in expected_hosts
+                    ),
                     manifest,
                 )
                 self.assertIn("sdk_layout shared-target-manifests", manifest)
+                self.assertEqual(
+                    manifest,
+                    package_platform_release.release_package_manifest(
+                        package_name, "1.7.10"
+                    ),
+                )
+
+    def test_lite_package_has_no_linux_or_ios_input_dependency(self) -> None:
+        shutil.rmtree(self.components / "gdpp-host-linux-x64")
+        for godot_version in package_release.SUPPORTED_GODOT_VERSIONS:
+            shutil.rmtree(self.components / f"gdpp-ios-godot-{godot_version}")
+        stage, archive_name = self.stage("lite")
+        self.assertEqual(archive_name, "gdpp-lite")
+        addon = stage / "addons" / "gdpp"
+        names = {
+            path.relative_to(addon).as_posix()
+            for path in addon.rglob("*")
+            if path.is_file()
+        }
+        self.assertFalse(any("linux" in name or "ios" in name for name in names))
+        manifest = (addon / "PACKAGE_MANIFEST.txt").read_text(encoding="utf-8")
+        self.assertNotIn("linux", manifest)
+        self.assertNotIn("ios", manifest)
 
     def test_zip_is_reproducible_and_contains_no_nested_or_debug_products(self) -> None:
         stage, archive_name = self.stage("standard")
@@ -431,14 +491,14 @@ class ReleasePackagingTest(unittest.TestCase):
                 "standard",
             )
 
-    def test_release_workflow_declares_only_the_two_multi_host_archives(self) -> None:
+    def test_release_workflow_declares_only_the_three_multi_host_archives(self) -> None:
         workflow_root = SOURCE_ROOT / ".github/workflows"
         orchestrator = (workflow_root / "release.yml").read_text(encoding="utf-8")
         host_components = (workflow_root / "host-components.yml").read_text(
             encoding="utf-8"
         )
         packages = (workflow_root / "package-release.yml").read_text(encoding="utf-8")
-        for archive in ("gdpp.zip", "gdpp-all.zip"):
+        for archive in ("gdpp.zip", "gdpp-all.zip", "gdpp-lite.zip"):
             self.assertIn(archive, packages)
         for retired in ("gdpp-mac.zip", "gdpp-linux.zip", "gdpp-win.zip"):
             self.assertNotIn(retired, packages)
