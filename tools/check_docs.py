@@ -137,13 +137,14 @@ def source_contracts() -> tuple[str, tuple[str, ...], tuple[str, ...], int, int]
     archives = tuple(
         f"{name}.zip"
         for name in re.findall(
-            r'ReleasePackage\("(gdpp(?:-all)?)",',
+            r'ReleasePackage\(\s*"(gdpp(?:-all|-lite)?)",',
             platform_packaging,
         )
     )
-    if archives != ("gdpp.zip", "gdpp-all.zip"):
+    if archives != ("gdpp.zip", "gdpp-all.zip", "gdpp-lite.zip"):
         raise ValueError(
-            "tools/package_platform_release.py must define gdpp.zip and gdpp-all.zip"
+            "tools/package_platform_release.py must define gdpp.zip, gdpp-all.zip, "
+            "and gdpp-lite.zip"
         )
     return version, cmake_versions, archives, schema, runtime_abi
 
