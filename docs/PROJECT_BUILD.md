@@ -2,9 +2,9 @@
 
 ## 用户需要什么
 
-正式插件包已经包含三种桌面 compiler、GDPP runtime、生成所需头文件和所选 Godot 版本的
-`template_release` 静态绑定。客户不需要 CMake、Ninja、Python、SCons，也不需要自行构建
-godot-cpp。
+正式完整插件包已经包含三种桌面 compiler、GDPP runtime、生成所需头文件和所选 Godot 版本的
+`template_release` 静态绑定；lite 包移除 Linux 和 iOS，保留 macOS、Windows、Android 与 Web。
+客户不需要 CMake、Ninja、Python、SCons，也不需要自行构建 godot-cpp。
 
 客户只需要 Godot 和目标平台工具链：
 
@@ -37,11 +37,9 @@ project/
 
 ZIP 外层包含 `addons/gdpp`，不需要手工移动文件。然后在 Godot 的插件设置中启用 GDPP。
 
-两个发布包都包含 macOS Universal 2、Linux x86_64 和 Windows x86_64 编辑器插件，以及全部
-支持的桌面、Android、iOS 和 Web 导出 SDK：
-
-- `gdpp.zip`：Godot 4.6、4.7；
-- `gdpp-all.zip`：Godot 4.4、4.5、4.6、4.7。
+- `gdpp.zip`：Godot 4.6、4.7；包含 macOS Universal 2、Linux x86_64、Windows x86_64 编辑器及全部支持的桌面、Android、iOS、Web 导出 SDK；
+- `gdpp-all.zip`：平台能力与 `gdpp.zip` 相同，包含 Godot 4.4、4.5、4.6、4.7；
+- `gdpp-lite.zip`：Godot 4.6、4.7；包含 macOS Universal 2、Windows x86_64 编辑器与桌面导出及 Android、Web 导出 SDK，不包含 Linux、iOS 载荷。
 
 ## 项目设置
 

@@ -55,7 +55,7 @@ runtime ABI、API 版本、平台、架构、profile 或 binding 摘要任一不
 
 ## 官方 API 之外的边界
 
-两个多宿主正式包认证官方标准精度 Godot 与包内匹配的 godot-cpp。下列情况不能直接复用标准 SDK：
+三个多宿主正式包认证官方标准精度 Godot 与包内匹配的 godot-cpp。下列情况不能直接复用标准 SDK：
 
 - `precision=double` 的自定义引擎；
 - 修改过 `extension_api.json` 或 GDExtension ABI 的引擎；

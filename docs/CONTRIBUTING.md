@@ -75,7 +75,7 @@ ruby tools/check_workflow_topology.rb
 文档检查会验证：
 
 - 产品版本、Godot 版本矩阵、SDK schema 与 runtime ABI；
-- 两个多宿主发行包和当前项目库命名；
+- 三个多宿主发行包和当前项目库命名；
 - 相对链接、必需文档集合和过时状态语句；
 - 客户标识没有进入公开工程文档；
 - release 工作流默认版本与产品版本一致。

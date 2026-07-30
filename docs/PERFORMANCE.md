@@ -176,10 +176,11 @@ N 个生成/运行时翻译单元
 | `gdpp-mac.zip` | 286,613,715 |
 | `gdpp-win.zip` | 208,711,578 |
 
-当前流水线不再发布这三个宿主专用包，而是生成包含 4.6～4.7 的 `gdpp.zip` 和包含 4.4～4.7
-的 `gdpp-all.zip`。两者都合并三种桌面编辑器和全部导出 SDK，公共头文件/runtime 每个 Godot
-版本只保留一份；每个平台/模式也只保留一份 `template_release`，不包含 template_debug/editor
-静态绑定。
+当前流水线不再发布这三个宿主专用包，而是生成包含 4.6～4.7 的 `gdpp.zip`、包含 4.4～4.7
+的 `gdpp-all.zip`，以及包含 4.6～4.7 且移除 Linux/iOS 载荷的 `gdpp-lite.zip`。完整包合并三种
+桌面编辑器和全部导出 SDK，lite 包保留 macOS、Windows、Android 与 Web；公共头文件/runtime
+每个 Godot 版本只保留一份，每个平台/模式也只保留一份 `template_release`，不包含
+template_debug/editor 静态绑定。
 
 最终游戏不会携带这些 SDK，因此插件 ZIP 大小不能作为游戏包大小。
 

@@ -15,7 +15,8 @@ Apple Silicon 模拟器 arm64 和 Intel 模拟器 x86_64 三种切片。
   选中的有效 Developer 目录；因此“插件可在 macOS 11.0 加载”不等于“macOS 11.0 可以安装
   当前 Xcode 并执行 iOS 导出”；
 - `gdpp.zip`（Godot 4.6～4.7）或 `gdpp-all.zip`（Godot 4.4～4.7）；两个包都包含 macOS
-  Universal 2 编辑器插件及 iOS、桌面、Android 与 Web release SDK；
+  Universal 2 编辑器插件及 iOS、桌面、Android 与 Web release SDK；`gdpp-lite.zip` 不包含
+  iOS 导出支持；
 - 已安装对应 Godot iOS 导出模板；
 - 真机或 App Store 导出所需的 Apple Developer Team、Bundle ID、证书和描述文件。
 

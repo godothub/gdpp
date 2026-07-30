@@ -9,7 +9,7 @@
 | 最近正式发布运行 | 1.8.3 / `https://github.com/abandoft/gdpp/actions/runs/30487659776` |
 | 1.8.3 发布状态 | 已发布；正式发布门禁成功 |
 | 1.8.3 已发布资产 | `gdpp.zip`、`gdpp-all.zip`、`SHA256SUMS` |
-| 当前目标发行资产 | `gdpp.zip`、`gdpp-all.zip`、`SHA256SUMS` |
+| 当前目标发行资产 | `gdpp.zip`、`gdpp-all.zip`、`gdpp-lite.zip`、`SHA256SUMS` |
 | 本地编译器单元测试 | 621 / 621 |
 
 本报告只描述可重复证据。内部商业语料和客户项目不按名称公开；它们只能补充发现问题，不能替代
@@ -117,8 +117,9 @@ preset 注册，Godot editor 服务只在 plugin preset 注册；这里的 CTest
 | Windows | 4.4～4.7 x86_64 SDK + compiler | 官方 Godot 4.7.1 | MSVC、Windows 10、静态 CRT |
 
 三端均从 host component 实际导出、运行普通 oracle和 4996 项协程循环 oracle。默认
-`gdpp.zip` 还会分别在 macOS、Linux、Windows 安装到全新工程，再重复导入、导出、运行、库唯一性和 PCK 审计；这能发现
-“构建目录可用但发行包缺文件”的问题。
+`gdpp.zip` 还会分别在 macOS、Linux、Windows 安装到全新工程，`gdpp-lite.zip` 会在 macOS、
+Windows 执行相同流程；两者都会重复导入、导出、运行、库唯一性和 PCK 审计，以发现“构建目录
+可用但发行包缺文件”的问题。
 
 Windows compiler 还必须在未调用 `gdpp_library_init` 时通过 `LoadLibraryExW`，暴露正确入口后
 可由 `FreeLibrary` 卸载。该门禁专门阻止包含 Godot 对象的静态/TLS 构造在 godot-cpp 取得引擎

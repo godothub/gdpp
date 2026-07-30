@@ -24,10 +24,7 @@ Firefox、移动浏览器和真实 CDN 尚未形成认证矩阵，不能由 Chro
 
 ## 安装布局
 
-`gdpp.zip` 和 `gdpp-all.zip` 都包含 Web release SDK 及三种桌面编辑器插件。用户将所需版本
-范围的 ZIP 解压到项目根目录，形成 `addons/gdpp/`，不需要再下载 Web target pack。SDK 同时
-携带 threads 与 nothreads 的 Release 静态 binding，不携带预构建的客户项目 Wasm；一次导出只
-生成与当前预设线程模式匹配的一个项目 side module。
+`gdpp.zip`、`gdpp-all.zip` 和 `gdpp-lite.zip` 都包含 Web release SDK；前两个包含三种桌面编辑器插件，lite 包只包含 macOS 和 Windows 编辑器插件。用户将所需版本范围的 ZIP 解压到项目根目录，形成 `addons/gdpp/`，不需要再下载 Web target pack。SDK 同时携带 threads 与 nothreads 的 Release 静态 binding，不携带预构建的客户项目 Wasm；一次导出只生成与当前预设线程模式匹配的一个项目 side module。
 
 每个 Godot 版本的 Web 文件与三种桌面、Android、iOS 文件共用 SDK 根：
 
