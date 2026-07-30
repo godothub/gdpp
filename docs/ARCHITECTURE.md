@@ -198,7 +198,7 @@ ProjectCompiler 后台只消费快照，不访问实时 ClassDB。离线 CLI 可
 ## NativeBuilder
 
 客户导出不调用 CMake、Ninja、Python 或 SCons。NativeBuilder 验证 SDK schema 12/runtime
-ABI 22 后，直接生成系统工具链命令：
+ABI 23 后，直接生成系统工具链命令：
 
 - Windows：MSVC/Windows SDK、x86_64、静态 CRT；
 - macOS：AppleClang、arm64/x86_64/Universal 2；

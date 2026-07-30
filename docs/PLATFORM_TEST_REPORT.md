@@ -4,24 +4,24 @@
 
 | 项目 | 值 |
 |---|---|
-| GDPP | 1.8.3 |
-| 功能审计范围 | 1.8.3 当前发布候选 |
-| 最近正式发布运行 | 1.8.2 / `https://github.com/abandoft/gdpp/actions/runs/30311849463` |
-| 1.8.2 发布状态 | 已发布；48 个正式发布作业全部成功 |
-| 1.8.2 已发布资产 | `gdpp-mac.zip`、`gdpp-linux.zip`、`gdpp-win.zip`、`SHA256SUMS` |
+| GDPP | 1.8.4 |
+| 功能审计范围 | 1.8.4 当前发布候选 |
+| 最近正式发布运行 | 1.8.3 / `https://github.com/abandoft/gdpp/actions/runs/30487659776` |
+| 1.8.3 发布状态 | 已发布；正式发布门禁成功 |
+| 1.8.3 已发布资产 | `gdpp.zip`、`gdpp-all.zip`、`SHA256SUMS` |
 | 当前目标发行资产 | `gdpp.zip`、`gdpp-all.zip`、`SHA256SUMS` |
-| 本地编译器单元测试 | 560 / 560 |
+| 本地编译器单元测试 | 621 / 621 |
 
 本报告只描述可重复证据。内部商业语料和客户项目不按名称公开；它们只能补充发现问题，不能替代
 产品级 fixture 与 CI。
 
-## 1.8.3 发布前本地验证
+## 1.8.4 发布前本地验证
 
 | 门禁 | 结果 |
 |---|---|
-| 开发 core CTest | 24 项发布前合同 |
-| 开发 plugin CTest | 24 项发布前合同 |
-| 编译器单元 | 560 / 560 |
+| 开发 core CTest | 23 项发布前合同 |
+| 开发 plugin CTest | 25 项发布前合同 |
+| 编译器单元 | 621 / 621 |
 | godot-cpp SDK | macOS 上完整重建 4.4、4.5、4.6、4.7 `template_release` |
 | 官方 Godot 4.7.1 直接构建 | 当前 compiler 生成、顺序编译并链接真实客户项目库成功 |
 | 官方 Godot 4.7.1 AOT runtime | 重新生成 Universal 2 成品后，arm64 与 Rosetta x86_64 的 FunctionState、异步虚函数、协程 lambda、await 默认参数、协程访问器、Callable/Signal、全 Variant fault 和项目脚本生命周期成功 |
@@ -30,7 +30,7 @@
 | 官方 Godot 4.5.2 AOT runtime | Universal 2 Release 导出后连续独立运行 10 次；动态 Script、Attached provider 与真实多 peer RPC 全部干净退出 |
 | custom/double add-on | 4.7 double 从精确 API 干净构建；compiler、SDK、descriptor、静态库和 manifest 审计成功 |
 | Windows DLL 装载边界 | Windows 11 / MSVC 19.50 同机探针对未修复 compiler 复现 `LoadLibraryExW` 1114，对当前 compiler 验证装载、`gdpp_library_init` 导出和卸载均成功 |
-| 官方 Godot 4.6.1 Windows 客户流程 | 清缓存安装、导入、Release AOT、原生编译、链接、导出及成品独立运行成功；嵌套终止分支不再误报 `GDS5118` |
+| 官方 Godot 4.6.1 Windows 客户流程 | 清缓存安装、导入、Release AOT、原生编译、链接、首次及重复导出、成品独立运行成功；工作副本不再复制并发变化的编辑器缓存 |
 | Windows 回环协议 | HTTP/WebSocket/protobuf、双礼物平台、远程头像、扩展事件、97 包突发、正常关闭与损坏消息均退出 0；对象池总数保持 5000 |
 | Windows 成品 PCK | 373 个文件、42 个资源可加载、1 个项目库、0 个源码/SDK/compiler/中间产物违规 |
 | 官方 Godot 4.6.2 Release | Universal 2 Attached provider 导出、独立运行成功 |
@@ -72,16 +72,16 @@ String、Variant 的 AOT mean 相对 GDScript 分别为 -38.57%、-6.87%、-28.7
 
 | 门禁 | 环境 | 验证 |
 |---|---|---|
-| Compiler core | Ubuntu 22.04、macOS 15、Windows 2025 | C++17、严格 warning、560 项单元 |
+| Compiler core | Ubuntu 22.04、macOS 15、Windows 2025 | C++17、严格 warning、621 项单元 |
 | ASan | Ubuntu 22.04 | 地址错误和 leak 阻断 |
 | UBSan | Ubuntu 22.04 | 未定义行为阻断 |
 | TSan | Ubuntu 22.04 | 线程数据竞争阻断 |
 | Native plugin | 三桌面 runner | compiler GDExtension、SDK、直接项目构建、进度模型；Windows 另验证 ABI 前 DLL 装载/卸载 |
 | Quality | Ubuntu 24.04 | 架构、格式、workflow、固定 Action SHA、Node.js 24 MSVC action |
 
-开发 core CTest 当前 24 项；启用 plugin 的本地 CTest 当前 24 项。部分兼容语料只在 core
+开发 core CTest 当前 23 项；启用 plugin 的本地 CTest 当前 25 项。部分兼容语料只在 core
 preset 注册，Godot editor 服务只在 plugin preset 注册；这里的 CTest 项目会各自运行大量内部
-断言，不能把“24 项 CTest”误写成“只有 24 个测试”。
+断言，不能把 CTest 项目数误写成编译器断言总数。
 
 ### Godot 版本
 

@@ -1,3 +1,7 @@
+## 1.8.4
+
+- Isolate export workers from volatile Godot editor, export, and shader caches; copy only required import and script metadata through bounded consistency checks and atomic commits so repeated AOT exports remain stable during concurrent cache updates.
+
 ## 1.8.3
 
 - Replace host-specific archives with `gdpp.zip` for Godot 4.6-4.7 and `gdpp-all.zip` for 4.4-4.7; both contain all three desktop editor plugins and every supported export SDK.
