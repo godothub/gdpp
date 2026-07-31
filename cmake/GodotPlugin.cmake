@@ -900,6 +900,9 @@ if(GDPP_BUILD_TESTS)
         COMMAND "${CMAKE_COMMAND}" -E copy_if_different
                 "$<TARGET_FILE:gdpp_godot_plugin>"
                 "${GDPP_ATTACHED_TEST_ROOT}/addons/gdpp/binary/$<TARGET_FILE_NAME:gdpp_godot_plugin>"
+        COMMAND "${CMAKE_COMMAND}" -E copy_directory
+                "${GDPP_ADDON_DIRECTORY}/tools"
+                "${GDPP_ATTACHED_TEST_ROOT}/addons/gdpp/tools"
         COMMAND "${CMAKE_COMMAND}" -E make_directory
                 "${GDPP_ATTACHED_TEST_ROOT}/addons/gdpp/sdk"
         COMMAND "${CMAKE_COMMAND}" -E touch

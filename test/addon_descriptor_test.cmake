@@ -236,6 +236,18 @@ foreach(required_ninja_build_contract IN ITEMS
             "${required_ninja_build_contract}")
     endif()
 endforeach()
+foreach(required_fixture_ninja_contract IN ITEMS
+        "\"\${GDPP_ADDON_DIRECTORY}/tools\""
+        "\"\${GDPP_ATTACHED_TEST_ROOT}/addons/gdpp/tools\""
+        "DEPENDS gdpp_addon gdpp_test_vendor gdpp_test_vendor_release")
+    string(FIND "${godot_plugin_build}" "${required_fixture_ninja_contract}"
+        fixture_ninja_offset)
+    if(fixture_ninja_offset EQUAL -1)
+        message(FATAL_ERROR
+            "Independent GDExtension fixture does not install the bundled Ninja payload: "
+            "${required_fixture_ninja_contract}")
+    endif()
+endforeach()
 string(FIND "${compiler_service}" "build_commands" legacy_command_plan_offset)
 if(NOT legacy_command_plan_offset EQUAL -1)
     message(FATAL_ERROR
