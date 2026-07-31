@@ -675,7 +675,7 @@ void append_android_target_arguments(std::vector<std::string>& arguments,
     const auto triple =
         options.architecture == "arm64" ? "aarch64-linux-android" : "x86_64-linux-android";
     // Keep this baseline aligned with the packaged Android godot-cpp SDK and the documented
-    // Android 9 minimum. A single fixed value keeps object-cache signatures deterministic.
+    // Android 9 minimum. A single fixed value keeps Ninja command signatures deterministic.
     arguments.push_back("--target=" + std::string{triple} + "28");
 }
 
@@ -1103,9 +1103,8 @@ std::string sanitized_description(std::string value) {
 
 std::optional<std::vector<std::filesystem::path>>
 write_ninja_command_file(const NativeBuildOptions& options,
-                         const std::filesystem::path& command_directory,
-                         const std::size_t index, NativeBuildCommand& command,
-                         std::vector<std::string> extra_arguments,
+                         const std::filesystem::path& command_directory, const std::size_t index,
+                         NativeBuildCommand& command, std::vector<std::string> extra_arguments,
                          std::string& invocation) {
     auto arguments = command.arguments;
     arguments.insert(arguments.end(), std::make_move_iterator(extra_arguments.begin()),
@@ -1124,18 +1123,18 @@ write_ninja_command_file(const NativeBuildOptions& options,
     const bool written =
         options.platform == NativePlatform::windows
             ? write_msvc_compiler_response_file(response, arguments)
-            : write_file_if_changed(
-                  response, [&]() {
-                      std::string content;
-                      for (const auto& argument : arguments)
-                          content += quote_response_argument(argument) + "\n";
-                      return content;
-                  }())
+            : write_file_if_changed(response,
+                                    [&]() {
+                                        std::string content;
+                                        for (const auto& argument : arguments)
+                                            content += quote_response_argument(argument) + "\n";
+                                        return content;
+                                    }())
                   .has_value();
     if (!written)
         return std::nullopt;
-    invocation = windows_command_invocation(
-        command.executable, {"@" + generic_path_to_utf8(response)});
+    invocation =
+        windows_command_invocation(command.executable, {"@" + generic_path_to_utf8(response)});
     return std::vector<std::filesystem::path>{response};
 #else
     (void)options;
@@ -1156,8 +1155,7 @@ write_ninja_command_file(const NativeBuildOptions& options,
 #endif
 }
 
-bool write_ninja_graph(const NativeBuildOptions& options,
-                       const std::filesystem::path& native,
+bool write_ninja_graph(const NativeBuildOptions& options, const std::filesystem::path& native,
                        std::vector<NinjaBuildEdge> edges,
                        const std::vector<std::filesystem::path>& final_outputs,
                        NativeBuildPlan& plan) {
@@ -1206,10 +1204,9 @@ bool write_ninja_graph(const NativeBuildOptions& options,
             if (options.platform == NativePlatform::windows) {
                 dependency_arguments.emplace_back("/showIncludes");
             } else {
-                dependency_arguments.insert(
-                    dependency_arguments.end(),
-                    {"-MMD", "-MF", path_to_utf8(edge.depfile), "-MT",
-                     path_to_utf8(edge.outputs.front())});
+                dependency_arguments.insert(dependency_arguments.end(),
+                                            {"-MMD", "-MF", path_to_utf8(edge.depfile), "-MT",
+                                             path_to_utf8(edge.outputs.front())});
             }
         }
         std::string invocation;
@@ -1610,8 +1607,7 @@ NativeBuildPlan NativeBuilder::plan(const NativeBuildOptions& options) const {
                 build_configuration_contents +=
                     "compiler_resolved " + path_to_utf8(*compiler) + "\ncompiler_size " +
                     std::to_string(size) + "\ncompiler_modified " +
-                    std::to_string(
-                        static_cast<std::int64_t>(modified.time_since_epoch().count())) +
+                    std::to_string(static_cast<std::int64_t>(modified.time_since_epoch().count())) +
                     "\n";
             }
         }
@@ -1704,13 +1700,12 @@ NativeBuildPlan NativeBuilder::plan(const NativeBuildOptions& options) const {
                 auto inputs = common_compile_inputs;
                 inputs.push_back(source);
                 auto command = ios_compile_command(options, slice, source, object, includes);
-                graph_edges.push_back(
-                    {command,
-                     inputs,
-                     {object},
-                     source.filename().string(),
-                     std::filesystem::path{path_to_utf8(object) + ".d"},
-                     true});
+                graph_edges.push_back({command,
+                                       inputs,
+                                       {object},
+                                       source.filename().string(),
+                                       std::filesystem::path{path_to_utf8(object) + ".d"},
+                                       true});
                 result.commands.push_back(std::move(command));
             }
             const auto slice_library = slice_directory / "libgdpp.dylib";
@@ -1720,9 +1715,8 @@ NativeBuildPlan NativeBuilder::plan(const NativeBuildOptions& options) const {
             link_inputs.push_back(export_map);
             link_inputs.insert(link_inputs.end(), bridge_inputs->link_libraries.begin(),
                                bridge_inputs->link_libraries.end());
-            auto command = ios_link_command(options, slice, objects,
-                                            bridge_inputs->link_libraries, slice_library,
-                                            export_map);
+            auto command = ios_link_command(options, slice, objects, bridge_inputs->link_libraries,
+                                            slice_library, export_map);
             graph_edges.push_back(
                 {command, link_inputs, {slice_library}, "Linking " + slice.name, {}, false});
             result.commands.push_back(std::move(command));
@@ -1771,13 +1765,12 @@ NativeBuildPlan NativeBuilder::plan(const NativeBuildOptions& options) const {
                                  "-library",   path_to_utf8(slice_libraries[0]),
                                  "-library",   path_to_utf8(simulator_library),
                                  "-output",    path_to_utf8(result.pending_output_library)};
-            graph_edges.push_back(
-                {command,
-                 {slice_libraries[0], simulator_library},
-                 {result.pending_output_library / "Info.plist"},
-                 "Packaging XCFramework",
-                 {},
-                 false});
+            graph_edges.push_back({command,
+                                   {slice_libraries[0], simulator_library},
+                                   {result.pending_output_library / "Info.plist"},
+                                   "Packaging XCFramework",
+                                   {},
+                                   false});
             result.commands.push_back(std::move(command));
         }
         if (!write_ninja_graph(options, native, std::move(graph_edges),
@@ -1795,13 +1788,12 @@ NativeBuildPlan NativeBuilder::plan(const NativeBuildOptions& options) const {
         auto inputs = common_compile_inputs;
         inputs.push_back(source);
         auto command = compile_command(options, source, object, includes);
-        graph_edges.push_back(
-            {command,
-             inputs,
-             {object},
-             source.filename().string(),
-             std::filesystem::path{path_to_utf8(object) + ".d"},
-             true});
+        graph_edges.push_back({command,
+                               inputs,
+                               {object},
+                               source.filename().string(),
+                               std::filesystem::path{path_to_utf8(object) + ".d"},
+                               true});
         result.commands.push_back(std::move(command));
     }
     auto link_inputs = objects;
@@ -1810,9 +1802,8 @@ NativeBuildPlan NativeBuilder::plan(const NativeBuildOptions& options) const {
         link_inputs.push_back(export_map);
     link_inputs.insert(link_inputs.end(), bridge_inputs->link_libraries.begin(),
                        bridge_inputs->link_libraries.end());
-    auto command =
-        link_command(options, objects, binding_library, bridge_inputs->link_libraries,
-                     result.output_library, native / "link.rsp", export_map);
+    auto command = link_command(options, objects, binding_library, bridge_inputs->link_libraries,
+                                result.output_library, native / "link.rsp", export_map);
     if (!command) {
         result.diagnostics.emplace_back("cannot write MSVC native linker response file");
         return result;

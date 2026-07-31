@@ -857,7 +857,7 @@ TEST_CASE("native builder optimizes MSVC debug exports against release bindings"
     REQUIRE(contains_utf16le_ascii(response_file, "/INCREMENTAL:NO"));
 }
 
-TEST_CASE("native builder keeps optimized debug exports in an isolated object cache") {
+TEST_CASE("native builder keeps optimized debug exports in an isolated Ninja object graph") {
     const auto root = make_sdk_fixture("native-builder-template-debug",
                                        "libgodot-cpp.macos.template_release.arm64.a");
     gdpp::NativeBuildOptions options;
