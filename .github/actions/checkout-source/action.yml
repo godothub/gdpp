@@ -35,7 +35,7 @@ runs:
         set -euo pipefail
         source_root="$GITHUB_WORKSPACE/source"
         test -f "$source_root/CMakeLists.txt"
-        test -d "$source_root/ci/.git"
+        test -e "$source_root/ci/.git"
         source_sha="$(git -C "$source_root" rev-parse HEAD)"
         pipeline_sha="$(git -C "$source_root/ci" rev-parse HEAD)"
         test "$pipeline_sha" = "$GITHUB_SHA"
