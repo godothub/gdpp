@@ -1197,6 +1197,10 @@ bool write_ninja_graph(const NativeBuildOptions& options,
         auto& edge = edges[index];
         if (const auto executable = resolve_compiler_path(edge.command.executable))
             edge.inputs.push_back(*executable);
+        for (const auto& argument : edge.command.arguments) {
+            if (!argument.empty() && argument.front() == '@')
+                edge.inputs.push_back(path_from_utf8(argument.substr(1)));
+        }
         std::vector<std::string> dependency_arguments;
         if (edge.compiler_dependencies) {
             if (options.platform == NativePlatform::windows) {
@@ -1217,6 +1221,14 @@ bool write_ninja_graph(const NativeBuildOptions& options,
             return false;
         }
         edge.inputs.insert(edge.inputs.end(), command_files->begin(), command_files->end());
+        std::sort(edge.inputs.begin(), edge.inputs.end());
+        edge.inputs.erase(std::unique(edge.inputs.begin(), edge.inputs.end()), edge.inputs.end());
+        if (std::any_of(edge.inputs.begin(), edge.inputs.end(),
+                        [](const auto& path) { return !ninja_path_supported(path); })) {
+            plan.diagnostics.emplace_back(
+                "Ninja build paths cannot contain a vertical bar or a line break");
+            return false;
+        }
 
         const auto rule = "gdpp_edge_" + std::to_string(index);
         graph += "rule " + rule + "\n";

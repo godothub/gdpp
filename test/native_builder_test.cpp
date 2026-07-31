@@ -714,6 +714,18 @@ TEST_CASE("native builder emits MSVC compile and link arguments") {
     REQUIRE(contains_utf16le_ascii(response_file, "gdpp.lib"));
     REQUIRE(!contains_utf16le_ascii(response_file, "gdpp_project.lib"));
     REQUIRE(contains_utf16le_ascii(response_file, "/OUT:"));
+    REQUIRE(read_input(plan.build_file).find(response_file.generic_string()) !=
+            std::string::npos);
+#ifdef _WIN32
+    const auto compiler_response = plan.build_directory / "commands/0.rsp";
+    const auto compiler_response_contents = read_input(compiler_response);
+    REQUIRE(compiler_response_contents.size() > 3);
+    REQUIRE(static_cast<unsigned char>(compiler_response_contents[0]) == 0xefU);
+    REQUIRE(static_cast<unsigned char>(compiler_response_contents[1]) == 0xbbU);
+    REQUIRE(static_cast<unsigned char>(compiler_response_contents[2]) == 0xbfU);
+    REQUIRE(compiler_response_contents.find("/showIncludes") != std::string::npos);
+    REQUIRE(read_input(plan.build_file).find("deps = msvc") != std::string::npos);
+#endif
     REQUIRE_EQ(plan.output_library.filename().string(),
                std::string{"gdpp.release.windows.x86_64.dll"});
     REQUIRE_EQ(plan.output_library.parent_path(), options.binary_output_directory);
@@ -1153,6 +1165,29 @@ TEST_CASE("native builder isolates threaded WebAssembly flags and artifacts") {
                           root / "sdk/lib/libgodot-cpp.web.template_release.wasm32.a"));
 }
 
+#ifdef _WIN32
+TEST_CASE("native builder launches Windows Web command scripts through the command processor") {
+    const auto root = make_sdk_fixture(
+        "native-builder-web-windows-command-script",
+        "libgodot-cpp.web.template_release.wasm32.nothreads.a");
+    gdpp::NativeBuildOptions options;
+    options.project_output_directory = root / "project";
+    options.binary_output_directory = root / "addons/gdpp/binary";
+    options.sdk_root = root / "sdk";
+    options.compiler_executable = "em++.bat";
+    options.platform = gdpp::NativePlatform::web;
+    options.architecture = "wasm32";
+    options.web_thread_mode = gdpp::NativeWebThreadMode::single_threaded;
+
+    const auto plan = gdpp::NativeBuilder{}.plan(options);
+
+    REQUIRE(plan.success);
+    const auto graph = read_input(plan.build_file);
+    REQUIRE(graph.find("cmd.exe /d /s /c") != std::string::npos);
+    REQUIRE(graph.find("em++.bat") != std::string::npos);
+}
+#endif
+
 TEST_CASE("native builder selects both Web variants from one shared SDK library directory") {
     const auto root = make_sdk_fixture("native-builder-shared-web-threads",
                                        "libgodot-cpp.web.template_release.wasm32.a");
@@ -1190,6 +1225,32 @@ TEST_CASE("native builder selects both Web variants from one shared SDK library 
     REQUIRE(contains_path(multi_threaded.commands.back().arguments,
                           root / "sdk/lib/libgodot-cpp.web.template_release.wasm32.a"));
 }
+
+#ifndef _WIN32
+TEST_CASE("native builder rejects paths that Ninja cannot represent") {
+    const auto fixture = make_sdk_fixture(
+        "native-builder-unsupported-path-source",
+        "libgodot-cpp.macos.template_release.arm64.a");
+    const auto root = fixture.parent_path() / "native-builder|unsupported-path";
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
+    std::filesystem::rename(fixture, root, error);
+    REQUIRE(!error);
+    gdpp::NativeBuildOptions options;
+    options.project_output_directory = root / "project";
+    options.binary_output_directory = root / "addons/gdpp/binary";
+    options.sdk_root = root / "sdk";
+    options.compiler_executable = "clang++";
+    options.platform = gdpp::NativePlatform::macos;
+    options.architecture = "arm64";
+
+    const auto plan = gdpp::NativeBuilder{}.plan(options);
+
+    REQUIRE(!plan.success);
+    REQUIRE(diagnostic_contains(
+        plan, "Ninja build paths cannot contain a vertical bar or a line break"));
+}
+#endif
 
 TEST_CASE("native builder fails closed for incomplete Web target contracts") {
     const auto root = make_sdk_fixture("native-builder-web-nothreads-contract",
