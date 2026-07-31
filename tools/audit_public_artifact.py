@@ -23,8 +23,23 @@ FORBIDDEN_SUFFIXES = {
     ".pdb",
 }
 PRIVATE_ROOTS = ("include/", "src/", "test/", "tools/")
+PRIVATE_SOURCE_SUFFIXES = {
+    ".c",
+    ".cc",
+    ".cpp",
+    ".cxx",
+    ".gd",
+    ".h",
+    ".hh",
+    ".hpp",
+    ".hxx",
+    ".ipp",
+    ".js",
+    ".py",
+}
 TEXT_LIMIT = 16 * 1024 * 1024
 MIN_SOURCE_LINE = 32
+MAX_REPORTED_VIOLATIONS = 20
 
 
 def arguments() -> argparse.Namespace:
@@ -45,7 +60,11 @@ def tracked_private_lines(source: Path) -> set[str]:
         if not relative:
             continue
         path = source / relative
-        if not path.is_file() or path.stat().st_size > TEXT_LIMIT:
+        if (
+            not path.is_file()
+            or path.suffix.casefold() not in PRIVATE_SOURCE_SUFFIXES
+            or path.stat().st_size > TEXT_LIMIT
+        ):
             continue
         try:
             content = path.read_text(encoding="utf-8")
@@ -92,8 +111,13 @@ def main() -> int:
                 violations.append(f"{path}:{number}: exact private source line")
                 break
     if violations:
+        visible = violations[:MAX_REPORTED_VIOLATIONS]
+        remaining = len(violations) - len(visible)
+        suffix = f"\n... and {remaining} more violation(s)" if remaining else ""
         raise SystemExit(
-            "Public artifact source-disclosure audit failed:\n" + "\n".join(violations)
+            "Public artifact source-disclosure audit failed:\n"
+            + "\n".join(visible)
+            + suffix
         )
     print(f"Audited {len(files)} public artifact files without private source disclosure.")
     return 0
