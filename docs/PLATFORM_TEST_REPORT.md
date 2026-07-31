@@ -4,24 +4,24 @@
 
 | 项目 | 值 |
 |---|---|
-| GDPP | 1.8.4 |
-| 功能审计范围 | 1.8.4 当前发布候选 |
-| 最近正式发布运行 | 1.8.3 / `https://github.com/abandoft/gdpp/actions/runs/30487659776` |
-| 1.8.3 发布状态 | 已发布；正式发布门禁成功 |
-| 1.8.3 已发布资产 | `gdpp.zip`、`gdpp-all.zip`、`SHA256SUMS` |
+| GDPP | 1.9.0 |
+| 功能审计范围 | 1.9.0 当前发布候选 |
+| 最近正式发布运行 | 1.8.4 / `https://github.com/godothub/gdpp/actions/runs/30608539870` |
+| 1.8.4 发布状态 | 已发布；正式发布门禁成功 |
+| 1.8.4 已发布资产 | `gdpp.zip`、`gdpp-all.zip`、`gdpp-lite.zip`、`SHA256SUMS` |
 | 当前目标发行资产 | `gdpp.zip`、`gdpp-all.zip`、`gdpp-lite.zip`、`SHA256SUMS` |
-| 本地编译器单元测试 | 621 / 621 |
+| 本地编译器单元测试 | 由当前提交的完整 core 门禁执行，不在报告中固化易过时的数量 |
 
 本报告只描述可重复证据。内部商业语料和客户项目不按名称公开；它们只能补充发现问题，不能替代
 产品级 fixture 与 CI。
 
-## 1.8.4 发布前本地验证
+## 1.9.0 发布前本地验证
 
 | 门禁 | 结果 |
 |---|---|
 | 开发 core CTest | 23 项发布前合同 |
 | 开发 plugin CTest | 25 项发布前合同 |
-| 编译器单元 | 621 / 621 |
+| 编译器单元 | 当前提交完整通过 |
 | godot-cpp SDK | macOS 上完整重建 4.4、4.5、4.6、4.7 `template_release` |
 | 官方 Godot 4.7.1 直接构建 | 当前 compiler 生成、顺序编译并链接真实客户项目库成功 |
 | 官方 Godot 4.7.1 AOT runtime | 重新生成 Universal 2 成品后，arm64 与 Rosetta x86_64 的 FunctionState、异步虚函数、协程 lambda、await 默认参数、协程访问器、Callable/Signal、全 Variant fault 和项目脚本生命周期成功 |

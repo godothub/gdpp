@@ -1,6 +1,6 @@
 # GDScript 兼容性
 
-本页描述 GDPP 1.8.4 能接受、生成、运行和交付的语言边界。总体状态和优先级见
+本页描述 GDPP 1.9.0 能接受、生成、运行和交付的语言边界。总体状态和优先级见
 [当前状态与功能缺口](STATUS.md)，平台证据见[平台验证报告](PLATFORM_TEST_REPORT.md)。
 
 ## 兼容模型
@@ -143,7 +143,7 @@ Callable、强类型存储和第三方调用均验证接收者/参数的左到�
 | 异步引擎虚函数 | 完成 | 与 GDScript 一样立即返回 FunctionState，并由 Godot 转换为虚函数声明的原生返回类型 |
 
 已知协程的返回值被消费时必须写 `await`；故意丢弃返回值的 detached 调用可以执行。协程身份进入
-项目公开 ABI 和精确增量失效，不能把同步旧对象误用于新协程实现。
+项目公开 ABI 和 Ninja 真实依赖边，不能把同步旧对象误用于新协程实现。
 
 真正挂起的调用返回引用计数 FunctionState 对象。它公开 `completed(result)`、`resume(arg)`、
 `is_valid(extended_check)`，折叠零个/一个/多个 Signal 参数，并在手动恢复或完成时断开旧的一次性
