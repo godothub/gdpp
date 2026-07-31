@@ -47,7 +47,9 @@ addons/gdpp/binary/libgdpp.<debug|release>.ios.arm64.xcframework/
 
 对象、切片 dylib 和尚未提交的合包只存在于 `addons/gdpp/build/project/native-direct/`。只有三个
 切片全部编译、链接且 `xcodebuild -create-xcframework` 成功后，新目录才会替换当前项目库；
-失败不会破坏上一次可用产物。
+提交前会校验 Info.plist、真机与模拟器动态库，并按目录内容而非时间戳判断复用。传入目录和备份
+均在同卷隐藏事务目录中保持 `.xcframework` 类型；替换中断时会先恢复上一份完整产物。失败不会
+破坏上一次可用产物。
 
 ## 最低版本与 ABI 规则
 
