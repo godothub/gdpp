@@ -478,6 +478,45 @@ class ReleasePackagingTest(unittest.TestCase):
                 "standard",
             )
 
+    def test_missing_ninja_executor_fails_closed(self) -> None:
+        executor = (
+            self.components
+            / "gdpp-host-windows-x64/addons/gdpp"
+            / package_release.HOSTS["windows-x64"].build_executor
+        )
+        executor.unlink()
+        with self.assertRaisesRegex(ValueError, "Ninja executor"):
+            package_platform_release.stage_release_package(
+                self.components,
+                self.temporary / "release",
+                "standard",
+            )
+
+    def test_wrong_ninja_version_metadata_fails_closed(self) -> None:
+        metadata = (
+            self.components
+            / "gdpp-host-linux-x64/addons/gdpp/tools/NINJA-VERSION.txt"
+        )
+        write(metadata, "Ninja 1.12.1\ncommit wrong\n")
+        with self.assertRaisesRegex(ValueError, "version metadata"):
+            package_platform_release.stage_release_package(
+                self.components,
+                self.temporary / "release",
+                "standard",
+            )
+
+    def test_extra_ninja_executor_fails_closed(self) -> None:
+        write(
+            self.components
+            / "gdpp-host-mac-universal/addons/gdpp/tools/linux-x64/gdpp-ninja"
+        )
+        with self.assertRaisesRegex(ValueError, "invalid Ninja executor matrix"):
+            package_platform_release.stage_release_package(
+                self.components,
+                self.temporary / "release",
+                "standard",
+            )
+
     def test_runtime_contract_conflict_fails_closed_across_versions(self) -> None:
         manifest = self.components / "gdpp-android-arm64-godot-4.7/sdk.manifest"
         manifest.write_text(
@@ -534,8 +573,14 @@ class ReleasePackagingTest(unittest.TestCase):
             self.assertIn(archive, packages)
         for retired in ("gdpp-mac.zip", "gdpp-linux.zip", "gdpp-win.zip"):
             self.assertNotIn(retired, packages)
+        self.assertIn("grep -q '^GDPP_PACKAGE 7$'", packages)
+        self.assertIn("build_executor Ninja_1.13.2", packages)
+        self.assertIn("addons/gdpp/tools/NINJA-VERSION.txt", packages)
+        self.assertIn("addons/gdpp/tools/NINJA-LICENSE.txt", packages)
         self.assertIn("python3 tools/stage_host_component.py", host_components)
         self.assertIn("--host '${{ matrix.host }}'", host_components)
+        self.assertIn('test "$("$executor" --version)" = 1.13.2', host_components)
+        self.assertIn("git -C third/ninja rev-parse HEAD", host_components)
         self.assertIn(
             "uses: ./.github/workflows/host-components.yml",
             orchestrator,
@@ -553,6 +598,8 @@ class ReleasePackagingTest(unittest.TestCase):
         ).read_text(encoding="utf-8")
         self.assertIn("name: gdpp-release-packages", installed_smoke)
         self.assertIn("Install the final ZIP into a clean customer project", installed_smoke)
+        self.assertIn('project="$root/客户项目-é"', installed_smoke)
+        self.assertIn('test "$("$executor" --version)" = 1.13.2', installed_smoke)
         self.assertIn(
             'find "$project/addons/gdpp/sdk" -type f', installed_smoke
         )
