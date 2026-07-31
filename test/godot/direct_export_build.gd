@@ -1,5 +1,7 @@
 extends SceneTree
 
+var _progress_events: Array[Dictionary] = []
+
 
 func _init() -> void:
     call_deferred("_run")
@@ -47,9 +49,16 @@ func _run() -> void:
         push_error("GDPP did not produce a complete Ninja build contract: %s" % result)
         quit(1)
         return
-    var execution: Dictionary = compiler.execute_project_build(result)
+    _progress_events.clear()
+    var execution: Dictionary = compiler.execute_project_build(
+        result, Callable(self, "_record_progress")
+    )
     if not execution.get("success", false):
         push_error("GDPP release compiler failed: %s" % execution.get("diagnostics", []))
+        quit(1)
+        return
+    if not _validate_progress(_progress_events, true):
+        push_error("GDPP did not stream monotonic per-file Ninja progress: %s" % _progress_events)
         quit(1)
         return
     var library := str(result.get("output_library", ""))
@@ -71,9 +80,19 @@ func _run() -> void:
     var first_library_time := FileAccess.get_modified_time(
         ProjectSettings.globalize_path(library)
     )
-    var no_op: Dictionary = compiler.execute_project_build(result)
+    _progress_events.clear()
+    var no_op: Dictionary = compiler.execute_project_build(
+        result, Callable(self, "_record_progress")
+    )
     if not no_op.get("success", false):
         push_error("GDPP no-op incremental build failed: %s" % no_op.get("diagnostics", []))
+        quit(1)
+        return
+    if _progress_events.any(
+        func(event: Dictionary) -> bool:
+            return str(event.get("phase", "")) in ["compile", "link"]
+    ):
+        push_error("GDPP reported compiler work for a no-op Ninja build: %s" % _progress_events)
         quit(1)
         return
     if (
@@ -96,13 +115,20 @@ func _run() -> void:
         push_error("GDPP could not update the incremental fixture header")
         quit(1)
         return
-    var header_rebuild: Dictionary = compiler.execute_project_build(result)
+    _progress_events.clear()
+    var header_rebuild: Dictionary = compiler.execute_project_build(
+        result, Callable(self, "_record_progress")
+    )
     var rebuilt_log := FileAccess.get_file_as_string(ninja_log_path)
     if not header_rebuild.get("success", false):
         push_error(
             "GDPP generated-header incremental build failed: %s"
             % header_rebuild.get("diagnostics", [])
         )
+        quit(1)
+        return
+    if not _validate_progress(_progress_events, true):
+        push_error("GDPP lost incremental Ninja progress: %s" % _progress_events)
         quit(1)
         return
     var appended_log := rebuilt_log.substr(first_log.length())
@@ -125,6 +151,40 @@ func _run() -> void:
         return
     print("GDPP_DIRECT_EXPORT_BUILD_OK")
     quit(0)
+
+
+func _record_progress(phase: String, completed: int, total: int) -> void:
+    _progress_events.append({
+        "phase": phase,
+        "completed": completed,
+        "total": total,
+    })
+
+
+func _validate_progress(events: Array[Dictionary], require_link: bool) -> bool:
+    var compile_seen := 0
+    var compile_completed := -1
+    var compile_total := -1
+    var link_seen := false
+    for event in events:
+        var phase := str(event.get("phase", ""))
+        var completed := int(event.get("completed", -1))
+        var total := int(event.get("total", -1))
+        if completed < 0 or total <= 0 or completed > total:
+            return false
+        if phase == "compile":
+            if completed < compile_completed or (compile_total >= 0 and total != compile_total):
+                return false
+            compile_seen += 1
+            compile_completed = completed
+            compile_total = total
+        elif phase == "link":
+            link_seen = true
+    return (
+        compile_seen >= 2
+        and compile_completed == compile_total
+        and (link_seen or not require_link)
+    )
 
 
 func _has_parallel_compiles(log_text: String) -> bool:
