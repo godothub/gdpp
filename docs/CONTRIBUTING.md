@@ -67,9 +67,10 @@ core → frontend → semantic → ir → codegen → compiler → project
 `CHANGELOG.md` / `CHANGELOG-ZH.md`，路线图不能把计划写成已交付。
 
 ```sh
+python3 -m pip install --requirement ci/tools/requirements.txt
 python3 tools/check_docs.py
 python3 tools/check_architecture.py
-ruby ci/tools/check_workflow_topology.rb
+python3 ci/tools/check_workflow_topology.py
 ```
 
 文档检查会验证：
@@ -95,9 +96,10 @@ find include src test -type f \( -name '*.cpp' -o -name '*.hpp' \) -print0 \
 随后执行：
 
 ```sh
+python3 -m pip install --requirement ci/tools/requirements.txt
 python3 tools/check_docs.py
 python3 tools/check_architecture.py
-ruby ci/tools/check_workflow_topology.rb
+python3 ci/tools/check_workflow_topology.py
 cmake --build --preset dev --parallel
 ctest --preset dev --output-on-failure
 cmake --build --preset plugin --parallel
