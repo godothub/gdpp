@@ -1190,9 +1190,8 @@ TEST_CASE("native builder isolates threaded WebAssembly flags and artifacts") {
 
 #ifdef _WIN32
 TEST_CASE("native builder launches Windows Web command scripts through the command processor") {
-    const auto root = make_sdk_fixture(
-        "native-builder-web-nothreads-command-script-winhost",
-        "libgodot-cpp.web.template_release.wasm32.nothreads.a");
+    const auto root = make_sdk_fixture("native-builder-web-nothreads-command-script-winhost",
+                                       "libgodot-cpp.web.template_release.wasm32.nothreads.a");
     gdpp::NativeBuildOptions options;
     options.project_output_directory = root / "project";
     options.binary_output_directory = root / "addons/gdpp/binary";
@@ -1251,9 +1250,8 @@ TEST_CASE("native builder selects both Web variants from one shared SDK library 
 
 #ifndef _WIN32
 TEST_CASE("native builder rejects paths that Ninja cannot represent") {
-    const auto fixture = make_sdk_fixture(
-        "native-builder-unsupported-path-source",
-        "libgodot-cpp.macos.template_release.arm64.a");
+    const auto fixture = make_sdk_fixture("native-builder-unsupported-path-source",
+                                          "libgodot-cpp.macos.template_release.arm64.a");
     const auto root = fixture.parent_path() / "native-builder|unsupported-path";
     std::error_code error;
     std::filesystem::remove_all(root, error);
@@ -1270,8 +1268,8 @@ TEST_CASE("native builder rejects paths that Ninja cannot represent") {
     const auto plan = gdpp::NativeBuilder{}.plan(options);
 
     REQUIRE(!plan.success);
-    REQUIRE(diagnostic_contains(
-        plan, "Ninja build paths cannot contain a vertical bar or a line break"));
+    REQUIRE(diagnostic_contains(plan,
+                                "Ninja build paths cannot contain a vertical bar or a line break"));
 }
 #endif
 
