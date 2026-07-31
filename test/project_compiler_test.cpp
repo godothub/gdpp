@@ -10,6 +10,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <map>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -110,7 +111,7 @@ TEST_CASE("project compiler reports ordered per-file frontend progress") {
     REQUIRE_EQ(sample_index, samples.size());
 }
 
-TEST_CASE("project compiler incrementally generates a unified native extension") {
+TEST_CASE("project compiler deterministically generates a unified native extension") {
     const auto root = fixture_root("project-compiler");
     std::error_code error;
     std::filesystem::remove_all(root, error);
@@ -128,8 +129,7 @@ TEST_CASE("project compiler incrementally generates a unified native extension")
 
     const auto first = compiler.compile(options);
     REQUIRE(first.success);
-    REQUIRE_EQ(first.compiled_count, std::size_t{2});
-    REQUIRE_EQ(first.cache_hit_count, std::size_t{0});
+    REQUIRE_EQ(first.compiled_count, first.scripts.size());
     REQUIRE(!std::filesystem::exists(options.output_directory / "CMakeLists.txt"));
     REQUIRE(!std::filesystem::exists(options.output_directory / "gdpp_project.gdextension"));
     REQUIRE(!std::filesystem::exists(options.output_directory / "prune_stale_development.cmake"));
@@ -146,26 +146,33 @@ TEST_CASE("project compiler incrementally generates a unified native extension")
     REQUIRE(std::filesystem::is_regular_file(options.output_directory / "build_id.txt"));
     REQUIRE(std::filesystem::is_regular_file(root / "addons/gdpp/build/.gdignore"));
     REQUIRE(read_text(options.output_directory / "manifest.txt")
-                .find(std::string{"GDPP_MANIFEST 4 "} + GDPP_VERSION_STRING + " " +
-                      GDPP_CODEGEN_FINGERPRINT + "\n") == 0);
+                .find("GDPP_OUTPUT_MANIFEST 1\n") == 0);
     const auto symbol_index = read_text(options.output_directory / "symbols.map");
     REQUIRE(symbol_index.rfind("GDPP_PROJECT_SYMBOL_MAP 1\n", 0) == 0);
     REQUIRE(symbol_index.find(first.build_id) != std::string::npos);
     REQUIRE(symbol_index.find("generated/project_player.gd.symbols") != std::string::npos);
     REQUIRE(read_text(options.output_directory / "generated/project_player.gd.symbols")
                 .find("method \"ready\"") != std::string::npos);
+    std::map<std::filesystem::path, std::filesystem::file_time_type> generated_times;
+    for (const auto& script : first.scripts) {
+        for (const auto& name :
+             {script.header_file_name, script.source_file_name, script.symbol_file_name}) {
+            const auto path = options.output_directory / "generated" / name;
+            generated_times.emplace(path, std::filesystem::last_write_time(path));
+        }
+    }
 
     const auto second = compiler.compile(options);
     REQUIRE(second.success);
-    REQUIRE_EQ(second.compiled_count, std::size_t{0});
-    REQUIRE_EQ(second.cache_hit_count, std::size_t{2});
+    REQUIRE_EQ(second.compiled_count, second.scripts.size());
+    for (const auto& [path, timestamp] : generated_times)
+        REQUIRE_EQ(std::filesystem::last_write_time(path), timestamp);
 
     write_text(root / "actors/enemy.gd",
                "extends Node\nclass_name ProjectEnemy\nfunc attack() -> int:\n    return 2\n");
     const auto third = compiler.compile(options);
     REQUIRE(third.success);
-    REQUIRE_EQ(third.compiled_count, std::size_t{1});
-    REQUIRE_EQ(third.cache_hit_count, std::size_t{1});
+    REQUIRE_EQ(third.compiled_count, third.scripts.size());
     REQUIRE(third.build_id != first.build_id);
     REQUIRE_EQ(native_class_for(third, "player.gd"), native_class_for(first, "player.gd"));
     REQUIRE_EQ(native_class_for(third, "enemy.gd"), native_class_for(first, "enemy.gd"));
@@ -263,7 +270,7 @@ TEST_CASE("project compiler publishes normalized extension class icons") {
 
     const auto cached = compiler.compile(options);
     REQUIRE(cached.success);
-    REQUIRE_EQ(cached.cache_hit_count, std::size_t{2});
+    REQUIRE_EQ(cached.compiled_count, cached.scripts.size());
     REQUIRE_EQ(cached.scripts.front().icon_path,
                std::optional<std::string>{"res://icons/type.svg"});
 }
@@ -298,7 +305,7 @@ TEST_CASE("project compiler ignores cross-platform filesystem metadata") {
 
     REQUIRE(result.success);
     REQUIRE_EQ(result.scripts.size(), std::size_t{1});
-    REQUIRE_EQ(result.compiled_count, std::size_t{1});
+    REQUIRE_EQ(result.compiled_count, result.scripts.size());
     REQUIRE_EQ(result.scripts.front().relative_path.generic_string(), std::string{"player.gd"});
     REQUIRE(result.diagnostics.empty());
 }
@@ -319,12 +326,12 @@ TEST_CASE("project compiler follows Godot project visibility boundaries") {
 
     REQUIRE(result.success);
     REQUIRE_EQ(result.scripts.size(), std::size_t{1});
-    REQUIRE_EQ(result.compiled_count, std::size_t{1});
+    REQUIRE_EQ(result.compiled_count, result.scripts.size());
     REQUIRE_EQ(result.scripts.front().relative_path.generic_string(), std::string{"runtime.gd"});
     REQUIRE(result.diagnostics.empty());
 }
 
-TEST_CASE("project compiler preserves tool mode across incremental cache hits") {
+TEST_CASE("project compiler preserves tool mode across deterministic regeneration") {
     const auto root = fixture_root("project-tool-metadata");
     std::error_code error;
     std::filesystem::remove_all(root, error);
@@ -354,7 +361,7 @@ TEST_CASE("project compiler preserves tool mode across incremental cache hits") 
 
     const auto cached = compiler.compile(options);
     REQUIRE(cached.success);
-    REQUIRE_EQ(cached.cache_hit_count, std::size_t{2});
+    REQUIRE_EQ(cached.compiled_count, cached.scripts.size());
     REQUIRE_EQ(std::count_if(cached.scripts.begin(), cached.scripts.end(),
                              [](const auto& script) { return script.is_tool; }),
                std::ptrdiff_t{1});
@@ -365,7 +372,7 @@ TEST_CASE("project compiler preserves tool mode across incremental cache hits") 
     REQUIRE(registration.find("GDREGISTER_RUNTIME_CLASS") == std::string::npos);
 }
 
-TEST_CASE("project compiler preserves static unload metadata across cache hits") {
+TEST_CASE("project compiler preserves static unload metadata across regeneration") {
     const auto root = fixture_root("project-static-unload-metadata");
     std::error_code error;
     std::filesystem::remove_all(root, error);
@@ -382,7 +389,7 @@ TEST_CASE("project compiler preserves static unload metadata across cache hits")
 
     const auto cached = compiler.compile(options);
     REQUIRE(cached.success);
-    REQUIRE_EQ(cached.cache_hit_count, std::size_t{1});
+    REQUIRE_EQ(cached.compiled_count, cached.scripts.size());
     REQUIRE(cached.scripts.front().static_unload);
 }
 
@@ -551,7 +558,7 @@ TEST_CASE("project compiler includes GDScript embedded in text scenes") {
 
     REQUIRE(result.success);
     REQUIRE_EQ(result.scripts.size(), std::size_t{1});
-    REQUIRE_EQ(result.compiled_count, std::size_t{1});
+    REQUIRE_EQ(result.compiled_count, result.scripts.size());
     REQUIRE_EQ(result.scripts.front().relative_path.generic_string(),
                std::string{"actors/enemy_pointer.tscn::GDScript_pointer"});
     REQUIRE(std::filesystem::is_regular_file(options.output_directory / "generated" /
@@ -623,7 +630,7 @@ TEST_CASE("moving a globally named script preserves reused generated outputs") {
     const auto moved = compiler.compile(options);
 
     REQUIRE(moved.success);
-    REQUIRE_EQ(moved.compiled_count, std::size_t{1});
+    REQUIRE_EQ(moved.compiled_count, moved.scripts.size());
     REQUIRE_EQ(moved.removed_count, std::size_t{1});
     REQUIRE_EQ(moved.scripts.front().header_file_name, header);
     REQUIRE_EQ(moved.scripts.front().source_file_name, source);
@@ -631,7 +638,7 @@ TEST_CASE("moving a globally named script preserves reused generated outputs") {
     REQUIRE(std::filesystem::is_regular_file(options.output_directory / "generated" / source));
 }
 
-TEST_CASE("project compiler transactionally replaces renamed and incompatible generated outputs") {
+TEST_CASE("project compiler transactionally replaces renamed and orphaned generated outputs") {
     const auto root = fixture_root("project-renamed-generated-output");
     std::error_code error;
     std::filesystem::remove_all(root, error);
@@ -650,22 +657,13 @@ TEST_CASE("project compiler transactionally replaces renamed and incompatible ge
     write_text(options.output_directory / "generated/orphan.gd.cpp", "orphan");
     write_text(options.output_directory / "generated/orphan.gd.symbols", "orphan");
 
-    auto incompatible_manifest = read_text(options.output_directory / "manifest.txt");
-    const auto header_end = incompatible_manifest.find('\n');
-    REQUIRE(header_end != std::string::npos);
-    const auto fingerprint_begin = incompatible_manifest.rfind(' ', header_end);
-    REQUIRE(fingerprint_begin != std::string::npos);
-    incompatible_manifest.replace(fingerprint_begin + 1U, header_end - fingerprint_begin - 1U,
-                                  "incompatible-codegen-fingerprint");
-    write_text(options.output_directory / "manifest.txt", incompatible_manifest);
     write_text(root / "widget.gd",
                "extends Node\nclass_name RenamedWidget\nfunc value() -> int:\n    return 2\n");
 
     const auto renamed = compiler.compile(options);
 
     REQUIRE(renamed.success);
-    REQUIRE_EQ(renamed.compiled_count, std::size_t{1});
-    REQUIRE_EQ(renamed.cache_hit_count, std::size_t{0});
+    REQUIRE_EQ(renamed.compiled_count, renamed.scripts.size());
     REQUIRE_EQ(renamed.removed_count, std::size_t{1});
     REQUIRE_EQ(renamed.scripts.front().header_file_name, std::string{"renamed_widget.gd.hpp"});
     REQUIRE_EQ(renamed.scripts.front().source_file_name, std::string{"renamed_widget.gd.cpp"});
@@ -704,7 +702,7 @@ TEST_CASE("project compiler never follows generated manifest paths outside its o
     const auto rebuilt = compiler.compile(options);
 
     REQUIRE(rebuilt.success);
-    REQUIRE_EQ(rebuilt.compiled_count, std::size_t{1});
+    REQUIRE_EQ(rebuilt.compiled_count, rebuilt.scripts.size());
     REQUIRE(std::filesystem::is_regular_file(sentinel));
     REQUIRE_EQ(read_text(sentinel), std::string{"must remain"});
 }
@@ -758,7 +756,7 @@ TEST_CASE("project compiler registers internal classes and includes complete enu
 
     const auto cached = compiler.compile(options);
     REQUIRE(cached.success);
-    REQUIRE_EQ(cached.cache_hit_count, std::size_t{2});
+    REQUIRE_EQ(cached.compiled_count, cached.scripts.size());
     const auto cached_consumer =
         std::find_if(cached.scripts.begin(), cached.scripts.end(), [](const auto& script) {
             return script.relative_path == std::filesystem::path{"consumer.gd"};
@@ -881,7 +879,7 @@ TEST_CASE("project compiler preserves canonical internal static method symbols")
     REQUIRE(source.find(worker + "::compute(") == std::string::npos);
 }
 
-TEST_CASE("project compiler preserves nested internal class identities across cache hits") {
+TEST_CASE("project compiler preserves nested internal class identities across regeneration") {
     const auto root = fixture_root("project-nested-internal-classes");
     std::error_code error;
     std::filesystem::remove_all(root, error);
@@ -932,8 +930,7 @@ TEST_CASE("project compiler preserves nested internal class identities across ca
 
     const auto cached = compiler.compile(options);
     REQUIRE(cached.success);
-    REQUIRE_EQ(cached.compiled_count, std::size_t{0});
-    REQUIRE_EQ(cached.cache_hit_count, std::size_t{1});
+    REQUIRE_EQ(cached.compiled_count, cached.scripts.size());
     REQUIRE_EQ(cached.scripts.front().inner_class_names, inner_names);
 }
 
@@ -2158,26 +2155,24 @@ TEST_CASE("project compiler dynamically bridges a binary-only GDExtension class"
 
     const auto cached = gdpp::ProjectCompiler{}.compile(options);
     REQUIRE(cached.success);
-    REQUIRE_EQ(cached.cache_hit_count, std::size_t{1});
+    REQUIRE_EQ(cached.compiled_count, cached.scripts.size());
 
     write_bridge("vendor-runtime-v1", "int", 7);
     const auto enum_changed = gdpp::ProjectCompiler{}.compile(options);
     REQUIRE(enum_changed.success);
-    REQUIRE_EQ(enum_changed.compiled_count, std::size_t{1});
+    REQUIRE_EQ(enum_changed.compiled_count, enum_changed.scripts.size());
     REQUIRE(read_text(options.output_directory / "generated/runtime_bridge_consumer.gd.cpp")
                 .find("format = 7;") != std::string::npos);
 
     write_bridge("vendor-runtime-v1", "float");
     const auto contract_changed = gdpp::ProjectCompiler{}.compile(options);
     REQUIRE(contract_changed.success);
-    REQUIRE_EQ(contract_changed.compiled_count, std::size_t{1});
-    REQUIRE_EQ(contract_changed.cache_hit_count, std::size_t{0});
+    REQUIRE_EQ(contract_changed.compiled_count, contract_changed.scripts.size());
 
     write_bridge("vendor-runtime-v2");
     const auto abi_changed = gdpp::ProjectCompiler{}.compile(options);
     REQUIRE(abi_changed.success);
-    REQUIRE_EQ(abi_changed.compiled_count, std::size_t{1});
-    REQUIRE_EQ(abi_changed.cache_hit_count, std::size_t{0});
+    REQUIRE_EQ(abi_changed.compiled_count, abi_changed.scripts.size());
 }
 
 TEST_CASE("project compiler propagates provider editor-only contracts") {
@@ -2610,8 +2605,7 @@ TEST_CASE("global class types win over same-stem embedded scripts in typed conta
                "@export var progress: int\n@export var action: String\n");
     const auto abi_change = compiler.compile(options);
     REQUIRE(abi_change.success);
-    REQUIRE_EQ(abi_change.compiled_count, std::size_t{2});
-    REQUIRE_EQ(abi_change.cache_hit_count, std::size_t{1});
+    REQUIRE_EQ(abi_change.compiled_count, abi_change.scripts.size());
 }
 
 TEST_CASE("project script member graph reports invalid static and typed calls") {
@@ -2645,7 +2639,7 @@ TEST_CASE("project script member graph reports invalid static and typed calls") 
     REQUIRE(has_code("GDS4002"));
 }
 
-TEST_CASE("project compiler preserves cross-script call contracts through cache invalidation") {
+TEST_CASE("project compiler preserves cross-script call contracts through regeneration") {
     const auto root = fixture_root("project-cross-script-call-contract");
     std::error_code error;
     std::filesystem::remove_all(root, error);
@@ -2664,7 +2658,7 @@ TEST_CASE("project compiler preserves cross-script call contracts through cache 
     const auto initial = compiler.compile(options);
 
     REQUIRE(initial.success);
-    REQUIRE_EQ(initial.compiled_count, std::size_t{2});
+    REQUIRE_EQ(initial.compiled_count, initial.scripts.size());
     const auto consumer =
         std::find_if(initial.scripts.begin(), initial.scripts.end(), [](const auto& script) {
             return script.relative_path == std::filesystem::path{"consumer.gd"};
@@ -2686,8 +2680,7 @@ TEST_CASE("project compiler preserves cross-script call contracts through cache 
     const auto changed = compiler.compile(options);
 
     REQUIRE(changed.success);
-    REQUIRE_EQ(changed.compiled_count, std::size_t{2});
-    REQUIRE_EQ(changed.cache_hit_count, std::size_t{0});
+    REQUIRE_EQ(changed.compiled_count, changed.scripts.size());
     const auto changed_consumer =
         std::find_if(changed.scripts.begin(), changed.scripts.end(), [](const auto& script) {
             return script.relative_path == std::filesystem::path{"consumer.gd"};
@@ -2934,7 +2927,7 @@ TEST_CASE("attached script object values materialize their native storage repres
             std::string::npos);
 }
 
-TEST_CASE("project symbol signature changes invalidate dependent script caches") {
+TEST_CASE("project symbol signature changes revalidate dependent scripts") {
     const auto root = fixture_root("project-symbol-cache");
     std::error_code error;
     std::filesystem::remove_all(root, error);
@@ -2960,7 +2953,7 @@ TEST_CASE("project symbol signature changes invalidate dependent script caches")
                         }));
 }
 
-TEST_CASE("project variadic ABI changes invalidate dependent script caches") {
+TEST_CASE("project variadic ABI changes revalidate dependent scripts") {
     const auto root = fixture_root("project-vararg-abi-cache");
     std::error_code error;
     std::filesystem::remove_all(root, error);
@@ -2973,7 +2966,7 @@ TEST_CASE("project variadic ABI changes invalidate dependent script caches") {
     const gdpp::ProjectCompiler compiler;
     const auto initial = compiler.compile(options);
     REQUIRE(initial.success);
-    REQUIRE_EQ(initial.compiled_count, std::size_t{2});
+    REQUIRE_EQ(initial.compiled_count, initial.scripts.size());
 
     write_text(root / "base.gd", "extends RefCounted\nclass_name VarargCacheBase\n"
                                  "func collect(value: int, ...extras: Array) -> int:\n"
@@ -2981,8 +2974,7 @@ TEST_CASE("project variadic ABI changes invalidate dependent script caches") {
     const auto changed = compiler.compile(options);
 
     REQUIRE(changed.success);
-    REQUIRE_EQ(changed.compiled_count, std::size_t{2});
-    REQUIRE_EQ(changed.cache_hit_count, std::size_t{0});
+    REQUIRE_EQ(changed.compiled_count, changed.scripts.size());
     REQUIRE(native_class_for(changed, "base.gd") != native_class_for(initial, "base.gd"));
 }
 
@@ -3065,7 +3057,7 @@ TEST_CASE("project coroutine ABI changes invalidate callers and require cross-sc
     const gdpp::ProjectCompiler compiler;
     const auto initial = compiler.compile(options);
     REQUIRE(initial.success);
-    REQUIRE_EQ(initial.compiled_count, std::size_t{2});
+    REQUIRE_EQ(initial.compiled_count, initial.scripts.size());
     const auto committed_manifest = read_text(options.output_directory / "manifest.txt");
 
     write_text(root / "producer.gd", asynchronous_producer);
@@ -3080,8 +3072,7 @@ TEST_CASE("project coroutine ABI changes invalidate callers and require cross-sc
     write_text(root / "consumer.gd", awaited_consumer);
     const auto migrated = compiler.compile(options);
     REQUIRE(migrated.success);
-    REQUIRE_EQ(migrated.compiled_count, std::size_t{2});
-    REQUIRE_EQ(migrated.cache_hit_count, std::size_t{0});
+    REQUIRE_EQ(migrated.compiled_count, migrated.scripts.size());
     REQUIRE(native_class_for(migrated, "producer.gd") != native_class_for(initial, "producer.gd"));
     const auto consumer =
         std::find_if(migrated.scripts.begin(), migrated.scripts.end(), [](const auto& script) {
@@ -3099,8 +3090,7 @@ TEST_CASE("project coroutine ABI changes invalidate callers and require cross-sc
                                      "func produce() -> int:\n    await resumed\n    return 2\n");
     const auto implementation_change = compiler.compile(options);
     REQUIRE(implementation_change.success);
-    REQUIRE_EQ(implementation_change.compiled_count, std::size_t{1});
-    REQUIRE_EQ(implementation_change.cache_hit_count, std::size_t{1});
+    REQUIRE_EQ(implementation_change.compiled_count, implementation_change.scripts.size());
 }
 
 TEST_CASE("project symbols classify awaited defaults as coroutine ABI") {
@@ -3582,10 +3572,10 @@ TEST_CASE("project compilation permits detached coroutine calls") {
     const auto result = gdpp::ProjectCompiler{}.compile(options);
 
     REQUIRE(result.success);
-    REQUIRE_EQ(result.compiled_count, std::size_t{2});
+    REQUIRE_EQ(result.compiled_count, result.scripts.size());
 }
 
-TEST_CASE("project cache invalidates only direct ABI dependents") {
+TEST_CASE("project ABI identities change only for affected scripts") {
     const auto root = fixture_root("project-precise-cache");
     std::error_code error;
     std::filesystem::remove_all(root, error);
@@ -3599,7 +3589,7 @@ TEST_CASE("project cache invalidates only direct ABI dependents") {
     const gdpp::ProjectCompiler compiler;
     const auto initial = compiler.compile(options);
     REQUIRE(initial.success);
-    REQUIRE_EQ(initial.compiled_count, std::size_t{3});
+    REQUIRE_EQ(initial.compiled_count, initial.scripts.size());
     REQUIRE_EQ(native_class_for(initial, "base.gd").find("GDPPNative_PreciseBase_"),
                std::size_t{0});
     const auto initial_base_class = native_class_for(initial, "base.gd");
@@ -3613,8 +3603,7 @@ TEST_CASE("project cache invalidates only direct ABI dependents") {
                                  "static func value() -> int:\n    return 2\n");
     const auto implementation_change = compiler.compile(options);
     REQUIRE(implementation_change.success);
-    REQUIRE_EQ(implementation_change.compiled_count, std::size_t{1});
-    REQUIRE_EQ(implementation_change.cache_hit_count, std::size_t{2});
+    REQUIRE_EQ(implementation_change.compiled_count, implementation_change.scripts.size());
     REQUIRE_EQ(native_class_for(implementation_change, "base.gd"), initial_base_class);
     REQUIRE_EQ(native_class_for(implementation_change, "consumer.gd"), initial_consumer_class);
 
@@ -3622,8 +3611,7 @@ TEST_CASE("project cache invalidates only direct ABI dependents") {
                                  "static func value() -> float:\n    return 2.0\n");
     const auto abi_change = compiler.compile(options);
     REQUIRE(abi_change.success);
-    REQUIRE_EQ(abi_change.compiled_count, std::size_t{2});
-    REQUIRE_EQ(abi_change.cache_hit_count, std::size_t{1});
+    REQUIRE_EQ(abi_change.compiled_count, abi_change.scripts.size());
     REQUIRE(native_class_for(abi_change, "base.gd") != initial_base_class);
     REQUIRE_EQ(native_class_for(abi_change, "consumer.gd"), initial_consumer_class);
     const auto consumer =
@@ -3637,11 +3625,10 @@ TEST_CASE("project cache invalidates only direct ABI dependents") {
             return script.relative_path.filename() == "unrelated.gd";
         });
     REQUIRE(unrelated != abi_change.scripts.end());
-    REQUIRE(unrelated->cache_hit);
     REQUIRE_EQ(unrelated->content_hash, initial_unrelated_hash);
 }
 
-TEST_CASE("typed container object arguments participate in precise dependency invalidation") {
+TEST_CASE("typed container object arguments propagate precise ABI dependencies") {
     const auto root = fixture_root("project-typed-container-dependency");
     std::error_code error;
     std::filesystem::remove_all(root, error);
@@ -3656,7 +3643,7 @@ TEST_CASE("typed container object arguments participate in precise dependency in
 
     const auto initial = compiler.compile(options);
     REQUIRE(initial.success);
-    REQUIRE_EQ(initial.compiled_count, std::size_t{2});
+    REQUIRE_EQ(initial.compiled_count, initial.scripts.size());
     const auto initial_item_class = native_class_for(initial, "item.gd");
     const auto initial_consumer_class = native_class_for(initial, "consumer.gd");
     const auto initial_consumer =
@@ -3677,8 +3664,7 @@ TEST_CASE("typed container object arguments participate in precise dependency in
                                  "func value() -> float:\n    return 1.0\n");
     const auto changed = compiler.compile(options);
     REQUIRE(changed.success);
-    REQUIRE_EQ(changed.compiled_count, std::size_t{2});
-    REQUIRE_EQ(changed.cache_hit_count, std::size_t{0});
+    REQUIRE_EQ(changed.compiled_count, changed.scripts.size());
     REQUIRE(native_class_for(changed, "item.gd") != initial_item_class);
     REQUIRE_EQ(native_class_for(changed, "consumer.gd"), initial_consumer_class);
     const auto changed_consumer =
@@ -3738,7 +3724,7 @@ TEST_CASE("typed script containers share one canonical ABI tag across generated 
     REQUIRE(consumer_source.find("consumer_gdpp_detail::ContainerObjectTag_") == std::string::npos);
 }
 
-TEST_CASE("project cache treats inspector annotations as public ABI") {
+TEST_CASE("project compiler treats inspector annotations as public ABI") {
     const auto root = fixture_root("project-inspector-abi-cache");
     std::error_code error;
     std::filesystem::remove_all(root, error);
@@ -3760,8 +3746,7 @@ TEST_CASE("project cache treats inspector annotations as public ABI") {
     const auto changed = compiler.compile(options);
 
     REQUIRE(changed.success);
-    REQUIRE_EQ(changed.compiled_count, std::size_t{2});
-    REQUIRE_EQ(changed.cache_hit_count, std::size_t{0});
+    REQUIRE_EQ(changed.compiled_count, changed.scripts.size());
     REQUIRE(native_class_for(changed, "base.gd") != initial_base_class);
 }
 
@@ -4136,7 +4121,7 @@ TEST_CASE("project compiler preserves asynchronous initializer construction") {
     REQUIRE(consumer.find(".instantiate(") != std::string::npos);
 }
 
-TEST_CASE("project compiler resolves autoloads and invalidates their cached symbol graph") {
+TEST_CASE("project compiler resolves autoloads and refreshes their symbol graph") {
     const auto root = fixture_root("project-autoload");
     std::error_code error;
     std::filesystem::remove_all(root, error);
@@ -4467,7 +4452,7 @@ TEST_CASE("project frontend limit failures never commit generated state") {
     REQUIRE(!std::filesystem::exists(options.output_directory / "register_types.cpp"));
 }
 
-TEST_CASE("project compiler emits source-free editor reflection on cache hits") {
+TEST_CASE("project compiler emits source-free editor reflection after regeneration") {
     const auto root = fixture_root("project-editor-reflection");
     std::error_code error;
     std::filesystem::remove_all(root, error);
@@ -4487,7 +4472,7 @@ TEST_CASE("project compiler emits source-free editor reflection on cache hits") 
 
     REQUIRE(first.success);
     REQUIRE(result.success);
-    REQUIRE_EQ(result.cache_hit_count, std::size_t{2});
+    REQUIRE_EQ(result.compiled_count, result.scripts.size());
     const auto child =
         std::find_if(result.scripts.begin(), result.scripts.end(), [](const auto& script) {
             return script.relative_path == std::filesystem::path{"child.gd"};

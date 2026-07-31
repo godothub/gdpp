@@ -175,7 +175,7 @@ foreach(required_windows_process_contract IN ITEMS
         "const bool requires_resolution = !requested.has_parent_path();"
         "options.environment = &environment->block;"
         "return execute_hidden_windows_command_line(std::move(command_line), options);"
-        "return execute_hidden_windows_process(wide_arguments);")
+        "return execute_hidden_windows_process(wide_arguments, options);")
     string(FIND "${compiler_service}" "${required_windows_process_contract}"
         windows_process_offset)
     if(windows_process_offset EQUAL -1)
@@ -219,31 +219,28 @@ if(NOT visible_windows_spawn_offset EQUAL -1)
     message(FATAL_ERROR
         "Windows export tools must not be launched through a visible console spawn")
 endif()
-foreach(required_serial_build_contract IN ITEMS
-        "for (std::size_t index = begin; index < end; ++index)"
-        "auto process_result ="
-        "toolchain output for '")
-    string(FIND "${compiler_service}" "${required_serial_build_contract}"
-        serial_build_offset)
-    if(serial_build_offset EQUAL -1)
+foreach(required_ninja_build_contract IN ITEMS
+        "execute_ninja_build("
+        "execute_ninja_process("
+        "inspect_ninja_dry_run("
+        "recommended_ninja_parallelism()"
+        "NinjaProgressParser progress"
+        "\"-k\", \"1\""
+        "parallel Ninja build failed with exit code "
+        "toolchain output:\\n")
+    string(FIND "${compiler_service}" "${required_ninja_build_contract}"
+        ninja_build_offset)
+    if(ninja_build_offset EQUAL -1)
         message(FATAL_ERROR
-            "Serial native build diagnostics contract is missing: "
-            "${required_serial_build_contract}")
+            "Ninja native build contract is missing: "
+            "${required_ninja_build_contract}")
     endif()
 endforeach()
-foreach(forbidden_parallel_build_contract IN ITEMS
-        "hardware_concurrency()"
-        "worker_count"
-        "std::thread worker"
-        "refresh_editor_display()")
-    string(FIND "${compiler_service}" "${forbidden_parallel_build_contract}"
-        parallel_build_offset)
-    if(NOT parallel_build_offset EQUAL -1)
-        message(FATAL_ERROR
-            "Native export commands must remain strictly serial: "
-            "${forbidden_parallel_build_contract}")
-    endif()
-endforeach()
+string(FIND "${compiler_service}" "build_commands" legacy_command_plan_offset)
+if(NOT legacy_command_plan_offset EQUAL -1)
+    message(FATAL_ERROR
+        "Compiler service must not accept the retired arbitrary-command build plan")
+endif()
 foreach(required_build_progress_contract IN ITEMS
         "extends CanvasLayer"
         "layer = 127"
