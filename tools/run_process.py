@@ -4,9 +4,12 @@
 from __future__ import annotations
 
 import argparse
+import os
+import re
 import shutil
 import subprocess
 import sys
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 
@@ -31,7 +34,97 @@ def disk_free_bytes(path: Path) -> int:
 
 
 def format_status(return_code: int) -> str:
-    return f"decimal={return_code} unsigned_hex=0x{return_code & 0xFFFFFFFF:08X}"
+    unsigned = return_code & 0xFFFFFFFF
+    known_statuses = {
+        0xC000007F: "STATUS_DISK_FULL",
+        0xC0000409: "STATUS_STACK_BUFFER_OVERRUN",
+    }
+    suffix = (
+        f" windows_status={known_statuses[unsigned]}"
+        if unsigned in known_statuses
+        else ""
+    )
+    return f"decimal={return_code} unsigned_hex=0x{unsigned:08X}{suffix}"
+
+
+def local_name(tag: str) -> str:
+    return tag.rsplit("}", 1)[-1]
+
+
+def parse_windows_application_errors(
+    payload: bytes, executable_name: str
+) -> list[dict[str, str]]:
+    if payload.startswith((b"\xff\xfe", b"\xfe\xff")):
+        text = payload.decode("utf-16", errors="replace")
+    else:
+        text = payload.decode("utf-8", errors="replace")
+    text = re.sub(r"<\?xml[^>]*\?>", "", text).strip()
+    if not text:
+        return []
+    try:
+        root = ET.fromstring(text)
+    except ET.ParseError:
+        try:
+            root = ET.fromstring(f"<Events>{text}</Events>")
+        except ET.ParseError:
+            return []
+
+    wanted = executable_name.casefold()
+    records: list[dict[str, str]] = []
+    events = (
+        [root]
+        if local_name(root.tag) == "Event"
+        else [
+            element for element in root.iter() if local_name(element.tag) == "Event"
+        ]
+    )
+    for event in events:
+        values = {
+            element.attrib["Name"]: element.text or ""
+            for element in event.iter()
+            if local_name(element.tag) == "Data" and "Name" in element.attrib
+        }
+        app_name = values.get("AppName", "")
+        if Path(app_name).name.casefold() != wanted:
+            continue
+        records.append(
+            {
+                "app": Path(app_name).name,
+                "module": Path(values.get("ModuleName", "")).name,
+                "exception": values.get("ExceptionCode", ""),
+                "offset": values.get("FaultingOffset", ""),
+            }
+        )
+    return records
+
+
+def report_windows_application_errors(label: str, executable_name: str) -> None:
+    if os.name != "nt":
+        return
+    try:
+        query = subprocess.run(
+            [
+                "wevtutil",
+                "qe",
+                "Application",
+                "/q:*[System[(EventID=1000)]]",
+                "/f:xml",
+                "/rd:true",
+                "/c:20",
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+    except OSError:
+        return
+    for record in parse_windows_application_errors(query.stdout, executable_name)[:3]:
+        print(
+            f"{label}: application_error app={record['app']} "
+            f"module={record['module']} exception={record['exception']} "
+            f"offset={record['offset']}",
+            flush=True,
+        )
 
 
 def main() -> int:
@@ -69,6 +162,10 @@ def main() -> int:
         f"{arguments.label}: process_exit {format_status(return_code)}",
         flush=True,
     )
+    if return_code != 0:
+        report_windows_application_errors(
+            arguments.label, Path(arguments.command[0]).name
+        )
     return 0 if return_code == 0 else 1
 
 

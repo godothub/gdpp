@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import importlib.util
 import subprocess
 import sys
 import tempfile
@@ -11,6 +12,10 @@ from pathlib import Path
 
 
 TOOL = Path(__file__).with_name("run_process.py")
+SPEC = importlib.util.spec_from_file_location("gdpp_run_process", TOOL)
+assert SPEC is not None and SPEC.loader is not None
+RUN_PROCESS = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(RUN_PROCESS)
 
 
 class ProcessRunnerTest(unittest.TestCase):
@@ -51,6 +56,37 @@ class ProcessRunnerTest(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         self.assertEqual(self.log.read_bytes(), b"")
         self.assertIn(b"decimal=7 unsigned_hex=0x00000007", result.stdout)
+
+    def test_windows_application_error_is_reduced_to_safe_fields(self) -> None:
+        payload = b"""\
+<Events>
+  <Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+    <EventData>
+      <Data Name="AppName">Godot_v4.7.1-stable_win64.exe</Data>
+      <Data Name="AppPath">D:\\private\\customer\\Godot.exe</Data>
+      <Data Name="ModuleName">gdpp_compiler.windows.x86_64.dll</Data>
+      <Data Name="ModulePath">D:\\private\\gdpp_compiler.dll</Data>
+      <Data Name="ExceptionCode">c0000409</Data>
+      <Data Name="FaultingOffset">00000000000abcde</Data>
+    </EventData>
+  </Event>
+</Events>
+"""
+        records = RUN_PROCESS.parse_windows_application_errors(
+            payload, "Godot_v4.7.1-stable_win64.exe"
+        )
+        self.assertEqual(
+            records,
+            [
+                {
+                    "app": "Godot_v4.7.1-stable_win64.exe",
+                    "module": "gdpp_compiler.windows.x86_64.dll",
+                    "exception": "c0000409",
+                    "offset": "00000000000abcde",
+                }
+            ],
+        )
+        self.assertNotIn("private", repr(records))
 
 
 if __name__ == "__main__":
