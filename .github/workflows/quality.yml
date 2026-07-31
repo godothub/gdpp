@@ -1,0 +1,123 @@
+name: Quality gates
+
+on:
+  workflow_call:
+    inputs:
+      source_ref:
+        description: Private source revision to validate
+        type: string
+        required: false
+        default: main
+    secrets:
+      GDPP_TOKEN:
+        required: true
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: Private source revision to validate
+        type: string
+        required: false
+        default: main
+
+permissions:
+  contents: read
+
+env:
+  GDPP_SOURCE_ROOT: ${{ github.workspace }}/source
+
+defaults:
+  run:
+    working-directory: source
+
+concurrency:
+  group: quality-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  source:
+    name: Quality / Source and repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out public pipeline
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+      - id: source
+        uses: ./.github/actions/checkout-source
+        with:
+          ref: ${{ inputs.source_ref }}
+          token: ${{ secrets.GDPP_TOKEN }}
+      - name: Check formatting of changed C++ files
+        shell: bash
+        run: |
+          base="$(git rev-parse HEAD^ 2>/dev/null || true)"
+          if [[ -z "$base" ]]; then
+            echo 'No parent commit is available; skipping the incremental format check.'
+            exit 0
+          fi
+          mapfile -t files < <(git diff --name-only --diff-filter=ACMR "$base" HEAD -- \
+            include src test | grep -E '\.(cpp|hpp)$' || true)
+          if [[ ${#files[@]} -eq 0 ]]; then
+            echo 'No changed C++ files.'
+            exit 0
+          fi
+          clang-format --dry-run --Werror "${files[@]}"
+      - name: Validate workflow YAML and ownership boundaries
+        shell: bash
+        run: |
+          ruby -e 'require "yaml"; root = ARGV.fetch(0); Dir[File.join(root, "*.yml")].sort.each { |path| workflow = YAML.load_file(path); actual = workflow.fetch("permissions").fetch("contents"); raise "#{path}: top-level contents must be read, got #{actual}" unless actual == "read"; if path.end_with?("/release.yml"); publish = workflow.fetch("jobs").fetch("publish").fetch("permissions").fetch("contents"); raise "#{path}: publish job contents must be write, got #{publish}" unless publish == "write"; end; puts path }' \
+            "$GITHUB_WORKSPACE/.github/workflows"
+          test ! -e "$GITHUB_WORKSPACE/.github/workflows/ci.yml"
+      - name: Validate reusable delivery topology
+        run: ruby "$GITHUB_WORKSPACE/tools/check_workflow_topology.rb"
+      - name: Reject mutable external Action references
+        shell: bash
+        run: |
+          set -euo pipefail
+          validation_status=0
+          while IFS= read -r entry; do
+            reference="${entry#*@}"
+            reference="${reference%% *}"
+            if [[ ! "$reference" =~ ^[0-9a-f]{40}$ ]]; then
+              echo "Mutable external Action reference: $entry"
+              validation_status=1
+            fi
+          done < <(grep -RInE \
+            'uses:[[:space:]]+[^./][^@[:space:]]+@' \
+            "$GITHUB_WORKSPACE/.github" --include='*.yml' --include='*.yaml')
+          test "$validation_status" -eq 0
+      - name: Validate module layout and dependency direction
+        run: python3 tools/check_architecture.py
+      - name: Validate documentation contracts
+        run: python3 tools/check_docs.py
+      - name: Validate GitHub Actions semantics
+        shell: bash
+        run: |
+          mkdir -p build/tools/go-cache build/tools/go-mod
+          (
+            cd "$GITHUB_WORKSPACE"
+            GOCACHE="$GDPP_SOURCE_ROOT/build/tools/go-cache" \
+              GOMODCACHE="$GDPP_SOURCE_ROOT/build/tools/go-mod" \
+              go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+          )
+      - name: Validate the Node.js 24 MSVC bootstrap action
+        run: node test/setup_msvc_action_test.js
+      - name: Reject generated and platform metadata
+        shell: bash
+        run: |
+          if test -n "$(find . -path './.git' -prune -o \
+              \( -name '._*' -o -name '.DS_Store' -o -name '__MACOSX' -o \
+                 -name '__pycache__' -o -name '*.pyc' \) -print -quit)"; then
+            echo 'Repository contains generated or cross-platform metadata.'
+            exit 1
+          fi
+          if test -n "$(find . -path './.git' -prune -o -path './third' -prune -o \
+              -path './build' -prune -o -path './example/addons/gdpp/binary' -prune -o \
+              -path './example/addons/gdpp/sdk' -prune -o \
+              -type f \( -name '*.o' -o -name '*.obj' -o -name '*.a' -o -name '*.so' \
+                         -o -name '*.dylib' -o -name '*.dll' -o -name '*.wasm' \) \
+              -print -quit)"; then
+            echo 'Native build products exist outside approved output directories.'
+            exit 1
+          fi
