@@ -4,14 +4,15 @@
 
 #include <godot_cpp/classes/ref_counted.hpp>
 #include <godot_cpp/variant/array.hpp>
-#include <godot_cpp/variant/callable.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/packed_string_array.hpp>
 #include <godot_cpp/variant/string.hpp>
 
+#include <cstddef>
 #include <cstdint>
 #include <mutex>
 #include <optional>
+#include <string>
 #include <vector>
 
 namespace gdpp::extension {
@@ -31,12 +32,12 @@ class GDPPCompiler final : public godot::RefCounted {
                     const godot::String& sdk_root, const godot::String& compiler_executable,
                     const godot::String& target_version, const godot::String& build_profile,
                     const godot::String& target_platform, const godot::String& target_architecture,
-                    const godot::String& target_variant, const godot::String& target_precision,
-                    const godot::Callable& progress_callback = {}) const;
+                    const godot::String& target_variant,
+                    const godot::String& target_precision) const;
     [[nodiscard]] godot::Dictionary
-    execute_project_build(const godot::Dictionary& build_plan,
-                          const godot::Callable& progress_callback = {}) const;
+    execute_project_build(const godot::Dictionary& build_plan) const;
     void prepare_project_build();
+    [[nodiscard]] godot::Array drain_project_build_progress() const;
     // Installs reflection-only attached script descriptors into the editor bridge. The
     // distribution library owns the executable descriptors and is never loaded into the editor.
     [[nodiscard]] godot::Dictionary
@@ -68,12 +69,22 @@ class GDPPCompiler final : public godot::RefCounted {
         godot::PackedStringArray diagnostics;
     };
 
-    [[nodiscard]] BuildExecutionResult
-    execute_ninja_build(const godot::Dictionary& build_plan,
-                        const godot::Callable& progress_callback) const;
+    struct BuildProgressEvent {
+        std::string phase;
+        std::size_t completed{0};
+        std::size_t total{0};
+    };
 
-    mutable std::mutex reflected_bridges_mutex_;
-    std::optional<std::vector<gdpp::ExtensionBridge>> reflected_bridges_;
+    [[nodiscard]] BuildExecutionResult
+    execute_ninja_build(const godot::Dictionary& build_plan) const;
+    void enqueue_build_progress(const char* phase, std::size_t completed, std::size_t total) const;
+    void clear_project_build_progress() const;
+
+    mutable std::mutex prepared_build_mutex_;
+    std::optional<std::vector<gdpp::ExtensionBridge>> prepared_extension_bridges_;
+    std::string prepared_build_executor_;
+    mutable std::mutex build_progress_mutex_;
+    mutable std::vector<BuildProgressEvent> build_progress_events_;
 };
 
 } // namespace gdpp::extension

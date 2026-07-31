@@ -4,8 +4,6 @@ extends RefCounted
 const POLL_INTERVAL_MSEC := 16
 
 var _thread: Thread
-var _progress_mutex := Mutex.new()
-var _progress_events: Array[Dictionary] = []
 
 
 func run(
@@ -22,11 +20,19 @@ func run(
     # ClassDB belongs to the editor thread. Capture all third-party GDExtension
     # contracts before the worker starts so compilation never reflects the live
     # editor registry from a background thread.
+    var worker_request := request.duplicate(true)
+    for key: String in ["project_root", "output_directory", "sdk_root"]:
+        var path := str(worker_request.get(key, ""))
+        if path.begins_with("res://") or path.begins_with("user://"):
+            worker_request[key] = ProjectSettings.globalize_path(path)
+    var compiler_path := str(worker_request.get("compiler_executable", ""))
+    if compiler_path.begins_with("res://") or compiler_path.begins_with("user://"):
+        worker_request["compiler_executable"] = ProjectSettings.globalize_path(compiler_path)
     compiler.prepare_project_build()
 
     _thread = Thread.new()
     var start_error := _thread.start(
-        Callable(self, "_worker_entry").bind(compiler, request.duplicate(true))
+        Callable(self, "_worker_entry").bind(compiler, worker_request)
     )
     if start_error != OK:
         _thread = null
@@ -35,14 +41,14 @@ func run(
         )
 
     while _thread.is_alive():
-        _dispatch_progress(progress_callback)
+        _dispatch_progress(compiler, progress_callback)
         _advance_frame(frame_callback, false)
         _pump_editor()
         OS.delay_msec(POLL_INTERVAL_MSEC)
 
     var result: Variant = _thread.wait_to_finish()
     _thread = null
-    _dispatch_progress(progress_callback)
+    _dispatch_progress(compiler, progress_callback)
     _advance_frame(frame_callback, true)
     _pump_editor()
     if result is Dictionary:
@@ -51,7 +57,6 @@ func run(
 
 
 func _worker_entry(compiler: Object, request: Dictionary) -> Dictionary:
-    var progress_callback := Callable(self, "_record_progress")
     var plan: Dictionary = compiler.compile_project(
         str(request.get("project_root", "res://")),
         str(request.get("output_directory", "")),
@@ -62,8 +67,7 @@ func _worker_entry(compiler: Object, request: Dictionary) -> Dictionary:
         str(request.get("target_platform", "")),
         str(request.get("target_architecture", "")),
         str(request.get("target_variant", "")),
-        str(request.get("target_precision", "single")),
-        progress_callback
+        str(request.get("target_precision", "single"))
     )
     if not plan.get("success", false):
         return {
@@ -78,31 +82,19 @@ func _worker_entry(compiler: Object, request: Dictionary) -> Dictionary:
             },
         }
 
-    var execution: Dictionary = compiler.execute_project_build(plan, progress_callback)
+    var execution: Dictionary = compiler.execute_project_build(plan)
     return {
         "plan": plan,
         "execution": execution,
     }
 
 
-func _record_progress(phase: String, completed: int, total: int) -> void:
-    _progress_mutex.lock()
-    _progress_events.push_back({
-        "phase": phase,
-        "completed": completed,
-        "total": total,
-    })
-    _progress_mutex.unlock()
-
-
-func _dispatch_progress(progress_callback: Callable) -> void:
-    _progress_mutex.lock()
-    var pending := _progress_events.duplicate(true)
-    _progress_events.clear()
-    _progress_mutex.unlock()
+func _dispatch_progress(compiler: Object, progress_callback: Callable) -> void:
+    var pending: Array = compiler.drain_project_build_progress()
     if not progress_callback.is_valid():
         return
-    for event: Dictionary in pending:
+    for value: Variant in pending:
+        var event := value as Dictionary
         progress_callback.call(
             str(event.get("phase", "compile")),
             int(event.get("completed", 0)),

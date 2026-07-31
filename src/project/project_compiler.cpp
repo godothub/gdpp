@@ -1134,8 +1134,8 @@ ProjectCompileResult ProjectCompiler::compile_impl(const ProjectCompileOptions& 
         return result;
     // A checked-in contract is an explicit, reviewable override for offline/cross-machine builds.
     // Live ClassDB reflection fills only classes that are not already described by one of those
-    // manifests. Keeping each reflected class in its own bridge also gives the incremental cache
-    // class-granular invalidation when a third-party API changes.
+    // manifests. Keeping each reflected class in its own bridge also gives the generated Ninja
+    // graph class-granular invalidation when a third-party API changes.
     std::set<std::string> declared_bridge_classes;
     for (const auto& bridge : bridge_load.bridges) {
         for (const auto& type : bridge.classes)

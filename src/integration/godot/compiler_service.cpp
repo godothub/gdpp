@@ -690,8 +690,8 @@ std::vector<ExtensionBridge> reflect_extension_contracts() {
 
         ExtensionBridge bridge;
         // Reflected contracts have no source file. Their exact ClassDB identity already enters
-        // the script/build hashes; leaving the path empty prevents the native object cache from
-        // treating a fictional manifest as perpetually stale.
+        // the script/build hashes; leaving the path empty prevents the Ninja graph from tracking
+        // a fictional manifest as a perpetually dirty input.
         bridge.manifest_path.clear();
         bridge.provider = "ClassDB";
         bridge.abi = "classdb:" + contract.gdscript_name;
@@ -733,9 +733,7 @@ struct NativeProcessResult {
 };
 
 using NativeOutputCallback = std::function<void(std::string_view)>;
-
-void report_build_progress(const godot::Callable& callback, const char* phase,
-                           std::size_t completed, std::size_t total);
+using NativeBuildProgressCallback = std::function<void(const char*, std::size_t, std::size_t)>;
 
 #ifdef _WIN32
 struct WindowsProcessOptions {
@@ -1607,8 +1605,8 @@ NinjaWork inspect_ninja_dry_run(std::string_view output) {
 
 class NinjaProgressParser final {
   public:
-    NinjaProgressParser(NinjaWork work, const godot::Callable& callback)
-        : work_{work}, callback_{callback} {}
+    NinjaProgressParser(NinjaWork work, NativeBuildProgressCallback callback)
+        : work_{work}, callback_{std::move(callback)} {}
 
     void consume(std::string_view chunk) {
         pending_.append(chunk);
@@ -1630,9 +1628,9 @@ class NinjaProgressParser final {
             pending_.clear();
         }
         if (work_.compile != 0)
-            report_build_progress(callback_, "compile", work_.compile, work_.compile);
+            callback_("compile", work_.compile, work_.compile);
         if (work_.link != 0)
-            report_build_progress(callback_, "link", work_.link, work_.link);
+            callback_("link", work_.link, work_.link);
     }
 
   private:
@@ -1654,20 +1652,18 @@ class NinjaProgressParser final {
             return;
         if (line.find("@@GDPP:compile@@", values_end) != std::string_view::npos) {
             if (work_.compile != 0)
-                report_build_progress(callback_, "compile", std::min(finished, work_.compile),
-                                      work_.compile);
+                callback_("compile", std::min(finished, work_.compile), work_.compile);
         } else if (line.find("@@GDPP:link@@", values_end) != std::string_view::npos) {
             if (work_.link != 0) {
                 const auto completed =
                     finished > work_.compile ? finished - work_.compile : std::size_t{0};
-                report_build_progress(callback_, "link", std::min(completed, work_.link),
-                                      work_.link);
+                callback_("link", std::min(completed, work_.link), work_.link);
             }
         }
     }
 
     NinjaWork work_;
-    godot::Callable callback_;
+    NativeBuildProgressCallback callback_;
     std::string pending_;
 };
 
@@ -1730,14 +1726,6 @@ std::vector<std::string> export_worker_diagnostics(const std::string& output) {
     return diagnostics;
 }
 
-void report_build_progress(const godot::Callable& callback, const char* phase,
-                           const std::size_t completed, const std::size_t total) {
-    if (!callback.is_valid())
-        return;
-    (void)callback.call(godot::String{phase}, static_cast<int64_t>(completed),
-                        static_cast<int64_t>(total));
-}
-
 } // namespace
 
 void GDPPCompiler::_bind_methods() {
@@ -1750,10 +1738,9 @@ void GDPPCompiler::_bind_methods() {
     godot::ClassDB::bind_method(
         godot::D_METHOD("compile_project", "project_root", "output_directory", "sdk_root",
                         "compiler_executable", "target_version", "build_profile", "target_platform",
-                        "target_architecture", "target_variant", "target_precision",
-                        "progress_callback"),
+                        "target_architecture", "target_variant", "target_precision"),
         &GDPPCompiler::compile_project, DEFVAL("4.4"), DEFVAL("release"), DEFVAL(""), DEFVAL(""),
-        DEFVAL(""), DEFVAL(GDPP_GODOT_PRECISION), DEFVAL(godot::Callable{}));
+        DEFVAL(""), DEFVAL(GDPP_GODOT_PRECISION));
     godot::ClassDB::bind_method(godot::D_METHOD("get_default_sdk_root"),
                                 &GDPPCompiler::get_default_sdk_root);
     godot::ClassDB::bind_method(godot::D_METHOD("get_default_compiler_executable"),
@@ -1766,11 +1753,12 @@ void GDPPCompiler::_bind_methods() {
                                 &GDPPCompiler::is_target_supported);
     godot::ClassDB::bind_method(godot::D_METHOD("get_supported_godot_versions"),
                                 &GDPPCompiler::get_supported_godot_versions);
-    godot::ClassDB::bind_method(
-        godot::D_METHOD("execute_project_build", "build_plan", "progress_callback"),
-        &GDPPCompiler::execute_project_build, DEFVAL(godot::Callable{}));
+    godot::ClassDB::bind_method(godot::D_METHOD("execute_project_build", "build_plan"),
+                                &GDPPCompiler::execute_project_build);
     godot::ClassDB::bind_method(godot::D_METHOD("prepare_project_build"),
                                 &GDPPCompiler::prepare_project_build);
+    godot::ClassDB::bind_method(godot::D_METHOD("drain_project_build_progress"),
+                                &GDPPCompiler::drain_project_build_progress);
     godot::ClassDB::bind_method(godot::D_METHOD("install_editor_script_descriptors", "descriptors"),
                                 &GDPPCompiler::install_editor_script_descriptors);
     godot::ClassDB::bind_method(
@@ -1784,19 +1772,17 @@ void GDPPCompiler::_bind_methods() {
 }
 
 GDPPCompiler::BuildExecutionResult
-GDPPCompiler::execute_ninja_build(const godot::Dictionary& build_plan,
-                                  const godot::Callable& progress_callback) const {
+GDPPCompiler::execute_ninja_build(const godot::Dictionary& build_plan) const {
     BuildExecutionResult result;
-    auto* settings = godot::ProjectSettings::get_singleton();
-    const auto global_path = [settings](const godot::String& value) {
-        return path_from_utf8(native_string(settings->globalize_path(value)));
+    const auto native_path = [](const godot::String& value) {
+        return path_from_utf8(native_string(value));
     };
     const auto executor =
-        global_path(build_plan.get("build_executor", godot::String{})).lexically_normal();
+        native_path(build_plan.get("build_executor", godot::String{})).lexically_normal();
     const auto directory =
-        global_path(build_plan.get("build_directory", godot::String{})).lexically_normal();
+        native_path(build_plan.get("build_directory", godot::String{})).lexically_normal();
     const auto build_file =
-        global_path(build_plan.get("build_file", godot::String{})).lexically_normal();
+        native_path(build_plan.get("build_file", godot::String{})).lexically_normal();
     const auto target = native_string(build_plan.get("build_target", godot::String{"gdpp"}));
     const auto native_compiler = native_string(build_plan.get("native_compiler", godot::String{}));
     const auto planned_compile =
@@ -1807,17 +1793,17 @@ GDPPCompiler::execute_ninja_build(const godot::Dictionary& build_plan,
     const auto executor_name = executor.filename().string();
     const bool valid_executor_name =
         executor_name == "gdpp-ninja" || executor_name == "gdpp-ninja.exe";
-    if (!valid_executor_name || !has_path_component(executor, "addons") ||
-        !has_path_component(executor, "gdpp") || !has_path_component(executor, "tools") ||
-        std::filesystem::is_symlink(executor, error) ||
+    if (!executor.is_absolute() || !valid_executor_name ||
+        !has_path_component(executor, "addons") || !has_path_component(executor, "gdpp") ||
+        !has_path_component(executor, "tools") || std::filesystem::is_symlink(executor, error) ||
         !std::filesystem::is_regular_file(executor, error)) {
         result.diagnostics.push_back(
             "the bundled Ninja build executor is missing or outside addons/gdpp/tools");
         return result;
     }
-    if (directory.empty() || build_file.parent_path() != directory ||
-        build_file.filename() != "build.ninja" || target != "gdpp" ||
-        !has_path_component(directory, "native-direct") ||
+    if (!directory.is_absolute() || !build_file.is_absolute() ||
+        build_file.parent_path() != directory || build_file.filename() != "build.ninja" ||
+        target != "gdpp" || !has_path_component(directory, "native-direct") ||
         !std::filesystem::is_regular_file(build_file, error) || planned_compile <= 0 ||
         planned_link <= 0) {
         result.diagnostics.push_back("the generated Ninja build plan is incomplete or unsafe");
@@ -1860,7 +1846,10 @@ GDPPCompiler::execute_ninja_build(const godot::Dictionary& build_plan,
         return result;
     }
 
-    NinjaProgressParser progress{work, progress_callback};
+    NinjaProgressParser progress{
+        work, [this](const char* phase, const std::size_t completed, const std::size_t total) {
+            enqueue_build_progress(phase, completed, total);
+        }};
     auto build_arguments = base_arguments;
     build_arguments.insert(
         build_arguments.end(),
@@ -1885,9 +1874,7 @@ GDPPCompiler::execute_ninja_build(const godot::Dictionary& build_plan,
     return result;
 }
 
-godot::Dictionary
-GDPPCompiler::execute_project_build(const godot::Dictionary& build_plan,
-                                    const godot::Callable& progress_callback) const {
+godot::Dictionary GDPPCompiler::execute_project_build(const godot::Dictionary& build_plan) const {
     godot::Dictionary output;
     output["success"] = false;
     output["exit_code"] = int64_t{-1};
@@ -1928,7 +1915,7 @@ GDPPCompiler::execute_project_build(const godot::Dictionary& build_plan,
         assign_diagnostic_channels(output, diagnostics, errors, warnings, notes);
         return output;
     }
-    const auto execution = execute_ninja_build(build_plan, progress_callback);
+    const auto execution = execute_ninja_build(build_plan);
     output["exit_code"] = execution.exit_code;
     if (execution.exit_code != 0) {
         for (const auto& diagnostic : execution.diagnostics) {
@@ -1946,11 +1933,10 @@ GDPPCompiler::execute_project_build(const godot::Dictionary& build_plan,
     }
 
     const godot::String output_library = build_plan.get("output_library", godot::String{});
-    auto* settings = godot::ProjectSettings::get_singleton();
-    const auto output_path = native_string(settings->globalize_path(output_library));
+    const auto output_path = native_string(output_library);
     const godot::String pending_output = build_plan.get("pending_output_library", godot::String{});
     if (!pending_output.is_empty()) {
-        const auto pending_path = native_string(settings->globalize_path(pending_output));
+        const auto pending_path = native_string(pending_output);
         std::string commit_diagnostic;
         if (!commit_xcframework_artifact(path_from_utf8(pending_path), path_from_utf8(output_path),
                                          commit_diagnostic)) {
@@ -1980,14 +1966,56 @@ GDPPCompiler::execute_project_build(const godot::Dictionary& build_plan,
     const auto completed_work = static_cast<std::size_t>(
         static_cast<int64_t>(build_plan.get("compile_edge_count", int64_t{0})) +
         static_cast<int64_t>(build_plan.get("post_compile_edge_count", int64_t{0})));
-    report_build_progress(progress_callback, "complete", completed_work, completed_work);
+    enqueue_build_progress("complete", completed_work, completed_work);
+    return output;
+}
+
+void GDPPCompiler::enqueue_build_progress(const char* phase, const std::size_t completed,
+                                          const std::size_t total) const {
+    constexpr std::size_t maximum_pending_events = 16U * 1024U;
+    const std::lock_guard lock{build_progress_mutex_};
+    BuildProgressEvent event{phase, completed, total};
+    if (build_progress_events_.size() < maximum_pending_events) {
+        build_progress_events_.push_back(std::move(event));
+        return;
+    }
+    // The editor normally drains every frame. Keep memory bounded if a platform stalls its main
+    // loop while preserving the newest progress value, including a later phase transition.
+    build_progress_events_.back() = std::move(event);
+}
+
+void GDPPCompiler::clear_project_build_progress() const {
+    const std::lock_guard lock{build_progress_mutex_};
+    build_progress_events_.clear();
+}
+
+godot::Array GDPPCompiler::drain_project_build_progress() const {
+    std::vector<BuildProgressEvent> pending;
+    {
+        const std::lock_guard lock{build_progress_mutex_};
+        pending.swap(build_progress_events_);
+    }
+    godot::Array output;
+    output.resize(static_cast<int64_t>(pending.size()));
+    for (std::size_t index = 0; index < pending.size(); ++index) {
+        godot::Dictionary event;
+        event["phase"] = godot::String{pending[index].phase.c_str()};
+        event["completed"] = static_cast<int64_t>(pending[index].completed);
+        event["total"] = static_cast<int64_t>(pending[index].total);
+        output[static_cast<int64_t>(index)] = event;
+    }
     return output;
 }
 
 void GDPPCompiler::prepare_project_build() {
+    clear_project_build_progress();
     auto reflected = reflect_extension_contracts();
-    const std::lock_guard lock{reflected_bridges_mutex_};
-    reflected_bridges_ = std::move(reflected);
+    auto* settings = godot::ProjectSettings::get_singleton();
+    const auto executor =
+        native_string(settings->globalize_path(godot::String{GDPP_NINJA_RESOURCE_PATH}));
+    const std::lock_guard lock{prepared_build_mutex_};
+    prepared_extension_bridges_ = std::move(reflected);
+    prepared_build_executor_ = executor;
 }
 
 godot::Dictionary
@@ -2202,8 +2230,8 @@ godot::Dictionary GDPPCompiler::compile_project(
     const godot::String& sdk_root, const godot::String& compiler_executable,
     const godot::String& target_version, const godot::String& build_profile,
     const godot::String& target_platform, const godot::String& target_architecture,
-    const godot::String& target_variant, const godot::String& target_precision,
-    const godot::Callable& progress_callback) const {
+    const godot::String& target_variant, const godot::String& target_precision) const {
+    clear_project_build_progress();
     const auto version = parse_godot_version(native_string(target_version));
     if (!version)
         return invalid_version_result(target_version);
@@ -2254,49 +2282,51 @@ godot::Dictionary GDPPCompiler::compile_project(
         resolved_compiler_executable = resolved.executable;
     }
 #endif
-    auto* settings = godot::ProjectSettings::get_singleton();
+    const auto native_project_root = path_from_utf8(native_string(project_root));
+    const auto native_output_directory = path_from_utf8(native_string(output_directory));
+    const auto native_sdk_root = path_from_utf8(native_string(sdk_root));
+    if (!native_project_root.is_absolute() || !native_output_directory.is_absolute() ||
+        !native_sdk_root.is_absolute()) {
+        return failure_result(
+            "project, output and SDK paths must be globalized on the editor thread");
+    }
     ProjectCompileOptions options;
-    options.project_root = path_from_utf8(native_string(settings->globalize_path(project_root)));
-    options.output_directory =
-        path_from_utf8(native_string(settings->globalize_path(output_directory)));
+    options.project_root = native_project_root;
+    options.output_directory = native_output_directory;
     options.sdk_root =
-        versioned_sdk_root(path_from_utf8(native_string(settings->globalize_path(sdk_root))),
-                           *version, *platform, architecture, web_thread_mode);
-    bool has_reflected_snapshot = false;
+        versioned_sdk_root(native_sdk_root, *version, *platform, architecture, web_thread_mode);
+    std::string prepared_build_executor;
     {
-        const std::lock_guard lock{reflected_bridges_mutex_};
-        if (reflected_bridges_) {
-            options.reflected_extension_bridges = *reflected_bridges_;
-            has_reflected_snapshot = true;
+        const std::lock_guard lock{prepared_build_mutex_};
+        if (!prepared_extension_bridges_ || prepared_build_executor_.empty()) {
+            return failure_result("project build state was not prepared on the editor thread");
         }
+        options.reflected_extension_bridges = *prepared_extension_bridges_;
+        prepared_build_executor = prepared_build_executor_;
     }
-    if (!has_reflected_snapshot)
-        options.reflected_extension_bridges = reflect_extension_contracts();
     options.compiler.target_version = *version;
-    if (progress_callback.is_valid()) {
-        options.progress_callback = [&](const ProjectCompilePhase phase,
-                                        const std::size_t completed, const std::size_t total) {
-            const char* phase_name = "analyze";
-            switch (phase) {
-            case ProjectCompilePhase::scan:
-                phase_name = "scan";
-                break;
-            case ProjectCompilePhase::parse:
-                phase_name = "parse";
-                break;
-            case ProjectCompilePhase::analyze:
-                phase_name = "analyze";
-                break;
-            case ProjectCompilePhase::translate:
-                phase_name = "translate";
-                break;
-            case ProjectCompilePhase::generate:
-                phase_name = "generate";
-                break;
-            }
-            report_build_progress(progress_callback, phase_name, completed, total);
-        };
-    }
+    options.progress_callback = [this](const ProjectCompilePhase phase, const std::size_t completed,
+                                       const std::size_t total) {
+        const char* phase_name = "analyze";
+        switch (phase) {
+        case ProjectCompilePhase::scan:
+            phase_name = "scan";
+            break;
+        case ProjectCompilePhase::parse:
+            phase_name = "parse";
+            break;
+        case ProjectCompilePhase::analyze:
+            phase_name = "analyze";
+            break;
+        case ProjectCompilePhase::translate:
+            phase_name = "translate";
+            break;
+        case ProjectCompilePhase::generate:
+            phase_name = "generate";
+            break;
+        }
+        enqueue_build_progress(phase_name, completed, total);
+    };
     const ProjectCompiler compiler;
     const auto result = compiler.compile(options);
 
@@ -2378,8 +2408,7 @@ godot::Dictionary GDPPCompiler::compile_project(
         build_options.project_output_directory = options.output_directory;
         build_options.binary_output_directory = result.native_library_directory;
         build_options.sdk_root = options.sdk_root;
-        build_options.build_executor = path_from_utf8(
-            native_string(settings->globalize_path(godot::String{GDPP_NINJA_RESOURCE_PATH})));
+        build_options.build_executor = path_from_utf8(prepared_build_executor);
         build_options.compiler_executable = resolved_compiler_executable;
         build_options.platform = *platform;
         build_options.architecture = architecture;
