@@ -63,14 +63,13 @@ jobs:
             exit 0
           fi
           clang-format --dry-run --Werror "${files[@]}"
-      - name: Validate workflow YAML and ownership boundaries
-        shell: bash
-        run: |
-          ruby -e 'require "yaml"; root = ARGV.fetch(0); Dir[File.join(root, "*.yml")].sort.each { |path| workflow = YAML.load_file(path); actual = workflow.fetch("permissions").fetch("contents"); raise "#{path}: top-level contents must be read, got #{actual}" unless actual == "read"; if path.end_with?("/release.yml"); publish = workflow.fetch("jobs").fetch("publish").fetch("permissions").fetch("contents"); raise "#{path}: publish job contents must be write, got #{publish}" unless publish == "write"; end; puts path }' \
-            "$GITHUB_WORKSPACE/.github/workflows"
-          test ! -e "$GITHUB_WORKSPACE/.github/workflows/ci.yml"
-      - name: Validate reusable delivery topology
-        run: ruby "$GITHUB_WORKSPACE/tools/check_workflow_topology.rb"
+      - name: Install pinned CI validation dependencies
+        run: >-
+          python3 -m pip install
+          --disable-pip-version-check
+          --requirement "$GITHUB_WORKSPACE/tools/requirements.txt"
+      - name: Validate workflow YAML, ownership and delivery topology
+        run: python3 "$GITHUB_WORKSPACE/tools/check_workflow_topology.py"
       - name: Reject mutable external Action references
         shell: bash
         run: |
