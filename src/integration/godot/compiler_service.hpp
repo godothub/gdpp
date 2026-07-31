@@ -69,9 +69,6 @@ class GDPPCompiler final : public godot::RefCounted {
     };
 
     [[nodiscard]] BuildExecutionResult
-    execute_build_commands(const godot::Array& commands,
-                           const godot::Callable& progress_callback) const;
-    [[nodiscard]] BuildExecutionResult
     execute_ninja_build(const godot::Dictionary& build_plan,
                         const godot::Callable& progress_callback) const;
 

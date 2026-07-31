@@ -1806,21 +1806,6 @@ std::string strip_ninja_progress(std::string_view output) {
     return result;
 }
 
-struct NativeInvocation {
-    std::string executable;
-    std::vector<std::string> arguments;
-    std::size_t stage{0};
-};
-
-std::string native_invocation_label(const NativeInvocation& invocation) {
-    for (std::size_t index = 0; index + 1 < invocation.arguments.size(); ++index) {
-        if (invocation.arguments[index] == "/c" || invocation.arguments[index] == "-c")
-            return std::filesystem::path{invocation.arguments[index + 1]}.filename().string();
-    }
-    const auto executable = std::filesystem::path{invocation.executable}.filename().string();
-    return executable.empty() ? invocation.executable : executable;
-}
-
 std::string trimmed_toolchain_output(std::string output) {
     while (!output.empty() && (output.back() == '\r' || output.back() == '\n' ||
                                output.back() == ' ' || output.back() == '\t'))
@@ -1912,78 +1897,6 @@ void GDPPCompiler::_bind_methods() {
     godot::ClassDB::bind_method(
         godot::D_METHOD("run_export_transform_worker", "state_path", "result_path"),
         &GDPPCompiler::run_export_transform_worker);
-}
-
-GDPPCompiler::BuildExecutionResult
-GDPPCompiler::execute_build_commands(const godot::Array& commands,
-                                     const godot::Callable& progress_callback) const {
-    BuildExecutionResult result;
-    std::vector<NativeInvocation> invocations;
-    invocations.reserve(static_cast<std::size_t>(commands.size()));
-    for (int64_t index = 0; index < commands.size(); ++index) {
-        const godot::Dictionary item = commands[index];
-        NativeInvocation invocation;
-        invocation.executable = native_string(item.get("executable", godot::String{}));
-        const godot::PackedStringArray arguments =
-            item.get("arguments", godot::PackedStringArray{});
-        invocation.arguments.reserve(static_cast<std::size_t>(arguments.size()));
-        for (int64_t argument = 0; argument < arguments.size(); ++argument)
-            invocation.arguments.push_back(native_string(arguments[argument]));
-        if (invocation.executable.empty()) {
-            result.diagnostics.push_back("native build command has no executable");
-            return result;
-        }
-        const auto stage = static_cast<int64_t>(item.get("stage", int64_t{0}));
-        if (stage < 0) {
-            result.diagnostics.push_back("native build command has an invalid stage");
-            return result;
-        }
-        invocation.stage = static_cast<std::size_t>(stage);
-        invocations.push_back(std::move(invocation));
-    }
-    if (invocations.empty()) {
-        result.exit_code = 0;
-        return result;
-    }
-
-    std::stable_sort(invocations.begin(), invocations.end(),
-                     [](const auto& left, const auto& right) { return left.stage < right.stage; });
-    for (std::size_t begin = 0; begin < invocations.size();) {
-        std::size_t end = begin + 1;
-        while (end < invocations.size() && invocations[end].stage == invocations[begin].stage)
-            ++end;
-        const auto count = end - begin;
-        const auto* phase = invocations[begin].stage == 0 ? "compile" : "link";
-        report_build_progress(progress_callback, phase, 0, count);
-        for (std::size_t index = begin; index < end; ++index) {
-            const auto& invocation = invocations[index];
-            auto process_result =
-                execute_native_process(invocation.executable, invocation.arguments);
-            report_build_progress(progress_callback, phase, index - begin + 1, count);
-            if (process_result.exit_code != 0) {
-                result.exit_code = process_result.exit_code;
-                const auto label = native_invocation_label(invocations[index]);
-                const auto action = invocations[index].stage == 0 ? "compile" : "link";
-                result.diagnostics.push_back(godot::String::utf8(
-                    ("C++ " + std::string{action} + " command for '" + label +
-                     "' failed with exit code " + std::to_string(process_result.exit_code))
-                        .c_str()));
-                if (!process_result.launch_error.empty()) {
-                    result.diagnostics.push_back(
-                        godot::String::utf8(process_result.launch_error.c_str()));
-                }
-                const auto output = trimmed_toolchain_output(std::move(process_result.output));
-                if (!output.empty()) {
-                    result.diagnostics.push_back(godot::String::utf8(
-                        ("toolchain output for '" + label + "':\n" + output).c_str()));
-                }
-                return result;
-            }
-        }
-        begin = end;
-    }
-    result.exit_code = 0;
-    return result;
 }
 
 GDPPCompiler::BuildExecutionResult
@@ -2128,11 +2041,15 @@ GDPPCompiler::execute_project_build(const godot::Dictionary& build_plan,
         return output;
     }
 
-    const godot::Array commands = build_plan.get("build_commands", godot::Array{});
-    const bool has_ninja_plan = build_plan.has("build_executor");
-    const auto execution = has_ninja_plan
-                               ? execute_ninja_build(build_plan, progress_callback)
-                               : execute_build_commands(commands, progress_callback);
+    if (!build_plan.has("build_executor")) {
+        const godot::String message{
+            "native build plan does not contain the required bundled Ninja executor"};
+        diagnostics.push_back(message);
+        errors.push_back(message);
+        assign_diagnostic_channels(output, diagnostics, errors, warnings, notes);
+        return output;
+    }
+    const auto execution = execute_ninja_build(build_plan, progress_callback);
     output["exit_code"] = execution.exit_code;
     if (execution.exit_code != 0) {
         for (const auto& diagnostic : execution.diagnostics) {
@@ -2181,13 +2098,9 @@ GDPPCompiler::execute_project_build(const godot::Dictionary& build_plan,
 
     output["success"] = true;
     assign_diagnostic_channels(output, diagnostics, errors, warnings, notes);
-    const auto completed_work =
-        has_ninja_plan
-            ? static_cast<std::size_t>(
-                  static_cast<int64_t>(build_plan.get("compile_edge_count", int64_t{0})) +
-                  static_cast<int64_t>(
-                      build_plan.get("post_compile_edge_count", int64_t{0})))
-            : static_cast<std::size_t>(commands.size());
+    const auto completed_work = static_cast<std::size_t>(
+        static_cast<int64_t>(build_plan.get("compile_edge_count", int64_t{0})) +
+        static_cast<int64_t>(build_plan.get("post_compile_edge_count", int64_t{0})));
     report_build_progress(progress_callback, "complete", completed_work, completed_work);
     return output;
 }
@@ -2613,18 +2526,6 @@ godot::Dictionary GDPPCompiler::compile_project(
             assign_diagnostic_channels(output, diagnostics, errors, warnings, notes);
             return output;
         }
-        godot::Array commands;
-        for (const auto& command : plan.commands) {
-            godot::Dictionary item;
-            item["executable"] = godot::String{command.executable.c_str()};
-            godot::PackedStringArray arguments;
-            for (const auto& argument : command.arguments)
-                arguments.push_back(godot::String{argument.c_str()});
-            item["arguments"] = arguments;
-            item["stage"] = static_cast<int64_t>(command.stage);
-            commands.push_back(item);
-        }
-        output["build_commands"] = commands;
         output["build_executor"] =
             godot::String::utf8(generic_path_to_utf8(plan.build_executor).c_str());
         output["build_directory"] =
@@ -2637,7 +2538,6 @@ godot::Dictionary GDPPCompiler::compile_project(
         output["compile_edge_count"] = static_cast<int64_t>(plan.compile_edge_count);
         output["post_compile_edge_count"] =
             static_cast<int64_t>(plan.post_compile_edge_count);
-        output["native_up_to_date"] = plan.up_to_date;
         output["output_library"] =
             godot::String::utf8(generic_path_to_utf8(plan.output_library).c_str());
         if (!plan.pending_output_library.empty()) {
