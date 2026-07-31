@@ -167,6 +167,30 @@ def validate_static_addon(addon: Path, component_host: str) -> str:
             f"{component_host} component must contain exactly its compiler and fallback "
             f"binaries; expected {sorted(expected_binaries)}, got {sorted(actual_binaries)}"
         )
+    expected_executor = addon / host.build_executor
+    if not expected_executor.is_file():
+        fail(f"{component_host} component is missing its Ninja executor: {expected_executor}")
+    actual_executors = {
+        path.relative_to(addon).as_posix()
+        for path in (addon / "tools").glob("*/gdpp-ninja*")
+        if path.is_file()
+    }
+    if actual_executors != {host.build_executor}:
+        fail(
+            f"{component_host} component has an invalid Ninja executor matrix; "
+            f"expected {[host.build_executor]}, got {sorted(actual_executors)}"
+        )
+    expected_version = (
+        f"Ninja {package_release.NINJA_VERSION}\n"
+        f"commit {package_release.NINJA_COMMIT}\n"
+    )
+    if (addon / "tools/NINJA-VERSION.txt").read_text(
+        encoding="utf-8"
+    ) != expected_version:
+        fail(f"{component_host} component has invalid Ninja version metadata")
+    for relative in ("tools/.gdignore", "tools/NINJA-LICENSE.txt"):
+        if not (addon / relative).is_file():
+            fail(f"{component_host} component is missing {relative}")
 
     actual_versions = sorted(
         path.name for path in (addon / "sdk").iterdir() if path.is_dir()
@@ -417,7 +441,7 @@ def release_package_manifest(package_name: str, gdpp_version: str) -> str:
     if package.include_ios:
         optional_minimums += "ios_platform_minimum iOS_16.0\n"
     return (
-        "GDPP_PACKAGE 6\n"
+        "GDPP_PACKAGE 7\n"
         "kind multi-host\n"
         f"edition {package_name}\n"
         "archive_layout addons/gdpp\n"
@@ -427,6 +451,8 @@ def release_package_manifest(package_name: str, gdpp_version: str) -> str:
         f"target_godot_apis {target_versions}\n"
         "godot_precision single\n"
         "api_fingerprints sha256-verified\n"
+        f"build_executor Ninja_{package_release.NINJA_VERSION}\n"
+        f"build_executor_hosts {','.join(package.desktop_hosts)}\n"
         f"editor_hosts {editor_hosts}\n"
         f"host_platform_minimums {platform_minimums}\n"
         f"export_targets {','.join(export_targets)}\n"
@@ -525,6 +551,12 @@ def stage_release_package(
 
     for relative in package_release.STATIC_ADDON_FILES:
         package_release.copy_path(canonical_addon / relative, staged_addon / relative)
+    for relative in (
+        "tools/.gdignore",
+        "tools/NINJA-LICENSE.txt",
+        "tools/NINJA-VERSION.txt",
+    ):
+        package_release.copy_path(canonical_addon / relative, staged_addon / relative)
     for component_host in package.desktop_hosts:
         host = package_release.HOSTS[component_host]
         for filename in (host.compiler_library, host.fallback_library):
@@ -532,6 +564,11 @@ def stage_release_package(
                 addons[component_host] / "binary" / filename,
                 staged_addon / "binary" / filename,
             )
+        package_release.copy_path(
+            addons[component_host] / host.build_executor,
+            staged_addon / host.build_executor,
+        )
+        (staged_addon / host.build_executor).chmod(0o755)
 
     for godot_version in package.godot_versions:
         source_sdk = canonical_addon / "sdk" / godot_version
@@ -651,6 +688,30 @@ def validate_release_stage(addon: Path, package_name: str, gdpp_version: str) ->
             f"{package_name} package contains an invalid desktop compiler/fallback matrix; "
             f"expected {sorted(expected_binaries)}, got {sorted(actual_binaries)}"
         )
+    expected_executors = {
+        package_release.HOSTS[name].build_executor for name in package.desktop_hosts
+    }
+    actual_executors = {
+        path.relative_to(addon).as_posix()
+        for path in (addon / "tools").glob("*/gdpp-ninja*")
+        if path.is_file()
+    }
+    if actual_executors != expected_executors:
+        fail(
+            f"{package_name} package contains an invalid Ninja executor matrix; "
+            f"expected {sorted(expected_executors)}, got {sorted(actual_executors)}"
+        )
+    expected_ninja_version = (
+        f"Ninja {package_release.NINJA_VERSION}\n"
+        f"commit {package_release.NINJA_COMMIT}\n"
+    )
+    if (addon / "tools/NINJA-VERSION.txt").read_text(
+        encoding="utf-8"
+    ) != expected_ninja_version:
+        fail(f"{package_name} package has invalid Ninja version metadata")
+    for relative in ("tools/.gdignore", "tools/NINJA-LICENSE.txt"):
+        if not (addon / relative).is_file():
+            fail(f"{package_name} package is missing {relative}")
     manifest = addon / "PACKAGE_MANIFEST.txt"
     if manifest.read_text(encoding="utf-8") != release_package_manifest(
         package_name, gdpp_version

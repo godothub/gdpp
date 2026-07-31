@@ -105,6 +105,15 @@ def create_host_component(root: Path, component_host: str) -> Path:
     write(addon / "gdpp.gdextension", '[configuration]\ncompatibility_minimum = "4.4"\n')
     write(addon / "binary" / host.compiler_library, f"compiler-{component_host}")
     write(addon / "binary" / host.fallback_library, f"fallback-{component_host}")
+    write(addon / host.build_executor, f"ninja-{component_host}")
+    (addon / host.build_executor).chmod(0o755)
+    write(addon / "tools/.gdignore", "")
+    write(addon / "tools/NINJA-LICENSE.txt", "Apache License fixture")
+    write(
+        addon / "tools/NINJA-VERSION.txt",
+        f"Ninja {package_release.NINJA_VERSION}\n"
+        f"commit {package_release.NINJA_COMMIT}\n",
+    )
 
     for godot_version in package_release.SUPPORTED_GODOT_VERSIONS:
         sdk = addon / "sdk" / godot_version
@@ -311,6 +320,17 @@ class ReleasePackagingTest(unittest.TestCase):
                     expected_binaries,
                 )
                 self.assertEqual(
+                    {
+                        path.relative_to(addon).as_posix()
+                        for path in (addon / "tools").glob("*/gdpp-ninja*")
+                        if path.is_file()
+                    },
+                    {
+                        package_release.HOSTS[name].build_executor
+                        for name in expected_hosts
+                    },
+                )
+                self.assertEqual(
                     sorted(path.name for path in (addon / "sdk").iterdir() if path.is_dir()),
                     list(expected_versions),
                 )
@@ -329,7 +349,7 @@ class ReleasePackagingTest(unittest.TestCase):
                     for retired in ("android", "ios", "web", "macos", "linux", "windows"):
                         self.assertFalse((sdk / retired).exists())
                 manifest = (addon / "PACKAGE_MANIFEST.txt").read_text(encoding="utf-8")
-                self.assertTrue(manifest.startswith("GDPP_PACKAGE 6\n"))
+                self.assertTrue(manifest.startswith("GDPP_PACKAGE 7\n"))
                 self.assertIn("kind multi-host", manifest)
                 self.assertIn(f"edition {package_name}", manifest)
                 self.assertIn("archive_layout addons/gdpp", manifest)
@@ -347,6 +367,10 @@ class ReleasePackagingTest(unittest.TestCase):
                     manifest,
                 )
                 self.assertIn("sdk_layout shared-target-manifests", manifest)
+                self.assertIn(
+                    f"build_executor Ninja_{package_release.NINJA_VERSION}",
+                    manifest,
+                )
                 self.assertEqual(
                     manifest,
                     package_platform_release.release_package_manifest(
@@ -378,6 +402,12 @@ class ReleasePackagingTest(unittest.TestCase):
         first_hash = package_release.sha256(first_archive)
         with zipfile.ZipFile(first_archive) as packaged:
             names = packaged.namelist()
+            executor_modes = {
+                name: (packaged.getinfo(name).external_attr >> 16) & 0o777
+                for name in names
+                if name.endswith("/gdpp-ninja")
+                or name.endswith("/gdpp-ninja.exe")
+            }
         self.assertTrue(all(path.startswith("addons/gdpp/") for path in names))
         self.assertFalse(any(path.endswith(".zip") for path in names))
         self.assertFalse(any("template_debug" in path for path in names))
@@ -393,6 +423,8 @@ class ReleasePackagingTest(unittest.TestCase):
         for relative in package_release.STATIC_ADDON_FILES:
             self.assertIn(f"addons/gdpp/{relative}", names)
         self.assertFalse(any(path.startswith("gdpp/") for path in names))
+        self.assertTrue(executor_modes)
+        self.assertEqual(set(executor_modes.values()), {0o755})
 
         second_stage, second_name, _ = package_platform_release.stage_release_package(
             self.components,
