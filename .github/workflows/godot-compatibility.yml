@@ -425,8 +425,10 @@ jobs:
         run: >-
           python3 "$GITHUB_WORKSPACE/tools/audit_public_artifact.py"
           --source .
-          --path example/addons/gdpp/build/export
-          --path build/plugin/attached-extension-project/export
+          --path
+          example/addons/gdpp/build/export/*.log
+          example/addons/gdpp/build/export/runtime-matrix.json
+          build/plugin/attached-extension-project/export/*.log
       - name: Upload compatibility evidence
         if: ${{ always() && steps.evidence_audit.outcome == 'success' }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
@@ -573,7 +575,9 @@ jobs:
         run: >-
           python3 "$GITHUB_WORKSPACE/tools/audit_public_artifact.py"
           --source .
-          --path build/external-e2e/${{ matrix.id }}
+          --path
+          build/external-e2e/${{ matrix.id }}/*.json
+          build/external-e2e/${{ matrix.id }}/*.log
       - name: Upload complete-project evidence
         if: ${{ always() && steps.evidence_audit.outcome == 'success' }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
