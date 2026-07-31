@@ -6,6 +6,7 @@
 #include "gdpp/project/export_worker_snapshot.hpp"
 #include "gdpp/project/native_builder.hpp"
 #include "gdpp/project/project_compiler.hpp"
+#include "gdpp/project/xcframework_artifact.hpp"
 #include "gdpp/runtime/attached_script.hpp"
 #include "gdpp/semantic/godot_api.hpp"
 #include "gdpp/support/path_utf8.hpp"
@@ -158,116 +159,6 @@ bool has_path_component(const std::filesystem::path& path, std::string_view comp
                        [&](const auto& item) { return item == std::filesystem::path{component}; });
 }
 
-bool is_xcframework(const std::filesystem::path& path) {
-    std::error_code error;
-    if (path.extension() != ".xcframework" || std::filesystem::is_symlink(path, error) || error ||
-        !std::filesystem::is_directory(path, error) || error ||
-        !std::filesystem::is_regular_file(path / "Info.plist", error) || error) {
-        return false;
-    }
-    for (std::filesystem::recursive_directory_iterator iterator{path, error}, end;
-         !error && iterator != end; iterator.increment(error)) {
-        if (iterator->is_symlink(error) || error)
-            return false;
-    }
-    return !error;
-}
-
-bool commit_xcframework(const std::filesystem::path& pending,
-                        const std::filesystem::path& destination, std::string& diagnostic) {
-    const auto filename = destination.filename().string();
-    if (!is_xcframework(pending) || pending.filename() != destination.filename() ||
-        filename.rfind("libgdpp.", 0) != 0 || destination.parent_path().filename() != "binary" ||
-        !has_path_component(pending, "native-direct") ||
-        !has_path_component(pending, "xcframework-staging")) {
-        diagnostic = "refusing to commit an invalid or unsafe iOS XCFramework artifact";
-        return false;
-    }
-
-    auto backup = destination;
-    backup += ".previous";
-    auto incoming = destination;
-    incoming += ".incoming";
-    std::error_code error;
-    bool had_destination = std::filesystem::exists(destination, error);
-    if (error) {
-        diagnostic = "cannot inspect the current iOS artifact: " + error.message();
-        return false;
-    }
-    const bool has_backup = std::filesystem::exists(backup, error);
-    if (error) {
-        diagnostic = "cannot inspect the previous iOS artifact backup: " + error.message();
-        return false;
-    }
-    if (has_backup && !had_destination) {
-        std::filesystem::rename(backup, destination, error);
-        if (error) {
-            diagnostic = "cannot recover the previous iOS artifact after an interrupted commit: " +
-                         error.message();
-            return false;
-        }
-        had_destination = true;
-    } else if (has_backup) {
-        std::filesystem::remove_all(backup, error);
-        if (error) {
-            diagnostic = "cannot clear the obsolete iOS artifact backup: " + error.message();
-            return false;
-        }
-    }
-    if (had_destination && is_xcframework(destination)) {
-        const auto pending_time = std::filesystem::last_write_time(pending / "Info.plist", error);
-        if (error) {
-            diagnostic = "cannot inspect the pending iOS artifact timestamp: " + error.message();
-            return false;
-        }
-        const auto destination_time =
-            std::filesystem::last_write_time(destination / "Info.plist", error);
-        if (error) {
-            diagnostic = "cannot inspect the current iOS artifact timestamp: " + error.message();
-            return false;
-        }
-        if (destination_time >= pending_time)
-            return true;
-    }
-    std::filesystem::remove_all(incoming, error);
-    if (error) {
-        diagnostic = "cannot clear the interrupted iOS incoming artifact: " + error.message();
-        return false;
-    }
-    std::filesystem::copy(pending, incoming, std::filesystem::copy_options::recursive, error);
-    if (error || !is_xcframework(incoming)) {
-        const auto copy_error = error ? error.message() : "copied artifact is incomplete";
-        error.clear();
-        std::filesystem::remove_all(incoming, error);
-        diagnostic = "cannot stage the completed iOS artifact for commit: " + copy_error;
-        return false;
-    }
-    if (had_destination) {
-        std::filesystem::rename(destination, backup, error);
-        if (error) {
-            diagnostic =
-                "cannot stage the current iOS artifact for replacement: " + error.message();
-            return false;
-        }
-    }
-    std::filesystem::rename(incoming, destination, error);
-    if (error) {
-        const auto commit_error = error.message();
-        if (had_destination) {
-            error.clear();
-            std::filesystem::rename(backup, destination, error);
-        }
-        error.clear();
-        std::filesystem::remove_all(incoming, error);
-        diagnostic = "cannot commit the new iOS XCFramework: " + commit_error;
-        return false;
-    }
-    std::filesystem::remove_all(backup, error);
-    // A failed cleanup does not invalidate the newly committed XCFramework. The next build will
-    // recognize and remove this backup before attempting another replacement.
-    return true;
-}
-
 NativePlatform native_platform() {
     const std::string platform{GDPP_PLATFORM};
     if (platform == "macos")
@@ -413,8 +304,7 @@ godot::PropertyInfo script_property_info(const Type& type, const godot::StringNa
         info.usage |= godot::PROPERTY_USAGE_NIL_IS_VARIANT;
     } else if (type.kind == TypeKind::object || type.kind == TypeKind::script_resource) {
         info.class_name = godot::StringName{type.name.c_str()};
-        if (type.kind == TypeKind::object &&
-            (usage & godot::PROPERTY_USAGE_EDITOR) != 0U) {
+        if (type.kind == TypeKind::object && (usage & godot::PROPERTY_USAGE_EDITOR) != 0U) {
             const auto native_base = reflected_object_native_base(type, script_native_bases);
             const godot::StringName native_base_name{native_base.c_str()};
             const auto* class_db = godot::ClassDBSingleton::get_singleton();
@@ -476,9 +366,8 @@ godot::Dictionary editor_script_descriptor(const CompiledProjectScript& script,
             if (member.property_editor)
                 usage |= godot::PROPERTY_USAGE_EDITOR;
             godot::Dictionary property;
-            property["info"] = static_cast<godot::Dictionary>(
-                script_property_info(member.type, godot::StringName{member.name.c_str()}, usage,
-                                     script_native_bases));
+            property["info"] = static_cast<godot::Dictionary>(script_property_info(
+                member.type, godot::StringName{member.name.c_str()}, usage, script_native_bases));
             // The target behavior constructor owns source-level defaults. This temporary editor
             // instance only needs the serialization surface while stored values are copied.
             property["has_default"] = false;
@@ -490,13 +379,12 @@ godot::Dictionary editor_script_descriptor(const CompiledProjectScript& script,
         }
         if (member.kind == ScriptMemberKind::function && member.name == "_static_init")
             continue;
-        godot::MethodInfo method{script_property_info(member.kind == ScriptMemberKind::signal
-                                                          ? Type{TypeKind::void_type, "void"}
-                                                          : member.type,
-                                                      godot::StringName{},
-                                                      godot::PROPERTY_USAGE_DEFAULT,
-                                                      script_native_bases),
-                                 godot::StringName{member.name.c_str()}};
+        godot::MethodInfo method{
+            script_property_info(
+                member.kind == ScriptMemberKind::signal ? Type{TypeKind::void_type, "void"}
+                                                        : member.type,
+                godot::StringName{}, godot::PROPERTY_USAGE_DEFAULT, script_native_bases),
+            godot::StringName{member.name.c_str()}};
         for (std::size_t index = 0; index < member.parameters.size(); ++index) {
             const auto argument_name = index < member.parameter_names.size()
                                            ? member.parameter_names[index]
@@ -1263,7 +1151,8 @@ MsvcEnvironmentSnapshot parse_msvc_environment(std::string output) {
     MsvcEnvironmentSnapshot snapshot;
     for (std::size_t begin = 0; begin <= output.size();) {
         const auto end = output.find('\n', begin);
-        auto line = output.substr(begin, end == std::string::npos ? std::string::npos : end - begin);
+        auto line =
+            output.substr(begin, end == std::string::npos ? std::string::npos : end - begin);
         if (!line.empty() && line.back() == '\r')
             line.pop_back();
         if (!line.empty() && line.find('=') != std::string::npos) {
@@ -1357,15 +1246,15 @@ std::vector<std::wstring> current_windows_environment_entries() {
     return entries;
 }
 
-std::vector<wchar_t>
-windows_environment_with_overrides(std::vector<std::wstring> entries,
-                                   const std::vector<std::pair<std::wstring, std::wstring>>&
-                                       overrides) {
+std::vector<wchar_t> windows_environment_with_overrides(
+    std::vector<std::wstring> entries,
+    const std::vector<std::pair<std::wstring, std::wstring>>& overrides) {
     for (const auto& [name, value] : overrides) {
-        entries.erase(std::remove_if(entries.begin(), entries.end(), [&](const auto& entry) {
-                          return equal_windows_environment_name(environment_entry_name(entry),
-                                                                name);
-                      }),
+        entries.erase(std::remove_if(entries.begin(), entries.end(),
+                                     [&](const auto& entry) {
+                                         return equal_windows_environment_name(
+                                             environment_entry_name(entry), name);
+                                     }),
                       entries.end());
         entries.push_back(name + L"=" + value);
     }
@@ -1640,8 +1529,7 @@ NativeProcessResult execute_ninja_process(const std::string& executable,
     }
     auto environment = windows_environment_with_overrides(
         std::move(environment_entries),
-        {{L"NINJA_STATUS", utf8_to_wide(std::string{ninja_status_format})},
-         {L"VSLANG", L"1033"}});
+        {{L"NINJA_STATUS", utf8_to_wide(std::string{ninja_status_format})}, {L"VSLANG", L"1033"}});
     WindowsProcessOptions options;
     options.environment = &environment;
     options.output_callback = output_callback;
@@ -1667,7 +1555,7 @@ std::uint64_t available_build_memory() {
     std::size_t size = sizeof(total);
     return sysctlbyname("hw.memsize", &total, &size, nullptr, 0) == 0 ? total * 3U / 4U : 0;
 #else
-    struct sysinfo information {};
+    struct sysinfo information{};
     if (sysinfo(&information) != 0)
         return 0;
     return (static_cast<std::uint64_t>(information.freeram) +
@@ -1730,8 +1618,7 @@ class NinjaProgressParser final {
                 return;
             parse_line(std::string_view{pending_}.substr(0, end));
             auto next = end + 1;
-            while (next < pending_.size() &&
-                   (pending_[next] == '\r' || pending_[next] == '\n'))
+            while (next < pending_.size() && (pending_[next] == '\r' || pending_[next] == '\n'))
                 ++next;
             pending_.erase(0, next);
         }
@@ -1762,8 +1649,7 @@ class NinjaProgressParser final {
         if (first_slash == std::string_view::npos)
             return;
         std::size_t finished = 0;
-        const auto parsed =
-            std::from_chars(values.data(), values.data() + first_slash, finished);
+        const auto parsed = std::from_chars(values.data(), values.data() + first_slash, finished);
         if (parsed.ec != std::errc{})
             return;
         if (line.find("@@GDPP:compile@@", values_end) != std::string_view::npos) {
@@ -1789,8 +1675,8 @@ std::string strip_ninja_progress(std::string_view output) {
     std::string result;
     for (std::size_t begin = 0; begin <= output.size();) {
         const auto end = output.find('\n', begin);
-        auto line = output.substr(
-            begin, end == std::string_view::npos ? std::string_view::npos : end - begin);
+        auto line = output.substr(begin, end == std::string_view::npos ? std::string_view::npos
+                                                                       : end - begin);
         const bool progress = line.find(ninja_status_marker) != std::string_view::npos &&
                               (line.find("@@GDPP:compile@@") != std::string_view::npos ||
                                line.find("@@GDPP:link@@") != std::string_view::npos);
@@ -1824,19 +1710,17 @@ std::vector<std::string> export_worker_diagnostics(const std::string& output) {
         const auto first = line.find_first_not_of(" \t");
         if (first != std::string::npos)
             line.erase(0, first);
-        const bool diagnostic = line.rfind("ERROR:", 0) == 0 ||
-                                line.rfind("SCRIPT ERROR:", 0) == 0 ||
-                                line.rfind("WARNING:", 0) == 0 ||
-                                line.rfind("Unable to open", 0) == 0 ||
-                                line.find("[toolchain output truncated") != std::string::npos;
+        const bool diagnostic =
+            line.rfind("ERROR:", 0) == 0 || line.rfind("SCRIPT ERROR:", 0) == 0 ||
+            line.rfind("WARNING:", 0) == 0 || line.rfind("Unable to open", 0) == 0 ||
+            line.find("[toolchain output truncated") != std::string::npos;
         // Godot's shader compiler reports this known non-fatal continuation for custom samplers
         // in valid Pixelorama shaders on both source and exported runs. Keep the allowlist exact;
         // every other child-process diagnostic remains a release-blocking transform failure.
         const bool known_custom_sampler_continuation =
-            line ==
-            "ERROR: Condition "
-            "\"!actions.custom_samplers.has(function->arguments[j].tex_builtin)\" is true. "
-            "Continuing.";
+            line == "ERROR: Condition "
+                    "\"!actions.custom_samplers.has(function->arguments[j].tex_builtin)\" is true. "
+                    "Continuing.";
         if (diagnostic && !known_custom_sampler_continuation)
             diagnostics.push_back(std::move(line));
         if (end == std::string::npos)
@@ -1913,10 +1797,8 @@ GDPPCompiler::execute_ninja_build(const godot::Dictionary& build_plan,
         global_path(build_plan.get("build_directory", godot::String{})).lexically_normal();
     const auto build_file =
         global_path(build_plan.get("build_file", godot::String{})).lexically_normal();
-    const auto target =
-        native_string(build_plan.get("build_target", godot::String{"gdpp"}));
-    const auto native_compiler =
-        native_string(build_plan.get("native_compiler", godot::String{}));
+    const auto target = native_string(build_plan.get("build_target", godot::String{"gdpp"}));
+    const auto native_compiler = native_string(build_plan.get("native_compiler", godot::String{}));
     const auto planned_compile =
         static_cast<int64_t>(build_plan.get("compile_edge_count", int64_t{0}));
     const auto planned_link =
@@ -1942,8 +1824,8 @@ GDPPCompiler::execute_ninja_build(const godot::Dictionary& build_plan,
         return result;
     }
 
-    const std::vector<std::string> base_arguments{
-        "-C", path_to_utf8(directory), "-f", build_file.filename().string()};
+    const std::vector<std::string> base_arguments{"-C", path_to_utf8(directory), "-f",
+                                                  build_file.filename().string()};
     auto version = execute_ninja_process(path_to_utf8(executor), {"--version"}, native_compiler);
     if (version.exit_code != 0 || trimmed_toolchain_output(version.output) != GDPP_NINJA_VERSION) {
         result.diagnostics.push_back(
@@ -1955,8 +1837,7 @@ GDPPCompiler::execute_ninja_build(const godot::Dictionary& build_plan,
 
     auto dry_arguments = base_arguments;
     dry_arguments.insert(dry_arguments.end(), {"-n", target});
-    auto dry_run =
-        execute_ninja_process(path_to_utf8(executor), dry_arguments, native_compiler);
+    auto dry_run = execute_ninja_process(path_to_utf8(executor), dry_arguments, native_compiler);
     if (dry_run.exit_code != 0) {
         result.exit_code = dry_run.exit_code;
         result.diagnostics.push_back("Ninja could not evaluate the generated build graph");
@@ -1981,27 +1862,25 @@ GDPPCompiler::execute_ninja_build(const godot::Dictionary& build_plan,
 
     NinjaProgressParser progress{work, progress_callback};
     auto build_arguments = base_arguments;
-    build_arguments.insert(build_arguments.end(),
-                           {"-j", std::to_string(recommended_ninja_parallelism()), "-k", "1",
-                            target});
-    auto execution = execute_ninja_process(
-        path_to_utf8(executor), build_arguments, native_compiler,
-        [&](const std::string_view chunk) { progress.consume(chunk); });
+    build_arguments.insert(
+        build_arguments.end(),
+        {"-j", std::to_string(recommended_ninja_parallelism()), "-k", "1", target});
+    auto execution =
+        execute_ninja_process(path_to_utf8(executor), build_arguments, native_compiler,
+                              [&](const std::string_view chunk) { progress.consume(chunk); });
     result.exit_code = execution.exit_code;
     if (execution.exit_code == 0) {
         progress.finish();
         return result;
     }
 
-    result.diagnostics.push_back(
-        "parallel Ninja build failed with exit code " + godot::String::num_int64(
-                                                          execution.exit_code));
+    result.diagnostics.push_back("parallel Ninja build failed with exit code " +
+                                 godot::String::num_int64(execution.exit_code));
     if (!execution.launch_error.empty())
         result.diagnostics.push_back(godot::String::utf8(execution.launch_error.c_str()));
     const auto output = trimmed_toolchain_output(strip_ninja_progress(execution.output));
     if (!output.empty()) {
-        result.diagnostics.push_back(
-            godot::String::utf8(("toolchain output:\n" + output).c_str()));
+        result.diagnostics.push_back(godot::String::utf8(("toolchain output:\n" + output).c_str()));
     }
     return result;
 }
@@ -2073,8 +1952,8 @@ GDPPCompiler::execute_project_build(const godot::Dictionary& build_plan,
     if (!pending_output.is_empty()) {
         const auto pending_path = native_string(settings->globalize_path(pending_output));
         std::string commit_diagnostic;
-        if (!commit_xcframework(path_from_utf8(pending_path), path_from_utf8(output_path),
-                                commit_diagnostic)) {
+        if (!commit_xcframework_artifact(path_from_utf8(pending_path), path_from_utf8(output_path),
+                                         commit_diagnostic)) {
             const godot::String message{commit_diagnostic.c_str()};
             diagnostics.push_back(message);
             errors.push_back(message);
@@ -2086,7 +1965,7 @@ GDPPCompiler::execute_project_build(const godot::Dictionary& build_plan,
     const auto output_filesystem_path = path_from_utf8(output_path);
     const bool artifact_exists =
         std::filesystem::is_regular_file(output_filesystem_path, file_error) ||
-        is_xcframework(output_filesystem_path);
+        is_complete_xcframework(output_filesystem_path);
     if (output_path.empty() || !artifact_exists || file_error) {
         const godot::String message =
             "native build completed without producing the planned library '" + output_library + "'";
@@ -2227,8 +2106,7 @@ GDPPCompiler::run_export_transform_worker(const godot::String& state_path,
     const auto safe_path = [&](const std::string& path) {
         return path.size() >= worker_prefix.size() &&
                std::equal(worker_prefix.begin(), worker_prefix.end(), path.begin()) &&
-               path.find("..") == std::string::npos &&
-               path.find('\\') == std::string::npos;
+               path.find("..") == std::string::npos && path.find('\\') == std::string::npos;
     };
     if (!safe_path(state_resource) || !safe_path(result_resource))
         return failure_result("export transform worker paths must stay inside its transaction");
@@ -2253,8 +2131,7 @@ GDPPCompiler::run_export_transform_worker(const godot::String& state_path,
         return failure_result("cannot isolate the export transform worker: " +
                               godot::String::utf8(snapshot.diagnostic.c_str()));
 
-    const auto executable =
-        native_string(godot::OS::get_singleton()->get_executable_path());
+    const auto executable = native_string(godot::OS::get_singleton()->get_executable_path());
     const std::vector<std::string> arguments{
         "--headless",
         "--editor",
@@ -2282,16 +2159,15 @@ GDPPCompiler::run_export_transform_worker(const godot::String& state_path,
     // The editor can report project-scan warnings before the worker starts and editor-owned
     // teardown diagnostics after SceneTree.quit(). Audit only the authenticated transaction
     // interval. Resource loads, transforms, serialization and cleanup all occur inside it.
-    const auto audited_output = worker_began && worker_committed
-                                    ? captured.substr(audited_begin,
-                                                      committed_offset - audited_begin)
-                                    : captured;
+    const auto audited_output =
+        worker_began && worker_committed
+            ? captured.substr(audited_begin, committed_offset - audited_begin)
+            : captured;
     const auto child_diagnostics = export_worker_diagnostics(audited_output);
     godot::Dictionary output;
-    output["success"] =
-        process.exit_code == 0 &&
-        std::filesystem::is_regular_file(path_from_utf8(result_absolute)) &&
-        worker_began && worker_committed && child_diagnostics.empty();
+    output["success"] = process.exit_code == 0 &&
+                        std::filesystem::is_regular_file(path_from_utf8(result_absolute)) &&
+                        worker_began && worker_committed && child_diagnostics.empty();
     output["exit_code"] = process.exit_code;
     godot::PackedStringArray diagnostics;
     if (!process.launch_error.empty())
@@ -2440,12 +2316,10 @@ godot::Dictionary GDPPCompiler::compile_project(
     for (const auto& script : result.scripts) {
         const auto relative_path = generic_path_to_utf8(script.relative_path);
         script_native_bases.insert_or_assign(relative_path, script.attached_native_base);
-        script_native_bases.insert_or_assign("res://" + relative_path,
-                                             script.attached_native_base);
+        script_native_bases.insert_or_assign("res://" + relative_path, script.attached_native_base);
         script_native_bases.insert_or_assign(script.class_name, script.attached_native_base);
         if (!script.global_name.empty()) {
-            script_native_bases.insert_or_assign(script.global_name,
-                                                 script.attached_native_base);
+            script_native_bases.insert_or_assign(script.global_name, script.attached_native_base);
         }
     }
     for (const auto& script : result.scripts) {
@@ -2529,14 +2403,11 @@ godot::Dictionary GDPPCompiler::compile_project(
             godot::String::utf8(generic_path_to_utf8(plan.build_executor).c_str());
         output["build_directory"] =
             godot::String::utf8(generic_path_to_utf8(plan.build_directory).c_str());
-        output["build_file"] =
-            godot::String::utf8(generic_path_to_utf8(plan.build_file).c_str());
+        output["build_file"] = godot::String::utf8(generic_path_to_utf8(plan.build_file).c_str());
         output["build_target"] = godot::String{plan.build_target.c_str()};
-        output["native_compiler"] =
-            godot::String::utf8(resolved_compiler_executable.c_str());
+        output["native_compiler"] = godot::String::utf8(resolved_compiler_executable.c_str());
         output["compile_edge_count"] = static_cast<int64_t>(plan.compile_edge_count);
-        output["post_compile_edge_count"] =
-            static_cast<int64_t>(plan.post_compile_edge_count);
+        output["post_compile_edge_count"] = static_cast<int64_t>(plan.post_compile_edge_count);
         output["output_library"] =
             godot::String::utf8(generic_path_to_utf8(plan.output_library).c_str());
         if (!plan.pending_output_library.empty()) {
