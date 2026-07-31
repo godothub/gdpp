@@ -1,3 +1,11 @@
+## 1.9.0
+
+- Bundle the pinned Ninja 1.13.2 build executor for every desktop host and make generated customer builds use its validated graph exclusively, removing the retired serial arbitrary-command plan.
+- Regenerate the complete current C++ project state on every export, preserve timestamps for identical outputs, reduce the project manifest to an ownership ledger, and make Ninja the sole native incremental-build authority.
+- Build independent generated C++ translation units with CPU- and memory-bounded parallelism, compiler depfiles, stage-ordered linking and packaging, deterministic command inputs, toolchain identity invalidation, and zero-work incremental reuse.
+- Stream monotonic per-file compile and link progress from hidden processes while preserving exact MSVC environments, UTF-8 compiler response files, Unicode and long paths, and Windows Emscripten command wrappers.
+- Enforce exact Ninja version, commit, host matrix, metadata, executable permissions, non-ASCII installed-project export, failure recovery, and source-free package boundaries throughout release assembly.
+
 ## 1.8.4
 
 - Add `gdpp-lite.zip` for Godot 4.6-4.7 with macOS and Windows editor/desktop export support plus Android and Web, excluding Linux and iOS payloads.
