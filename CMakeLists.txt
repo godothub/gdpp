@@ -580,6 +580,7 @@ set(GDPP_PROJECT_SOURCES
     src/project/native_builder.cpp
     src/project/project_compiler.cpp
     src/project/project_file_selector.cpp
+    src/project/xcframework_artifact.cpp
 )
 set(GDPP_SUPPORT_SOURCES
     src/support/sha256.cpp
