@@ -1,0 +1,279 @@
+name: iOS target and Xcode integration
+
+on:
+  workflow_call:
+    inputs:
+      source_ref:
+        description: Private source revision to validate
+        type: string
+        required: false
+        default: main
+    secrets:
+      GDPP_TOKEN:
+        required: true
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: Private source revision to validate
+        type: string
+        required: false
+        default: main
+
+permissions:
+  contents: read
+
+env:
+  GDPP_SOURCE_ROOT: ${{ github.workspace }}/source
+
+defaults:
+  run:
+    working-directory: source
+
+concurrency:
+  group: ios-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  target-sdk:
+    name: iOS SDK / Godot ${{ matrix.godot }} / arm64 + Universal Simulator
+    runs-on: macos-15
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        godot: [4.4, 4.5, 4.6, 4.7]
+    steps:
+      - name: Check out public pipeline
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/checkout-source
+        with:
+          ref: ${{ inputs.source_ref }}
+          token: ${{ secrets.GDPP_TOKEN }}
+      - name: Configure iOS target SDK builder
+        run: cmake --preset dev -DGDPP_IOS_SDK_VERSIONS=${{ matrix.godot }}
+      - name: Build Release target SDK
+        run: cmake --build --preset dev --target gdpp_ios_sdk --parallel
+      - name: Validate device and Simulator contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdk="example/addons/gdpp/sdk/${{ matrix.godot }}/ios/arm64"
+          grep -q '^platform ios$' "$sdk/sdk.manifest"
+          grep -q '^arch arm64$' "$sdk/sdk.manifest"
+          grep -q '^profiles debug,release$' "$sdk/sdk.manifest"
+          grep -q '^distribution_binding template_release$' "$sdk/sdk.manifest"
+          grep -q '^distribution_optimization Release$' "$sdk/sdk.manifest"
+          grep -q '^ios_slices device-arm64,simulator-arm64,simulator-x86_64$' \
+            "$sdk/sdk.manifest"
+          grep -q '^source_paths mapped$' "$sdk/sdk.manifest"
+          grep -q '^ios_deployment_target 16.0$' "$sdk/sdk.manifest"
+          test "$(find "$sdk/lib/device" -type f -name '*template_debug*.a' | wc -l)" -eq 0
+          test "$(find "$sdk/lib/simulator" -type f -name '*template_debug*.a' | wc -l)" -eq 0
+          test "$(find "$sdk/lib/device" -type f -name '*template_release*.a' | wc -l)" -eq 1
+          test "$(find "$sdk/lib/simulator" -type f -name '*template_release*.a' | wc -l)" -eq 1
+          while IFS= read -r archive; do
+            test "$(xcrun lipo -archs "$archive")" = arm64
+          done < <(find "$sdk/lib/device" -type f -name '*.a' | LC_ALL=C sort)
+          while IFS= read -r archive; do
+            architectures="$(xcrun lipo -archs "$archive")"
+            grep -qw arm64 <<<"$architectures"
+            grep -qw x86_64 <<<"$architectures"
+          done < <(find "$sdk/lib/simulator" -type f -name '*.a' | LC_ALL=C sort)
+          if find "$sdk/lib" -type f -name '*.a' -exec strings {} + \
+              | grep -F "$GDPP_SOURCE_ROOT" >/dev/null; then
+            echo 'iOS target SDK leaks the checkout path.'
+            exit 1
+          fi
+          test -z "$(find third/godot-cpp -type d -name __pycache__ -print -quit)"
+          test -z "$(find third/godot-cpp -type f -name '*.pyc' -print -quit)"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: gdpp-ios-godot-${{ matrix.godot }}
+          path: source/example/addons/gdpp/sdk/${{ matrix.godot }}/ios/arm64
+          if-no-files-found: error
+          retention-days: 7
+
+  xcode-project:
+    name: iOS Xcode project / Godot 4.6.2 / unsigned Simulator
+    needs: target-sdk
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - name: Check out public pipeline
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/checkout-source
+        with:
+          ref: ${{ inputs.source_ref }}
+          token: ${{ secrets.GDPP_TOKEN }}
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: gdpp-ios-godot-4.6
+          path: source/example/addons/gdpp/sdk/4.6/ios/arm64
+      - id: godot
+        name: Install official Godot editor and iOS template
+        shell: bash
+        env:
+          GODOT_VERSION: 4.6.2
+        run: |
+          set -euo pipefail
+          root="$GDPP_SOURCE_ROOT/build/ci/godot/$GODOT_VERSION"
+          mkdir -p "$root"
+          bash "$GDPP_SOURCE_ROOT/tools/download_with_retry.sh" \
+            "https://github.com/godotengine/godot-builds/releases/download/${GODOT_VERSION}-stable/Godot_v${GODOT_VERSION}-stable_macos.universal.zip" \
+            "$root/editor.zip"
+          ditto -x -k "$root/editor.zip" "$root"
+          editor="$root/Godot.app/Contents/MacOS/Godot"
+          test -x "$editor"
+          echo "executable=$editor" >> "$GITHUB_OUTPUT"
+          bash "$GDPP_SOURCE_ROOT/tools/download_with_retry.sh" \
+            "https://github.com/godotengine/godot-builds/releases/download/${GODOT_VERSION}-stable/Godot_v${GODOT_VERSION}-stable_export_templates.tpz" \
+            "$root/templates.tpz"
+          destination="$HOME/Library/Application Support/Godot/export_templates/${GODOT_VERSION}.stable"
+          mkdir -p "$destination"
+          unzip -p "$root/templates.tpz" templates/ios.zip > "$destination/ios.zip"
+          unzip -p "$root/templates.tpz" templates/macos.zip > "$destination/macos.zip"
+          unzip -t "$destination/ios.zip"
+          unzip -t "$destination/macos.zip"
+      - name: Build compiler plugin
+        shell: bash
+        env:
+          GODOT: ${{ steps.godot.outputs.executable }}
+        run: |
+          cmake --preset plugin \
+            -DGDPP_GODOT_EXECUTABLE="$GODOT" \
+            -DGDPP_PACKAGE_GODOT_VERSIONS=4.6 \
+            '-DCMAKE_OSX_ARCHITECTURES=arm64;x86_64'
+          cmake --build --preset plugin --parallel
+          ctest --preset plugin --output-on-failure
+      - name: Export binary-only Xcode project
+        shell: bash
+        env:
+          GODOT: ${{ steps.godot.outputs.executable }}
+        run: |
+          set -euo pipefail
+          root="$GDPP_SOURCE_ROOT/example/addons/gdpp/build/ios"
+          mkdir -p "$root"
+          "$GODOT" --headless --editor --path example --quit-after 120 \
+            2>&1 | tee "$root/warmup.log"
+          "$GODOT" --headless --editor --path example --import \
+            2>&1 | tee "$root/import.log"
+          python3 tools/verify_export_immutability.py snapshot \
+            --project example --state "$root/extension-state.json"
+          "$GODOT" --headless --editor --path example \
+            --export-release 'iOS AOT' "$root/GDPPExample" \
+            2>&1 | tee "$root/export.log"
+          python3 tools/verify_export_immutability.py verify \
+            --project example --state "$root/extension-state.json"
+          grep -q 'GDPP_AOT_SUMMARY scenes=' "$root/export.log"
+          diagnostics="$root/import-export-diagnostics.log"
+          forbidden_diagnostics="$root/forbidden-diagnostics.log"
+          grep -Eh '(^| )ERROR:|SCRIPT ERROR:|WARNING:|Unable to open' \
+            "$root/import.log" "$root/export.log" > "$diagnostics" || true
+          # Godot 4.6.2's official iOS exporter queries this removed optional
+          # setting while extracting its own Xcode template. Keep the exception
+          # exact so every GDPP or otherwise unknown diagnostic still fails closed.
+          grep -Fvx \
+            'WARNING: Property not found: application/boot_splash/fullsize' \
+            "$diagnostics" > "$forbidden_diagnostics" || true
+          if [[ -s "$forbidden_diagnostics" ]]; then
+            cat "$forbidden_diagnostics"
+            echo 'Godot reported an iOS import/export failure.'
+            exit 1
+          fi
+          test "$(find "$root" -type d -name 'libgdpp.release.ios.arm64.xcframework' | wc -l)" -eq 1
+          test "$(find "$root" -type d -name '*.xcodeproj' | wc -l)" -eq 1
+          if find "$root" -type f \( -name '*.gd' -o -name '*.gdc' \) -print -quit \
+              | grep -q .; then
+            echo 'iOS export contains project GDScript.'
+            exit 1
+          fi
+      - name: Build the exported project for iOS Simulator without signing
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="example/addons/gdpp/build/ios"
+          project="$(find "$root" -type d -name '*.xcodeproj' -print -quit)"
+          test -n "$project"
+          engine_archive="$(find "$root" -path \
+            '*/GDPPExample.xcframework/*-simulator/libgodot.a' -print -quit)"
+          project_pattern='*libgdpp.release.ios.arm64.xcframework/'
+          project_pattern+='*-simulator/libgdpp.framework/libgdpp'
+          project_library="$(find "$root" -path "$project_pattern" -print -quit)"
+          test -n "$engine_archive"
+          test -n "$project_library"
+          engine_archs="$(xcrun lipo -archs "$engine_archive")"
+          if grep -qw arm64 <<<"$engine_archs"; then
+            simulator_arch=arm64
+          elif grep -qw x86_64 <<<"$engine_archs"; then
+            simulator_arch=x86_64
+          else
+            echo "Official Godot Simulator archive has no supported architecture: $engine_archs"
+            exit 1
+          fi
+          xcrun lipo -archs "$project_library" | grep -qw "$simulator_arch"
+          echo "Building the architecture supplied by the official Godot template: $simulator_arch"
+          xcodebuild -project "$project" -configuration Release \
+            -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
+            ARCHS="$simulator_arch" ONLY_ACTIVE_ARCH=YES \
+            CODE_SIGNING_ALLOWED=NO build \
+              | tee "$root/xcodebuild.log"
+          grep -q '\*\* BUILD SUCCEEDED \*\*' "$root/xcodebuild.log"
+      - name: Export and run an immutable Universal 2 provider project
+        shell: bash
+        env:
+          GODOT: ${{ steps.godot.outputs.executable }}
+        run: |
+          set -euo pipefail
+          fixture=build/plugin/attached-extension-project
+          root="$GDPP_SOURCE_ROOT/build/ci/attached-macos"
+          state="$root/extension-state.json"
+          mkdir -p "$root"
+          cp "$fixture/extension_list.compiler.cfg" \
+            "$fixture/.godot/extension_list.cfg"
+          "$GODOT" --headless --editor --path "$fixture" --import \
+            2>&1 | tee "$root/import.log"
+          python3 tools/verify_export_immutability.py snapshot \
+            --project "$fixture" --state "$state"
+          "$GODOT" --headless --editor --path "$fixture" \
+            --export-release 'macOS Universal 2' "$root/GDPPAttached.app" \
+            2>&1 | tee "$root/export.log"
+          python3 tools/verify_export_immutability.py verify \
+            --project "$fixture" --state "$state"
+
+          frameworks="$root/GDPPAttached.app/Contents/Frameworks"
+          test "$(find "$frameworks" -maxdepth 1 -type f \
+            -name 'libgdpp.release.macos.universal.dylib' | wc -l)" -eq 1
+          test "$(find "$frameworks" -maxdepth 1 -type f \
+            -name 'libgdpp_test_vendor.release.macos.universal.dylib' | wc -l)" -eq 1
+          "$root/GDPPAttached.app/Contents/MacOS/GDPP Attached Extension Integration" \
+            --headless 2>&1 | tee "$root/runtime.log"
+          grep -q '^GDPP_DYNAMIC_SCRIPT_RUNTIME_OK$' "$root/runtime.log"
+          grep -q '^GDPP_ATTACHED_EXPORT_RUNTIME_OK$' "$root/runtime.log"
+          grep -q 'GDPP_AOT_SUMMARY scenes=' "$root/export.log"
+          if grep -E -q '(^| )ERROR:|SCRIPT ERROR:|Parse Error:|WARNING:|Unable to open' \
+              "$root/import.log" "$root/export.log" "$root/runtime.log"; then
+            echo 'Universal 2 provider export emitted a forbidden diagnostic.'
+            exit 1
+          fi
+      - id: evidence_audit
+        name: Audit public iOS evidence for source disclosure
+        if: always()
+        run: >-
+          python3 "$GITHUB_WORKSPACE/tools/audit_public_artifact.py"
+          --source .
+          --path example/addons/gdpp/build/ios
+          --path build/ci/attached-macos
+      - name: Upload iOS integration evidence
+        if: ${{ always() && steps.evidence_audit.outcome == 'success' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: gdpp-ios-xcode-godot-4.6.2
+          path: |
+            source/example/addons/gdpp/build/ios
+            source/build/ci/attached-macos
+          if-no-files-found: warn
+          retention-days: 14
