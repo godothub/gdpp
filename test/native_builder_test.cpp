@@ -165,6 +165,30 @@ bool contains_path(const std::vector<std::string>& arguments,
     });
 }
 
+std::filesystem::path ninja_command_file(const gdpp::NativeBuildPlan& plan,
+                                         const std::size_t index) {
+#ifdef _WIN32
+    return plan.build_directory / "commands" / (std::to_string(index) + ".rsp");
+#else
+    return plan.build_directory / "commands" / (std::to_string(index) + ".sh");
+#endif
+}
+
+bool ninja_graph_contains_path(const std::string& graph, const std::filesystem::path& expected) {
+    std::string escaped;
+    for (const char character : expected.generic_string()) {
+        if (character == '$')
+            escaped += "$$";
+        else if (character == ' ')
+            escaped += "$ ";
+        else if (character == ':')
+            escaped += "$:";
+        else
+            escaped.push_back(character);
+    }
+    return graph.find(escaped) != std::string::npos;
+}
+
 bool contains_utf16le_ascii(const std::filesystem::path& path, const std::string& expected) {
     std::ifstream input{path, std::ios::binary};
     const std::string bytes{std::istreambuf_iterator<char>{input},
@@ -533,7 +557,7 @@ TEST_CASE("native builder creates a stable release macOS Ninja graph") {
     REQUIRE_EQ(first.compile_edge_count, std::size_t{3});
     REQUIRE_EQ(first.post_compile_edge_count, std::size_t{1});
     const auto graph_time = std::filesystem::last_write_time(first.build_file);
-    const auto command_file = first.build_directory / "commands/0.sh";
+    const auto command_file = ninja_command_file(first, 0);
     const auto command_time = std::filesystem::last_write_time(command_file);
     const auto command_contents = read_input(command_file);
     const auto second = builder.plan(options);
@@ -579,7 +603,7 @@ TEST_CASE("native builder delegates precise generated-header invalidation to com
     REQUIRE(graph.find("example.gd.cpp") != std::string::npos);
     REQUIRE(graph.find("other.gd.cpp") != std::string::npos);
     REQUIRE(graph.find("shared.hpp") == std::string::npos);
-    const auto first_command = read_input(initial.build_directory / "commands/0.sh");
+    const auto first_command = read_input(ninja_command_file(initial, 0));
     REQUIRE(first_command.find("-MMD") != std::string::npos);
     REQUIRE(first_command.find("-MF") != std::string::npos);
     REQUIRE(first_command.find("-MT") != std::string::npos);
@@ -602,8 +626,7 @@ TEST_CASE("native builder tracks static libraries as Ninja link inputs") {
     REQUIRE_EQ(first.commands.size(), std::size_t{4});
     REQUIRE(contains(first.commands.back().arguments, "-dynamiclib"));
     REQUIRE(contains_path(first.commands.back().arguments, binding_library));
-    REQUIRE(read_input(first.build_file).find(binding_library.generic_string()) !=
-            std::string::npos);
+    REQUIRE(ninja_graph_contains_path(read_input(first.build_file), binding_library));
 }
 
 TEST_CASE("native builder injects the selected third-party bridge target") {
@@ -714,8 +737,7 @@ TEST_CASE("native builder emits MSVC compile and link arguments") {
     REQUIRE(contains_utf16le_ascii(response_file, "gdpp.lib"));
     REQUIRE(!contains_utf16le_ascii(response_file, "gdpp_project.lib"));
     REQUIRE(contains_utf16le_ascii(response_file, "/OUT:"));
-    REQUIRE(read_input(plan.build_file).find(response_file.generic_string()) !=
-            std::string::npos);
+    REQUIRE(ninja_graph_contains_path(read_input(plan.build_file), response_file));
 #ifdef _WIN32
     const auto compiler_response = plan.build_directory / "commands/0.rsp";
     const auto compiler_response_contents = read_input(compiler_response);
@@ -1168,7 +1190,7 @@ TEST_CASE("native builder isolates threaded WebAssembly flags and artifacts") {
 #ifdef _WIN32
 TEST_CASE("native builder launches Windows Web command scripts through the command processor") {
     const auto root = make_sdk_fixture(
-        "native-builder-web-windows-command-script",
+        "native-builder-web-command-script-winhost",
         "libgodot-cpp.web.template_release.wasm32.nothreads.a");
     gdpp::NativeBuildOptions options;
     options.project_output_directory = root / "project";
