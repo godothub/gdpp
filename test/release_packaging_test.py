@@ -248,7 +248,7 @@ class ReleasePackagingTest(unittest.TestCase):
             r'require_field\\(manifest, "runtime_abi", "[0-9]+", "SDK"\\)',
         )
         workflow = (
-            SOURCE_ROOT / ".github/workflows/native-integration.yml"
+            SOURCE_ROOT / "ci/.github/workflows/native-integration.yml"
         ).read_text(encoding="utf-8")
         self.assertIn("CMAKE_PROJECT_VERSION:STATIC=", workflow)
         self.assertIn('--version "$version"', workflow)
@@ -492,7 +492,7 @@ class ReleasePackagingTest(unittest.TestCase):
             )
 
     def test_release_workflow_declares_only_the_three_multi_host_archives(self) -> None:
-        workflow_root = SOURCE_ROOT / ".github/workflows"
+        workflow_root = SOURCE_ROOT / "ci/.github/workflows"
         orchestrator = (workflow_root / "release.yml").read_text(encoding="utf-8")
         host_components = (workflow_root / "host-components.yml").read_text(
             encoding="utf-8"
@@ -544,8 +544,20 @@ class ReleasePackagingTest(unittest.TestCase):
         self.assertNotIn("complete-packages:", orchestrator)
         self.assertNotIn("16-archive matrix", packages)
 
+    def test_public_ci_submodule_owns_every_executable_workflow(self) -> None:
+        gitmodules = (SOURCE_ROOT / ".gitmodules").read_text(encoding="utf-8")
+        self.assertIn('[submodule "ci"]', gitmodules)
+        self.assertIn("path = ci", gitmodules)
+        self.assertIn("url = https://github.com/godothub/gdpp.git", gitmodules)
+        self.assertTrue((SOURCE_ROOT / "ci/.github/workflows/release.yml").is_file())
+        private_workflows = SOURCE_ROOT / ".github/workflows"
+        self.assertEqual(
+            sorted(path.name for path in private_workflows.glob("*.y*ml")),
+            [],
+        )
+
     def test_platform_workflows_audit_short_project_product_names(self) -> None:
-        workflow_root = SOURCE_ROOT / ".github/workflows"
+        workflow_root = SOURCE_ROOT / "ci/.github/workflows"
         expected_names = {
             "godot-compatibility.yml": (
                 "libgdpp.release.linux.x86_64.so",
@@ -570,7 +582,7 @@ class ReleasePackagingTest(unittest.TestCase):
 
     def test_android_workflow_skips_legacy_default_sdk_packages(self) -> None:
         workflow = (
-            SOURCE_ROOT / ".github/workflows/android.yml"
+            SOURCE_ROOT / "ci/.github/workflows/android.yml"
         ).read_text(encoding="utf-8")
         self.assertEqual(
             workflow.count("uses: android-actions/setup-android@"),
@@ -583,7 +595,7 @@ class ReleasePackagingTest(unittest.TestCase):
 
     def test_ios_upstream_warning_allowlist_is_exact_and_fail_closed(self) -> None:
         workflow = (
-            SOURCE_ROOT / ".github/workflows/ios.yml"
+            SOURCE_ROOT / "ci/.github/workflows/ios.yml"
         ).read_text(encoding="utf-8")
         self.assertIn(
             "grep -Eh '(^| )ERROR:|SCRIPT ERROR:|WARNING:|Unable to open'",
@@ -599,7 +611,7 @@ class ReleasePackagingTest(unittest.TestCase):
 
     def test_godot_compatibility_workflow_tracks_complete_external_projects(self) -> None:
         workflow = (
-            SOURCE_ROOT / ".github/workflows/godot-compatibility.yml"
+            SOURCE_ROOT / "ci/.github/workflows/godot-compatibility.yml"
         ).read_text(encoding="utf-8")
         self.assertIn('"4.7.1"', workflow)
         self.assertNotIn('"4.7"]', workflow)
@@ -700,11 +712,11 @@ class ReleasePackagingTest(unittest.TestCase):
 
     def test_host_artifact_preserves_required_hidden_addon_files(self) -> None:
         workflow = (
-            SOURCE_ROOT / ".github/workflows/host-components.yml"
+            SOURCE_ROOT / "ci/.github/workflows/host-components.yml"
         ).read_text(encoding="utf-8")
         self.assertIn(
             "name: gdpp-host-${{ matrix.host }}\n"
-            "          path: build/host-component\n"
+            "          path: source/build/host-component\n"
             "          if-no-files-found: error\n"
             "          include-hidden-files: true\n"
             "          retention-days: 7",

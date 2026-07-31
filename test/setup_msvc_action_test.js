@@ -4,7 +4,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 
-const setup = require("../.github/actions/setup-msvc/index.js");
+const setup = require("../ci/.github/actions/setup-msvc/index.js");
 
 assert.equal(setup.resolveArchitecture("x64"), "x64");
 assert.equal(setup.resolveArchitecture("X86_64"), "x64");
@@ -67,12 +67,12 @@ assert.equal(invocation[2].windowsVerbatimArguments, true);
 
 const root = path.resolve(__dirname, "..");
 const action = fs.readFileSync(
-    path.join(root, ".github/actions/setup-msvc/action.yml"),
+    path.join(root, "ci/.github/actions/setup-msvc/action.yml"),
     "utf8",
 );
 assert.match(action, /^  using: node24$/mu);
 for (const workflow of ["core.yml", "native-integration.yml", "host-components.yml"]) {
-    const content = fs.readFileSync(path.join(root, ".github/workflows", workflow), "utf8");
+    const content = fs.readFileSync(path.join(root, "ci/.github/workflows", workflow), "utf8");
     assert.match(content, /uses: \.\/\.github\/actions\/setup-msvc/u);
     assert.doesNotMatch(content, /ilammy\/msvc-dev-cmd/u);
 }
