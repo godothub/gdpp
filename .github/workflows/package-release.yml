@@ -1,0 +1,225 @@
+name: Release package assembly
+
+on:
+  workflow_call:
+    inputs:
+      source_ref:
+        description: Private source revision to package
+        type: string
+        required: true
+    secrets:
+      GDPP_TOKEN:
+        required: true
+
+permissions:
+  contents: read
+
+env:
+  GDPP_SOURCE_ROOT: ${{ github.workspace }}/source
+
+defaults:
+  run:
+    working-directory: source
+
+jobs:
+  package:
+    name: ZIP / standard, all and lite editions
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+    steps:
+      - name: Check out public pipeline
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/checkout-source
+        with:
+          ref: ${{ inputs.source_ref }}
+          token: ${{ secrets.GDPP_TOKEN }}
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          pattern: gdpp-host-*
+          path: source/build/components
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          pattern: gdpp-android-arm64-godot-*
+          path: source/build/components
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          pattern: gdpp-web-godot-*
+          path: source/build/components
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          pattern: gdpp-ios-godot-*
+          path: source/build/components
+      - name: Assemble all multi-host plugin ZIPs
+        shell: bash
+        run: |
+          set -euo pipefail
+          for package in standard all lite; do
+            python3 tools/package_platform_release.py \
+              --components build/components \
+              --output build/release \
+              --package "$package"
+          done
+      - name: Audit every package and SDK matrix
+        shell: bash
+        run: |
+          set -euo pipefail
+          audit_archive() {
+            local archive="$1"
+            local edition="$2"
+            shift 2
+            local contents
+            contents="build/$(basename "$archive").contents"
+            local expected_csv
+            expected_csv="$(IFS=,; echo "$*")"
+            local expected_binary_count
+            local expected_library_count
+            local expected_editor_hosts
+            local expected_export_targets
+            local -a binaries
+            local -a manifests
+            if [[ "$edition" == lite ]]; then
+              expected_binary_count=4
+              expected_library_count=5
+              expected_editor_hosts='macos-universal,windows-x86_64'
+              expected_export_targets='macos-universal,windows-x64,android-arm64,web-wasm32-nothreads,web-wasm32-threads'
+              binaries=(
+                libgdpp_compiler.macos.universal.dylib
+                libgdpp_fallback.macos.universal.dylib
+                gdpp_compiler.windows.x86_64.dll
+                gdpp_fallback.windows.x86_64.dll
+              )
+              manifests=(
+                macos.universal
+                windows.x86_64
+                android.arm64
+                web.wasm32.nothreads
+                web.wasm32.threads
+              )
+            else
+              expected_binary_count=6
+              expected_library_count=8
+              expected_editor_hosts='macos-universal,linux-x86_64,windows-x86_64'
+              expected_export_targets='macos-universal,linux-x64,windows-x64,android-arm64,ios-arm64,web-wasm32-nothreads,web-wasm32-threads'
+              binaries=(
+                libgdpp_compiler.macos.universal.dylib
+                libgdpp_fallback.macos.universal.dylib
+                libgdpp_compiler.linux.x86_64.so
+                libgdpp_fallback.linux.x86_64.so
+                gdpp_compiler.windows.x86_64.dll
+                gdpp_fallback.windows.x86_64.dll
+              )
+              manifests=(
+                macos.universal
+                linux.x86_64
+                windows.x86_64
+                android.arm64
+                ios.arm64
+                web.wasm32.nothreads
+                web.wasm32.threads
+              )
+            fi
+            test -f "$archive"
+            unzip -Z1 "$archive" > "$contents"
+            if grep -qv '^addons/gdpp/' "$contents"; then
+              echo 'Release ZIP must contain exactly one addons/gdpp plugin directory.'
+              exit 1
+            fi
+            for static_file in \
+              .gitignore \
+              build_progress.gd \
+              build_progress.gd.uid \
+              native_build_job.gd \
+              native_build_job.gd.uid \
+              export_plugin.gd \
+              export_plugin.gd.uid \
+              scene_transform_worker.gd \
+              scene_transform_worker.gd.uid \
+              gdpp.gdextension \
+              gdpp.gdextension.uid \
+              plugin.cfg \
+              plugin.gd \
+              plugin.gd.uid; do
+              grep -Fqx "addons/gdpp/${static_file}" "$contents"
+            done
+            grep -Fqx 'addons/gdpp/PACKAGE_MANIFEST.txt' "$contents"
+            grep -q '^GDPP_PACKAGE 6$' \
+              <(unzip -p "$archive" addons/gdpp/PACKAGE_MANIFEST.txt)
+            grep -q '^kind multi-host$' \
+              <(unzip -p "$archive" addons/gdpp/PACKAGE_MANIFEST.txt)
+            grep -q '^archive_layout addons/gdpp$' \
+              <(unzip -p "$archive" addons/gdpp/PACKAGE_MANIFEST.txt)
+            grep -q '^sdk_layout shared-target-manifests$' \
+              <(unzip -p "$archive" addons/gdpp/PACKAGE_MANIFEST.txt)
+            grep -q "^edition ${edition}$" \
+              <(unzip -p "$archive" addons/gdpp/PACKAGE_MANIFEST.txt)
+            grep -q "^target_godot_apis ${expected_csv}$" \
+              <(unzip -p "$archive" addons/gdpp/PACKAGE_MANIFEST.txt)
+            grep -q "^editor_hosts ${expected_editor_hosts}$" \
+              <(unzip -p "$archive" addons/gdpp/PACKAGE_MANIFEST.txt)
+            grep -q "^export_targets ${expected_export_targets}$" \
+              <(unzip -p "$archive" addons/gdpp/PACKAGE_MANIFEST.txt)
+            test "$(grep -Ec '^addons/gdpp/binary/[^/]+$' "$contents")" \
+              -eq "$expected_binary_count"
+            for binary in "${binaries[@]}"; do
+              grep -Fqx "addons/gdpp/binary/$binary" "$contents"
+            done
+            mapfile -t actual_versions < <(
+              grep -Eo '^addons/gdpp/sdk/[0-9]+\.[0-9]+/' "$contents" \
+                | cut -d/ -f4 \
+                | sort -Vu
+            )
+            test "${actual_versions[*]}" = "$*"
+            if grep -Eq '^addons/gdpp/sdk/[^/]+/sdk\.manifest$' "$contents"; then
+              echo 'A multi-host package contains an ambiguous root SDK manifest.'
+              exit 1
+            fi
+            for godot in "$@"; do
+              test "$(grep -Ec \
+                "^addons/gdpp/sdk/$godot/manifests/[^/]+$" "$contents")" \
+                -eq "${#manifests[@]}"
+              for manifest in "${manifests[@]}"; do
+                grep -Fqx \
+                  "addons/gdpp/sdk/$godot/manifests/$manifest.sdk.manifest" \
+                  "$contents"
+              done
+              test "$(grep -Ec "^addons/gdpp/sdk/$godot/lib/[^/]+$" "$contents")" \
+                -eq "$expected_library_count"
+            done
+            if [[ "$edition" == lite ]] && grep -Eq \
+                '^addons/gdpp/(binary/[^/]*(linux|ios)|sdk/[^/]+/(lib|manifests)/[^/]*(linux|ios))' \
+                "$contents"; then
+              echo 'The lite package contains a Linux or iOS payload.'
+              exit 1
+            fi
+            if [[ "$edition" == lite ]] && grep -Eq '^(ios_|.*linux)' \
+                < <(unzip -p "$archive" addons/gdpp/PACKAGE_MANIFEST.txt); then
+              echo 'The lite package manifest advertises Linux or iOS support.'
+              exit 1
+            fi
+            if grep -Eq \
+                'template_debug|\.editor\.|\.zip$|/build/|gdpp_project|(^|/)(lib)?gdpp\.(debug|release)\.|(^|/)gdpp\.lib$|\.DS_Store$|/\._' \
+                "$contents"; then
+              echo 'Release ZIP contains a forbidden binding or generated product.'
+              exit 1
+            fi
+            if grep -Eq '^addons/gdpp/sdk/[^/]+/(android|ios|web|macos|linux|windows)/' \
+                "$contents"; then
+              echo 'Release ZIP contains a retired per-target SDK directory.'
+              exit 1
+            fi
+          }
+          audit_archive build/release/gdpp.zip standard 4.6 4.7
+          audit_archive build/release/gdpp-all.zip all 4.4 4.5 4.6 4.7
+          audit_archive build/release/gdpp-lite.zip lite 4.6 4.7
+          test "$(find build/release -maxdepth 1 -type f -name '*.zip' | wc -l)" -eq 3
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: gdpp-release-packages
+          path: |
+            source/build/release/gdpp.zip
+            source/build/release/gdpp-all.zip
+            source/build/release/gdpp-lite.zip
+          if-no-files-found: error
+          retention-days: 14

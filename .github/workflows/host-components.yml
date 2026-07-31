@@ -1,0 +1,413 @@
+name: Desktop host components
+
+on:
+  workflow_call:
+    inputs:
+      source_ref:
+        description: Private source revision to validate
+        type: string
+        required: false
+        default: main
+    secrets:
+      GDPP_TOKEN:
+        required: true
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: Private source revision to validate
+        type: string
+        required: false
+        default: main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: host-components-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GDPP_COMPILER_GODOT_API: 4.4
+  GDPP_SOURCE_ROOT: ${{ github.workspace }}/source
+
+defaults:
+  run:
+    working-directory: source
+
+jobs:
+  build:
+    name: Host / ${{ matrix.host }} / Godot 4.4-4.7 SDKs
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - host: mac-universal
+            os: macos-15
+            sdk_platform: macos
+            sdk_arch: universal
+            platform_minimum: macOS_11.0
+          - host: linux-x64
+            os: ubuntu-22.04
+            sdk_platform: linux
+            sdk_arch: x86_64
+            platform_minimum: Ubuntu_22.04
+          - host: windows-x64
+            os: windows-2025
+            sdk_platform: windows
+            sdk_arch: x86_64
+            platform_minimum: Windows_10
+    steps:
+      - name: Check out public pipeline
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/checkout-source
+        with:
+          ref: ${{ inputs.source_ref }}
+          token: ${{ secrets.GDPP_TOKEN }}
+      - name: Initialize the MSVC x64 toolchain
+        if: runner.os == 'Windows'
+        uses: ./.github/actions/setup-msvc
+        with:
+          arch: x64
+      - name: Configure the cross-version commercial host component
+        shell: bash
+        run: |
+          set -euo pipefail
+          arguments=(
+            --preset release
+            "-DGDPP_GODOT_API_VERSION=$GDPP_COMPILER_GODOT_API"
+            "-DGDPP_PACKAGE_GODOT_VERSIONS=4.4;4.5;4.6;4.7"
+          )
+          if [[ "${{ matrix.host }}" == mac-universal ]]; then
+            test "$(uname -m)" = arm64
+            arguments+=("-DCMAKE_OSX_ARCHITECTURES=arm64;x86_64")
+          elif [[ "${{ matrix.host }}" == windows-x64 ]]; then
+            arguments+=("-DCMAKE_CXX_COMPILER=cl.exe")
+          fi
+          cmake "${arguments[@]}"
+      - name: Build compiler and all host SDKs
+        run: cmake --build --preset release --parallel
+      - name: Run release tests
+        run: ctest --preset release
+      - name: Validate all host SDK and compiler ABI contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          package=example/addons/gdpp
+          version="$(sed -n 's/^version="\([^"]*\)"$/\1/p' "$package/plugin.cfg")"
+          test -n "$version"
+          test "$(find "$package/sdk" -mindepth 1 -maxdepth 1 -type d | wc -l)" -eq 4
+          for godot in 4.4 4.5 4.6 4.7; do
+            sdk="$package/sdk/$godot"
+            grep -q "^api $godot$" "$sdk/sdk.manifest"
+            grep -q '^platform ${{ matrix.sdk_platform }}$' "$sdk/sdk.manifest"
+            grep -q '^arch ${{ matrix.sdk_arch }}$' "$sdk/sdk.manifest"
+            grep -q '^profiles debug,release$' "$sdk/sdk.manifest"
+            grep -q '^distribution_binding template_release$' "$sdk/sdk.manifest"
+            grep -q '^distribution_optimization Release$' "$sdk/sdk.manifest"
+            grep -q '^platform_minimum ${{ matrix.platform_minimum }}$' "$sdk/sdk.manifest"
+            grep -q "^gdpp_version $version$" "$sdk/sdk.manifest"
+            test "$(find "$sdk/lib" -maxdepth 1 -type f | wc -l)" -eq 1
+            test "$(find "$sdk/lib" -maxdepth 1 -type f -name '*template_release*' | wc -l)" -eq 1
+          done
+          grep -q '^compatibility_minimum = "4.4"$' "$package/gdpp.gdextension"
+      - id: godot
+        name: Install official Godot 4.7.1 editor and host templates
+        uses: ./.github/actions/setup-godot
+        with:
+          source-root: ${{ env.GDPP_SOURCE_ROOT }}
+          version: 4.7.1
+          templates: host
+      - name: Export and run the host desktop package
+        shell: bash
+        env:
+          GODOT: ${{ steps.godot.outputs.executable }}
+        run: |
+          set -euo pipefail
+          root="$GDPP_SOURCE_ROOT/build/host-export"
+          mkdir -p "$root"
+          if [[ "$RUNNER_OS" == macOS ]]; then
+            preset='macOS Universal'
+            output="$root/GDPPExample.app"
+            runtime="$output/Contents/MacOS/GDPP Example"
+            project_library="$output/Contents/Frameworks/libgdpp.release.macos.universal.dylib"
+          elif [[ "$RUNNER_OS" == Windows ]]; then
+            preset='Windows x86_64'
+            output="$root/GDPPExample.exe"
+            runtime="$output"
+            project_library="$root/gdpp.release.windows.x86_64.dll"
+          else
+            preset='Linux x86_64'
+            output="$root/GDPPExample.x86_64"
+            runtime="$output"
+            project_library="$root/libgdpp.release.linux.x86_64.so"
+          fi
+
+          "$GODOT" --headless --editor --path example --quit-after 120 \
+            2>&1 | tee "$root/warmup.log"
+          "$GODOT" --headless --editor --path example --import \
+            2>&1 | tee "$root/import.log"
+          python3 tools/verify_export_immutability.py snapshot \
+            --project example --state "$root/extension-state.json"
+          "$GODOT" --headless --editor --path example \
+            --export-release "$preset" "$output" \
+            2>&1 | tee "$root/export.log"
+          python3 tools/verify_export_immutability.py verify \
+            --project example --state "$root/extension-state.json"
+
+          test -f "$runtime"
+          test -f "$project_library"
+          test "$(find "$root" -type f \
+            \( -name 'gdpp.release.*' -o -name 'libgdpp.release.*' \) \
+            | wc -l)" -eq 1
+          if find "$root" -type f \
+              \( -name '*gdpp_compiler*' -o -name '*gdpp_fallback*' \) \
+              -print -quit | grep -q .; then
+            echo 'Desktop export contains an editor or fallback library.'
+            exit 1
+          fi
+
+          python3 - "$runtime" "$root/runtime.log" "$root/coroutine-loop.log" \
+            "$root/runtime-failure.log" <<'PY'
+          from pathlib import Path
+          import subprocess
+          import sys
+
+          executable, runtime_log, coroutine_log, failure_log = sys.argv[1:]
+          cases = (
+              (["--headless", "--quit-after", "2"], runtime_log),
+              (
+                  [
+                      "--headless",
+                      "--audio-driver",
+                      "Dummy",
+                      "--",
+                      "--gdpp-coroutine-loop",
+                  ],
+                  coroutine_log,
+              ),
+              (
+                  [
+                      "--headless",
+                      "--audio-driver",
+                      "Dummy",
+                      "--",
+                      "--gdpp-runtime-failure",
+                  ],
+                  failure_log,
+              ),
+          )
+          for arguments, log_path in cases:
+              result = subprocess.run(
+                  [executable, *arguments],
+                  stdout=subprocess.PIPE,
+                  stderr=subprocess.STDOUT,
+                  text=True,
+                  timeout=30,
+                  check=False,
+              )
+              Path(log_path).write_text(result.stdout, encoding="utf-8")
+              print(result.stdout, end="")
+              if result.returncode:
+                  raise SystemExit(result.returncode)
+          PY
+          grep -q '^GDPP_EXPORTED_PROPERTIES_OK$' "$root/runtime.log"
+          grep -q '^GDPP_RUNTIME_FAILURE_OK$' "$root/runtime-failure.log"
+          grep -q '^GDPP_ASYNC_VIRTUAL_OK$' "$root/runtime.log"
+          grep -q '^GDPP_COROUTINE_LOOP_OK$' "$root/coroutine-loop.log"
+          grep -q 'GDPP_AOT_SUMMARY scenes=' "$root/export.log"
+          if grep -E -q '(^| )ERROR:|SCRIPT ERROR:|Parse Error:|WARNING:|Unable to open' \
+              "$root/warmup.log" "$root/import.log" "$root/export.log" \
+              "$root/runtime.log" "$root/coroutine-loop.log"; then
+            echo 'Official host desktop export emitted a forbidden diagnostic.'
+            exit 1
+          fi
+      - name: Export and run multi-peer attached RPC integration
+        shell: bash
+        env:
+          GODOT: ${{ steps.godot.outputs.executable }}
+        run: |
+          set -euo pipefail
+          fixture=build/release/attached-extension-project
+          root="$GDPP_SOURCE_ROOT/build/host-rpc-integration"
+          mkdir -p "$root" "$fixture/.godot"
+          cp "$fixture/extension_list.compiler.cfg" \
+            "$fixture/.godot/extension_list.cfg"
+
+          if [[ "$RUNNER_OS" == macOS ]]; then
+            preset='macOS Universal 2'
+            output="$root/GDPPAttached.app"
+            runtime="$output/Contents/MacOS/GDPP Attached Extension Integration"
+            project_library="$output/Contents/Frameworks/libgdpp.release.macos.universal.dylib"
+            vendor_library="$output/Contents/Frameworks/libgdpp_test_vendor.release.macos.universal.dylib"
+          elif [[ "$RUNNER_OS" == Windows ]]; then
+            preset='Windows x86_64'
+            output="$root/GDPPAttached.exe"
+            runtime="$output"
+            project_library="$root/gdpp.release.windows.x86_64.dll"
+            vendor_library="$root/gdpp_test_vendor.release.windows.x86_64.dll"
+          else
+            preset='Linux x86_64'
+            output="$root/GDPPAttached.x86_64"
+            runtime="$output"
+            project_library="$root/libgdpp.release.linux.x86_64.so"
+            vendor_library="$root/libgdpp_test_vendor.release.linux.x86_64.so"
+          fi
+
+          "$GODOT" --headless --editor --path "$fixture" --import \
+            2>&1 | tee "$root/import.log"
+          python3 - "$GODOT" "$fixture" "$root/fault-source.log" <<'PY'
+          from pathlib import Path
+          import subprocess
+          import sys
+
+          executable, project, log_path = sys.argv[1:]
+          result = subprocess.run(
+              [
+                  executable,
+                  "--headless",
+                  "--path",
+                  project,
+                  "--script",
+                  "res://runtime_fault_oracle.gd",
+              ],
+              stdout=subprocess.PIPE,
+              stderr=subprocess.STDOUT,
+              text=True,
+              timeout=45,
+              check=False,
+          )
+          Path(log_path).write_text(result.stdout, encoding="utf-8")
+          print(result.stdout, end="")
+          raise SystemExit(result.returncode)
+          PY
+          python3 tools/verify_export_immutability.py snapshot \
+            --project "$fixture" --state "$root/extension-state.json"
+          "$GODOT" --headless --editor --path "$fixture" \
+            --export-release "$preset" "$output" \
+            2>&1 | tee "$root/export.log"
+          python3 tools/verify_export_immutability.py verify \
+            --project "$fixture" --state "$root/extension-state.json"
+
+          test -f "$runtime"
+          test -f "$project_library"
+          test -f "$vendor_library"
+          python3 - "$runtime" "$root/runtime.log" "$root/fault-aot.log" <<'PY'
+          from pathlib import Path
+          import subprocess
+          import sys
+
+          executable, runtime_log, fault_log = sys.argv[1:]
+          cases = (
+              (["--headless", "--audio-driver", "Dummy"], runtime_log),
+              (
+                  [
+                      "--headless",
+                      "--audio-driver",
+                      "Dummy",
+                      "--",
+                      "--gdpp-fault-matrix",
+                  ],
+                  fault_log,
+              ),
+          )
+          for arguments, log_path in cases:
+              result = subprocess.run(
+                  [executable, *arguments],
+                  stdout=subprocess.PIPE,
+                  stderr=subprocess.STDOUT,
+                  text=True,
+                  timeout=45,
+                  check=False,
+              )
+              Path(log_path).write_text(result.stdout, encoding="utf-8")
+              print(result.stdout, end="")
+              if result.returncode:
+                  raise SystemExit(result.returncode)
+          PY
+          grep -q '^GDPP_DYNAMIC_SCRIPT_RUNTIME_OK$' "$root/runtime.log"
+          grep -q '^GDPP_RPC_RUNTIME_OK$' "$root/runtime.log"
+          grep -q '^GDPP_ATTACHED_EXPORT_RUNTIME_OK$' "$root/runtime.log"
+          grep -q '^GDPP_FAULT_MATRIX=' "$root/fault-source.log"
+          grep -q '^GDPP_FAULT_MATRIX=' "$root/fault-aot.log"
+          grep -q '^GDPP_VALUE_MATRIX=' "$root/fault-source.log"
+          grep -q '^GDPP_VALUE_MATRIX=' "$root/fault-aot.log"
+          source_fault="$(grep '^GDPP_FAULT_MATRIX=' "$root/fault-source.log" | tail -n 1)"
+          aot_fault="$(grep '^GDPP_FAULT_MATRIX=' "$root/fault-aot.log" | tail -n 1)"
+          test "$source_fault" = "$aot_fault"
+          source_values="$(grep '^GDPP_VALUE_MATRIX=' "$root/fault-source.log" | tail -n 1)"
+          aot_values="$(grep '^GDPP_VALUE_MATRIX=' "$root/fault-aot.log" | tail -n 1)"
+          test "$source_values" = "$aot_values"
+          if grep -E -q 'ObjectDB instances were leaked|resources still in use at exit|Resource still in use' \
+              "$root/runtime.log" "$root/fault-aot.log"; then
+            echo 'Attached GDExtension runtime retained engine objects during shutdown.'
+            exit 1
+          fi
+          grep -q 'GDPP_AOT_SUMMARY scenes=' "$root/export.log"
+          if grep -E -q '(^| )ERROR:|SCRIPT ERROR:|Parse Error:|WARNING:|Unable to open' \
+              "$root/import.log" "$root/export.log" "$root/runtime.log"; then
+            echo 'Multi-peer attached RPC integration emitted a forbidden diagnostic.'
+            exit 1
+          fi
+      - name: Validate macOS Universal 2 and 11.0 minimum
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          for binary in \
+            example/addons/gdpp/binary/libgdpp_compiler.macos.universal.dylib \
+            example/addons/gdpp/binary/libgdpp_fallback.macos.universal.dylib \
+            example/addons/gdpp/sdk/*/lib/libgodot-cpp.macos.template_release.universal.a; do
+            architectures="$(lipo -archs "$binary")"
+            grep -qw arm64 <<<"$architectures"
+            grep -qw x86_64 <<<"$architectures"
+            for architecture in arm64 x86_64; do
+              load_commands="$(otool -arch "$architecture" -l "$binary")"
+              grep -q 'LC_BUILD_VERSION' <<<"$load_commands"
+              grep -q 'minos 11.0' <<<"$load_commands"
+            done
+          done
+      - name: Validate Ubuntu 22.04 glibc minimum
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(. /etc/os-release && printf '%s' "$VERSION_ID")" = 22.04
+          maximum_glibc="$(
+            find example/addons/gdpp/binary -type f -name '*.so' \
+              -exec readelf --version-info {} + \
+              | grep -Eo 'GLIBC_[0-9]+\.[0-9]+' \
+              | sed 's/^GLIBC_//' \
+              | sort -Vu \
+              | tail -n 1
+          )"
+          test -n "$maximum_glibc"
+          if [[ "$(printf '%s\n%s\n' 2.35 "$maximum_glibc" | sort -Vu | tail -n 1)" \
+              != 2.35 ]]; then
+            echo "Linux package requires GLIBC_$maximum_glibc, newer than GLIBC_2.35."
+            exit 1
+          fi
+      - name: Remove project products and stage the host component
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake \
+            -DGDPP_ADDON_DIRECTORY="$GDPP_SOURCE_ROOT/example/addons/gdpp" \
+            -P cmake/CleanAddonBuild.cmake
+          destination=build/host-component/addons/gdpp
+          python3 tools/stage_host_component.py \
+            --source example/addons/gdpp \
+            --destination "$destination" \
+            --host '${{ matrix.host }}'
+          test ! -e "$destination/build"
+          test "$(find "$destination/binary" -maxdepth 1 -type f | wc -l)" -eq 2
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: gdpp-host-${{ matrix.host }}
+          path: source/build/host-component
+          if-no-files-found: error
+          include-hidden-files: true
+          retention-days: 7
