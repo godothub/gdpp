@@ -158,9 +158,10 @@ jobs:
             2>&1 | tee "$root/import.log"
           python3 tools/verify_export_immutability.py snapshot \
             --project "$project" --state "$root/extension-state.json"
-          "$GODOT" --headless --editor --path "$project" \
-            --export-release '${{ matrix.preset }}' "$output" \
-            2>&1 | tee "$root/export.log"
+          python3 "$GITHUB_WORKSPACE/tools/run_process.py" \
+            --label godot-export --log "$root/export.log" -- \
+            "$GODOT" --headless --editor --path "$project" \
+            --export-release '${{ matrix.preset }}' "$output"
           python3 tools/verify_export_immutability.py verify \
             --project "$project" --state "$root/extension-state.json"
 
