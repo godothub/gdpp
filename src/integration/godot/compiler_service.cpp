@@ -2427,7 +2427,6 @@ godot::Dictionary GDPPCompiler::compile_project(
     godot::Dictionary output;
     output["success"] = result.success;
     output["compiled_count"] = static_cast<int64_t>(result.compiled_count);
-    output["cache_hit_count"] = static_cast<int64_t>(result.cache_hit_count);
     output["removed_count"] = static_cast<int64_t>(result.removed_count);
     godot::PackedStringArray scripts;
     godot::PackedStringArray abstract_scripts;

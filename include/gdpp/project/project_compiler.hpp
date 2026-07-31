@@ -70,7 +70,6 @@ struct CompiledProjectScript {
     bool static_unload{false};
     bool is_attached{false};
     bool is_editor_only{false};
-    bool cache_hit{false};
 };
 
 struct ProjectCompileResult {
@@ -78,7 +77,6 @@ struct ProjectCompileResult {
     std::vector<CompiledProjectScript> scripts;
     std::vector<ProjectDiagnostic> diagnostics;
     std::size_t compiled_count{0};
-    std::size_t cache_hit_count{0};
     std::size_t removed_count{0};
     std::filesystem::path native_library_directory;
     std::string build_id;

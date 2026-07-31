@@ -129,8 +129,7 @@ int main(int argc, char** argv) {
         if (!result.success)
             return 1;
         std::cout << "project generated: " << result.scripts.size() << " script(s), "
-                  << result.compiled_count << " compiled, " << result.cache_hit_count << " cached, "
-                  << result.removed_count
+                  << result.compiled_count << " generated, " << result.removed_count
                   << " removed; native compilation is performed by the export integration\n";
         return 0;
     }

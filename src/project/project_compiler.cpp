@@ -36,21 +36,12 @@ namespace gdpp {
 namespace {
 
 struct ManifestEntry {
-    std::string implementation_hash;
-    std::string public_abi_hash;
-    std::string class_name;
     std::string header;
     std::string source;
     std::string symbols;
-    std::vector<std::string> dependencies;
 };
 
 using Manifest = std::map<std::string, ManifestEntry>;
-
-struct LoadedManifest {
-    Manifest entries;
-    bool cache_compatible{false};
-};
 
 struct EmbeddedScriptSource {
     std::string id;
@@ -844,55 +835,33 @@ IconPathResolution resolve_script_icon_path(const std::string_view source_path,
     return {"res://" + generic_path_to_utf8(relative_icon), {}};
 }
 
-LoadedManifest read_manifest(const std::filesystem::path& path) {
-    LoadedManifest loaded;
+Manifest read_manifest(const std::filesystem::path& path) {
+    Manifest manifest;
     std::ifstream input{path};
     std::string magic;
     std::string version;
-    std::string compiler_version;
-    std::string codegen_fingerprint;
-    if (!(input >> magic >> version >> compiler_version >> codegen_fingerprint))
-        return loaded;
-    if (magic != "GDPP_MANIFEST" || version != "4")
-        return loaded;
-    loaded.cache_compatible =
-        compiler_version == GDPP_VERSION_STRING && codegen_fingerprint == GDPP_CODEGEN_FINGERPRINT;
+    if (!(input >> magic >> version) || magic != "GDPP_OUTPUT_MANIFEST" || version != "1")
+        return manifest;
     std::string source_path;
     ManifestEntry entry;
-    std::size_t dependency_count = 0;
-    while (input >> std::quoted(source_path) >> std::quoted(entry.implementation_hash) >>
-           std::quoted(entry.public_abi_hash) >> std::quoted(entry.class_name) >>
-           std::quoted(entry.header) >> std::quoted(entry.source) >> std::quoted(entry.symbols) >>
-           dependency_count) {
-        entry.dependencies.clear();
-        entry.dependencies.reserve(dependency_count);
-        for (std::size_t index = 0; index < dependency_count; ++index) {
-            std::string dependency;
-            if (!(input >> std::quoted(dependency)))
-                return {};
-            entry.dependencies.push_back(std::move(dependency));
-        }
+    while (input >> std::quoted(source_path) >> std::quoted(entry.header) >>
+           std::quoted(entry.source) >> std::quoted(entry.symbols)) {
         if (!managed_translation_unit_name(entry.header) ||
             !managed_translation_unit_name(entry.source) ||
             !managed_symbol_map_name(entry.symbols)) {
             return {};
         }
-        loaded.entries.emplace(source_path, entry);
+        manifest.emplace(source_path, entry);
     }
-    return loaded;
+    return manifest;
 }
 
 std::string write_manifest(const Manifest& manifest) {
     std::ostringstream output;
-    output << "GDPP_MANIFEST 4 " << GDPP_VERSION_STRING << ' ' << GDPP_CODEGEN_FINGERPRINT << '\n';
+    output << "GDPP_OUTPUT_MANIFEST 1\n";
     for (const auto& [path, entry] : manifest) {
-        output << std::quoted(path) << ' ' << std::quoted(entry.implementation_hash) << ' '
-               << std::quoted(entry.public_abi_hash) << ' ' << std::quoted(entry.class_name) << ' '
-               << std::quoted(entry.header) << ' ' << std::quoted(entry.source) << ' '
-               << std::quoted(entry.symbols) << ' ' << entry.dependencies.size();
-        for (const auto& dependency : entry.dependencies)
-            output << ' ' << std::quoted(dependency);
-        output << '\n';
+        output << std::quoted(path) << ' ' << std::quoted(entry.header) << ' '
+               << std::quoted(entry.source) << ' ' << std::quoted(entry.symbols) << '\n';
     }
     return output.str();
 }
@@ -1103,8 +1072,7 @@ ProjectCompileResult ProjectCompiler::compile_impl(const ProjectCompileOptions& 
 
     const auto generated = output / "generated";
     const auto manifest_path = output / "manifest.txt";
-    const auto loaded_manifest = read_manifest(manifest_path);
-    const auto& old_manifest = loaded_manifest.entries;
+    const auto old_manifest = read_manifest(manifest_path);
     report_project_progress(options, ProjectCompilePhase::scan, 0, 1);
     std::vector<std::filesystem::path> source_paths;
     std::vector<std::filesystem::path> text_resource_paths;
@@ -2889,72 +2857,54 @@ ProjectCompileResult ProjectCompiler::compile_impl(const ProjectCompileOptions& 
             if (editor_only)
                 script.editor_only_inner_class_names.push_back(native_name);
         }
-        const auto cached = old_manifest.find(input.relative);
-        if (loaded_manifest.cache_compatible && cached != old_manifest.end() &&
-            cached->second.implementation_hash == input.implementation_hash &&
-            cached->second.public_abi_hash == input.public_abi_hash &&
-            cached->second.class_name == expected_class_name &&
-            std::filesystem::is_regular_file(generated / cached->second.header) &&
-            std::filesystem::is_regular_file(generated / cached->second.source) &&
-            std::filesystem::is_regular_file(generated / cached->second.symbols)) {
-            script.class_name = cached->second.class_name;
-            script.header_file_name = cached->second.header;
-            script.source_file_name = cached->second.source;
-            script.symbol_file_name = cached->second.symbols;
-            script.cache_hit = true;
-            ++result.cache_hit_count;
-        } else {
-            auto script_options = compiler_options;
-            script_options.native_class_suffix = "_" + input.public_abi_hash.substr(0, 16);
-            script_options.current_script_path = input.relative;
-            script_options.semantic_base_type = input.semantic_base_type;
-            script_options.attached_script = input.attached;
-            script_options.attached_native_base = input.attached_native_base;
-            script_options.script_contract_hash = input.public_abi_hash;
-            if (input.script_base) {
-                const auto& base = inputs[*input.script_base];
-                const auto* base_symbol = script_symbols.find_path(base.relative);
-                script_options.attached_base_script_path =
-                    "res://" + generic_path_to_utf8(base.relative);
-                script_options.native_base_class =
-                    base_symbol ? base_symbol->native_class_name : "";
-                script_options.native_base_header =
-                    base_symbol ? base_symbol->header_file_name : "";
-            } else if (input.extension_base.type && !input.attached) {
-                script_options.native_base_class = input.extension_base.type->cpp_type;
-                script_options.native_base_header = input.extension_base.type->header;
-            } else if (input.local_inner_base) {
-                script_options.attached_base_script_path =
-                    "res://" + generic_path_to_utf8(input.relative) +
-                    "::" + input.inner_classes[*input.local_inner_base].name;
-                script_options.native_base_class =
-                    "GDPPNative_" + input.native_class_stem + "_" +
-                    input.public_abi_hash.substr(0, 16) + "__" +
-                    native_inner_suffix(input.inner_classes[*input.local_inner_base].name);
-                script_options.native_base_header.clear();
-            }
-            auto compilation = compiler.compile(input.relative, input.source, script_options);
-            if (!compilation.success) {
-                for (auto& diagnostic : compilation.diagnostics)
-                    result.diagnostics.push_back({input.path, std::move(diagnostic)});
-                report_project_progress(options, ProjectCompilePhase::translate,
-                                        ++translated_inputs, translation_total);
-                continue;
-            }
-            script.class_name = compilation.unit.class_name;
-            script.header_file_name = compilation.unit.header_file_name;
-            script.source_file_name = compilation.unit.source_file_name;
-            script.symbol_file_name = compilation.unit.symbol_file_name;
-            script.inner_class_names = compilation.unit.inner_class_names;
-            script.abstract_inner_class_names = compilation.unit.abstract_inner_class_names;
-            script.is_abstract = compilation.unit.is_abstract;
-            script.is_tool = compilation.unit.is_tool;
-            script.static_unload = compilation.unit.static_unload;
-            pending.push_back({result.scripts.size(), std::move(compilation.unit.header),
-                               std::move(compilation.unit.source),
-                               std::move(compilation.unit.symbol_map)});
-            ++result.compiled_count;
+        auto script_options = compiler_options;
+        script_options.native_class_suffix = "_" + input.public_abi_hash.substr(0, 16);
+        script_options.current_script_path = input.relative;
+        script_options.semantic_base_type = input.semantic_base_type;
+        script_options.attached_script = input.attached;
+        script_options.attached_native_base = input.attached_native_base;
+        script_options.script_contract_hash = input.public_abi_hash;
+        if (input.script_base) {
+            const auto& base = inputs[*input.script_base];
+            const auto* base_symbol = script_symbols.find_path(base.relative);
+            script_options.attached_base_script_path =
+                "res://" + generic_path_to_utf8(base.relative);
+            script_options.native_base_class = base_symbol ? base_symbol->native_class_name : "";
+            script_options.native_base_header = base_symbol ? base_symbol->header_file_name : "";
+        } else if (input.extension_base.type && !input.attached) {
+            script_options.native_base_class = input.extension_base.type->cpp_type;
+            script_options.native_base_header = input.extension_base.type->header;
+        } else if (input.local_inner_base) {
+            script_options.attached_base_script_path =
+                "res://" + generic_path_to_utf8(input.relative) +
+                "::" + input.inner_classes[*input.local_inner_base].name;
+            script_options.native_base_class =
+                "GDPPNative_" + input.native_class_stem + "_" +
+                input.public_abi_hash.substr(0, 16) + "__" +
+                native_inner_suffix(input.inner_classes[*input.local_inner_base].name);
+            script_options.native_base_header.clear();
         }
+        auto compilation = compiler.compile(input.relative, input.source, script_options);
+        if (!compilation.success) {
+            for (auto& diagnostic : compilation.diagnostics)
+                result.diagnostics.push_back({input.path, std::move(diagnostic)});
+            report_project_progress(options, ProjectCompilePhase::translate, ++translated_inputs,
+                                    translation_total);
+            continue;
+        }
+        script.class_name = compilation.unit.class_name;
+        script.header_file_name = compilation.unit.header_file_name;
+        script.source_file_name = compilation.unit.source_file_name;
+        script.symbol_file_name = compilation.unit.symbol_file_name;
+        script.inner_class_names = compilation.unit.inner_class_names;
+        script.abstract_inner_class_names = compilation.unit.abstract_inner_class_names;
+        script.is_abstract = compilation.unit.is_abstract;
+        script.is_tool = compilation.unit.is_tool;
+        script.static_unload = compilation.unit.static_unload;
+        pending.push_back({result.scripts.size(), std::move(compilation.unit.header),
+                           std::move(compilation.unit.source),
+                           std::move(compilation.unit.symbol_map)});
+        ++result.compiled_count;
         const auto [owner, unique_class] = class_owners.emplace(script.class_name, input.relative);
         if (!unique_class) {
             result.diagnostics.push_back(
@@ -2969,10 +2919,8 @@ ProjectCompileResult ProjectCompiler::compile_impl(const ProjectCompileOptions& 
                 {input.path, project_error("PRJ0006", "generated file name collision")});
         }
         new_manifest.emplace(input.relative,
-                             ManifestEntry{input.implementation_hash, input.public_abi_hash,
-                                           script.class_name, script.header_file_name,
-                                           script.source_file_name, script.symbol_file_name,
-                                           input.dependencies});
+                             ManifestEntry{script.header_file_name, script.source_file_name,
+                                           script.symbol_file_name});
         result.scripts.push_back(std::move(script));
         report_project_progress(options, ProjectCompilePhase::translate, ++translated_inputs,
                                 translation_total);
