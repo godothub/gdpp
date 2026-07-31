@@ -556,6 +556,7 @@ TEST_CASE("native builder creates a stable release macOS Ninja graph") {
     REQUIRE(first.build_directory == first.build_file.parent_path());
     REQUIRE_EQ(first.compile_edge_count, std::size_t{3});
     REQUIRE_EQ(first.post_compile_edge_count, std::size_t{1});
+    const auto graph_contents = read_input(first.build_file);
     const auto graph_time = std::filesystem::last_write_time(first.build_file);
     const auto command_file = ninja_command_file(first, 0);
     const auto command_time = std::filesystem::last_write_time(command_file);
@@ -571,7 +572,7 @@ TEST_CASE("native builder creates a stable release macOS Ninja graph") {
     const auto toolchain_change = builder.plan(options);
     REQUIRE(toolchain_change.success);
     REQUIRE_EQ(toolchain_change.commands.size(), std::size_t{4});
-    REQUIRE(read_input(command_file) != command_contents);
+    REQUIRE(read_input(toolchain_change.build_file) != graph_contents);
 }
 
 TEST_CASE("native builder delegates precise generated-header invalidation to compiler depfiles") {
@@ -1190,7 +1191,7 @@ TEST_CASE("native builder isolates threaded WebAssembly flags and artifacts") {
 #ifdef _WIN32
 TEST_CASE("native builder launches Windows Web command scripts through the command processor") {
     const auto root = make_sdk_fixture(
-        "native-builder-web-command-script-winhost",
+        "native-builder-web-nothreads-command-script-winhost",
         "libgodot-cpp.web.template_release.wasm32.nothreads.a");
     gdpp::NativeBuildOptions options;
     options.project_output_directory = root / "project";
