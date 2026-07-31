@@ -45,7 +45,9 @@ MAX_REPORTED_VIOLATIONS = 20
 def arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--source", type=Path, required=True)
-    parser.add_argument("--path", type=Path, action="append", required=True)
+    parser.add_argument(
+        "--path", type=Path, action="extend", nargs="+", required=True
+    )
     return parser.parse_args()
 
 
