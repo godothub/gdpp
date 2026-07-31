@@ -825,6 +825,9 @@ if(GDPP_CUSTOM_GDEXTENSION_API_FILE)
                 "$<TARGET_FILE:gdpp_fallback>"
                 "${GDPP_CUSTOM_ADDON_ROOT}/binary/$<TARGET_FILE_NAME:gdpp_fallback>"
         COMMAND "${CMAKE_COMMAND}" -E copy_directory
+                "${GDPP_ADDON_DIRECTORY}/tools"
+                "${GDPP_CUSTOM_ADDON_ROOT}/tools"
+        COMMAND "${CMAKE_COMMAND}" -E copy_directory
                 "${GDPP_CUSTOM_SDK_SOURCE}/include"
                 "${GDPP_CUSTOM_SDK_DESTINATION}/include"
         COMMAND "${CMAKE_COMMAND}" -E copy_directory

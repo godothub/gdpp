@@ -3,3 +3,5 @@
 /build/
 /tools/*/gdpp-ninja
 /tools/*/gdpp-ninja.exe
+/tools/NINJA-LICENSE.txt
+/tools/NINJA-VERSION.txt
