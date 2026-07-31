@@ -149,6 +149,37 @@ func _run() -> void:
         push_error("GDPP could not restore the incremental fixture build")
         quit(1)
         return
+
+    var generated_source := project_output.path_join("generated/hello_aot.gd.cpp")
+    var original_source := FileAccess.get_file_as_string(generated_source)
+    OS.delay_msec(1100)
+    if not _write_text(generated_source, original_source + "\nGDPP_INVALID_CPP_PROBE\n"):
+        push_error("GDPP could not prepare the Ninja failure fixture")
+        quit(1)
+        return
+    var expected_failure: Dictionary = compiler.execute_project_build(result)
+    var failure_diagnostics := "\n".join(
+        expected_failure.get("diagnostics", PackedStringArray()) as PackedStringArray
+    )
+    if (
+        expected_failure.get("success", false)
+        or int(expected_failure.get("exit_code", 0)) == 0
+        or "parallel Ninja build failed" not in failure_diagnostics
+        or "hello_aot.gd.cpp" not in failure_diagnostics
+        or "@@GDPP_STATUS@@" in failure_diagnostics
+    ):
+        push_error("GDPP lost structured Ninja failure diagnostics: %s" % expected_failure)
+        quit(1)
+        return
+    if not _write_text(generated_source, original_source):
+        push_error("GDPP could not restore the Ninja failure fixture")
+        quit(1)
+        return
+    var recovered: Dictionary = compiler.execute_project_build(result)
+    if not recovered.get("success", false):
+        push_error("GDPP could not recover after a failed Ninja edge")
+        quit(1)
+        return
     print("GDPP_DIRECT_EXPORT_BUILD_OK")
     quit(0)
 
