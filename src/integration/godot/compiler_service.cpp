@@ -35,16 +35,20 @@
 
 #include <algorithm>
 #include <cctype>
+#include <charconv>
 #include <cstring>
+#include <cwchar>
 #include <cwctype>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <iterator>
 #include <limits>
 #include <memory>
 #include <mutex>
 #include <optional>
 #include <string>
+#include <thread>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -57,6 +61,11 @@
 #include <spawn.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#ifdef __APPLE__
+#include <sys/sysctl.h>
+#else
+#include <sys/sysinfo.h>
+#endif
 #endif
 
 #ifndef _WIN32
@@ -151,9 +160,17 @@ bool has_path_component(const std::filesystem::path& path, std::string_view comp
 
 bool is_xcframework(const std::filesystem::path& path) {
     std::error_code error;
-    return path.extension() == ".xcframework" && !std::filesystem::is_symlink(path, error) &&
-           !error && std::filesystem::is_directory(path, error) && !error &&
-           std::filesystem::is_regular_file(path / "Info.plist", error) && !error;
+    if (path.extension() != ".xcframework" || std::filesystem::is_symlink(path, error) || error ||
+        !std::filesystem::is_directory(path, error) || error ||
+        !std::filesystem::is_regular_file(path / "Info.plist", error) || error) {
+        return false;
+    }
+    for (std::filesystem::recursive_directory_iterator iterator{path, error}, end;
+         !error && iterator != end; iterator.increment(error)) {
+        if (iterator->is_symlink(error) || error)
+            return false;
+    }
+    return !error;
 }
 
 bool commit_xcframework(const std::filesystem::path& pending,
@@ -169,6 +186,8 @@ bool commit_xcframework(const std::filesystem::path& pending,
 
     auto backup = destination;
     backup += ".previous";
+    auto incoming = destination;
+    incoming += ".incoming";
     std::error_code error;
     bool had_destination = std::filesystem::exists(destination, error);
     if (error) {
@@ -195,6 +214,34 @@ bool commit_xcframework(const std::filesystem::path& pending,
             return false;
         }
     }
+    if (had_destination && is_xcframework(destination)) {
+        const auto pending_time = std::filesystem::last_write_time(pending / "Info.plist", error);
+        if (error) {
+            diagnostic = "cannot inspect the pending iOS artifact timestamp: " + error.message();
+            return false;
+        }
+        const auto destination_time =
+            std::filesystem::last_write_time(destination / "Info.plist", error);
+        if (error) {
+            diagnostic = "cannot inspect the current iOS artifact timestamp: " + error.message();
+            return false;
+        }
+        if (destination_time >= pending_time)
+            return true;
+    }
+    std::filesystem::remove_all(incoming, error);
+    if (error) {
+        diagnostic = "cannot clear the interrupted iOS incoming artifact: " + error.message();
+        return false;
+    }
+    std::filesystem::copy(pending, incoming, std::filesystem::copy_options::recursive, error);
+    if (error || !is_xcframework(incoming)) {
+        const auto copy_error = error ? error.message() : "copied artifact is incomplete";
+        error.clear();
+        std::filesystem::remove_all(incoming, error);
+        diagnostic = "cannot stage the completed iOS artifact for commit: " + copy_error;
+        return false;
+    }
     if (had_destination) {
         std::filesystem::rename(destination, backup, error);
         if (error) {
@@ -203,13 +250,15 @@ bool commit_xcframework(const std::filesystem::path& pending,
             return false;
         }
     }
-    std::filesystem::rename(pending, destination, error);
+    std::filesystem::rename(incoming, destination, error);
     if (error) {
         const auto commit_error = error.message();
         if (had_destination) {
             error.clear();
             std::filesystem::rename(backup, destination, error);
         }
+        error.clear();
+        std::filesystem::remove_all(incoming, error);
         diagnostic = "cannot commit the new iOS XCFramework: " + commit_error;
         return false;
     }
@@ -795,11 +844,17 @@ struct NativeProcessResult {
     std::string launch_error;
 };
 
+using NativeOutputCallback = std::function<void(std::string_view)>;
+
+void report_build_progress(const godot::Callable& callback, const char* phase,
+                           std::size_t completed, std::size_t total);
+
 #ifdef _WIN32
 struct WindowsProcessOptions {
     const std::vector<wchar_t>* environment{nullptr};
     const std::wstring* desktop_name{nullptr};
     bool utf16_output{false};
+    NativeOutputCallback output_callback;
 };
 
 NativeProcessResult execute_hidden_windows_process(const std::vector<std::wstring>& arguments,
@@ -1139,6 +1194,8 @@ NativeProcessResult execute_hidden_windows_command_line(std::wstring command_lin
         const auto remaining = maximum_captured_output - result.output.size();
         const auto captured = std::min(remaining, static_cast<std::size_t>(bytes_read));
         result.output.append(buffer, captured);
+        if (options.output_callback)
+            options.output_callback(std::string_view{buffer, static_cast<std::size_t>(bytes_read)});
         output_truncated = output_truncated || captured != bytes_read;
     }
     CloseHandle(output_read);
@@ -1289,6 +1346,45 @@ cached_msvc_environment(const std::filesystem::path& vcvars) {
     return snapshot;
 }
 
+std::vector<std::wstring> current_windows_environment_entries() {
+    std::vector<std::wstring> entries;
+    wchar_t* block = GetEnvironmentStringsW();
+    if (block == nullptr)
+        return entries;
+    for (const wchar_t* item = block; *item != L'\0'; item += std::wcslen(item) + 1)
+        entries.emplace_back(item);
+    FreeEnvironmentStringsW(block);
+    return entries;
+}
+
+std::vector<wchar_t>
+windows_environment_with_overrides(std::vector<std::wstring> entries,
+                                   const std::vector<std::pair<std::wstring, std::wstring>>&
+                                       overrides) {
+    for (const auto& [name, value] : overrides) {
+        entries.erase(std::remove_if(entries.begin(), entries.end(), [&](const auto& entry) {
+                          return equal_windows_environment_name(environment_entry_name(entry),
+                                                                name);
+                      }),
+                      entries.end());
+        entries.push_back(name + L"=" + value);
+    }
+    std::sort(entries.begin(), entries.end(), [](const auto& left, const auto& right) {
+        return _wcsicmp(left.c_str(), right.c_str()) < 0;
+    });
+    std::vector<wchar_t> block;
+    std::size_t size = 1;
+    for (const auto& entry : entries)
+        size += entry.size() + 1;
+    block.reserve(size);
+    for (const auto& entry : entries) {
+        block.insert(block.end(), entry.begin(), entry.end());
+        block.push_back(L'\0');
+    }
+    block.push_back(L'\0');
+    return block;
+}
+
 std::optional<std::wstring> resolve_msvc_executable(const std::wstring& executable,
                                                     const MsvcEnvironmentSnapshot& environment) {
     const std::filesystem::path requested{executable};
@@ -1369,7 +1465,8 @@ ResolvedMsvcCompiler resolve_msvc_compiler_for_plan(const std::string& configure
 #endif
 
 NativeProcessResult execute_native_process(const std::string& executable,
-                                           const std::vector<std::string>& arguments) {
+                                           const std::vector<std::string>& arguments,
+                                           const NativeOutputCallback& output_callback = {}) {
 #ifdef _WIN32
     auto wide_executable = utf8_to_wide(executable);
     if (wide_executable.empty())
@@ -1415,10 +1512,13 @@ NativeProcessResult execute_native_process(const std::string& executable,
             }
             WindowsProcessOptions options;
             options.environment = &environment->block;
+            options.output_callback = output_callback;
             return execute_hidden_windows_process(wide_arguments, options);
         }
     }
-    return execute_hidden_windows_process(wide_arguments);
+    WindowsProcessOptions options;
+    options.output_callback = output_callback;
+    return execute_hidden_windows_process(wide_arguments, options);
 #else
     NativeProcessResult result;
     if (executable.empty())
@@ -1465,6 +1565,8 @@ NativeProcessResult execute_native_process(const std::string& executable,
         const auto remaining = maximum_captured_output - result.output.size();
         const auto captured = std::min(remaining, static_cast<std::size_t>(bytes_read));
         result.output.append(buffer, captured);
+        if (output_callback)
+            output_callback(std::string_view{buffer, static_cast<std::size_t>(bytes_read)});
         output_truncated = output_truncated || captured != static_cast<std::size_t>(bytes_read);
     }
     close(output_pipe[0]);
@@ -1486,6 +1588,222 @@ NativeProcessResult execute_native_process(const std::string& executable,
         result.output += "\n[toolchain output truncated after 512 KiB]";
     return result;
 #endif
+}
+
+constexpr std::string_view ninja_status_marker{"@@GDPP_STATUS@@"};
+constexpr std::string_view ninja_status_format{"@@GDPP_STATUS@@%f/%t/%r@@ "};
+
+NativeProcessResult execute_ninja_process(const std::string& executable,
+                                          const std::vector<std::string>& arguments,
+                                          const std::string& native_compiler,
+                                          const NativeOutputCallback& output_callback = {}) {
+#ifdef _WIN32
+    const auto wide_executable = utf8_to_wide(executable);
+    if (wide_executable.empty()) {
+        NativeProcessResult result;
+        result.launch_error = "the bundled Ninja executable path is not valid UTF-8";
+        return result;
+    }
+    std::vector<std::wstring> wide_arguments;
+    wide_arguments.reserve(arguments.size() + 1);
+    wide_arguments.push_back(wide_executable);
+    for (const auto& argument : arguments) {
+        auto converted = utf8_to_wide(argument);
+        if (!argument.empty() && converted.empty()) {
+            NativeProcessResult result;
+            result.launch_error = "a Ninja build argument is not valid UTF-8";
+            return result;
+        }
+        wide_arguments.push_back(std::move(converted));
+    }
+
+    std::vector<std::wstring> environment_entries;
+    const auto compiler_wide = utf8_to_wide(native_compiler);
+    if (!compiler_wide.empty() && is_msvc_tool(std::filesystem::path{compiler_wide})) {
+        const auto vcvars = find_vcvars_batch(std::filesystem::path{compiler_wide});
+        if (!vcvars) {
+            NativeProcessResult result;
+            result.launch_error =
+                "cannot locate vcvars64.bat for the parallel Ninja build; install the x64 C++ "
+                "tools component or configure gdpp/build/cpp_compiler";
+            return result;
+        }
+        const auto environment = cached_msvc_environment(*vcvars);
+        if (!environment->valid()) {
+            NativeProcessResult result;
+            result.launch_error = environment->diagnostic;
+            return result;
+        }
+        environment_entries = environment->entries;
+    } else {
+        environment_entries = current_windows_environment_entries();
+    }
+    auto environment = windows_environment_with_overrides(
+        std::move(environment_entries),
+        {{L"NINJA_STATUS", utf8_to_wide(std::string{ninja_status_format})},
+         {L"VSLANG", L"1033"}});
+    WindowsProcessOptions options;
+    options.environment = &environment;
+    options.output_callback = output_callback;
+    return execute_hidden_windows_process(wide_arguments, options);
+#else
+    (void)native_compiler;
+    std::vector<std::string> environment_arguments;
+    environment_arguments.reserve(arguments.size() + 2);
+    environment_arguments.push_back("NINJA_STATUS=" + std::string{ninja_status_format});
+    environment_arguments.push_back(executable);
+    environment_arguments.insert(environment_arguments.end(), arguments.begin(), arguments.end());
+    return execute_native_process("/usr/bin/env", environment_arguments, output_callback);
+#endif
+}
+
+std::uint64_t available_build_memory() {
+#ifdef _WIN32
+    MEMORYSTATUSEX status{};
+    status.dwLength = sizeof(status);
+    return GlobalMemoryStatusEx(&status) != FALSE ? status.ullAvailPhys : 0;
+#elif defined(__APPLE__)
+    std::uint64_t total = 0;
+    std::size_t size = sizeof(total);
+    return sysctlbyname("hw.memsize", &total, &size, nullptr, 0) == 0 ? total * 3U / 4U : 0;
+#else
+    struct sysinfo information {};
+    if (sysinfo(&information) != 0)
+        return 0;
+    return (static_cast<std::uint64_t>(information.freeram) +
+            static_cast<std::uint64_t>(information.bufferram)) *
+           static_cast<std::uint64_t>(information.mem_unit);
+#endif
+}
+
+std::size_t recommended_ninja_parallelism() {
+    constexpr std::uint64_t reserved_memory = 1024ULL * 1024ULL * 1024ULL;
+    constexpr std::uint64_t memory_per_compiler = 768ULL * 1024ULL * 1024ULL;
+    constexpr std::size_t maximum_jobs = 12;
+    const auto processors = std::max(1U, std::thread::hardware_concurrency());
+    std::size_t jobs = std::min<std::size_t>(processors, maximum_jobs);
+    const auto memory = available_build_memory();
+    if (memory > reserved_memory) {
+        const auto memory_jobs =
+            std::max<std::uint64_t>(1, (memory - reserved_memory) / memory_per_compiler);
+        jobs = std::min(jobs, static_cast<std::size_t>(memory_jobs));
+    } else if (memory != 0) {
+        jobs = 1;
+    }
+    return std::max<std::size_t>(jobs, 1);
+}
+
+struct NinjaWork {
+    std::size_t compile{0};
+    std::size_t link{0};
+
+    [[nodiscard]] std::size_t total() const { return compile + link; }
+};
+
+NinjaWork inspect_ninja_dry_run(std::string_view output) {
+    NinjaWork work;
+    for (std::size_t begin = 0; begin <= output.size();) {
+        const auto end = output.find('\n', begin);
+        const auto line = output.substr(
+            begin, end == std::string_view::npos ? std::string_view::npos : end - begin);
+        if (line.find("@@GDPP:compile@@") != std::string_view::npos)
+            ++work.compile;
+        else if (line.find("@@GDPP:link@@") != std::string_view::npos)
+            ++work.link;
+        if (end == std::string_view::npos)
+            break;
+        begin = end + 1;
+    }
+    return work;
+}
+
+class NinjaProgressParser final {
+  public:
+    NinjaProgressParser(NinjaWork work, const godot::Callable& callback)
+        : work_{work}, callback_{callback} {}
+
+    void consume(std::string_view chunk) {
+        pending_.append(chunk);
+        for (;;) {
+            const auto end = pending_.find_first_of("\r\n");
+            if (end == std::string::npos)
+                return;
+            parse_line(std::string_view{pending_}.substr(0, end));
+            auto next = end + 1;
+            while (next < pending_.size() &&
+                   (pending_[next] == '\r' || pending_[next] == '\n'))
+                ++next;
+            pending_.erase(0, next);
+        }
+    }
+
+    void finish() {
+        if (!pending_.empty()) {
+            parse_line(pending_);
+            pending_.clear();
+        }
+        if (work_.compile != 0)
+            report_build_progress(callback_, "compile", work_.compile, work_.compile);
+        if (work_.link != 0)
+            report_build_progress(callback_, "link", work_.link, work_.link);
+    }
+
+  private:
+    void parse_line(std::string_view line) {
+        const auto marker = line.find(ninja_status_marker);
+        if (marker == std::string_view::npos)
+            return;
+        const auto values_begin = marker + ninja_status_marker.size();
+        const auto values_end = line.find("@@", values_begin);
+        if (values_end == std::string_view::npos)
+            return;
+        const auto values = line.substr(values_begin, values_end - values_begin);
+        const auto first_slash = values.find('/');
+        if (first_slash == std::string_view::npos)
+            return;
+        std::size_t finished = 0;
+        const auto parsed =
+            std::from_chars(values.data(), values.data() + first_slash, finished);
+        if (parsed.ec != std::errc{})
+            return;
+        if (line.find("@@GDPP:compile@@", values_end) != std::string_view::npos) {
+            if (work_.compile != 0)
+                report_build_progress(callback_, "compile", std::min(finished, work_.compile),
+                                      work_.compile);
+        } else if (line.find("@@GDPP:link@@", values_end) != std::string_view::npos) {
+            if (work_.link != 0) {
+                const auto completed =
+                    finished > work_.compile ? finished - work_.compile : std::size_t{0};
+                report_build_progress(callback_, "link", std::min(completed, work_.link),
+                                      work_.link);
+            }
+        }
+    }
+
+    NinjaWork work_;
+    godot::Callable callback_;
+    std::string pending_;
+};
+
+std::string strip_ninja_progress(std::string_view output) {
+    std::string result;
+    for (std::size_t begin = 0; begin <= output.size();) {
+        const auto end = output.find('\n', begin);
+        auto line = output.substr(
+            begin, end == std::string_view::npos ? std::string_view::npos : end - begin);
+        const bool progress = line.find(ninja_status_marker) != std::string_view::npos &&
+                              (line.find("@@GDPP:compile@@") != std::string_view::npos ||
+                               line.find("@@GDPP:link@@") != std::string_view::npos);
+        if (!progress) {
+            result.append(line);
+            if (end != std::string_view::npos)
+                result.push_back('\n');
+        }
+        if (end == std::string_view::npos)
+            break;
+        begin = end + 1;
+    }
+    return result;
 }
 
 struct NativeInvocation {
@@ -1668,6 +1986,113 @@ GDPPCompiler::execute_build_commands(const godot::Array& commands,
     return result;
 }
 
+GDPPCompiler::BuildExecutionResult
+GDPPCompiler::execute_ninja_build(const godot::Dictionary& build_plan,
+                                  const godot::Callable& progress_callback) const {
+    BuildExecutionResult result;
+    auto* settings = godot::ProjectSettings::get_singleton();
+    const auto global_path = [settings](const godot::String& value) {
+        return path_from_utf8(native_string(settings->globalize_path(value)));
+    };
+    const auto executor =
+        global_path(build_plan.get("build_executor", godot::String{})).lexically_normal();
+    const auto directory =
+        global_path(build_plan.get("build_directory", godot::String{})).lexically_normal();
+    const auto build_file =
+        global_path(build_plan.get("build_file", godot::String{})).lexically_normal();
+    const auto target =
+        native_string(build_plan.get("build_target", godot::String{"gdpp"}));
+    const auto native_compiler =
+        native_string(build_plan.get("native_compiler", godot::String{}));
+    const auto planned_compile =
+        static_cast<int64_t>(build_plan.get("compile_edge_count", int64_t{0}));
+    const auto planned_link =
+        static_cast<int64_t>(build_plan.get("post_compile_edge_count", int64_t{0}));
+    std::error_code error;
+    const auto executor_name = executor.filename().string();
+    const bool valid_executor_name =
+        executor_name == "gdpp-ninja" || executor_name == "gdpp-ninja.exe";
+    if (!valid_executor_name || !has_path_component(executor, "addons") ||
+        !has_path_component(executor, "gdpp") || !has_path_component(executor, "tools") ||
+        std::filesystem::is_symlink(executor, error) ||
+        !std::filesystem::is_regular_file(executor, error)) {
+        result.diagnostics.push_back(
+            "the bundled Ninja build executor is missing or outside addons/gdpp/tools");
+        return result;
+    }
+    if (directory.empty() || build_file.parent_path() != directory ||
+        build_file.filename() != "build.ninja" || target != "gdpp" ||
+        !has_path_component(directory, "native-direct") ||
+        !std::filesystem::is_regular_file(build_file, error) || planned_compile <= 0 ||
+        planned_link <= 0) {
+        result.diagnostics.push_back("the generated Ninja build plan is incomplete or unsafe");
+        return result;
+    }
+
+    const std::vector<std::string> base_arguments{
+        "-C", path_to_utf8(directory), "-f", build_file.filename().string()};
+    auto version = execute_ninja_process(path_to_utf8(executor), {"--version"}, native_compiler);
+    if (version.exit_code != 0 || trimmed_toolchain_output(version.output) != GDPP_NINJA_VERSION) {
+        result.diagnostics.push_back(
+            "the bundled Ninja build executor is not the required " GDPP_NINJA_VERSION);
+        if (!version.launch_error.empty())
+            result.diagnostics.push_back(godot::String::utf8(version.launch_error.c_str()));
+        return result;
+    }
+
+    auto dry_arguments = base_arguments;
+    dry_arguments.insert(dry_arguments.end(), {"-n", target});
+    auto dry_run =
+        execute_ninja_process(path_to_utf8(executor), dry_arguments, native_compiler);
+    if (dry_run.exit_code != 0) {
+        result.exit_code = dry_run.exit_code;
+        result.diagnostics.push_back("Ninja could not evaluate the generated build graph");
+        if (!dry_run.launch_error.empty())
+            result.diagnostics.push_back(godot::String::utf8(dry_run.launch_error.c_str()));
+        const auto output = trimmed_toolchain_output(strip_ninja_progress(dry_run.output));
+        if (!output.empty())
+            result.diagnostics.push_back(godot::String::utf8(output.c_str()));
+        return result;
+    }
+    const auto work = inspect_ninja_dry_run(dry_run.output);
+    if (work.compile > static_cast<std::size_t>(planned_compile) ||
+        work.link > static_cast<std::size_t>(planned_link)) {
+        result.diagnostics.push_back(
+            "Ninja reported more build edges than the validated GDPP build plan");
+        return result;
+    }
+    if (work.total() == 0) {
+        result.exit_code = 0;
+        return result;
+    }
+
+    NinjaProgressParser progress{work, progress_callback};
+    auto build_arguments = base_arguments;
+    build_arguments.insert(build_arguments.end(),
+                           {"-j", std::to_string(recommended_ninja_parallelism()), "-k", "1",
+                            target});
+    auto execution = execute_ninja_process(
+        path_to_utf8(executor), build_arguments, native_compiler,
+        [&](const std::string_view chunk) { progress.consume(chunk); });
+    result.exit_code = execution.exit_code;
+    if (execution.exit_code == 0) {
+        progress.finish();
+        return result;
+    }
+
+    result.diagnostics.push_back(
+        "parallel Ninja build failed with exit code " + godot::String::num_int64(
+                                                          execution.exit_code));
+    if (!execution.launch_error.empty())
+        result.diagnostics.push_back(godot::String::utf8(execution.launch_error.c_str()));
+    const auto output = trimmed_toolchain_output(strip_ninja_progress(execution.output));
+    if (!output.empty()) {
+        result.diagnostics.push_back(
+            godot::String::utf8(("toolchain output:\n" + output).c_str()));
+    }
+    return result;
+}
+
 godot::Dictionary
 GDPPCompiler::execute_project_build(const godot::Dictionary& build_plan,
                                     const godot::Callable& progress_callback) const {
@@ -1704,7 +2129,10 @@ GDPPCompiler::execute_project_build(const godot::Dictionary& build_plan,
     }
 
     const godot::Array commands = build_plan.get("build_commands", godot::Array{});
-    const auto execution = execute_build_commands(commands, progress_callback);
+    const bool has_ninja_plan = build_plan.has("build_executor");
+    const auto execution = has_ninja_plan
+                               ? execute_ninja_build(build_plan, progress_callback)
+                               : execute_build_commands(commands, progress_callback);
     output["exit_code"] = execution.exit_code;
     if (execution.exit_code != 0) {
         for (const auto& diagnostic : execution.diagnostics) {
@@ -1753,8 +2181,14 @@ GDPPCompiler::execute_project_build(const godot::Dictionary& build_plan,
 
     output["success"] = true;
     assign_diagnostic_channels(output, diagnostics, errors, warnings, notes);
-    report_build_progress(progress_callback, "complete", static_cast<std::size_t>(commands.size()),
-                          static_cast<std::size_t>(commands.size()));
+    const auto completed_work =
+        has_ninja_plan
+            ? static_cast<std::size_t>(
+                  static_cast<int64_t>(build_plan.get("compile_edge_count", int64_t{0})) +
+                  static_cast<int64_t>(
+                      build_plan.get("post_compile_edge_count", int64_t{0})))
+            : static_cast<std::size_t>(commands.size());
+    report_build_progress(progress_callback, "complete", completed_work, completed_work);
     return output;
 }
 
@@ -2158,6 +2592,8 @@ godot::Dictionary GDPPCompiler::compile_project(
         build_options.project_output_directory = options.output_directory;
         build_options.binary_output_directory = result.native_library_directory;
         build_options.sdk_root = options.sdk_root;
+        build_options.build_executor = path_from_utf8(
+            native_string(settings->globalize_path(godot::String{GDPP_NINJA_RESOURCE_PATH})));
         build_options.compiler_executable = resolved_compiler_executable;
         build_options.platform = *platform;
         build_options.architecture = architecture;
@@ -2189,6 +2625,18 @@ godot::Dictionary GDPPCompiler::compile_project(
             commands.push_back(item);
         }
         output["build_commands"] = commands;
+        output["build_executor"] =
+            godot::String::utf8(generic_path_to_utf8(plan.build_executor).c_str());
+        output["build_directory"] =
+            godot::String::utf8(generic_path_to_utf8(plan.build_directory).c_str());
+        output["build_file"] =
+            godot::String::utf8(generic_path_to_utf8(plan.build_file).c_str());
+        output["build_target"] = godot::String{plan.build_target.c_str()};
+        output["native_compiler"] =
+            godot::String::utf8(resolved_compiler_executable.c_str());
+        output["compile_edge_count"] = static_cast<int64_t>(plan.compile_edge_count);
+        output["post_compile_edge_count"] =
+            static_cast<int64_t>(plan.post_compile_edge_count);
         output["native_up_to_date"] = plan.up_to_date;
         output["output_library"] =
             godot::String::utf8(generic_path_to_utf8(plan.output_library).c_str());

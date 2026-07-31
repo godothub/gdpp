@@ -71,6 +71,9 @@ class GDPPCompiler final : public godot::RefCounted {
     [[nodiscard]] BuildExecutionResult
     execute_build_commands(const godot::Array& commands,
                            const godot::Callable& progress_callback) const;
+    [[nodiscard]] BuildExecutionResult
+    execute_ninja_build(const godot::Dictionary& build_plan,
+                        const godot::Callable& progress_callback) const;
 
     mutable std::mutex reflected_bridges_mutex_;
     std::optional<std::vector<gdpp::ExtensionBridge>> reflected_bridges_;
