@@ -20,6 +20,7 @@ on:
         default: 1.9.0
 
 permissions:
+  actions: read
   contents: read
 
 env:

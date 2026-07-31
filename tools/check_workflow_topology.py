@@ -66,6 +66,8 @@ def main() -> int:
     publish = release_jobs["publish"]
     if publish.get("permissions", {}).get("contents") != "write":
         fail("only the publish job may request contents: write")
+    if release.get("permissions", {}).get("actions") != "read":
+        fail("release.yml must allow called workflows to read package artifacts")
     if set(triggers(release)) != {"workflow_dispatch"}:
         fail("release.yml must expose only workflow_dispatch")
 
@@ -109,6 +111,8 @@ def main() -> int:
 
     smoke_workflow = workflows["release-package-smoke.yml"]
     require_private_source_contract("release-package-smoke.yml", smoke_workflow)
+    if smoke_workflow.get("permissions", {}).get("actions") != "read":
+        fail("release-package-smoke.yml must read assembled package artifacts")
     smoke_dispatch = triggers(smoke_workflow).get("workflow_dispatch", {})
     smoke_dispatch_inputs = smoke_dispatch.get("inputs", {})
     if not smoke_dispatch_inputs.get("source_ref", {}).get("required"):
