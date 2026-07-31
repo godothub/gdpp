@@ -7,11 +7,27 @@ on:
         description: Private source revision to validate
         type: string
         required: true
+      artifact_run_id:
+        description: Existing package run to validate instead of the current caller
+        type: string
+        required: false
+        default: ""
     secrets:
       GDPP_TOKEN:
         required: true
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: Immutable private source revision to validate
+        type: string
+        required: true
+      artifact_run_id:
+        description: Completed release workflow run containing gdpp-release-packages
+        type: string
+        required: true
 
 permissions:
+  actions: read
   contents: read
 
 env:
@@ -71,10 +87,20 @@ jobs:
           source-root: ${{ env.GDPP_SOURCE_ROOT }}
           version: 4.7.1
           templates: host
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+      - name: Download packages from the current delivery run
+        if: inputs.artifact_run_id == ''
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: gdpp-release-packages
           path: source/build/release-package-smoke/archive
+      - name: Download packages from an existing delivery run
+        if: inputs.artifact_run_id != ''
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: gdpp-release-packages
+          path: source/build/release-package-smoke/archive
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.artifact_run_id }}
       - name: Install the final ZIP into a clean customer project
         shell: bash
         run: |

@@ -109,8 +109,12 @@ def main() -> int:
 
     smoke_workflow = workflows["release-package-smoke.yml"]
     require_private_source_contract("release-package-smoke.yml", smoke_workflow)
-    if "workflow_dispatch" in triggers(smoke_workflow):
-        fail("release-package-smoke.yml cannot run without assembled artifacts")
+    smoke_dispatch = triggers(smoke_workflow).get("workflow_dispatch", {})
+    smoke_dispatch_inputs = smoke_dispatch.get("inputs", {})
+    if not smoke_dispatch_inputs.get("source_ref", {}).get("required"):
+        fail("release-package-smoke.yml dispatch must require an immutable source_ref")
+    if not smoke_dispatch_inputs.get("artifact_run_id", {}).get("required"):
+        fail("release-package-smoke.yml dispatch must require an assembled artifact run")
     smoke_matrix = smoke_workflow["jobs"]["desktop"]["strategy"]["matrix"]["include"]
     actual_smokes = sorted((entry["archive"], entry["os"]) for entry in smoke_matrix)
     expected_smokes = sorted(
