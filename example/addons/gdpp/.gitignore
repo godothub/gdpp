@@ -1,3 +1,5 @@
 /binary/
 /sdk/
 /build/
+/tools/*/gdpp-ninja
+/tools/*/gdpp-ninja.exe

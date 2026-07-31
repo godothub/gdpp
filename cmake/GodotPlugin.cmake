@@ -195,6 +195,25 @@ endif()
 set(GDPP_EXAMPLE_DIRECTORY "${CMAKE_SOURCE_DIR}/example")
 set(GDPP_ADDON_DIRECTORY "${GDPP_EXAMPLE_DIRECTORY}/addons/gdpp")
 set(GDPP_EXTENSION_OUTPUT "${GDPP_ADDON_DIRECTORY}/binary")
+include(GdppNinja)
+if(GDPP_PLATFORM STREQUAL "macos")
+    set(GDPP_NINJA_HOST "mac-universal")
+elseif(GDPP_PLATFORM STREQUAL "windows")
+    set(GDPP_NINJA_HOST "windows-x64")
+else()
+    set(GDPP_NINJA_HOST "linux-x64")
+endif()
+set(GDPP_NINJA_ADDON_DIRECTORY
+    "${GDPP_ADDON_DIRECTORY}/tools/${GDPP_NINJA_HOST}")
+set(GDPP_NINJA_ADDON_EXECUTABLE
+    "${GDPP_NINJA_ADDON_DIRECTORY}/$<TARGET_FILE_NAME:gdpp_ninja>")
+set(GDPP_NINJA_RESOURCE_PATH
+    "res://addons/gdpp/tools/${GDPP_NINJA_HOST}/$<TARGET_FILE_NAME:gdpp_ninja>")
+file(GENERATE
+    OUTPUT "${CMAKE_BINARY_DIR}/generated/gdpp/ninja-version.txt"
+    CONTENT
+        "Ninja ${GDPP_NINJA_VERSION}\ncommit ${GDPP_NINJA_COMMIT}\n"
+)
 # A generator expression prevents multi-config generators from silently appending Debug/Release
 # below the install-ready add-on directory.
 set(GDPP_EXTENSION_OUTPUT_FLAT "${GDPP_EXTENSION_OUTPUT}/$<0:>")
@@ -264,6 +283,8 @@ target_compile_definitions(
         GDPP_SDK_ROOT=""
         GDPP_PLATFORM="${GDPP_PLATFORM}"
         GDPP_ARCH="${GDPP_ARCH}"
+        GDPP_NINJA_RESOURCE_PATH="${GDPP_NINJA_RESOURCE_PATH}"
+        GDPP_NINJA_VERSION="${GDPP_NINJA_VERSION}"
 )
 gdpp_set_project_warnings(gdpp_godot_plugin)
 
@@ -707,6 +728,18 @@ endif()
 
 add_custom_target(
     gdpp_addon ALL
+    COMMAND "${CMAKE_COMMAND}" -E make_directory
+            "${GDPP_NINJA_ADDON_DIRECTORY}"
+            "${GDPP_ADDON_DIRECTORY}/tools"
+    COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+            "$<TARGET_FILE:gdpp_ninja>"
+            "${GDPP_NINJA_ADDON_EXECUTABLE}"
+    COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+            "${CMAKE_SOURCE_DIR}/third/ninja/COPYING"
+            "${GDPP_ADDON_DIRECTORY}/tools/NINJA-LICENSE.txt"
+    COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+            "${CMAKE_BINARY_DIR}/generated/gdpp/ninja-version.txt"
+            "${GDPP_ADDON_DIRECTORY}/tools/NINJA-VERSION.txt"
     COMMAND "${CMAKE_COMMAND}" -E rm -f
             "${GDPP_EXTENSION_OUTPUT}/libgdpp.${GDPP_PLATFORM}.editor.${GDPP_ARCH}.dylib"
             "${GDPP_EXTENSION_OUTPUT}/libgdpp.${GDPP_PLATFORM}.editor.${GDPP_ARCH}.so"
@@ -714,7 +747,7 @@ add_custom_target(
             "${GDPP_EXTENSION_OUTPUT}/libgdpp.${GDPP_PLATFORM}.template_release.${GDPP_ARCH}.dylib"
             "${GDPP_EXTENSION_OUTPUT}/libgdpp.${GDPP_PLATFORM}.template_release.${GDPP_ARCH}.so"
             "${GDPP_EXTENSION_OUTPUT}/gdpp.${GDPP_PLATFORM}.template_release.${GDPP_ARCH}.dll"
-    DEPENDS gdpp_godot_plugin gdpp_fallback gdpp_packaged_sdk
+    DEPENDS gdpp_godot_plugin gdpp_fallback gdpp_ninja gdpp_packaged_sdk
     VERBATIM
 )
 
