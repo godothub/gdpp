@@ -16,6 +16,7 @@ add_executable(
     godot_api_test.cpp
     export_worker_snapshot_test.cpp
     native_builder_test.cpp
+    xcframework_artifact_test.cpp
     project_compiler_test.cpp
     compiler_test.cpp
 )
