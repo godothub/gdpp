@@ -1,0 +1,12 @@
+name: Setup GDPP MSVC
+description: Initialize the supported Windows x64 MSVC environment with the Node.js 24 runtime.
+
+inputs:
+  arch:
+    description: Target MSVC architecture. GDPP currently ships Windows x64 only.
+    required: false
+    default: x64
+
+runs:
+  using: node24
+  main: index.js
