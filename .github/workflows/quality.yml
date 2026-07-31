@@ -70,6 +70,8 @@ jobs:
           --requirement "$GITHUB_WORKSPACE/tools/requirements.txt"
       - name: Validate workflow YAML, ownership and delivery topology
         run: python3 "$GITHUB_WORKSPACE/tools/check_workflow_topology.py"
+      - name: Validate public diagnostic source-disclosure guard
+        run: python3 "$GITHUB_WORKSPACE/tools/test_audit_public_artifact.py"
       - name: Reject mutable external Action references
         shell: bash
         run: |
