@@ -61,12 +61,34 @@ def stage_host_component(source: Path, destination: Path, component_host: str) -
         path = source_binary / library
         if not path.is_file():
             fail(f"host runtime binary is missing: {path}")
+    executor = source / host.build_executor
+    if not executor.is_file():
+        fail(f"bundled Ninja build executor is missing: {executor}")
+    ninja_license = source / "tools/NINJA-LICENSE.txt"
+    ninja_version = source / "tools/NINJA-VERSION.txt"
+    ninja_gdignore = source / "tools/.gdignore"
+    for path in (ninja_license, ninja_version, ninja_gdignore):
+        if not path.is_file():
+            fail(f"bundled Ninja metadata is missing: {path}")
+    expected_version = (
+        f"Ninja {package_release.NINJA_VERSION}\n"
+        f"commit {package_release.NINJA_COMMIT}\n"
+    )
+    if ninja_version.read_text(encoding="utf-8") != expected_version:
+        fail(f"bundled Ninja version metadata is invalid: {ninja_version}")
 
     source_root = source.resolve()
 
     def ignore_root_products(path: str, names: list[str]) -> set[str]:
-        if Path(path).resolve() == source_root:
+        resolved = Path(path).resolve()
+        if resolved == source_root:
             return {"binary", "build"}.intersection(names)
+        if resolved == (source_root / "tools"):
+            return {
+                name
+                for name in names
+                if name in package_release.HOSTS and name != component_host
+            }
         return set()
 
     shutil.copytree(source, destination, ignore=ignore_root_products)
@@ -75,6 +97,8 @@ def stage_host_component(source: Path, destination: Path, component_host: str) -
     destination_binary.mkdir()
     for library in expected_binaries:
         shutil.copy2(source_binary / library, destination_binary / library)
+    staged_executor = destination / host.build_executor
+    staged_executor.chmod(0o755)
 
     actual_binaries = {
         path.name for path in destination_binary.iterdir() if path.is_file()
@@ -83,6 +107,16 @@ def stage_host_component(source: Path, destination: Path, component_host: str) -
         fail(
             f"staged host component must contain exactly {sorted(expected_binaries)}, "
             f"got {sorted(actual_binaries)}"
+        )
+    actual_executors = {
+        path.relative_to(destination).as_posix()
+        for path in (destination / "tools").glob("*/gdpp-ninja*")
+        if path.is_file()
+    }
+    if actual_executors != {host.build_executor}:
+        fail(
+            f"staged host component must contain exactly {host.build_executor}, "
+            f"got {sorted(actual_executors)}"
         )
 
 

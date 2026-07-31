@@ -14,6 +14,8 @@ from pathlib import Path
 
 SUPPORTED_GODOT_VERSIONS = ("4.4", "4.5", "4.6", "4.7")
 SDK_SCHEMA = 12
+NINJA_VERSION = "1.13.2"
+NINJA_COMMIT = "3441b633c2fe2c494e958780ba0f4227b1327634"
 STATIC_ADDON_FILES = (
     ".gitignore",
     "build_progress.gd",
@@ -41,6 +43,7 @@ class HostContract:
     platform_minimum: str
     compiler_library: str
     fallback_library: str
+    build_executor: str
     export_targets: tuple[str, ...]
 
 
@@ -51,6 +54,7 @@ HOSTS = {
         platform_minimum="macOS_11.0",
         compiler_library="libgdpp_compiler.macos.universal.dylib",
         fallback_library="libgdpp_fallback.macos.universal.dylib",
+        build_executor="tools/mac-universal/gdpp-ninja",
         export_targets=(
             "macos-universal",
             "android-arm64",
@@ -65,6 +69,7 @@ HOSTS = {
         platform_minimum="Ubuntu_22.04",
         compiler_library="libgdpp_compiler.linux.x86_64.so",
         fallback_library="libgdpp_fallback.linux.x86_64.so",
+        build_executor="tools/linux-x64/gdpp-ninja",
         export_targets=(
             "linux-x64",
             "android-arm64",
@@ -78,6 +83,7 @@ HOSTS = {
         platform_minimum="Windows_10",
         compiler_library="gdpp_compiler.windows.x86_64.dll",
         fallback_library="gdpp_fallback.windows.x86_64.dll",
+        build_executor="tools/windows-x64/gdpp-ninja.exe",
         export_targets=(
             "windows-x64",
             "android-arm64",
@@ -199,7 +205,13 @@ def create_zip(stage_root: Path, archive: Path) -> None:
             info = zipfile.ZipInfo(relative, FIXED_ZIP_TIMESTAMP)
             info.compress_type = zipfile.ZIP_DEFLATED
             info.create_system = 3
-            info.external_attr = (stat.S_IFREG | 0o644) << 16
+            mode = (
+                0o755
+                if relative.endswith("/gdpp-ninja")
+                or relative.endswith("/gdpp-ninja.exe")
+                else 0o644
+            )
+            info.external_attr = (stat.S_IFREG | mode) << 16
             with path.open("rb") as source, output.open(info, "w", force_zip64=True) as target:
                 shutil.copyfileobj(source, target, length=1024 * 1024)
     temporary.replace(archive)
