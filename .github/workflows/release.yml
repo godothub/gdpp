@@ -1,0 +1,339 @@
+name: Delivery gate and release
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: Private source branch, tag, or commit to release
+        required: true
+        type: string
+        default: main
+      publish:
+        description: Create the GitHub Release after the complete delivery gate passes
+        required: true
+        type: boolean
+        default: false
+      release_version:
+        description: Release version without a v prefix (for example, 1.8.4)
+        required: true
+        type: string
+        default: 1.8.4
+
+permissions:
+  contents: read
+
+env:
+  GDPP_SOURCE_ROOT: ${{ github.workspace }}/source
+
+defaults:
+  run:
+    working-directory: source
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    name: Gate / Release metadata
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      source_sha: ${{ steps.source.outputs.sha }}
+    steps:
+      - name: Check out public pipeline
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: source
+        uses: ./.github/actions/checkout-source
+        with:
+          ref: ${{ inputs.source_ref }}
+          token: ${{ secrets.GDPP_TOKEN }}
+      - name: Validate immutable release inputs
+        shell: bash
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          GH_TOKEN: ${{ github.token }}
+          PUBLISH: ${{ github.event_name == 'workflow_dispatch' && inputs.publish || false }}
+          REQUESTED_VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.release_version || '' }}
+        run: |
+          set -euo pipefail
+          plugin_version="$(sed -n 's/^version="\([^"]*\)"$/\1/p' \
+            example/addons/gdpp/plugin.cfg)"
+          test "$plugin_version" = "$(printf '%s' "$plugin_version" | tr -d '[:space:]')"
+          [[ "$plugin_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          version="${REQUESTED_VERSION:-$plugin_version}"
+          test "$version" = "$plugin_version"
+          mkdir -p build/release-preflight
+          python3 tools/extract_changelog.py \
+            --changelog CHANGELOG.md \
+            --version "$version" \
+            --output build/release-preflight/notes.md
+          test -s build/release-preflight/notes.md
+          if [[ "$PUBLISH" == true ]]; then
+            test "$GITHUB_REF_NAME" = "$DEFAULT_BRANCH"
+            if git -C "$GITHUB_WORKSPACE" ls-remote --exit-code --tags origin \
+                "refs/tags/$version" >/dev/null 2>&1; then
+              echo "Tag $version already exists; releases are immutable."
+              exit 1
+            fi
+            if gh api "repos/$GITHUB_REPOSITORY/releases/tags/$version" >/dev/null 2>&1; then
+              echo "Release $version already exists; releases are immutable."
+              exit 1
+            fi
+          fi
+
+  quality-gate:
+    name: Gate / Quality
+    needs: preflight
+    uses: ./.github/workflows/quality.yml
+    with:
+      source_ref: ${{ needs.preflight.outputs.source_sha }}
+    secrets:
+      GDPP_TOKEN: ${{ secrets.GDPP_TOKEN }}
+
+  core-gate:
+    name: Gate / Compiler core
+    needs: preflight
+    uses: ./.github/workflows/core.yml
+    with:
+      source_ref: ${{ needs.preflight.outputs.source_sha }}
+    secrets:
+      GDPP_TOKEN: ${{ secrets.GDPP_TOKEN }}
+
+  native-gate:
+    name: Gate / Native integration
+    needs: preflight
+    uses: ./.github/workflows/native-integration.yml
+    with:
+      source_ref: ${{ needs.preflight.outputs.source_sha }}
+    secrets:
+      GDPP_TOKEN: ${{ secrets.GDPP_TOKEN }}
+
+  godot-gate:
+    name: Gate / Godot compatibility
+    needs: preflight
+    uses: ./.github/workflows/godot-compatibility.yml
+    with:
+      source_ref: ${{ needs.preflight.outputs.source_sha }}
+      target: all
+    secrets:
+      GDPP_TOKEN: ${{ secrets.GDPP_TOKEN }}
+
+  android-gate:
+    name: Gate / Android
+    needs: preflight
+    uses: ./.github/workflows/android.yml
+    with:
+      source_ref: ${{ needs.preflight.outputs.source_sha }}
+    secrets:
+      GDPP_TOKEN: ${{ secrets.GDPP_TOKEN }}
+
+  web-gate:
+    name: Gate / Web
+    needs: preflight
+    uses: ./.github/workflows/web.yml
+    with:
+      source_ref: ${{ needs.preflight.outputs.source_sha }}
+    secrets:
+      GDPP_TOKEN: ${{ secrets.GDPP_TOKEN }}
+
+  ios-gate:
+    name: Gate / iOS
+    needs: preflight
+    uses: ./.github/workflows/ios.yml
+    with:
+      source_ref: ${{ needs.preflight.outputs.source_sha }}
+    secrets:
+      GDPP_TOKEN: ${{ secrets.GDPP_TOKEN }}
+
+  host-components:
+    name: Build / Desktop host components
+    needs: preflight
+    uses: ./.github/workflows/host-components.yml
+    with:
+      source_ref: ${{ needs.preflight.outputs.source_sha }}
+    secrets:
+      GDPP_TOKEN: ${{ secrets.GDPP_TOKEN }}
+
+  packages:
+    name: Assemble / Release packages
+    needs:
+      - preflight
+      - quality-gate
+      - core-gate
+      - native-gate
+      - godot-gate
+      - android-gate
+      - web-gate
+      - ios-gate
+      - host-components
+    uses: ./.github/workflows/package-release.yml
+    with:
+      source_ref: ${{ needs.preflight.outputs.source_sha }}
+    secrets:
+      GDPP_TOKEN: ${{ secrets.GDPP_TOKEN }}
+
+  package-smoke:
+    name: Gate / Installed desktop package
+    needs:
+      - preflight
+      - packages
+    uses: ./.github/workflows/release-package-smoke.yml
+    with:
+      source_ref: ${{ needs.preflight.outputs.source_sha }}
+    secrets:
+      GDPP_TOKEN: ${{ secrets.GDPP_TOKEN }}
+
+  readiness:
+    name: Release readiness / All gates passed
+    if: always()
+    needs:
+      - quality-gate
+      - core-gate
+      - native-gate
+      - godot-gate
+      - android-gate
+      - web-gate
+      - ios-gate
+      - host-components
+      - packages
+      - package-smoke
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    defaults:
+      run:
+        working-directory: ${{ github.workspace }}
+    steps:
+      - name: Enforce the complete delivery gate
+        shell: bash
+        env:
+          QUALITY: ${{ needs.quality-gate.result }}
+          CORE: ${{ needs.core-gate.result }}
+          NATIVE: ${{ needs.native-gate.result }}
+          GODOT: ${{ needs.godot-gate.result }}
+          ANDROID: ${{ needs.android-gate.result }}
+          WEB: ${{ needs.web-gate.result }}
+          IOS: ${{ needs.ios-gate.result }}
+          HOST_COMPONENTS: ${{ needs.host-components.result }}
+          PACKAGES: ${{ needs.packages.result }}
+          PACKAGE_SMOKE: ${{ needs.package-smoke.result }}
+        run: |
+          set -euo pipefail
+          for result in \
+            "$QUALITY" "$CORE" "$NATIVE" "$GODOT" "$ANDROID" "$WEB" "$IOS" \
+            "$HOST_COMPONENTS" "$PACKAGES" "$PACKAGE_SMOKE"; do
+            test "$result" = success
+          done
+          printf '### Complete delivery gate passed\n\nAll tests, all three packages, and installed macOS/Linux/Windows package smokes passed.\n' \
+            >> "$GITHUB_STEP_SUMMARY"
+
+  publish:
+    name: Publish / GitHub Release
+    if: github.event_name == 'workflow_dispatch' && inputs.publish && needs.readiness.result == 'success'
+    needs:
+      - preflight
+      - readiness
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - name: Check out public pipeline
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./.github/actions/checkout-source
+        with:
+          ref: ${{ needs.preflight.outputs.source_sha }}
+          token: ${{ secrets.GDPP_TOKEN }}
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: gdpp-release-packages
+          path: source/build/release
+      - name: Validate the unprefixed version and three-archive matrix
+        shell: bash
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          GH_TOKEN: ${{ github.token }}
+          GDPP_TOKEN: ${{ secrets.GDPP_TOKEN }}
+          RELEASE_VERSION: ${{ inputs.release_version }}
+          SOURCE_SHA: ${{ needs.preflight.outputs.source_sha }}
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          plugin_version="$(sed -n 's/^version="\([^"]*\)"$/\1/p' \
+            example/addons/gdpp/plugin.cfg)"
+          test "$RELEASE_VERSION" = "$plugin_version"
+          git -C "$GITHUB_WORKSPACE" fetch --no-tags origin "refs/heads/$DEFAULT_BRANCH"
+          test "$(git -C "$GITHUB_WORKSPACE" rev-parse HEAD)" \
+            = "$(git -C "$GITHUB_WORKSPACE" rev-parse FETCH_HEAD)"
+          private_main="$(GH_TOKEN="$GDPP_TOKEN" gh api \
+            repos/abandoft/gdpp/commits/main --jq .sha)"
+          test "$SOURCE_SHA" = "$private_main"
+          if git -C "$GITHUB_WORKSPACE" ls-remote --exit-code --tags origin \
+              "refs/tags/$RELEASE_VERSION" >/dev/null 2>&1; then
+            echo "Tag $RELEASE_VERSION appeared while the release was running."
+            exit 1
+          fi
+          if gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_VERSION" \
+              >/dev/null 2>&1; then
+            echo "Release $RELEASE_VERSION appeared while the release was running."
+            exit 1
+          fi
+          for archive in gdpp.zip gdpp-all.zip gdpp-lite.zip; do
+            test -f "build/release/$archive"
+          done
+          test "$(find build/release -maxdepth 1 -type f -name '*.zip' | wc -l)" -eq 3
+      - name: Read release notes from CHANGELOG.md
+        env:
+          RELEASE_VERSION: ${{ inputs.release_version }}
+        run: >-
+          python3 tools/extract_changelog.py
+          --changelog CHANGELOG.md
+          --version "$RELEASE_VERSION"
+          --output build/release-notes.md
+      - name: Create checksums
+        working-directory: source/build/release
+        run: LC_ALL=C sha256sum -- gdpp.zip gdpp-all.zip gdpp-lite.zip > SHA256SUMS
+      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+        with:
+          tag_name: ${{ inputs.release_version }}
+          name: ${{ inputs.release_version }}
+          body_path: source/build/release-notes.md
+          generate_release_notes: false
+          fail_on_unmatched_files: true
+          files: |
+            source/build/release/gdpp.zip
+            source/build/release/gdpp-all.zip
+            source/build/release/gdpp-lite.zip
+            source/build/release/SHA256SUMS
+      - name: Verify the published release contract
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ inputs.release_version }}
+        run: |
+          set -euo pipefail
+          release="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_VERSION")"
+          test "$(jq -r '.tag_name' <<< "$release")" = "$RELEASE_VERSION"
+          test "$(jq -r '.name' <<< "$release")" = "$RELEASE_VERSION"
+          test "$(jq -r '.draft' <<< "$release")" = false
+          test "$(jq -r '.prerelease' <<< "$release")" = false
+          test "$(jq '[.assets[] | select(.state == "uploaded" and .size > 0)] | length' \
+            <<< "$release")" -eq 4
+          test "$(jq '.assets | length' <<< "$release")" -eq 4
+          test "$(jq '[.assets[] | select(.name | endswith(".zip"))] | length' \
+            <<< "$release")" -eq 3
+          for name in gdpp.zip gdpp-all.zip gdpp-lite.zip SHA256SUMS; do
+            test "$(jq --arg name "$name" \
+              '[.assets[] | select(.name == $name)] | length' <<< "$release")" -eq 1
+          done
+          test "$(git -C "$GITHUB_WORKSPACE" ls-remote origin \
+            "refs/tags/$RELEASE_VERSION" | awk '{print $1}')" \
+            = "$GITHUB_SHA"
+          printf 'Published %s: %s\n' "$RELEASE_VERSION" \
+            "$(jq -r '.html_url' <<< "$release")" >> "$GITHUB_STEP_SUMMARY"
