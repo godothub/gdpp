@@ -209,10 +209,11 @@ set(GDPP_NINJA_ADDON_EXECUTABLE
     "${GDPP_NINJA_ADDON_DIRECTORY}/$<TARGET_FILE_NAME:gdpp_ninja>")
 set(GDPP_NINJA_RESOURCE_PATH
     "res://addons/gdpp/tools/${GDPP_NINJA_HOST}/$<TARGET_FILE_NAME:gdpp_ninja>")
-file(GENERATE
+file(CONFIGURE
     OUTPUT "${CMAKE_BINARY_DIR}/generated/gdpp/ninja-version.txt"
     CONTENT
         "Ninja ${GDPP_NINJA_VERSION}\ncommit ${GDPP_NINJA_COMMIT}\n"
+    NEWLINE_STYLE UNIX
 )
 # A generator expression prevents multi-config generators from silently appending Debug/Release
 # below the install-ready add-on directory.
