@@ -477,8 +477,8 @@ jobs:
         run: >-
           python3 "$GITHUB_WORKSPACE/tools/audit_public_artifact.py"
           --source .
-          --path build/dev/compatibility/results
-          --path build/dev/compatibility/parser-results
+          --path build/dev/compatibility/results/report.json
+          --path build/dev/compatibility/parser-results/report.json
           --path build/dev/compatibility/frontend-snapshot-diff.json
       - name: Upload compatibility report
         if: ${{ always() && steps.report_audit.outcome == 'success' }}
