@@ -258,7 +258,7 @@ def validate_claims(
 
 
 def validate_release_default(version: str, errors: list[str]) -> None:
-    workflow = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
+    workflow = (ROOT / "ci/.github/workflows/release.yml").read_text(encoding="utf-8")
     section = re.search(
         r"^\s{6}release_version:\s*$"
         r"(.*?)"
@@ -267,7 +267,7 @@ def validate_release_default(version: str, errors: list[str]) -> None:
         re.MULTILINE | re.DOTALL,
     )
     if section is None:
-        errors.append(".github/workflows/release.yml: cannot locate release_version input")
+        errors.append("ci/.github/workflows/release.yml: cannot locate release_version input")
         return
     default = re.search(
         r"^\s{8}default:\s*([0-9]+\.[0-9]+\.[0-9]+)\s*$",
@@ -277,7 +277,7 @@ def validate_release_default(version: str, errors: list[str]) -> None:
     if default is None or default.group(1) != version:
         actual = default.group(1) if default else "<missing>"
         errors.append(
-            ".github/workflows/release.yml: release_version default "
+            "ci/.github/workflows/release.yml: release_version default "
             f"{actual} does not match product version {version}"
         )
 
