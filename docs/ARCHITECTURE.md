@@ -39,7 +39,7 @@ compiler + project -----------------------------------------------------> cli
 | `ir` | 类型化 HIR、await ANF、CFG/MIR、verifier 和保守优化 |
 | `codegen` | 只消费已验证 IR 的 GDExtension C++17 emitter |
 | `compiler` | 单翻译单元流水线、诊断和阶段指标 |
-| `project` | 脚本发现、依赖图、增量清单、Extension bridge 和 NativeBuilder |
+| `project` | 脚本发现、项目语义图、输出所有权清单、Extension bridge 和 NativeBuilder |
 | `runtime` | 生成代码 ABI：Variant、动态分派、容器、迭代、协程和 Attached Script |
 | `support` | UTF-8 路径、SHA-256 等无业务状态工具 |
 | `integration/godot` | compiler GDExtension、ClassDB 快照和 export fallback |
@@ -171,14 +171,16 @@ GDPP 自己的受控 build/SDK 区域。它建立：
 
 - 路径稳定的脚本身份、全局类和递归内部类；
 - 继承拓扑、普通跨引用和 Autoload；
-- 实现哈希、公开 ABI 哈希、依赖边和 compiler/codegen 指纹；
+- 实现哈希、公开 ABI 哈希、依赖边和 compiler/codegen 身份；
 - 每个脚本的生成头/源、metadata 和桥接契约；
-- 源码/目标版本/第三方契约变化的精确失效集合。
+- 完整、确定性的当前生成输出集合。
 
-manifest 只在完整编译成功后提交。陈旧生成单元按受控白名单清理，外部路径、符号链接和异常
-清单名不能逃出输出目录；原地升级还会精确清除已退役的 `gdpp_project.gdextension` 与 CMake
-项目脚手架，防止旧入口 ABI 与当前直接构建 manifest 并存。对象缓存再通过 depfile、SDK/runtime
-摘要、工具链和 profile 校验。
+前端每次重建完整语义图并生成全部目标内容；内容相同的文件不改写，因此不会制造虚假原生失效。
+manifest 只保存输出所有权，并在完整编译成功后提交。陈旧生成单元按受控白名单清理，外部路径、
+符号链接和异常清单名不能逃出输出目录；原地升级还会精确清除已退役的
+`gdpp_project.gdextension` 与 CMake 项目脚手架，防止旧入口 ABI 与当前直接构建 manifest
+并存。原生对象是否失效只由 Ninja 的 depfile/include 数据库、SDK/runtime 摘要、工具链和
+profile 图输入决定。
 
 跨进程项目锁尚未实现；同一项目不能同时由多个编辑器/CLI 安全写入同一构建目录。
 
@@ -197,8 +199,8 @@ ProjectCompiler 后台只消费快照，不访问实时 ClassDB。离线 CLI 可
 
 ## NativeBuilder
 
-客户导出不调用 CMake、Ninja、Python 或 SCons。NativeBuilder 验证 SDK schema 12/runtime
-ABI 23 后，直接生成系统工具链命令：
+客户导出不调用 CMake、Python 或 SCons，也不依赖系统安装 Ninja。NativeBuilder 验证 SDK
+schema 12/runtime ABI 23 后生成确定性 `build.ninja`、每边命令文件和以下系统工具链调用：
 
 - Windows：MSVC/Windows SDK、x86_64、静态 CRT；
 - macOS：AppleClang、arm64/x86_64/Universal 2；
@@ -208,8 +210,10 @@ ABI 23 后，直接生成系统工具链命令：
 - Web：Emscripten wasm32，threads/nothreads 隔离。
 
 每个平台/架构/线程模式只有一份优化的 `template_release` godot-cpp 静态绑定。Debug 和 Release
-导出都链接它；区别是 GDPP 是否保留脚本调试语义。每个翻译单元与链接命令严格串行，后台线程
-执行，主线程负责 UI 刷新和导出协调。
+导出都链接它；区别是 GDPP 是否保留脚本调试语义。插件内置并固定 Ninja 1.13.2；独立翻译单元
+在 CPU/内存预算内并行，编译器 depfile 或 MSVC include 数据库决定精确失效，链接/lipo/合包
+通过单深度池顺序执行。Ninja 运行在后台构建线程，主线程负责 UI 刷新和导出协调；每个已完成
+编译边都会推进逐文件进度。
 
 项目库文件使用 `gdpp.<debug|release>.<platform>.<arch>` 前缀；唯一公开 C 入口固定为
 `gdpp_library_init`。文件名与入口符号是分别校验的两个契约。

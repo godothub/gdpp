@@ -82,7 +82,7 @@ GDPP 项目动态库
 进入客户 bridge。
 
 快照只在内存中交给 ProjectCompiler。后台编译不访问实时 ClassDB。实际引用的契约身份进入
-`addons/gdpp/build/project/bridge.lock` 和项目缓存；未使用供应商类的变化不会使所有脚本失效。
+`addons/gdpp/build/project/bridge.lock` 和项目/原生构建身份；未使用供应商类的变化不会使无关原生对象失效。
 
 ## editor-only 与 runtime
 

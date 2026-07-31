@@ -20,6 +20,10 @@ addons/
     ├── gdpp.gdextension
     ├── *.gd
     ├── binary/
+    ├── tools/
+    │   ├── mac-universal/gdpp-ninja
+    │   ├── linux-x64/gdpp-ninja
+    │   └── windows-x64/gdpp-ninja.exe
     └── sdk/
         ├── 4.6/
         └── 4.7/
@@ -70,6 +74,7 @@ SDK schema 12、runtime ABI 23 由源码、打包器和发布门禁共同校验�
 
 - 缺少当前归档声明的任一 Godot SDK；
 - schema/runtime ABI 或文件摘要冲突；
+- 缺少发行规格声明的 Ninja 宿主执行器、版本/提交元数据或 Apache 2.0 许可文本；
 - 缺少发行规格声明的任一宿主或目标、混入未声明目标、editor/template_debug 静态库；
 - 项目生成库、build 目录、嵌套 ZIP；
 - symlink、AppleDouble、`.DS_Store`、`__MACOSX`；
@@ -84,8 +89,8 @@ GDPP 只在 AOT 导出时编译客户项目。普通编辑、导入和编辑器�
 ```text
 一个目标 + 一个 profile
   -> 一次项目 frontend/codegen
-  -> 每个翻译单元顺序编译一次
-  -> 链接一个项目库
+  -> 内置 Ninja 有界并行编译失效翻译单元
+  -> 顺序链接/合包一个项目库
   -> 转换场景/资源/Autoload
   -> 剥离源码
   -> Godot 标准打包
@@ -94,6 +99,20 @@ GDPP 只在 AOT 导出时编译客户项目。普通编辑、导入和编辑器�
 不存在客户 editor/development 项目库。成功成品只携带一个
 `gdpp.<debug|release>.<platform>.<arch>` 项目库；compiler、fallback、SDK、静态库、生成 C++、
 对象缓存和客户 `.gd/.gdc` 都不得进入。
+
+## 内置构建执行器
+
+每个桌面宿主只携带一个固定到提交 `3441b633c2fe2c494e958780ba0f4227b1327634` 的 Ninja
+1.13.2，不按 Godot SDK 版本复制。运行前同时校验插件目录、文件类型和 `--version`；发行汇总
+再校验宿主矩阵、版本/提交元数据和 ZIP 可执行权限。客户无需系统安装 Ninja。
+
+NativeBuilder 只向 Godot 层暴露经过校验的图路径、目标和工作量，不再传递任意系统命令数组。
+前端每次生成完整的当前 C++ 输出集合，相同内容不改时间戳；项目 manifest 只负责输出所有权和
+陈旧文件清理，不再维护另一套增量命中状态。
+编译边通过编译器 depfile 或 MSVC include 数据库跟踪真实头依赖，命令文件和链接 response file
+本身也是图输入；工具链身份、SDK/runtime/bridge manifest 或命令变化都会精确失效。独立编译边
+按 CPU 与可用内存预算并行，链接和平台合包保持顺序。失败输出去除内部进度标记后进入结构化
+诊断，成功前不提交 iOS 目录产物。
 
 ## 第三方 GDExtension
 
@@ -144,7 +163,7 @@ editor-only 物理文件不变，在导出回调中跳过它，并在成品同�
 
 ## 发布门禁
 
-最近完成的 1.8.3 正式发布运行 `30487659776` 已成功交付两个插件 ZIP 与 `SHA256SUMS`，其
+最近完成的 1.8.4 正式发布运行 `30608539870` 已成功交付三个插件 ZIP 与 `SHA256SUMS`，其
 发布拓扑包含真实跨脚本工程的前端、项目语义、生成 C++17 与原生语法兼容门禁：
 
 - macOS/Linux/Windows 编译器核心和 plugin 集成；

@@ -20,7 +20,8 @@ Apple Silicon 模拟器 arm64 和 Intel 模拟器 x86_64 三种切片。
 - 已安装对应 Godot iOS 导出模板；
 - 真机或 App Store 导出所需的 Apple Developer Team、Bundle ID、证书和描述文件。
 
-用户不需要 CMake、Ninja、Python、SCons，也不需要自行编译 godot-cpp。每套 SDK 的共享
+用户不需要安装 CMake、Ninja、Python、SCons，也不需要自行编译 godot-cpp；插件内置的 Ninja
+负责切片依赖调度。每套 SDK 的共享
 `lib/` 中包含 device 和 Universal Simulator 两份优化后的 `template_release` 静态依赖；
 `sdk/manifests/ios.arm64.sdk.manifest` 描述其身份。Debug 与 Release 导出复用这些 release
 binding，它们只参与链接，不会整包进入游戏。
@@ -33,7 +34,8 @@ binding，它们只参与链接，不会整包进入游戏。
 3. 安装 Godot iOS 导出模板，在 iOS 预设中设置 Team ID、Bundle ID 和应用信息。
 4. 保持 `gdpp/strip_gdscript_sources=true`、`gdpp/allow_source_fallback=false`。
 5. 执行 Debug 或 Release 导出。GDPP 通过 metadata-only 脚本描述完成导出期类型和场景验证，
-   不构建主机项目库；随后调用 `xcrun` 分别构建三个 iOS 切片，最后事务式提交 XCFramework。
+   不构建主机项目库；随后由 Ninja 调用 `xcrun` 并行构建三个 iOS 切片、顺序完成切片链接、
+   lipo 和 XCFramework 合包，最后事务式提交 XCFramework。
 6. Godot 将项目 XCFramework 嵌入生成的 Xcode 工程；签名、设备安装、Archive 和上传仍使用
    Godot/Xcode 的标准流程。
 

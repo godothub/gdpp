@@ -45,8 +45,9 @@ addons/gdpp/sdk/<godot-version>/
 中，避免复制公共头文件与 runtime 源码。
 
 用户仍需安装与目标 Godot 匹配的官方 Web 导出模板和 Emscripten。项目设置
-`gdpp/build/emscripten_cxx` 默认查找 `em++`，也可设置绝对路径。客户导出不会调用 CMake、
-Ninja、Python 或 SCons。
+`gdpp/build/emscripten_cxx` 默认查找 `em++`，也可设置绝对路径。客户无需安装 CMake、
+Ninja、Python 或 SCons；插件内置的 Ninja 调度 Emscripten 编译和链接，Windows 的
+`.bat/.cmd` 启动器由隐藏的命令处理器包装。
 
 ## 导出前提
 

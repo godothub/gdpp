@@ -6,7 +6,7 @@ GDPP 的提交必须保持“实现、证据、公开状态”一致。不能只
 
 ## 开发环境
 
-初始化固定版本的 godot-cpp 子模块，所有 CMake 产物只允许写入根目录 `build/`：
+初始化固定版本的 godot-cpp 与 Ninja 子模块，所有 CMake 产物只允许写入根目录 `build/`：
 
 ```sh
 git submodule update --init --recursive

@@ -4,7 +4,8 @@
 
 正式完整插件包已经包含三种桌面 compiler、GDPP runtime、生成所需头文件和所选 Godot 版本的
 `template_release` 静态绑定；lite 包移除 Linux 和 iOS，保留 macOS、Windows、Android 与 Web。
-客户不需要 CMake、Ninja、Python、SCons，也不需要自行构建 godot-cpp。
+客户不需要安装 CMake、Ninja、Python、SCons，也不需要自行构建 godot-cpp；插件为每个桌面宿主
+内置固定版本的 `gdpp-ninja`。
 
 客户只需要 Godot 和目标平台工具链：
 
@@ -30,6 +31,8 @@ project/
         ├── plugin.cfg
         ├── gdpp.gdextension
         ├── binary/
+        ├── tools/
+        │   └── <host>/gdpp-ninja[.exe]
         └── sdk/
             ├── 4.6/
             └── 4.7/
@@ -99,8 +102,8 @@ STL 或 Web threads 模式，不能用另一个模式的静态库勉强链接。
   -> 语义分析和项目固定点
   -> 预编译脚本行为
   -> 写入生成 C++17/metadata
-  -> 顺序编译每个翻译单元一次
-  -> 链接一个目标项目库
+  -> Ninja 按依赖图有界并行编译失效翻译单元
+  -> 顺序链接/合包一个目标项目库
   -> 转换 PackedScene/Resource/Autoload
   -> 写入运行描述符并剥离 .gd/.gdc
   -> 交还 Godot 标准打包
@@ -112,8 +115,11 @@ STL 或 Web threads 模式，不能用另一个模式的静态库勉强链接。
 `template_release`；Debug 保留脚本 `assert`、`breakpoint` 和源码调试帧，Release 在生成阶段移除
 这些调试语义。
 
-每个翻译单元和链接命令严格串行。构建运行在后台线程，主线程继续渲染、处理窗口和驱动导出。
-一个连续进度条覆盖全部大阶段；逐文件步骤显示 `(当前/总数)`，结束后让出 Godot 自己的打包进度。
+独立翻译单元由内置 Ninja 并行调度，并发数同时受逻辑 CPU、12 任务上限和可用内存预算限制；
+链接、lipo 与 XCFramework 合包进入深度为 1 的顺序池，并在全部编译边完成后执行。Windows
+MSVC 环境只解析一次，所有宿主子进程都隐藏控制台。构建运行在后台线程，主线程继续渲染、处理
+窗口和驱动导出。一个连续进度条覆盖全部大阶段；Ninja 每完成一个编译边就更新 `(当前/总数)`，
+链接阶段继续推进同一进度条，结束后让出 Godot 自己的打包进度。
 
 ## Attached 转换
 
@@ -160,7 +166,7 @@ libgdpp.release.ios.arm64.xcframework/
 
 动态库文件前缀是 `gdpp`；GDExtension C 入口固定为 `gdpp_library_init`。二者不要混淆。
 
-## 缓存
+## 生成与增量构建
 
 ```text
 addons/gdpp/build/project/
@@ -169,18 +175,29 @@ addons/gdpp/build/project/
 ├── bridge.lock
 └── native-direct/
     └── <api>/<platform>/<arch>[/<web-mode>]/<profile>/
+        ├── build.ninja
+        ├── commands/
         ├── objects/
+        ├── .ninja_deps
+        ├── .ninja_log
         └── build-configuration.txt
 ```
 
-项目 manifest 区分源码实现哈希和公开 ABI 哈希，只让真实依赖方失效。对象缓存再包含 include/
-depfile、SDK/runtime、第三方 bridge、工具链绝对路径、profile 和可复现路径映射。
+每次导出都重新扫描、解析和分析整个客户项目，并为全部脚本生成当前应有的 C++、头文件与符号
+元数据。写入采用内容比较：内容相同就保留原文件及时间戳，内容变化才原子替换；`manifest.txt`
+只登记编译器拥有的输出，用于删除已移除、改名或升级遗留的生成单元，不参与增量命中判断。
+
+NativeBuilder 为每个目标生成完整、确定性的 Ninja 图和独立命令文件。Ninja 是原生增量构建的
+唯一权威：GCC/Clang/Emscripten 使用 depfile，MSVC 使用 `/showIncludes` 依赖数据库。命令文件
+本身、SDK/runtime/bridge manifest、实际链接库、工具链路径/大小/修改身份、profile 和可复现
+路径映射都进入图输入。未变化的生成文件、图和命令文件保持原时间戳，Ninja dry-run 为零时不会
+启动编译器或链接器。
 
 从旧版原地升级时，成功的项目编译会精确删除输出根内已退役的 `gdpp_project.gdextension`、
 `CMakeLists.txt` 和两个历史 CMake 辅助脚本。当前导出只使用内存生成的 runtime 描述符和
-NativeBuilder 直接命令；这些旧文件既不会参与构建，也不会以旧入口 ABI 留在诊断现场。
+NativeBuilder 生成的 Ninja 图；这些旧文件既不会参与构建，也不会以旧入口 ABI 留在诊断现场。
 
-当前缓存事务在单进程内安全；多个编辑器或 CLI 同时写同一项目尚无跨进程锁，不属于支持用法。
+当前输出事务在单进程内安全；多个编辑器或 CLI 同时写同一项目尚无跨进程锁，不属于支持用法。
 新进程仍需重新执行前端，持久化 AST/符号摘要尚未实现。动态 `.gd` 资源不依赖静态调用点分析：
 项目编译清单登记每个可交付脚本的规范路径、UID 与唯一 `Script` 身份，运行时拼接路径和线程
 ResourceLoader 从该清单解析；清单外路径确定返回不存在。
