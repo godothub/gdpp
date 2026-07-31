@@ -128,7 +128,7 @@ cmake --build --preset dev --target gdpp_web_sdk --parallel
 Godot 4.4 SDK 使用 Emscripten 3.1.62 系列，4.5 及以上使用 4.0.0+。SDK 构建脚本会拒绝明显
 不匹配的版本，并把自身中间产物留在根目录 `build/`。
 
-`.github/workflows/web.yml` 当前执行：
+`ci/.github/workflows/web.yml` 当前执行：
 
 1. 4 个 Godot API 版本 × 2 个线程模式的 SDK 构建与 manifest/命名/隔离检查；
 2. Godot 4.5.2 两种模式的 compiler 构建、Release Web 导出和无源码审计；

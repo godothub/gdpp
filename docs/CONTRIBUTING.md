@@ -69,7 +69,7 @@ core → frontend → semantic → ir → codegen → compiler → project
 ```sh
 python3 tools/check_docs.py
 python3 tools/check_architecture.py
-ruby tools/check_workflow_topology.rb
+ruby ci/tools/check_workflow_topology.rb
 ```
 
 文档检查会验证：
@@ -97,7 +97,7 @@ find include src test -type f \( -name '*.cpp' -o -name '*.hpp' \) -print0 \
 ```sh
 python3 tools/check_docs.py
 python3 tools/check_architecture.py
-ruby tools/check_workflow_topology.rb
+ruby ci/tools/check_workflow_topology.rb
 cmake --build --preset dev --parallel
 ctest --preset dev --output-on-failure
 cmake --build --preset plugin --parallel
@@ -106,6 +106,14 @@ ctest --preset plugin --output-on-failure
 
 平台代码还必须走对应的可复用工作流；正式发行只有在 quality、core、native、compatibility、
 Android、iOS、Web、三平台组件、汇总打包和安装后导出/运行全部通过时才能发布。
+
+## 持续集成边界
+
+可执行的 GitHub Actions 控制面位于根级 `ci/` 子模块（`godothub/gdpp`），闭源仓库不保留
+workflow。公开控制面只允许维护者从默认分支手动启动，通过只读 `GDPP_TOKEN` 检出一个固定
+的闭源源码提交；所有并行门禁、打包与发布作业复用同一源码提交，并验证闭源仓库锁定的
+`ci/` 提交就是当前流水线提交。外部 PR 不触发任何带密钥的任务，公开诊断工件在上传前必须
+通过源码泄露审计。
 
 ## 提交与版本
 
