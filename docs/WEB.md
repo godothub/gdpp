@@ -93,9 +93,9 @@ Cache-Control: no-store
 Worker、跨域资源、HTTPS 与回滚策略。无论是否启用线程，GDExtension Web 导出都不能通过直接
 双击 HTML 运行。
 
-## 构建、缓存与安全
+## 构建、增量与安全
 
-对象缓存按以下维度隔离：
+Ninja 工作目录按以下维度隔离：
 
 ```text
 addons/gdpp/build/project/native-direct/

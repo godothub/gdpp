@@ -45,7 +45,7 @@ godot::Color::html("ff8800");
 目标 API 版本进入：
 
 - 项目内容/ABI 身份和生成输出所有权 manifest；
-- 原生对象缓存目录与构建身份；
+- Ninja 目标目录、命令输入与构建身份；
 - SDK manifest 和 runtime ABI 校验；
 - 生成项目 `.gdextension` 的 `compatibility_minimum`；
 - 导出摘要与诊断。

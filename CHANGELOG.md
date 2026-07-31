@@ -4,6 +4,7 @@
 - Regenerate the complete current C++ project state on every export, preserve timestamps for identical outputs, reduce the project manifest to an ownership ledger, and make Ninja the sole native incremental-build authority.
 - Build independent generated C++ translation units with CPU- and memory-bounded parallelism, compiler depfiles, stage-ordered linking and packaging, deterministic command inputs, toolchain identity invalidation, and zero-work incremental reuse.
 - Stream monotonic per-file compile and link progress from hidden processes while preserving exact MSVC environments, UTF-8 compiler response files, Unicode and long paths, and Windows Emscripten command wrappers.
+- Capture editor paths and extension contracts before each build, run the frontend and Ninja toolchain on an isolated worker, and deliver progress through a main-thread queue without cross-thread Godot or GDScript calls.
 - Enforce exact Ninja version, commit, host matrix, metadata, executable permissions, non-ASCII installed-project export, failure recovery, and source-free package boundaries throughout release assembly.
 - Commit iOS XCFrameworks through validated same-volume transactions with content-based reuse and interrupted-replacement recovery.
 

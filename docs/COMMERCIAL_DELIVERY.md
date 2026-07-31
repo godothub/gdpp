@@ -98,7 +98,7 @@ GDPP 只在 AOT 导出时编译客户项目。普通编辑、导入和编辑器�
 
 不存在客户 editor/development 项目库。成功成品只携带一个
 `gdpp.<debug|release>.<platform>.<arch>` 项目库；compiler、fallback、SDK、静态库、生成 C++、
-对象缓存和客户 `.gd/.gdc` 都不得进入。
+Ninja 对象及日志和客户 `.gd/.gdc` 都不得进入。
 
 ## 内置构建执行器
 
