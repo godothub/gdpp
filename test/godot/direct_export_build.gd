@@ -1,6 +1,7 @@
 extends SceneTree
 
 var _progress_events: Array[Dictionary] = []
+var _progress_on_main_thread := true
 
 
 func _init() -> void:
@@ -16,18 +17,28 @@ func _run() -> void:
         push_error("GDPP could not reset the direct-build integration fixture")
         quit(1)
         return
-    var result: Dictionary = compiler.compile_project(
-        "res://",
-        "res://addons/gdpp/build/project",
-        ProjectSettings.globalize_path("res://addons/gdpp/sdk"),
-        compiler.get_default_compiler_executable(),
-        target_version,
-        "release",
-        compiler.get_host_platform(),
-        compiler.get_host_architecture(),
-        "",
-        "double" if OS.has_feature("double") else "single"
+    var native_build_job_script := load("res://addons/gdpp/native_build_job.gd")
+    var native_build_job: Object = native_build_job_script.new()
+    _progress_events.clear()
+    _progress_on_main_thread = true
+    var outcome: Dictionary = native_build_job.run(
+        compiler,
+        {
+            "project_root": "res://",
+            "output_directory": project_output,
+            "sdk_root": "res://addons/gdpp/sdk",
+            "compiler_executable": compiler.get_default_compiler_executable(),
+            "target_version": target_version,
+            "build_profile": "release",
+            "target_platform": compiler.get_host_platform(),
+            "target_architecture": compiler.get_host_architecture(),
+            "target_variant": "",
+            "target_precision": "double" if OS.has_feature("double") else "single",
+        },
+        Callable(self, "_on_progress")
     )
+    var result: Dictionary = outcome.get("plan", {})
+    var execution: Dictionary = outcome.get("execution", {})
     if not result.get("success", false):
         push_error("GDPP release planning failed: %s" % result.get("diagnostics", []))
         quit(1)
@@ -49,12 +60,12 @@ func _run() -> void:
         push_error("GDPP did not produce a complete Ninja build contract: %s" % result)
         quit(1)
         return
-    _progress_events.clear()
-    var execution: Dictionary = compiler.execute_project_build(
-        result, Callable(self, "_record_progress")
-    )
     if not execution.get("success", false):
         push_error("GDPP release compiler failed: %s" % execution.get("diagnostics", []))
+        quit(1)
+        return
+    if not _progress_on_main_thread:
+        push_error("GDPP delivered native build progress outside the Godot main thread")
         quit(1)
         return
     if not _validate_progress(_progress_events, true):
@@ -81,9 +92,8 @@ func _run() -> void:
         ProjectSettings.globalize_path(library)
     )
     _progress_events.clear()
-    var no_op: Dictionary = compiler.execute_project_build(
-        result, Callable(self, "_record_progress")
-    )
+    var no_op: Dictionary = compiler.execute_project_build(result)
+    _drain_progress(compiler)
     if not no_op.get("success", false):
         push_error("GDPP no-op incremental build failed: %s" % no_op.get("diagnostics", []))
         quit(1)
@@ -116,9 +126,8 @@ func _run() -> void:
         quit(1)
         return
     _progress_events.clear()
-    var header_rebuild: Dictionary = compiler.execute_project_build(
-        result, Callable(self, "_record_progress")
-    )
+    var header_rebuild: Dictionary = compiler.execute_project_build(result)
+    _drain_progress(compiler)
     var rebuilt_log := FileAccess.get_file_as_string(ninja_log_path)
     if not header_rebuild.get("success", false):
         push_error(
@@ -184,7 +193,13 @@ func _run() -> void:
     quit(0)
 
 
-func _record_progress(phase: String, completed: int, total: int) -> void:
+func _drain_progress(compiler: Object) -> void:
+    for value: Variant in compiler.drain_project_build_progress():
+        _progress_events.append(value as Dictionary)
+
+
+func _on_progress(phase: String, completed: int, total: int) -> void:
+    _progress_on_main_thread = _progress_on_main_thread and Thread.is_main_thread()
     _progress_events.append({
         "phase": phase,
         "completed": completed,

@@ -323,8 +323,9 @@ foreach(required_background_build_contract IN ITEMS
         "_thread.start("
         "while _thread.is_alive():"
         "_thread.wait_to_finish()"
-        "_progress_mutex.lock()"
-        "_dispatch_progress(progress_callback)"
+        "_dispatch_progress(compiler, progress_callback)"
+        "compiler.drain_project_build_progress()"
+        "ProjectSettings.globalize_path(path)"
         "_advance_frame(frame_callback, false)"
         "_advance_frame(frame_callback, true)"
         "DisplayServer.process_events()"
@@ -348,10 +349,14 @@ foreach(required_progress_integration IN ITEMS
         "NATIVE_BUILD_JOB.new()"
         "godot::D_METHOD(\"compile_project\", \"project_root\""
         "godot::D_METHOD(\"prepare_project_build\")"
+        "godot::D_METHOD(\"drain_project_build_progress\")"
+        "project build state was not prepared on the editor thread"
+        "project, output and SDK paths must be globalized on the editor thread"
+        "build_options.build_executor = path_from_utf8(prepared_build_executor)"
         "options.progress_callback ="
         "ProjectCompilePhase::translate"
-        "godot::D_METHOD(\"execute_project_build\", \"build_plan\", \"progress_callback\")"
-        "report_build_progress(progress_callback, phase")
+        "godot::D_METHOD(\"execute_project_build\", \"build_plan\")"
+        "enqueue_build_progress(phase_name, completed, total)")
     string(FIND
         "${editor_plugin}\n${export_plugin}\n${native_build_job}\n${compiler_service}"
         "${required_progress_integration}"
@@ -359,6 +364,22 @@ foreach(required_progress_integration IN ITEMS
     if(progress_integration_offset EQUAL -1)
         message(FATAL_ERROR
             "Native build progress integration is missing: ${required_progress_integration}")
+    endif()
+endforeach()
+foreach(forbidden_cross_thread_progress_contract IN ITEMS
+        "var progress_callback := Callable(self, \"_record_progress\")"
+        "compiler.execute_project_build(plan, progress_callback)"
+        "var _progress_mutex :="
+        "report_build_progress("
+        "\"target_precision\", \"progress_callback\"")
+    string(FIND
+        "${native_build_job}\n${compiler_service}"
+        "${forbidden_cross_thread_progress_contract}"
+        cross_thread_progress_offset)
+    if(NOT cross_thread_progress_offset EQUAL -1)
+        message(FATAL_ERROR
+            "Background native builds must not enter GDScript through a worker-thread "
+            "progress callback: ${forbidden_cross_thread_progress_contract}")
     endif()
 endforeach()
 foreach(required_scene_compatibility IN ITEMS
