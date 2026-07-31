@@ -4,7 +4,6 @@
 #include "gdpp/version.hpp"
 
 #include <algorithm>
-#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
@@ -507,7 +506,7 @@ TEST_CASE("native build profiles use product roles instead of Godot ABI target n
     REQUIRE(!gdpp::parse_native_build_profile("template_release").has_value());
 }
 
-TEST_CASE("native builder creates release macOS commands and reuses fresh objects") {
+TEST_CASE("native builder creates a stable release macOS Ninja graph") {
     const auto root =
         make_sdk_fixture("native-builder-macos", "libgodot-cpp.macos.template_release.arm64.a");
     gdpp::NativeBuildOptions options;
@@ -529,27 +528,29 @@ TEST_CASE("native builder creates release macOS commands and reuses fresh object
                std::string{"libgdpp.release.macos.arm64.dylib"});
     REQUIRE_EQ(first.output_library.parent_path(), options.binary_output_directory);
 
-    const auto future = std::filesystem::file_time_type::clock::now() + std::chrono::seconds{5};
-    for (const auto& name : {"example_gd_cpp.o", "register_types_cpp.o", "variant_ops_cpp.o"}) {
-        const auto object = root / "project/native-direct/4.4/macos/arm64/release/objects" / name;
-        write_input(object);
-        std::filesystem::last_write_time(object, future);
-    }
-    write_input(first.output_library);
-    std::filesystem::last_write_time(first.output_library, future + std::chrono::seconds{1});
+    REQUIRE(first.build_file.filename() == "build.ninja");
+    REQUIRE(first.build_directory == first.build_file.parent_path());
+    REQUIRE_EQ(first.compile_edge_count, std::size_t{3});
+    REQUIRE_EQ(first.post_compile_edge_count, std::size_t{1});
+    const auto graph_time = std::filesystem::last_write_time(first.build_file);
+    const auto command_file = first.build_directory / "commands/0.sh";
+    const auto command_time = std::filesystem::last_write_time(command_file);
+    const auto command_contents = read_input(command_file);
     const auto second = builder.plan(options);
     REQUIRE(second.success);
-    REQUIRE(second.up_to_date);
-    REQUIRE(second.commands.empty());
+    REQUIRE_EQ(second.commands.size(), std::size_t{4});
+    REQUIRE(std::filesystem::last_write_time(second.build_file) == graph_time);
+    REQUIRE(std::filesystem::last_write_time(command_file) == command_time);
+    REQUIRE_EQ(read_input(command_file), command_contents);
 
     options.compiler_executable = "clang++-commercial-upgrade";
     const auto toolchain_change = builder.plan(options);
     REQUIRE(toolchain_change.success);
-    REQUIRE(!toolchain_change.up_to_date);
     REQUIRE_EQ(toolchain_change.commands.size(), std::size_t{4});
+    REQUIRE(read_input(command_file) != command_contents);
 }
 
-TEST_CASE("native builder recompiles only translation units affected by a generated header") {
+TEST_CASE("native builder delegates precise generated-header invalidation to compiler depfiles") {
     const auto root = make_sdk_fixture("native-builder-precise-objects",
                                        "libgodot-cpp.macos.template_release.arm64.a");
     const auto generated = root / "project/generated";
@@ -572,45 +573,19 @@ TEST_CASE("native builder recompiles only translation units affected by a genera
     const auto initial = builder.plan(options);
     REQUIRE(initial.success);
     REQUIRE_EQ(initial.commands.size(), std::size_t{5});
-
-    const auto objects = root / "project/native-direct/4.4/macos/arm64/release/objects";
-    const auto fresh = std::filesystem::file_time_type::clock::now() + std::chrono::seconds{5};
-    for (const auto& name :
-         {"example_gd_cpp.o", "other_gd_cpp.o", "register_types_cpp.o", "variant_ops_cpp.o"}) {
-        write_input(objects / name);
-        std::filesystem::last_write_time(objects / name, fresh);
-    }
-    write_input(initial.output_library);
-    std::filesystem::last_write_time(initial.output_library, fresh + std::chrono::seconds{1});
-    std::filesystem::last_write_time(generated / "shared.hpp", fresh + std::chrono::seconds{2});
-
-    const auto changed = builder.plan(options);
-
-    REQUIRE(changed.success);
-    REQUIRE_EQ(changed.commands.size(), std::size_t{3});
-    REQUIRE(contains_path(changed.commands[0].arguments, generated / "example.gd.cpp"));
-    REQUIRE(contains_path(changed.commands[1].arguments, root / "project/register_types.cpp"));
-    REQUIRE(!contains_path(changed.commands[0].arguments, generated / "other.gd.cpp"));
-    REQUIRE(
-        !contains_path(changed.commands[1].arguments, root / "sdk/src/runtime/variant_ops.cpp"));
-    REQUIRE(contains(changed.commands.back().arguments, "-dynamiclib"));
-
-    std::filesystem::last_write_time(objects / "example_gd_cpp.o", fresh + std::chrono::seconds{3});
-    std::filesystem::last_write_time(objects / "register_types_cpp.o",
-                                     fresh + std::chrono::seconds{3});
-    std::filesystem::last_write_time(initial.output_library, fresh + std::chrono::seconds{3});
-    std::filesystem::last_write_time(generated / "other.gd.cpp", fresh + std::chrono::seconds{4});
-
-    const auto implementation_changed = builder.plan(options);
-
-    REQUIRE(implementation_changed.success);
-    REQUIRE_EQ(implementation_changed.commands.size(), std::size_t{2});
-    REQUIRE(contains_path(implementation_changed.commands.front().arguments,
-                          generated / "other.gd.cpp"));
-    REQUIRE(contains(implementation_changed.commands.back().arguments, "-dynamiclib"));
+    const auto graph = read_input(initial.build_file);
+    REQUIRE(graph.find("deps = gcc") != std::string::npos);
+    REQUIRE(graph.find("depfile = ") != std::string::npos);
+    REQUIRE(graph.find("example.gd.cpp") != std::string::npos);
+    REQUIRE(graph.find("other.gd.cpp") != std::string::npos);
+    REQUIRE(graph.find("shared.hpp") == std::string::npos);
+    const auto first_command = read_input(initial.build_directory / "commands/0.sh");
+    REQUIRE(first_command.find("-MMD") != std::string::npos);
+    REQUIRE(first_command.find("-MF") != std::string::npos);
+    REQUIRE(first_command.find("-MT") != std::string::npos);
 }
 
-TEST_CASE("native builder relinks without recompiling when a static library changes") {
+TEST_CASE("native builder tracks static libraries as Ninja link inputs") {
     const auto root = make_sdk_fixture("native-builder-link-only-change",
                                        "libgodot-cpp.macos.template_release.arm64.a");
     gdpp::NativeBuildOptions options;
@@ -623,25 +598,12 @@ TEST_CASE("native builder relinks without recompiling when a static library chan
     const gdpp::NativeBuilder builder;
     const auto first = builder.plan(options);
     REQUIRE(first.success);
-
-    const auto future = std::filesystem::file_time_type::clock::now() + std::chrono::seconds{5};
-    for (const auto& name : {"example_gd_cpp.o", "register_types_cpp.o", "variant_ops_cpp.o"}) {
-        const auto object = root / "project/native-direct/4.4/macos/arm64/release/objects" / name;
-        write_input(object);
-        std::filesystem::last_write_time(object, future);
-    }
-    write_input(first.output_library);
-    std::filesystem::last_write_time(first.output_library, future + std::chrono::seconds{1});
     const auto binding_library = root / "sdk/lib/libgodot-cpp.macos.template_release.arm64.a";
-    std::filesystem::last_write_time(binding_library, future + std::chrono::seconds{2});
-
-    const auto relink = builder.plan(options);
-
-    REQUIRE(relink.success);
-    REQUIRE(!relink.up_to_date);
-    REQUIRE_EQ(relink.commands.size(), std::size_t{1});
-    REQUIRE(contains(relink.commands.front().arguments, "-dynamiclib"));
-    REQUIRE(contains_path(relink.commands.front().arguments, binding_library));
+    REQUIRE_EQ(first.commands.size(), std::size_t{4});
+    REQUIRE(contains(first.commands.back().arguments, "-dynamiclib"));
+    REQUIRE(contains_path(first.commands.back().arguments, binding_library));
+    REQUIRE(read_input(first.build_file).find(binding_library.generic_string()) !=
+            std::string::npos);
 }
 
 TEST_CASE("native builder injects the selected third-party bridge target") {

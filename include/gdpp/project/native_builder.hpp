@@ -46,15 +46,16 @@ struct NativeBuildCommand {
     std::string executable;
     std::vector<std::string> arguments;
     std::filesystem::path working_directory;
-    // Commands execute in stage order and remain strictly serial within a stage. Native compiler
-    // frontends can consume substantial memory for generated project translation units, and
-    // customers must never receive an unbounded burst of toolchain processes during export.
+    // Logical stage metadata is retained for graph validation and progress accounting. Ninja owns
+    // dependency scheduling and bounded parallel execution; these commands are never serialized
+    // into the Godot-facing build plan.
     std::size_t stage{0};
 };
 
 struct NativeBuildPlan {
     bool success{false};
-    bool up_to_date{false};
+    // Complete logical edge descriptions used by native tests and graph construction. Customer
+    // builds receive only the generated Ninja graph contract.
     std::vector<NativeBuildCommand> commands;
     std::vector<std::string> diagnostics;
     std::filesystem::path build_executor;

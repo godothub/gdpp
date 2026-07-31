@@ -12,7 +12,6 @@
 #include <iomanip>
 #include <iterator>
 #include <optional>
-#include <set>
 #include <sstream>
 #include <string_view>
 #include <system_error>
@@ -83,77 +82,6 @@ std::optional<std::string> read_file(const std::filesystem::path& path) {
     if (!input)
         return std::nullopt;
     return std::string{std::istreambuf_iterator<char>{input}, std::istreambuf_iterator<char>{}};
-}
-
-std::vector<std::string> quoted_include_names(std::string_view contents) {
-    std::vector<std::string> result;
-    std::size_t line_begin = 0;
-    while (line_begin < contents.size()) {
-        const auto line_end = contents.find('\n', line_begin);
-        const auto line = contents.substr(line_begin, line_end == std::string_view::npos
-                                                          ? contents.size() - line_begin
-                                                          : line_end - line_begin);
-        auto offset = line.find_first_not_of(" \t");
-        if (offset != std::string_view::npos && line[offset] == '#') {
-            offset = line.find_first_not_of(" \t", offset + 1);
-            constexpr std::string_view directive{"include"};
-            if (offset != std::string_view::npos &&
-                line.substr(offset, directive.size()) == directive) {
-                offset = line.find_first_not_of(" \t", offset + directive.size());
-                if (offset != std::string_view::npos && line[offset] == '"') {
-                    const auto end = line.find('"', offset + 1);
-                    if (end != std::string_view::npos && end != offset + 1)
-                        result.emplace_back(line.substr(offset + 1, end - offset - 1));
-                }
-            }
-        }
-        if (line_end == std::string_view::npos)
-            break;
-        line_begin = line_end + 1;
-    }
-    return result;
-}
-
-std::filesystem::path
-resolve_quoted_include(const std::filesystem::path& including_file, std::string_view name,
-                       const std::vector<std::filesystem::path>& include_directories) {
-    const auto relative = path_from_utf8(name);
-    std::vector<std::filesystem::path> candidates{including_file.parent_path() / relative};
-    for (const auto& directory : include_directories)
-        candidates.push_back(directory / relative);
-    std::error_code error;
-    for (auto& candidate : candidates) {
-        candidate = candidate.lexically_normal();
-        if (std::filesystem::is_regular_file(candidate, error))
-            return candidate;
-        error.clear();
-    }
-    // Preserve an unresolved quoted include as an input. Its missing timestamp forces the
-    // translation unit through the compiler, which then emits the authoritative diagnostic
-    // instead of reusing a stale object built before the dependency disappeared.
-    return candidates.front().lexically_normal();
-}
-
-void append_translation_unit_inputs(const std::filesystem::path& source,
-                                    const std::vector<std::filesystem::path>& include_directories,
-                                    std::vector<std::filesystem::path>& inputs) {
-    std::vector<std::filesystem::path> pending{source.lexically_normal()};
-    std::set<std::filesystem::path> visited;
-    while (!pending.empty()) {
-        auto current = std::move(pending.back());
-        pending.pop_back();
-        if (!visited.insert(current).second)
-            continue;
-        inputs.push_back(current);
-        const auto contents = read_file(current);
-        if (!contents)
-            continue;
-        for (const auto& name : quoted_include_names(*contents)) {
-            auto dependency = resolve_quoted_include(current, name, include_directories);
-            if (visited.find(dependency) == visited.end())
-                pending.push_back(std::move(dependency));
-        }
-    }
 }
 
 std::optional<BridgeBuildInputs> read_bridge_lock(const std::filesystem::path& path,
@@ -715,20 +643,6 @@ std::filesystem::path find_binding_library(const std::filesystem::path& director
     return fallback_candidates.empty() ? std::filesystem::path{} : fallback_candidates.front();
 }
 
-bool older_than(const std::filesystem::path& output,
-                const std::vector<std::filesystem::path>& inputs) {
-    std::error_code error;
-    const auto output_time = std::filesystem::last_write_time(output, error);
-    if (error)
-        return true;
-    for (const auto& input : inputs) {
-        const auto input_time = std::filesystem::last_write_time(input, error);
-        if (error || input_time > output_time)
-            return true;
-    }
-    return false;
-}
-
 void append_include_arguments(std::vector<std::string>& arguments,
                               const std::vector<std::filesystem::path>& includes,
                               NativePlatform platform) {
@@ -1100,6 +1014,37 @@ std::string quote_response_argument(std::string_view argument) {
     output.push_back('"');
     return output;
 }
+
+bool write_msvc_compiler_response_file(const std::filesystem::path& path,
+                                       const std::vector<std::string>& arguments) {
+    // cl.exe accepts Unicode response files as UTF-8 with a BOM. Keep linker response files in
+    // UTF-16LE because link.exe has a separate, well-defined Unicode response-file path.
+    std::string content{"\xef\xbb\xbf"};
+    for (const auto& argument : arguments)
+        content += quote_response_argument(argument) + "\r\n";
+    return write_file_if_changed(path, content).has_value();
+}
+
+bool is_windows_command_script(const std::string_view executable) {
+    auto extension = std::filesystem::path{executable}.extension().string();
+    std::transform(extension.begin(), extension.end(), extension.begin(), [](const char value) {
+        return static_cast<char>(std::tolower(static_cast<unsigned char>(value)));
+    });
+    return extension == ".bat" || extension == ".cmd";
+}
+
+std::string windows_command_invocation(const std::string& executable,
+                                       const std::vector<std::string>& arguments) {
+    std::string command;
+    if (is_windows_command_script(executable))
+        command = "cmd.exe /d /s /c \"";
+    command += quote_response_argument(executable);
+    for (const auto& argument : arguments)
+        command += " " + quote_response_argument(argument);
+    if (is_windows_command_script(executable))
+        command.push_back('"');
+    return command;
+}
 #endif
 
 std::string quote_posix_shell_argument(std::string_view argument) {
@@ -1143,6 +1088,11 @@ std::string escape_ninja_path(const std::filesystem::path& path) {
     return output;
 }
 
+bool ninja_path_supported(const std::filesystem::path& path) {
+    const auto value = generic_path_to_utf8(path);
+    return value.find_first_of("|\r\n") == std::string::npos;
+}
+
 std::string sanitized_description(std::string value) {
     for (char& character : value) {
         if (character == '\r' || character == '\n')
@@ -1151,7 +1101,7 @@ std::string sanitized_description(std::string value) {
     return value;
 }
 
-std::optional<std::filesystem::path>
+std::optional<std::vector<std::filesystem::path>>
 write_ninja_command_file(const NativeBuildOptions& options,
                          const std::filesystem::path& command_directory,
                          const std::size_t index, NativeBuildCommand& command,
@@ -1162,18 +1112,18 @@ write_ninja_command_file(const NativeBuildOptions& options,
                      std::make_move_iterator(extra_arguments.end()));
 #ifdef _WIN32
     const auto response = command_directory / (std::to_string(index) + ".rsp");
-    const bool nested_response =
-        std::any_of(arguments.begin(), arguments.end(),
-                    [](const auto& argument) { return !argument.empty() && argument.front() == '@'; });
-    if (nested_response) {
-        invocation = quote_response_argument(command.executable);
-        for (const auto& argument : arguments)
-            invocation += " " + quote_response_argument(argument);
-        return std::filesystem::path{};
+    std::vector<std::filesystem::path> nested_responses;
+    for (const auto& argument : arguments) {
+        if (!argument.empty() && argument.front() == '@')
+            nested_responses.push_back(path_from_utf8(argument.substr(1)));
+    }
+    if (!nested_responses.empty()) {
+        invocation = windows_command_invocation(command.executable, arguments);
+        return nested_responses;
     }
     const bool written =
         options.platform == NativePlatform::windows
-            ? write_msvc_response_file(response, arguments)
+            ? write_msvc_compiler_response_file(response, arguments)
             : write_file_if_changed(
                   response, [&]() {
                       std::string content;
@@ -1184,10 +1134,9 @@ write_ninja_command_file(const NativeBuildOptions& options,
                   .has_value();
     if (!written)
         return std::nullopt;
-    invocation =
-        quote_response_argument(command.executable) + " @" + quote_response_argument(
-                                                              generic_path_to_utf8(response));
-    return response;
+    invocation = windows_command_invocation(
+        command.executable, {"@" + generic_path_to_utf8(response)});
+    return std::vector<std::filesystem::path>{response};
 #else
     (void)options;
     const auto script = command_directory / (std::to_string(index) + ".sh");
@@ -1203,7 +1152,7 @@ write_ninja_command_file(const NativeBuildOptions& options,
     if (!write_file_if_changed(script, content))
         return std::nullopt;
     invocation = "/bin/sh " + quote_posix_shell_argument(generic_path_to_utf8(script));
-    return script;
+    return std::vector<std::filesystem::path>{script};
 #endif
 }
 
@@ -1212,6 +1161,25 @@ bool write_ninja_graph(const NativeBuildOptions& options,
                        std::vector<NinjaBuildEdge> edges,
                        const std::vector<std::filesystem::path>& final_outputs,
                        NativeBuildPlan& plan) {
+    if (!ninja_path_supported(native) || !ninja_path_supported(options.build_executor)) {
+        plan.diagnostics.emplace_back(
+            "Ninja build paths cannot contain a vertical bar or a line break");
+        return false;
+    }
+    for (const auto& edge : edges) {
+        const auto invalid_input =
+            std::find_if(edge.inputs.begin(), edge.inputs.end(),
+                         [](const auto& path) { return !ninja_path_supported(path); });
+        const auto invalid_output =
+            std::find_if(edge.outputs.begin(), edge.outputs.end(),
+                         [](const auto& path) { return !ninja_path_supported(path); });
+        if (invalid_input != edge.inputs.end() || invalid_output != edge.outputs.end() ||
+            (!edge.depfile.empty() && !ninja_path_supported(edge.depfile))) {
+            plan.diagnostics.emplace_back(
+                "Ninja build paths cannot contain a vertical bar or a line break");
+            return false;
+        }
+    }
     const auto command_directory = native / "commands";
     std::error_code error;
     std::filesystem::create_directories(command_directory, error);
@@ -1227,6 +1195,8 @@ bool write_ninja_graph(const NativeBuildOptions& options,
     std::vector<std::filesystem::path> compile_outputs;
     for (std::size_t index = 0; index < edges.size(); ++index) {
         auto& edge = edges[index];
+        if (const auto executable = resolve_compiler_path(edge.command.executable))
+            edge.inputs.push_back(*executable);
         std::vector<std::string> dependency_arguments;
         if (edge.compiler_dependencies) {
             if (options.platform == NativePlatform::windows) {
@@ -1239,15 +1209,14 @@ bool write_ninja_graph(const NativeBuildOptions& options,
             }
         }
         std::string invocation;
-        const auto command_file =
+        const auto command_files =
             write_ninja_command_file(options, command_directory, index, edge.command,
                                      std::move(dependency_arguments), invocation);
-        if (!command_file) {
+        if (!command_files) {
             plan.diagnostics.emplace_back("cannot write Ninja command response");
             return false;
         }
-        if (!command_file->empty())
-            edge.inputs.push_back(*command_file);
+        edge.inputs.insert(edge.inputs.end(), command_files->begin(), command_files->end());
 
         const auto rule = "gdpp_edge_" + std::to_string(index);
         graph += "rule " + rule + "\n";
@@ -1620,11 +1589,24 @@ NativeBuildPlan NativeBuilder::plan(const NativeBuildOptions& options) const {
         web_thread_mode_name(options.web_thread_mode) + "\nbuild_engine " +
         std::string{native_build_engine} + "\nbuild_executor " +
         path_to_utf8(options.build_executor) + "\n";
+    if (const auto compiler = resolve_compiler_path(options.compiler_executable)) {
+        std::error_code compiler_error;
+        const auto size = std::filesystem::file_size(*compiler, compiler_error);
+        if (!compiler_error) {
+            const auto modified = std::filesystem::last_write_time(*compiler, compiler_error);
+            if (!compiler_error) {
+                build_configuration_contents +=
+                    "compiler_resolved " + path_to_utf8(*compiler) + "\ncompiler_size " +
+                    std::to_string(size) + "\ncompiler_modified " +
+                    std::to_string(
+                        static_cast<std::int64_t>(modified.time_since_epoch().count())) +
+                    "\n";
+            }
+        }
+    }
     for (const auto& [source, replacement] : reproducible_path_mappings(options))
         build_configuration_contents += "path_map " + source + "=" + replacement + "\n";
-    const auto build_configuration_changed =
-        write_file_if_changed(build_configuration, build_configuration_contents);
-    if (!build_configuration_changed) {
+    if (!write_file_if_changed(build_configuration, build_configuration_contents)) {
         result.diagnostics.emplace_back("cannot write native build configuration signature");
         return result;
     }
@@ -1665,18 +1647,6 @@ NativeBuildPlan NativeBuilder::plan(const NativeBuildOptions& options) const {
         common_compile_inputs.push_back(bridge_lock);
     common_compile_inputs.insert(common_compile_inputs.end(), bridge_inputs->manifests.begin(),
                                  bridge_inputs->manifests.end());
-    for (const auto& include : bridge_inputs->include_directories) {
-        for (std::filesystem::recursive_directory_iterator iterator{include, error}, end;
-             !error && iterator != end; iterator.increment(error)) {
-            if (iterator->is_regular_file())
-                common_compile_inputs.push_back(iterator->path());
-        }
-        if (error) {
-            result.diagnostics.push_back("cannot inspect third-party bridge headers in '" +
-                                         path_to_utf8(include) + "': " + error.message());
-            return result;
-        }
-    }
     std::sort(common_compile_inputs.begin(), common_compile_inputs.end());
     common_compile_inputs.erase(
         std::unique(common_compile_inputs.begin(), common_compile_inputs.end()),
@@ -1706,7 +1676,6 @@ NativeBuildPlan NativeBuilder::plan(const NativeBuildOptions& options) const {
         result.pending_output_library = staging_directory / result.output_library.filename();
 
         std::vector<std::filesystem::path> slice_libraries;
-        std::vector<bool> slice_relinked;
         for (const auto& slice : slices) {
             const auto slice_directory = native / slice.name;
             const auto slice_objects = slice_directory / "objects";
@@ -1717,12 +1686,11 @@ NativeBuildPlan NativeBuilder::plan(const NativeBuildOptions& options) const {
                 return result;
             }
             std::vector<std::filesystem::path> objects;
-            bool compiled = false;
             for (const auto& source : sources) {
                 const auto object = slice_objects / (safe_stem(source) + ".o");
                 objects.push_back(object);
                 auto inputs = common_compile_inputs;
-                append_translation_unit_inputs(source, includes, inputs);
+                inputs.push_back(source);
                 auto command = ios_compile_command(options, slice, source, object, includes);
                 graph_edges.push_back(
                     {command,
@@ -1731,10 +1699,7 @@ NativeBuildPlan NativeBuilder::plan(const NativeBuildOptions& options) const {
                      source.filename().string(),
                      std::filesystem::path{path_to_utf8(object) + ".d"},
                      true});
-                if (*build_configuration_changed || older_than(object, inputs)) {
-                    result.commands.push_back(std::move(command));
-                    compiled = true;
-                }
+                result.commands.push_back(std::move(command));
             }
             const auto slice_library = slice_directory / "libgdpp.dylib";
             slice_libraries.push_back(slice_library);
@@ -1743,16 +1708,12 @@ NativeBuildPlan NativeBuilder::plan(const NativeBuildOptions& options) const {
             link_inputs.push_back(export_map);
             link_inputs.insert(link_inputs.end(), bridge_inputs->link_libraries.begin(),
                                bridge_inputs->link_libraries.end());
-            const bool relink = compiled || older_than(slice_library, link_inputs);
-            slice_relinked.push_back(relink);
             auto command = ios_link_command(options, slice, objects,
                                             bridge_inputs->link_libraries, slice_library,
                                             export_map);
             graph_edges.push_back(
                 {command, link_inputs, {slice_library}, "Linking " + slice.name, {}, false});
-            if (relink) {
-                result.commands.push_back(std::move(command));
-            }
+            result.commands.push_back(std::move(command));
         }
 
         const auto simulator_directory = native / "simulator-universal";
@@ -1763,21 +1724,6 @@ NativeBuildPlan NativeBuilder::plan(const NativeBuildOptions& options) const {
             return result;
         }
         const auto simulator_library = simulator_directory / "libgdpp.dylib";
-        const bool relipo = slice_relinked[1] || slice_relinked[2] ||
-                            older_than(simulator_library, {slice_libraries[1], slice_libraries[2]});
-        if (relipo) {
-            NativeBuildCommand command;
-            command.executable = options.compiler_executable;
-            command.working_directory = options.project_output_directory;
-            command.stage = 2;
-            command.arguments = {"lipo",
-                                 "-create",
-                                 path_to_utf8(slice_libraries[1]),
-                                 path_to_utf8(slice_libraries[2]),
-                                 "-output",
-                                 path_to_utf8(simulator_library)};
-            result.commands.push_back(std::move(command));
-        }
         {
             NativeBuildCommand command;
             command.executable = options.compiler_executable;
@@ -1789,39 +1735,20 @@ NativeBuildPlan NativeBuilder::plan(const NativeBuildOptions& options) const {
                                  path_to_utf8(slice_libraries[2]),
                                  "-output",
                                  path_to_utf8(simulator_library)};
-            graph_edges.push_back({std::move(command),
+            graph_edges.push_back({command,
                                    {slice_libraries[1], slice_libraries[2]},
                                    {simulator_library},
                                    "Combining Simulator slices",
                                    {},
                                    false});
+            result.commands.push_back(std::move(command));
         }
 
-        const bool repackage = slice_relinked[0] || relipo ||
-                               older_than(result.output_library / "Info.plist",
-                                          {slice_libraries[0], simulator_library});
-        if (repackage) {
-            std::filesystem::remove_all(result.pending_output_library, error);
-            if (error) {
-                result.diagnostics.push_back("cannot clear stale iOS XCFramework staging output: " +
-                                             error.message());
-                return result;
-            }
-            std::filesystem::create_directories(staging_directory, error);
-            if (error) {
-                result.diagnostics.push_back("cannot create iOS XCFramework staging directory: " +
-                                             error.message());
-                return result;
-            }
-            NativeBuildCommand command;
-            command.executable = options.compiler_executable;
-            command.working_directory = options.project_output_directory;
-            command.stage = 3;
-            command.arguments = {"xcodebuild", "-create-xcframework",
-                                 "-library",   path_to_utf8(slice_libraries[0]),
-                                 "-library",   path_to_utf8(simulator_library),
-                                 "-output",    path_to_utf8(result.pending_output_library)};
-            result.commands.push_back(std::move(command));
+        std::filesystem::create_directories(staging_directory, error);
+        if (error) {
+            result.diagnostics.push_back("cannot create iOS XCFramework staging directory: " +
+                                         error.message());
+            return result;
         }
         {
             NativeBuildCommand command;
@@ -1833,14 +1760,14 @@ NativeBuildPlan NativeBuilder::plan(const NativeBuildOptions& options) const {
                                  "-library",   path_to_utf8(simulator_library),
                                  "-output",    path_to_utf8(result.pending_output_library)};
             graph_edges.push_back(
-                {std::move(command),
+                {command,
                  {slice_libraries[0], simulator_library},
                  {result.pending_output_library / "Info.plist"},
                  "Packaging XCFramework",
                  {},
                  false});
+            result.commands.push_back(std::move(command));
         }
-        result.up_to_date = result.commands.empty();
         if (!write_ninja_graph(options, native, std::move(graph_edges),
                                {result.pending_output_library / "Info.plist"}, result))
             return result;
@@ -1849,13 +1776,12 @@ NativeBuildPlan NativeBuilder::plan(const NativeBuildOptions& options) const {
     }
 
     std::vector<std::filesystem::path> objects;
-    bool compiled = false;
     for (const auto& source : sources) {
         const auto object =
             objects_directory / (safe_stem(source) + object_extension(options.platform));
         objects.push_back(object);
         auto inputs = common_compile_inputs;
-        append_translation_unit_inputs(source, includes, inputs);
+        inputs.push_back(source);
         auto command = compile_command(options, source, object, includes);
         graph_edges.push_back(
             {command,
@@ -1864,10 +1790,7 @@ NativeBuildPlan NativeBuilder::plan(const NativeBuildOptions& options) const {
              source.filename().string(),
              std::filesystem::path{path_to_utf8(object) + ".d"},
              true});
-        if (*build_configuration_changed || older_than(object, inputs)) {
-            result.commands.push_back(std::move(command));
-            compiled = true;
-        }
+        result.commands.push_back(std::move(command));
     }
     auto link_inputs = objects;
     link_inputs.push_back(binding_library);
@@ -1884,10 +1807,7 @@ NativeBuildPlan NativeBuilder::plan(const NativeBuildOptions& options) const {
     }
     graph_edges.push_back(
         {*command, link_inputs, {result.output_library}, "Linking native library", {}, false});
-    if (compiled || older_than(result.output_library, link_inputs)) {
-        result.commands.push_back(std::move(*command));
-    }
-    result.up_to_date = result.commands.empty();
+    result.commands.push_back(std::move(*command));
     if (!write_ninja_graph(options, native, std::move(graph_edges), {result.output_library},
                            result))
         return result;
