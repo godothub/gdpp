@@ -32,6 +32,7 @@ struct NativeBuildOptions {
     std::filesystem::path project_output_directory;
     std::filesystem::path binary_output_directory;
     std::filesystem::path sdk_root;
+    std::filesystem::path build_executor;
     std::string compiler_executable;
     NativePlatform platform{NativePlatform::linux};
     std::string architecture{"x86_64"};
@@ -56,6 +57,12 @@ struct NativeBuildPlan {
     bool up_to_date{false};
     std::vector<NativeBuildCommand> commands;
     std::vector<std::string> diagnostics;
+    std::filesystem::path build_executor;
+    std::filesystem::path build_directory;
+    std::filesystem::path build_file;
+    std::string build_target{"gdpp"};
+    std::size_t compile_edge_count{0};
+    std::size_t post_compile_edge_count{0};
     std::filesystem::path output_library;
     // Directory artifacts such as an Apple XCFramework are assembled away from the customer
     // output and committed only after the complete build succeeds.
