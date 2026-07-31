@@ -80,7 +80,7 @@ jobs:
         run: |
           set -euo pipefail
           root="$GDPP_SOURCE_ROOT/build/release-package-smoke"
-          project="$root/project"
+          project="$root/客户项目-é"
           archive="$root/archive/${{ matrix.archive }}"
           test -f "$archive"
           rm -rf "$project"
@@ -89,6 +89,18 @@ jobs:
           unzip -q "$archive" -d "$project"
           test -f "$project/addons/gdpp/plugin.cfg"
           test -f "$project/addons/gdpp/gdpp.gdextension"
+          if [[ "$RUNNER_OS" == macOS ]]; then
+            executor="$project/addons/gdpp/tools/mac-universal/gdpp-ninja"
+          elif [[ "$RUNNER_OS" == Windows ]]; then
+            executor="$project/addons/gdpp/tools/windows-x64/gdpp-ninja.exe"
+          else
+            executor="$project/addons/gdpp/tools/linux-x64/gdpp-ninja"
+          fi
+          test -f "$executor"
+          test "$("$executor" --version)" = 1.13.2
+          diff -u \
+            <(printf 'Ninja 1.13.2\ncommit 3441b633c2fe2c494e958780ba0f4227b1327634\n') \
+            "$project/addons/gdpp/tools/NINJA-VERSION.txt"
           test "$(find "$project/addons/gdpp/sdk" -mindepth 1 -maxdepth 1 \
             -type d | wc -l)" -eq 2
           test -d "$project/addons/gdpp/sdk/4.6"
@@ -123,7 +135,7 @@ jobs:
         run: |
           set -euo pipefail
           root="$GDPP_SOURCE_ROOT/build/release-package-smoke"
-          project="$root/project"
+          project="$root/客户项目-é"
           output_root="$root/output"
           mkdir -p "$output_root"
           if [[ "$RUNNER_OS" == macOS ]]; then

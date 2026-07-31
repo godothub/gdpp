@@ -97,8 +97,23 @@ jobs:
         run: |
           set -euo pipefail
           package=example/addons/gdpp
+          executor="$package/tools/${{ matrix.host }}/gdpp-ninja"
+          if [[ "$RUNNER_OS" == Windows ]]; then
+            executor="$executor.exe"
+          fi
           version="$(sed -n 's/^version="\([^"]*\)"$/\1/p' "$package/plugin.cfg")"
           test -n "$version"
+          test -f "$executor"
+          test "$("$executor" --version)" = 1.13.2
+          test "$(git -C third/ninja rev-parse HEAD)" \
+            = 3441b633c2fe2c494e958780ba0f4227b1327634
+          test "$(find "$package/tools" -mindepth 2 -maxdepth 2 \
+            -type f -name 'gdpp-ninja*' | wc -l)" -eq 1
+          diff -u \
+            <(printf 'Ninja 1.13.2\ncommit 3441b633c2fe2c494e958780ba0f4227b1327634\n') \
+            "$package/tools/NINJA-VERSION.txt"
+          test -s "$package/tools/NINJA-LICENSE.txt"
+          test -f "$package/tools/.gdignore"
           test "$(find "$package/sdk" -mindepth 1 -maxdepth 1 -type d | wc -l)" -eq 4
           for godot in 4.4 4.5 4.6 4.7; do
             sdk="$package/sdk/$godot"

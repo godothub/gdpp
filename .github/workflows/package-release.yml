@@ -144,7 +144,7 @@ jobs:
               grep -Fqx "addons/gdpp/${static_file}" "$contents"
             done
             grep -Fqx 'addons/gdpp/PACKAGE_MANIFEST.txt' "$contents"
-            grep -q '^GDPP_PACKAGE 6$' \
+            grep -q '^GDPP_PACKAGE 7$' \
               <(unzip -p "$archive" addons/gdpp/PACKAGE_MANIFEST.txt)
             grep -q '^kind multi-host$' \
               <(unzip -p "$archive" addons/gdpp/PACKAGE_MANIFEST.txt)
@@ -152,6 +152,30 @@ jobs:
               <(unzip -p "$archive" addons/gdpp/PACKAGE_MANIFEST.txt)
             grep -q '^sdk_layout shared-target-manifests$' \
               <(unzip -p "$archive" addons/gdpp/PACKAGE_MANIFEST.txt)
+            grep -q '^build_executor Ninja_1.13.2$' \
+              <(unzip -p "$archive" addons/gdpp/PACKAGE_MANIFEST.txt)
+            if [[ "$edition" == lite ]]; then
+              expected_executor_hosts='mac-universal,windows-x64'
+            else
+              expected_executor_hosts='mac-universal,linux-x64,windows-x64'
+            fi
+            grep -q "^build_executor_hosts ${expected_executor_hosts}$" \
+              <(unzip -p "$archive" addons/gdpp/PACKAGE_MANIFEST.txt)
+            diff -u \
+              <(printf 'Ninja 1.13.2\ncommit 3441b633c2fe2c494e958780ba0f4227b1327634\n') \
+              <(unzip -p "$archive" addons/gdpp/tools/NINJA-VERSION.txt)
+            grep -Fqx 'addons/gdpp/tools/NINJA-LICENSE.txt' "$contents"
+            grep -Fqx 'addons/gdpp/tools/.gdignore' "$contents"
+            test "$(grep -Ec '^addons/gdpp/tools/[^/]+/gdpp-ninja(\.exe)?$' \
+              "$contents")" -eq "$(tr ',' '\n' <<<"$expected_executor_hosts" | wc -l)"
+            for executor_host in ${expected_executor_hosts//,/ }; do
+              executable=gdpp-ninja
+              if [[ "$executor_host" == windows-x64 ]]; then
+                executable=gdpp-ninja.exe
+              fi
+              grep -Fqx \
+                "addons/gdpp/tools/$executor_host/$executable" "$contents"
+            done
             grep -q "^edition ${edition}$" \
               <(unzip -p "$archive" addons/gdpp/PACKAGE_MANIFEST.txt)
             grep -q "^target_godot_apis ${expected_csv}$" \
