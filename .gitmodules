@@ -4,3 +4,6 @@
 [submodule "ci"]
 	path = ci
 	url = https://github.com/godothub/gdpp.git
+[submodule "third/ninja"]
+	path = third/ninja
+	url = https://github.com/ninja-build/ninja.git
