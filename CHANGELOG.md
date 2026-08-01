@@ -8,6 +8,7 @@
 - Enforce exact Ninja version, commit, host matrix, metadata, executable permissions, non-ASCII installed-project export, failure recovery, and source-free package boundaries throughout release assembly.
 - Commit iOS XCFrameworks through validated same-volume transactions with content-based reuse and interrupted-replacement recovery.
 - Keep project, generated, snapshot, SDK, response-file, and artifact paths UTF-8 across every compiler boundary, preventing Windows exports from depending on the active ANSI code page.
+- Bound Windows toolchain output capture to the Ninja process lifetime so persistent MSVC helper processes cannot hold a completed export open through inherited pipe handles.
 
 ## 1.8.4
 
