@@ -231,8 +231,25 @@ def safe_windows_dump_evidence(output: str) -> list[str]:
     )
     evidence: list[str] = []
     in_stack = False
+    in_raw_stack = False
     for raw_line in output.splitlines():
         line = raw_line.strip()
+        if line == "GDPP_RAW_STACK_BEGIN":
+            evidence.append("RAW_STACK_POINTERS:")
+            in_raw_stack = True
+            continue
+        if line == "GDPP_RAW_STACK_END":
+            in_raw_stack = False
+            continue
+        if in_raw_stack:
+            if re.match(
+                r"^[0-9a-fA-F`]{8,}\s+[0-9a-fA-F`]{8,}\s+"
+                r"\S*gdpp_compiler\.windows\.x86_64(?:\.dll)?\+0x[0-9a-fA-F]+$",
+                line,
+                re.IGNORECASE,
+            ):
+                evidence.append(line)
+            continue
         if line == "STACK_TEXT:":
             evidence.append(line)
             in_stack = True
@@ -245,7 +262,7 @@ def safe_windows_dump_evidence(output: str) -> list[str]:
             continue
         if line.startswith(fields):
             evidence.append(line)
-    return evidence[:80]
+    return evidence[:160]
 
 
 def report_windows_local_dump(label: str, dump_directory: Path) -> None:
@@ -274,7 +291,11 @@ def report_windows_local_dump(label: str, dump_directory: Path) -> None:
                 "-z",
                 str(dump),
                 "-c",
-                "!analyze -v; .ecxr; k; q",
+                (
+                    "!analyze -v; .ecxr; k; "
+                    ".echo GDPP_RAW_STACK_BEGIN; dps @rsp L100; "
+                    ".echo GDPP_RAW_STACK_END; q"
+                ),
             ],
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,

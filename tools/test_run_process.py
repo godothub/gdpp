@@ -100,11 +100,32 @@ STACK_TEXT:
 MODULE_NAME: gdpp_compiler
 IMAGE_NAME: gdpp_compiler.windows.x86_64.dll
 FAILURE_BUCKET_ID: FAIL_FAST_FATAL_APP_EXIT_c0000409
+GDPP_RAW_STACK_BEGIN
+000000ab`1234f000 00007ff9`11112222 gdpp_compiler.windows.x86_64+0x1234
+000000ab`1234f008 00007ff9`33334444 private_customer_module+0x5678
+000000ab`1234f010 00007ff9`55556666 ~gdpp_compiler.windows.x86_64+0x9abc
+GDPP_RAW_STACK_END
 """
         evidence = RUN_PROCESS.safe_windows_dump_evidence(output)
         self.assertIn("PROCESS_NAME:  Godot_v4.7.1-stable_win64.exe", evidence)
         self.assertIn("MODULE_NAME: gdpp_compiler", evidence)
         self.assertTrue(any("gdpp_compiler+0x1234" in line for line in evidence))
+        self.assertIn("RAW_STACK_POINTERS:", evidence)
+        self.assertTrue(
+            any(
+                "gdpp_compiler.windows.x86_64+0x1234" in line
+                for line in evidence
+            )
+        )
+        self.assertTrue(
+            any(
+                "~gdpp_compiler.windows.x86_64+0x9abc" in line
+                for line in evidence
+            )
+        )
+        self.assertFalse(
+            any("private_customer_module" in line for line in evidence)
+        )
         self.assertNotIn("private", "\n".join(evidence).lower())
 
     def test_procdump_launch_preserves_the_exact_child_argument_vector(self) -> None:
