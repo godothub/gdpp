@@ -77,6 +77,9 @@ ZIP 外层包含 `addons/gdpp`，不需要手工移动文件。然后在 Godot �
 链接器。`cl.exe`、`link.exe` 和 bootstrap 不创建可见控制台窗口。找不到时导出预检给出安装
 x64 C++ tools 或配置 `gdpp/build/cpp_compiler` 的错误，不尝试硬编码用户目录。
 
+Godot 和 GDPP manifest 提供的路径统一按 UTF-8 进入编译器，Windows 文件系统调用和子进程边界
+使用原生宽字符；项目名、资源目录、生成文件、SDK、快照与响应文件不经过活动 ANSI 代码页。
+
 ### macOS
 
 桌面目标使用配置的 `c++`/AppleClang。iOS 使用 `xcrun --find clang++`、当前

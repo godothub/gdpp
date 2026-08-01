@@ -7,6 +7,7 @@
 - Capture editor paths and extension contracts before each build, run the frontend and Ninja toolchain on an isolated worker, and deliver progress through a main-thread queue without cross-thread Godot or GDScript calls.
 - Enforce exact Ninja version, commit, host matrix, metadata, executable permissions, non-ASCII installed-project export, failure recovery, and source-free package boundaries throughout release assembly.
 - Commit iOS XCFrameworks through validated same-volume transactions with content-based reuse and interrupted-replacement recovery.
+- Keep project, generated, snapshot, SDK, response-file, and artifact paths UTF-8 across every compiler boundary, preventing Windows exports from depending on the active ANSI code page.
 
 ## 1.8.4
 
