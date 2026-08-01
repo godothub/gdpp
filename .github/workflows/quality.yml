@@ -72,6 +72,10 @@ jobs:
         run: python3 "$GITHUB_WORKSPACE/tools/check_workflow_topology.py"
       - name: Validate public diagnostic source-disclosure guard
         run: python3 "$GITHUB_WORKSPACE/tools/test_audit_public_artifact.py"
+      - name: Validate portable process and log-contract runners
+        run: |
+          python3 "$GITHUB_WORKSPACE/tools/test_run_process.py"
+          python3 "$GITHUB_WORKSPACE/tools/test_check_log_contract.py"
       - name: Reject mutable external Action references
         shell: bash
         run: |

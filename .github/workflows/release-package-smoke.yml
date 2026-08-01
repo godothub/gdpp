@@ -220,59 +220,42 @@ jobs:
             exit 1
           fi
 
-          python3 - "$runtime" "$root/runtime.log" "$root/coroutine-loop.log" \
-            "$root/runtime-failure.log" <<'PY'
-          from pathlib import Path
-          import subprocess
-          import sys
+          python3 "$GITHUB_WORKSPACE/tools/run_process.py" \
+            --label installed-runtime --log "$root/runtime.log" \
+            --timeout-seconds 30 -- \
+            "$runtime" --headless --quit-after 2
+          python3 "$GITHUB_WORKSPACE/tools/run_process.py" \
+            --label installed-coroutine-loop --log "$root/coroutine-loop.log" \
+            --timeout-seconds 30 -- \
+            "$runtime" --headless --audio-driver Dummy -- --gdpp-coroutine-loop
+          python3 "$GITHUB_WORKSPACE/tools/run_process.py" \
+            --label installed-runtime-failure --log "$root/runtime-failure.log" \
+            --timeout-seconds 30 -- \
+            "$runtime" --headless --audio-driver Dummy -- --gdpp-runtime-failure
+          python3 "$GITHUB_WORKSPACE/tools/check_log_contract.py" \
+            "$root/runtime.log" \
+            --line GDPP_EXPORTED_PROPERTIES_OK \
+            --line GDPP_ASYNC_VIRTUAL_OK
+          python3 "$GITHUB_WORKSPACE/tools/check_log_contract.py" \
+            "$root/coroutine-loop.log" \
+            --line GDPP_COROUTINE_LOOP_OK
+          python3 "$GITHUB_WORKSPACE/tools/check_log_contract.py" \
+            "$root/runtime-failure.log" \
+            --line GDPP_RUNTIME_FAILURE_OK
+          python3 "$GITHUB_WORKSPACE/tools/check_log_contract.py" \
+            "$root/export.log" \
+            --contains 'GDPP_AOT_SUMMARY scenes='
 
-          executable, runtime_log, coroutine_log, failure_log = sys.argv[1:]
-          cases = (
-              (["--headless", "--quit-after", "2"], runtime_log),
-              (
-                  [
-                      "--headless",
-                      "--audio-driver",
-                      "Dummy",
-                      "--",
-                      "--gdpp-coroutine-loop",
-                  ],
-                  coroutine_log,
-              ),
-              (
-                  [
-                      "--headless",
-                      "--audio-driver",
-                      "Dummy",
-                      "--",
-                      "--gdpp-runtime-failure",
-                  ],
-                  failure_log,
-              ),
+          mapfile -t pcks < <(
+            find "$output_root" -type f -name '*.pck' | LC_ALL=C sort
           )
-          for arguments, log_path in cases:
-              result = subprocess.run(
-                  [executable, *arguments],
-                  stdout=subprocess.PIPE,
-                  stderr=subprocess.STDOUT,
-                  text=True,
-                  timeout=30,
-                  check=False,
-              )
-              Path(log_path).write_text(result.stdout, encoding="utf-8", newline="\n")
-              print(result.stdout, end="")
-              if result.returncode:
-                  raise SystemExit(result.returncode)
-          PY
-          grep -q '^GDPP_RUNTIME_FAILURE_OK$' "$root/runtime-failure.log"
-          grep -q '^GDPP_EXPORTED_PROPERTIES_OK$' "$root/runtime.log"
-          grep -q '^GDPP_ASYNC_VIRTUAL_OK$' "$root/runtime.log"
-          grep -q '^GDPP_COROUTINE_LOOP_OK$' "$root/coroutine-loop.log"
-          grep -q 'GDPP_AOT_SUMMARY scenes=' "$root/export.log"
-
-          test "$(find "$output_root" -type f -name '*.pck' | wc -l)" -eq 1
-          pck="$(find "$output_root" -type f -name '*.pck' | LC_ALL=C sort | head -n 1)"
-          test -n "$pck"
+          if [[ ${#pcks[@]} -ne 1 ]]; then
+            printf 'Installed release export produced %d PCK files; expected 1.\n' \
+              "${#pcks[@]}"
+            printf 'PCK: %s\n' "${pcks[@]}"
+            exit 1
+          fi
+          pck="${pcks[0]}"
           audit="$root/pck-audit"
           mkdir -p "$audit"
           cp tools/audit_export_pck.gd "$audit/audit_export_pck.gd"
@@ -282,8 +265,10 @@ jobs:
             --script "$audit/audit_export_pck.gd" -- \
             "$pck" "$output_root" "$project_library" \
             2>&1 | tee "$root/pck-audit.log"
-          grep -q '^PCK_AUDIT_VIOLATIONS=0$' "$root/pck-audit.log"
-          grep -q '^PCK_AUDIT_PROJECT_LIBRARIES=1$' "$root/pck-audit.log"
+          python3 "$GITHUB_WORKSPACE/tools/check_log_contract.py" \
+            "$root/pck-audit.log" \
+            --line PCK_AUDIT_VIOLATIONS=0 \
+            --line PCK_AUDIT_PROJECT_LIBRARIES=1
 
           if grep -E -q '(^| )ERROR:|SCRIPT ERROR:|Parse Error:|WARNING:|Unable to open' \
               "$root/warmup.log" "$root/import.log" "$root/export.log" \

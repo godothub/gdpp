@@ -11,7 +11,9 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW_ROOT = ROOT / ".github/workflows"
-PORTABLE_RUNTIME_LOG = 'Path(log_path).write_text(result.stdout, encoding="utf-8", newline="\\n")'
+PORTABLE_RUNTIME_LOG = (
+    'Path(log_path).write_text(result.stdout, encoding="utf-8", newline="\\n")'
+)
 
 
 def fail(message: str) -> None:
@@ -156,13 +158,21 @@ def main() -> int:
         if source_checkouts == 0:
             fail(f"{name} must check out private source")
 
-    runtime_log_workflows = ("host-components.yml", "release-package-smoke.yml")
+    runtime_log_workflows = ("host-components.yml",)
     for name in runtime_log_workflows:
         source = (WORKFLOW_ROOT / name).read_text(encoding="utf-8")
         writes = source.count("Path(log_path).write_text(result.stdout")
         portable_writes = source.count(PORTABLE_RUNTIME_LOG)
         if writes == 0 or portable_writes != writes:
             fail(f"{name} must persist subprocess logs with portable LF line endings")
+
+    smoke_source = (WORKFLOW_ROOT / "release-package-smoke.yml").read_text(
+        encoding="utf-8"
+    )
+    if smoke_source.count("$GITHUB_WORKSPACE/tools/run_process.py") != 4:
+        fail("release-package-smoke.yml must diagnose export and all runtime processes")
+    if smoke_source.count("$GITHUB_WORKSPACE/tools/check_log_contract.py") != 5:
+        fail("release-package-smoke.yml must validate every portable log contract")
 
     print(
         f"Validated {len(parallel)} parallel producers, one gated package stage, "
