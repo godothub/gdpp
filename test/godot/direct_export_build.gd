@@ -199,7 +199,10 @@ func _drain_progress(compiler: Object) -> void:
 
 
 func _on_progress(phase: String, completed: int, total: int) -> void:
-    _progress_on_main_thread = _progress_on_main_thread and Thread.is_main_thread()
+    _progress_on_main_thread = (
+        _progress_on_main_thread
+        and OS.get_thread_caller_id() == OS.get_main_thread_id()
+    )
     _progress_events.append({
         "phase": phase,
         "completed": completed,
