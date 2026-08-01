@@ -9,6 +9,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
@@ -101,30 +102,169 @@ def parse_windows_application_errors(
 def report_windows_application_errors(label: str, executable_name: str) -> None:
     if os.name != "nt":
         return
+    for attempt in range(6):
+        try:
+            query = subprocess.run(
+                [
+                    "wevtutil",
+                    "qe",
+                    "Application",
+                    "/q:*[System[(EventID=1000)]]",
+                    "/f:xml",
+                    "/rd:true",
+                    "/c:20",
+                ],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                check=False,
+            )
+        except OSError:
+            return
+        records = parse_windows_application_errors(query.stdout, executable_name)
+        if records:
+            for record in records[:3]:
+                print(
+                    f"{label}: application_error app={record['app']} "
+                    f"module={record['module']} exception={record['exception']} "
+                    f"offset={record['offset']}",
+                    flush=True,
+                )
+            return
+        if attempt != 5:
+            time.sleep(2)
+
+
+def configure_windows_local_dumps(executable_name: str, dump_directory: Path) -> bool:
+    if os.name != "nt":
+        return False
+    configured = os.environ.get("GDPP_WINDOWS_LOCAL_DUMPS", "").strip()
+    if configured != "1":
+        return False
     try:
-        query = subprocess.run(
+        import winreg
+
+        dump_directory.mkdir(parents=True, exist_ok=True)
+        for existing in dump_directory.glob("*.dmp"):
+            existing.unlink()
+        key_path = (
+            r"Software\Microsoft\Windows\Windows Error Reporting\LocalDumps"
+            rf"\{executable_name}"
+        )
+        with winreg.CreateKeyEx(
+            winreg.HKEY_CURRENT_USER,
+            key_path,
+            0,
+            winreg.KEY_SET_VALUE,
+        ) as key:
+            winreg.SetValueEx(
+                key,
+                "DumpFolder",
+                0,
+                winreg.REG_EXPAND_SZ,
+                str(dump_directory.resolve()),
+            )
+            winreg.SetValueEx(key, "DumpType", 0, winreg.REG_DWORD, 2)
+            winreg.SetValueEx(key, "DumpCount", 0, winreg.REG_DWORD, 1)
+    except (OSError, ImportError):
+        return False
+    return True
+
+
+def find_windows_debugger() -> Path | None:
+    if os.name != "nt":
+        return None
+    from_path = shutil.which("cdb.exe")
+    if from_path:
+        return Path(from_path)
+    roots = [
+        os.environ.get("ProgramFiles(x86)", ""),
+        os.environ.get("ProgramFiles", ""),
+    ]
+    for root in roots:
+        if not root:
+            continue
+        candidate = Path(root) / "Windows Kits" / "10" / "Debuggers" / "x64" / "cdb.exe"
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def safe_windows_dump_evidence(output: str) -> list[str]:
+    fields = (
+        "PROCESS_NAME:",
+        "EXCEPTION_CODE:",
+        "ERROR_CODE:",
+        "EXCEPTION_STR:",
+        "SYMBOL_NAME:",
+        "MODULE_NAME:",
+        "IMAGE_NAME:",
+        "FAILURE_BUCKET_ID:",
+    )
+    evidence: list[str] = []
+    in_stack = False
+    for raw_line in output.splitlines():
+        line = raw_line.strip()
+        if line == "STACK_TEXT:":
+            evidence.append(line)
+            in_stack = True
+            continue
+        if in_stack and re.match(r"^[0-9a-fA-F`]{8,}\s+", line):
+            evidence.append(line)
+            continue
+        if in_stack and not line:
+            in_stack = False
+            continue
+        if line.startswith(fields):
+            evidence.append(line)
+    return evidence[:80]
+
+
+def report_windows_local_dump(label: str, dump_directory: Path) -> None:
+    if os.name != "nt":
+        return
+    dumps: list[Path] = []
+    for attempt in range(10):
+        dumps = sorted(dump_directory.glob("*.dmp"), key=lambda path: path.stat().st_mtime)
+        if dumps:
+            break
+        if attempt != 9:
+            time.sleep(1)
+    if not dumps:
+        print(f"{label}: local_dump=missing", flush=True)
+        return
+    dump = dumps[-1]
+    print(f"{label}: local_dump=captured bytes={dump.stat().st_size}", flush=True)
+    debugger = find_windows_debugger()
+    if debugger is None:
+        print(f"{label}: local_dump_debugger=unavailable", flush=True)
+        return
+    try:
+        analysis = subprocess.run(
             [
-                "wevtutil",
-                "qe",
-                "Application",
-                "/q:*[System[(EventID=1000)]]",
-                "/f:xml",
-                "/rd:true",
-                "/c:20",
+                str(debugger),
+                "-z",
+                str(dump),
+                "-c",
+                "!analyze -v; .ecxr; k; q",
             ],
             stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
+            stderr=subprocess.STDOUT,
+            text=True,
+            errors="replace",
+            timeout=120,
             check=False,
         )
-    except OSError:
+    except (OSError, subprocess.TimeoutExpired):
+        print(f"{label}: local_dump_analysis=failed", flush=True)
         return
-    for record in parse_windows_application_errors(query.stdout, executable_name)[:3]:
-        print(
-            f"{label}: application_error app={record['app']} "
-            f"module={record['module']} exception={record['exception']} "
-            f"offset={record['offset']}",
-            flush=True,
-        )
+    evidence = safe_windows_dump_evidence(analysis.stdout)
+    print(
+        f"{label}: local_dump_analysis="
+        f"{'available' if evidence else 'no-safe-evidence'}",
+        flush=True,
+    )
+    for line in evidence:
+        print(f"{label}: dump_evidence {line}", flush=True)
 
 
 def main() -> int:
@@ -132,6 +272,11 @@ def main() -> int:
     arguments.log.parent.mkdir(parents=True, exist_ok=True)
     free_before = disk_free_bytes(arguments.log)
     print(f"{arguments.label}: disk_free_before={free_before}", flush=True)
+    executable_name = Path(arguments.command[0]).name
+    dump_directory = arguments.log.parent / "windows-local-dumps"
+    dump_configured = configure_windows_local_dumps(executable_name, dump_directory)
+    if dump_configured:
+        print(f"{arguments.label}: local_dump_capture=enabled", flush=True)
 
     try:
         with arguments.log.open("wb") as log:
@@ -163,9 +308,9 @@ def main() -> int:
         flush=True,
     )
     if return_code != 0:
-        report_windows_application_errors(
-            arguments.label, Path(arguments.command[0]).name
-        )
+        report_windows_application_errors(arguments.label, executable_name)
+        if dump_configured:
+            report_windows_local_dump(arguments.label, dump_directory)
     return 0 if return_code == 0 else 1
 
 

@@ -88,6 +88,25 @@ class ProcessRunnerTest(unittest.TestCase):
         )
         self.assertNotIn("private", repr(records))
 
+    def test_windows_dump_output_is_reduced_to_safe_fields(self) -> None:
+        output = """\
+PROCESS_NAME:  Godot_v4.7.1-stable_win64.exe
+PRIVATE_PATH: D:\\private\\customer\\source.gd
+EXCEPTION_CODE: (NTSTATUS) 0xc0000409
+STACK_TEXT:
+000000ab`1234f000 00007ff9`11112222 : 00000000`00000000 : gdpp_compiler+0x1234
+000000ab`1234f080 00007ff9`33334444 : 00000000`00000000 : Godot+0x5678
+
+MODULE_NAME: gdpp_compiler
+IMAGE_NAME: gdpp_compiler.windows.x86_64.dll
+FAILURE_BUCKET_ID: FAIL_FAST_FATAL_APP_EXIT_c0000409
+"""
+        evidence = RUN_PROCESS.safe_windows_dump_evidence(output)
+        self.assertIn("PROCESS_NAME:  Godot_v4.7.1-stable_win64.exe", evidence)
+        self.assertIn("MODULE_NAME: gdpp_compiler", evidence)
+        self.assertTrue(any("gdpp_compiler+0x1234" in line for line in evidence))
+        self.assertNotIn("private", "\n".join(evidence).lower())
+
 
 if __name__ == "__main__":
     unittest.main()
