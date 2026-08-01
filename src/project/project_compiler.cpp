@@ -10,7 +10,7 @@
 #include "gdpp/project/native_contract.hpp"
 #include "gdpp/semantic/analyzer.hpp"
 #include "gdpp/semantic/godot_api.hpp"
-#include "gdpp/support/path_utf8.hpp"
+#include "gdpp/core/path_utf8.hpp"
 #include "gdpp/support/sha256.hpp"
 #include "gdpp/version.hpp"
 

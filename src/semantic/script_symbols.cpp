@@ -1,6 +1,7 @@
 #include "gdpp/semantic/script_symbols.hpp"
 
 #include "gdpp/semantic/godot_api.hpp"
+#include "gdpp/core/path_utf8.hpp"
 
 #include <algorithm>
 #include <filesystem>
@@ -315,13 +316,13 @@ ScriptSymbolTable::resolve_resource_path(const std::string& owner_path,
     constexpr std::string_view resource_prefix{"res://"};
     std::filesystem::path path;
     if (reference.rfind(resource_prefix, 0) == 0)
-        path = reference.substr(resource_prefix.size());
+        path = path_from_utf8(reference.substr(resource_prefix.size()));
     else
-        path = std::filesystem::path{owner_path}.parent_path() / reference;
+        path = path_from_utf8(owner_path).parent_path() / path_from_utf8(reference);
     const auto normalized = path.lexically_normal();
     if (normalized.empty() || *normalized.begin() == "..")
         return std::nullopt;
-    return normalized.generic_string();
+    return generic_path_to_utf8(normalized);
 }
 
 const ScriptClassSymbol* ScriptSymbolTable::find_global(const std::string& name) const noexcept {

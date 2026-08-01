@@ -1,6 +1,6 @@
 #include "gdpp/project/export_worker_snapshot.hpp"
 
-#include "gdpp/support/path_utf8.hpp"
+#include "gdpp/core/path_utf8.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -231,7 +231,8 @@ class SnapshotBuilder final {
     bool copy_file(const std::filesystem::path& source, const std::filesystem::path& destination,
                    const std::filesystem::path& relative) {
         constexpr std::size_t maximum_attempts = 4;
-        const auto temporary = destination.string() + ".gdpp-snapshot-copy";
+        auto temporary = destination;
+        temporary += path_from_utf8(".gdpp-snapshot-copy");
         for (std::size_t attempt = 0; attempt < maximum_attempts; ++attempt) {
             std::error_code error;
             const auto size_before = std::filesystem::file_size(source, error);

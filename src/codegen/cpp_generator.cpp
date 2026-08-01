@@ -1,6 +1,7 @@
 #include "gdpp/codegen/cpp_generator.hpp"
 #include "gdpp/semantic/conversion.hpp"
 #include "gdpp/semantic/godot_api.hpp"
+#include "gdpp/core/path_utf8.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -8909,8 +8910,8 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
                                       const std::string& attached_base_script_path,
                                       const std::string& script_contract_hash) const {
     const auto& module = mir_module.program;
-    const std::filesystem::path path{source_path};
-    const auto base_name = path.stem().string();
+    const auto path = path_from_utf8(source_path);
+    const auto base_name = path_to_utf8(path.stem());
     GeneratedUnit unit;
     generated_symbols_.clear();
     current_static_context_ = false;
@@ -9128,17 +9129,17 @@ GeneratedUnit CodeGenerator::generate(const mir::Module& mir_module, const std::
     }
     const auto file_stem =
         current_script_
-            ? std::filesystem::path{current_script_->header_file_name}.stem().stem().string()
+            ? path_to_utf8(path_from_utf8(current_script_->header_file_name).stem().stem())
             : to_snake_case(unit.script_class_name);
     detail_namespace_ = file_stem + "_gdpp_detail";
     unit.header_file_name =
         current_script_ ? current_script_->header_file_name : file_stem + ".gd.hpp";
     unit.source_file_name =
         current_script_
-            ? std::filesystem::path{unit.header_file_name}.replace_extension(".cpp").string()
+            ? path_to_utf8(path_from_utf8(unit.header_file_name).replace_extension(".cpp"))
             : file_stem + ".gd.cpp";
     unit.symbol_file_name =
-        std::filesystem::path{unit.source_file_name}.replace_extension(".symbols").string();
+        path_to_utf8(path_from_utf8(unit.source_file_name).replace_extension(".symbols"));
     auto base = module.base_type.value_or("RefCounted");
     if (native_base_class.empty() && !is_valid_base_type(base)) {
         diagnostics_.error("GDS3002",

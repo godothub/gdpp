@@ -1,5 +1,7 @@
 #include "gdpp/project/xcframework_artifact.hpp"
 
+#include "gdpp/core/path_utf8.hpp"
+
 #include <algorithm>
 #include <array>
 #include <fstream>
@@ -12,7 +14,7 @@ namespace {
 
 bool has_path_component(const std::filesystem::path& path, std::string_view component) {
     return std::any_of(path.begin(), path.end(),
-                       [&](const auto& item) { return item == std::filesystem::path{component}; });
+                       [&](const auto& item) { return item == path_from_utf8(component); });
 }
 
 bool equal_files(const std::filesystem::path& left, const std::filesystem::path& right,
@@ -62,7 +64,7 @@ bool collect_entries(const std::filesystem::path& root, ArtifactEntries& entries
         const bool is_regular_file = !is_directory && iterator->is_regular_file(error);
         if (error || (!is_directory && !is_regular_file))
             return false;
-        entries.emplace(relative.generic_string(), is_directory);
+        entries.emplace(generic_path_to_utf8(relative), is_directory);
     }
     return !error;
 }
@@ -84,8 +86,8 @@ bool equal_xcframeworks(const std::filesystem::path& left, const std::filesystem
 std::filesystem::path transaction_artifact(const std::filesystem::path& root,
                                            const std::filesystem::path& destination,
                                            std::string_view state) {
-    return root / (destination.stem().string() + "." + std::string{state} +
-                   destination.extension().string());
+    return root / path_from_utf8(path_to_utf8(destination.stem()) + "." + std::string{state} +
+                                 path_to_utf8(destination.extension()));
 }
 
 void remove_empty_transaction_root(const std::filesystem::path& root) {
@@ -123,7 +125,7 @@ bool commit_xcframework_artifact(const std::filesystem::path& pending,
                                  const std::filesystem::path& destination,
                                  std::string& diagnostic) {
     diagnostic.clear();
-    const auto filename = destination.filename().string();
+    const auto filename = path_to_utf8(destination.filename());
     if (!is_complete_xcframework(pending) || pending.filename() != destination.filename() ||
         filename.rfind("libgdpp.", 0) != 0 || destination.parent_path().filename() != "binary" ||
         !has_path_component(pending, "native-direct") ||

@@ -1,6 +1,6 @@
 #include "gdpp/project/extension_bridge.hpp"
 
-#include "gdpp/support/path_utf8.hpp"
+#include "gdpp/core/path_utf8.hpp"
 #include "gdpp/support/sha256.hpp"
 
 #include <algorithm>

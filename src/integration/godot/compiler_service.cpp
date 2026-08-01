@@ -9,7 +9,7 @@
 #include "gdpp/project/xcframework_artifact.hpp"
 #include "gdpp/runtime/attached_script.hpp"
 #include "gdpp/semantic/godot_api.hpp"
-#include "gdpp/support/path_utf8.hpp"
+#include "gdpp/core/path_utf8.hpp"
 #include "gdpp/support/sha256.hpp"
 #include "gdpp/version.hpp"
 
@@ -156,7 +156,7 @@ bool write_file(const std::filesystem::path& path, const std::string& content) {
 
 bool has_path_component(const std::filesystem::path& path, std::string_view component) {
     return std::any_of(path.begin(), path.end(),
-                       [&](const auto& item) { return item == std::filesystem::path{component}; });
+                       [&](const auto& item) { return item == path_from_utf8(component); });
 }
 
 NativePlatform native_platform() {
@@ -1790,7 +1790,7 @@ GDPPCompiler::execute_ninja_build(const godot::Dictionary& build_plan) const {
     const auto planned_link =
         static_cast<int64_t>(build_plan.get("post_compile_edge_count", int64_t{0}));
     std::error_code error;
-    const auto executor_name = executor.filename().string();
+    const auto executor_name = path_to_utf8(executor.filename());
     const bool valid_executor_name =
         executor_name == "gdpp-ninja" || executor_name == "gdpp-ninja.exe";
     if (!executor.is_absolute() || !valid_executor_name ||
@@ -1811,7 +1811,7 @@ GDPPCompiler::execute_ninja_build(const godot::Dictionary& build_plan) const {
     }
 
     const std::vector<std::string> base_arguments{"-C", path_to_utf8(directory), "-f",
-                                                  build_file.filename().string()};
+                                                  path_to_utf8(build_file.filename())};
     auto version = execute_ninja_process(path_to_utf8(executor), {"--version"}, native_compiler);
     if (version.exit_code != 0 || trimmed_toolchain_output(version.output) != GDPP_NINJA_VERSION) {
         result.diagnostics.push_back(

@@ -1,7 +1,7 @@
 #include "gdpp/project/native_builder.hpp"
 
 #include "gdpp/project/native_contract.hpp"
-#include "gdpp/support/path_utf8.hpp"
+#include "gdpp/core/path_utf8.hpp"
 #include "gdpp/support/sha256.hpp"
 #include "gdpp/version.hpp"
 
@@ -422,8 +422,7 @@ bool validate_manifest(const NativeBuildOptions& options, std::vector<std::strin
                               (msvc_runtime.empty() ? std::string{"<missing>"} : msvc_runtime));
     }
     if (options.platform == NativePlatform::windows) {
-        auto executable_name =
-            std::filesystem::path{options.compiler_executable}.filename().string();
+        auto executable_name = path_to_utf8(path_from_utf8(options.compiler_executable).filename());
         std::transform(executable_name.begin(), executable_name.end(), executable_name.begin(),
                        [](const char character) {
                            return static_cast<char>(
@@ -616,7 +615,7 @@ std::filesystem::path find_binding_library(const std::filesystem::path& director
         if (!iterator->is_regular_file())
             continue;
         const auto extension = iterator->path().extension();
-        const auto filename = iterator->path().filename().string();
+        const auto filename = path_to_utf8(iterator->path().filename());
         const bool thread_variant_matches =
             options.platform != NativePlatform::web ||
             (options.web_thread_mode == NativeWebThreadMode::single_threaded
@@ -716,7 +715,7 @@ void add_reproducible_path_mapping(std::vector<ReproduciblePathMapping>& mapping
 }
 
 std::optional<std::filesystem::path> resolve_compiler_path(std::string_view executable) {
-    std::filesystem::path value{executable};
+    auto value = path_from_utf8(executable);
     std::error_code error;
     if (value.is_absolute() || value.has_parent_path()) {
         auto resolved = std::filesystem::weakly_canonical(value, error);
@@ -737,7 +736,7 @@ std::optional<std::filesystem::path> resolve_compiler_path(std::string_view exec
     while (std::getline(paths, directory, path_separator)) {
         for (const auto& suffix : suffixes) {
             const auto candidate =
-                std::filesystem::path{directory} / (std::string{executable} + suffix);
+                path_from_utf8(directory) / path_from_utf8(std::string{executable} + suffix);
             if (!std::filesystem::is_regular_file(candidate, error)) {
                 error.clear();
                 continue;
@@ -1026,7 +1025,7 @@ bool write_msvc_compiler_response_file(const std::filesystem::path& path,
 }
 
 bool is_windows_command_script(const std::string_view executable) {
-    auto extension = std::filesystem::path{executable}.extension().string();
+    auto extension = path_to_utf8(path_from_utf8(executable).extension());
     std::transform(extension.begin(), extension.end(), extension.begin(), [](const char value) {
         return static_cast<char>(std::tolower(static_cast<unsigned char>(value)));
     });
@@ -1296,25 +1295,25 @@ std::optional<NativeBuildCommand> link_command(const NativeBuildOptions& options
         // cl.exe does not decode UTF-16 response files reliably. Invoke the MSVC
         // linker directly so large projects and non-ASCII paths use its native
         // UTF-16 response-file support instead of the Windows command-line limit.
-        std::filesystem::path linker = options.compiler_executable;
+        auto linker = path_from_utf8(options.compiler_executable);
         linker.replace_filename("link.exe");
-        command.executable = linker.u8string();
+        command.executable = path_to_utf8(linker);
         const auto import_library = response_file.parent_path() / "gdpp.lib";
         std::vector<std::string> response_arguments{
             "/DLL", options.architecture == "arm64" ? "/MACHINE:ARM64" : "/MACHINE:X64"};
         for (const auto& object : objects)
-            response_arguments.push_back(object.u8string());
-        response_arguments.push_back(binding_library.u8string());
+            response_arguments.push_back(path_to_utf8(object));
+        response_arguments.push_back(path_to_utf8(binding_library));
         for (const auto& library : libraries)
-            response_arguments.push_back(library.u8string());
-        response_arguments.push_back("/IMPLIB:" + import_library.u8string());
-        response_arguments.push_back("/OUT:" + output.u8string());
+            response_arguments.push_back(path_to_utf8(library));
+        response_arguments.push_back("/IMPLIB:" + path_to_utf8(import_library));
+        response_arguments.push_back("/OUT:" + path_to_utf8(output));
         response_arguments.emplace_back("/OPT:REF");
         response_arguments.emplace_back("/OPT:ICF");
         response_arguments.emplace_back("/INCREMENTAL:NO");
         if (!write_msvc_response_file(response_file, response_arguments))
             return std::nullopt;
-        arguments = {"/NOLOGO", "@" + response_file.u8string()};
+        arguments = {"/NOLOGO", "@" + path_to_utf8(response_file)};
     } else if (options.platform == NativePlatform::web) {
         command.executable = options.compiler_executable;
         arguments = {"-shared", "-sSIDE_MODULE=1", "-sWASM_BIGINT", "-sSUPPORT_LONGJMP=wasm",
@@ -1561,7 +1560,7 @@ NativeBuildPlan NativeBuilder::plan(const NativeBuildOptions& options) const {
     for (std::filesystem::directory_iterator iterator{generated, error}, end;
          !error && iterator != end; iterator.increment(error)) {
         if (iterator->is_regular_file() &&
-            ends_with(iterator->path().filename().string(), ".gd.cpp")) {
+            ends_with(path_to_utf8(iterator->path().filename()), ".gd.cpp")) {
             sources.push_back(iterator->path());
             found_generated_source = true;
         }
@@ -1703,8 +1702,8 @@ NativeBuildPlan NativeBuilder::plan(const NativeBuildOptions& options) const {
                 graph_edges.push_back({command,
                                        inputs,
                                        {object},
-                                       source.filename().string(),
-                                       std::filesystem::path{path_to_utf8(object) + ".d"},
+                                       path_to_utf8(source.filename()),
+                                       path_from_utf8(path_to_utf8(object) + ".d"),
                                        true});
                 result.commands.push_back(std::move(command));
             }
@@ -1791,8 +1790,8 @@ NativeBuildPlan NativeBuilder::plan(const NativeBuildOptions& options) const {
         graph_edges.push_back({command,
                                inputs,
                                {object},
-                               source.filename().string(),
-                               std::filesystem::path{path_to_utf8(object) + ".d"},
+                               path_to_utf8(source.filename()),
+                               path_from_utf8(path_to_utf8(object) + ".d"),
                                true});
         result.commands.push_back(std::move(command));
     }

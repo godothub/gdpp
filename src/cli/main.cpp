@@ -2,7 +2,7 @@
 #include "gdpp/core/diagnostic.hpp"
 #include "gdpp/core/source.hpp"
 #include "gdpp/project/project_compiler.hpp"
-#include "gdpp/support/path_utf8.hpp"
+#include "gdpp/core/path_utf8.hpp"
 #include "gdpp/version.hpp"
 
 #include <filesystem>
@@ -86,18 +86,20 @@ int main(int argc, char** argv) {
     }
     if (argc >= 3 && std::string{argv[1]} == "project") {
         gdpp::ProjectCompileOptions options;
-        options.project_root = std::filesystem::absolute(argv[2]);
+        options.project_root = std::filesystem::absolute(gdpp::path_from_utf8(argv[2]));
         options.output_directory = options.project_root / "addons/gdpp/build/project";
         options.sdk_root = std::filesystem::current_path();
         options.godot_cpp_directory = options.sdk_root / "third/godot-cpp";
         for (int index = 3; index < argc; ++index) {
             const std::string argument{argv[index]};
             if (argument == "--output" && index + 1 < argc)
-                options.output_directory = std::filesystem::absolute(argv[++index]);
+                options.output_directory =
+                    std::filesystem::absolute(gdpp::path_from_utf8(argv[++index]));
             else if (argument == "--sdk-root" && index + 1 < argc)
-                options.sdk_root = std::filesystem::absolute(argv[++index]);
+                options.sdk_root = std::filesystem::absolute(gdpp::path_from_utf8(argv[++index]));
             else if (argument == "--godot-cpp" && index + 1 < argc)
-                options.godot_cpp_directory = std::filesystem::absolute(argv[++index]);
+                options.godot_cpp_directory =
+                    std::filesystem::absolute(gdpp::path_from_utf8(argv[++index]));
             else if (argument == "--no-optimize")
                 options.compiler.optimize = false;
             else if (argument == "--target-godot" && index + 1 < argc) {
@@ -138,17 +140,17 @@ int main(int argc, char** argv) {
         return 2;
     }
 
-    const std::filesystem::path input_path{argv[2]};
+    const auto input_path = gdpp::path_from_utf8(argv[2]);
     std::filesystem::path output_path{"build/generated"};
     std::filesystem::path metrics_path;
     gdpp::CompileOptions compile_options;
     for (int index = 3; index < argc; ++index) {
         if (std::string{argv[index]} == "--output" && index + 1 < argc) {
-            output_path = argv[++index];
+            output_path = gdpp::path_from_utf8(argv[++index]);
         } else if (std::string{argv[index]} == "--no-optimize") {
             compile_options.optimize = false;
         } else if (std::string{argv[index]} == "--metrics-json" && index + 1 < argc) {
-            metrics_path = argv[++index];
+            metrics_path = gdpp::path_from_utf8(argv[++index]);
         } else if (std::string{argv[index]} == "--target-godot" && index + 1 < argc) {
             const auto version = gdpp::parse_godot_version(argv[++index]);
             if (!version) {

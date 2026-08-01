@@ -1,6 +1,6 @@
 #include "project_file_selector.hpp"
 
-#include "gdpp/support/path_utf8.hpp"
+#include "gdpp/core/path_utf8.hpp"
 
 #include <iterator>
 #include <string_view>
