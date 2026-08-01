@@ -259,7 +259,7 @@ jobs:
                   timeout=30,
                   check=False,
               )
-              Path(log_path).write_text(result.stdout, encoding="utf-8")
+              Path(log_path).write_text(result.stdout, encoding="utf-8", newline="\n")
               print(result.stdout, end="")
               if result.returncode:
                   raise SystemExit(result.returncode)

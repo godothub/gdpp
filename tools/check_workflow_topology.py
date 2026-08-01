@@ -11,6 +11,7 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW_ROOT = ROOT / ".github/workflows"
+PORTABLE_RUNTIME_LOG = 'Path(log_path).write_text(result.stdout, encoding="utf-8", newline="\\n")'
 
 
 def fail(message: str) -> None:
@@ -154,6 +155,14 @@ def main() -> int:
         )
         if source_checkouts == 0:
             fail(f"{name} must check out private source")
+
+    runtime_log_workflows = ("host-components.yml", "release-package-smoke.yml")
+    for name in runtime_log_workflows:
+        source = (WORKFLOW_ROOT / name).read_text(encoding="utf-8")
+        writes = source.count("Path(log_path).write_text(result.stdout")
+        portable_writes = source.count(PORTABLE_RUNTIME_LOG)
+        if writes == 0 or portable_writes != writes:
+            fail(f"{name} must persist subprocess logs with portable LF line endings")
 
     print(
         f"Validated {len(parallel)} parallel producers, one gated package stage, "
