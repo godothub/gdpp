@@ -5,11 +5,10 @@
 | 项目 | 值 |
 |---|---|
 | GDPP | 1.9.0 |
-| 功能审计范围 | 1.9.0 当前发布候选 |
-| 最近正式发布运行 | 1.8.4 / `https://github.com/godothub/gdpp/actions/runs/30608539870` |
-| 1.8.4 发布状态 | 已发布；正式发布门禁成功 |
-| 1.8.4 已发布资产 | `gdpp.zip`、`gdpp-all.zip`、`gdpp-lite.zip`、`SHA256SUMS` |
-| 当前目标发行资产 | `gdpp.zip`、`gdpp-all.zip`、`gdpp-lite.zip`、`SHA256SUMS` |
+| 功能审计范围 | 1.9.0 已发布 |
+| 最近正式发布运行 | 1.9.0 / `https://github.com/godothub/gdpp/actions/runs/30709558770` |
+| 1.9.0 发布状态 | 已发布；完整正式发布门禁成功 |
+| 1.9.0 已发布资产 | `gdpp.zip`、`gdpp-all.zip`、`gdpp-lite.zip`、`SHA256SUMS` |
 | 本地编译器单元测试 | 由当前提交的完整 core 门禁执行，不在报告中固化易过时的数量 |
 
 本报告只描述可重复证据。内部商业语料和客户项目不按名称公开；它们只能补充发现问题，不能替代
@@ -30,6 +29,7 @@
 | 官方 Godot 4.5.2 AOT runtime | Universal 2 Release 导出后连续独立运行 10 次；动态 Script、Attached provider 与真实多 peer RPC 全部干净退出 |
 | custom/double add-on | 4.7 double 从精确 API 干净构建；compiler、SDK、descriptor、静态库和 manifest 审计成功 |
 | Windows DLL 装载边界 | Windows 11 / MSVC 19.50 同机探针对未修复 compiler 复现 `LoadLibraryExW` 1114，对当前 compiler 验证装载、`gdpp_library_init` 导出和卸载均成功 |
+| 官方 Godot 4.7.1 Windows 安装包 | 非 ASCII 干净项目完成导入、Release AOT、并行编译、链接、三种独立运行和 PCK 审计；驻留 MSVC 辅助进程不再阻塞已完成的导出 |
 | 官方 Godot 4.6.1 Windows 客户流程 | 清缓存安装、导入、Release AOT、原生编译、链接、首次及重复导出、成品独立运行成功；工作副本不再复制并发变化的编辑器缓存 |
 | Windows 回环协议 | HTTP/WebSocket/protobuf、双礼物平台、远程头像、扩展事件、97 包突发、正常关闭与损坏消息均退出 0；对象池总数保持 5000 |
 | Windows 成品 PCK | 373 个文件、42 个资源可加载、1 个项目库、0 个源码/SDK/compiler/中间产物违规 |
