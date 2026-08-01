@@ -1,6 +1,7 @@
 #include "support/test.hpp"
 
 #include "gdpp/project/export_worker_snapshot.hpp"
+#include "gdpp/core/path_utf8.hpp"
 
 #include <atomic>
 #include <filesystem>
@@ -122,6 +123,28 @@ TEST_CASE("export worker snapshot ignores concurrently changing editor caches") 
     REQUIRE(std::filesystem::is_regular_file(snapshot / "project.godot"));
     REQUIRE(std::filesystem::is_regular_file(snapshot / ".godot/extension_list.cfg"));
     std::filesystem::remove_all(root, error);
+}
+
+TEST_CASE(
+    "export worker snapshot preserves UTF-8 customer paths independent of the ANSI code page") {
+    const auto root =
+        snapshot_fixture("export-worker-unicode") / gdpp::path_from_utf8("客户项目-é");
+    const auto snapshot = root / "addons/gdpp/build/project/export-worker/transaction/project";
+    const auto resource = gdpp::path_from_utf8("场景") / gdpp::path_from_utf8("角色-é.tscn");
+    std::error_code error;
+    std::filesystem::remove_all(root.parent_path(), error);
+    write_snapshot_file(root / "project.godot", "[application]\nconfig/name=\"Unicode\"\n");
+    write_snapshot_file(root / resource, "客户资源");
+
+    const auto result = gdpp::create_export_worker_snapshot(root, snapshot);
+
+    REQUIRE(result.success);
+    REQUIRE(std::filesystem::is_regular_file(snapshot / resource));
+    REQUIRE_EQ(read_snapshot_file(snapshot / resource), std::string{"客户资源"});
+    auto temporary = snapshot / resource;
+    temporary += gdpp::path_from_utf8(".gdpp-snapshot-copy");
+    REQUIRE(!std::filesystem::exists(temporary));
+    std::filesystem::remove_all(root.parent_path(), error);
 }
 
 TEST_CASE("export worker snapshot rejects destinations outside its ignored transaction root") {

@@ -43,6 +43,14 @@ add_test(
 )
 
 add_test(
+    NAME gdpp.path_encoding.audit
+    COMMAND
+        "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/path_encoding_audit_test.py"
+        "${PROJECT_SOURCE_DIR}"
+)
+
+add_test(
     NAME gdpp.godot_frontend.audit
     COMMAND
         "${Python3_EXECUTABLE}"
