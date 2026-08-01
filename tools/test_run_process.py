@@ -44,6 +44,27 @@ class ProcessRunnerTest(unittest.TestCase):
             capture_output=True,
         )
 
+    def run_tool_with_timeout(
+        self, child: str, timeout_seconds: str
+    ) -> subprocess.CompletedProcess[bytes]:
+        return subprocess.run(
+            [
+                sys.executable,
+                str(TOOL),
+                "--label",
+                "test-child",
+                "--log",
+                str(self.log),
+                "--timeout-seconds",
+                timeout_seconds,
+                "--",
+                sys.executable,
+                "-c",
+                child,
+            ],
+            capture_output=True,
+        )
+
     def test_success_preserves_binary_output(self) -> None:
         result = self.run_tool("import sys; sys.stdout.buffer.write(b'payload\\x00\\xff')")
         self.assertEqual(result.returncode, 0)
@@ -56,6 +77,15 @@ class ProcessRunnerTest(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         self.assertEqual(self.log.read_bytes(), b"")
         self.assertIn(b"decimal=7 unsigned_hex=0x00000007", result.stdout)
+
+    def test_timeout_preserves_output_and_terminates_the_child(self) -> None:
+        result = self.run_tool_with_timeout(
+            "import sys,time; print('before-timeout', flush=True); time.sleep(30)",
+            "0.1",
+        )
+        self.assertEqual(result.returncode, 1)
+        self.assertIn(b"before-timeout", self.log.read_bytes())
+        self.assertIn(b"timeout_seconds=0.1", result.stdout)
 
     def test_windows_application_error_is_reduced_to_safe_fields(self) -> None:
         payload = b"""\

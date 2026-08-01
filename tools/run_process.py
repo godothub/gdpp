@@ -18,12 +18,15 @@ def parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--label", required=True)
     parser.add_argument("--log", type=Path, required=True)
+    parser.add_argument("--timeout-seconds", type=float)
     parser.add_argument("command", nargs=argparse.REMAINDER)
     arguments = parser.parse_args()
     if arguments.command[:1] == ["--"]:
         arguments.command = arguments.command[1:]
     if not arguments.command:
         parser.error("a command is required after --")
+    if arguments.timeout_seconds is not None and arguments.timeout_seconds <= 0:
+        parser.error("--timeout-seconds must be positive")
     return arguments
 
 
@@ -333,6 +336,7 @@ def main() -> int:
     if monitored:
         print(f"{arguments.label}: exception_monitor=enabled", flush=True)
 
+    timed_out = False
     try:
         with arguments.log.open("wb") as log:
             process = subprocess.Popen(
@@ -341,12 +345,25 @@ def main() -> int:
                 stderr=subprocess.STDOUT,
             )
             assert process.stdout is not None
-            while chunk := process.stdout.read(64 * 1024):
-                log.write(chunk)
+            if arguments.timeout_seconds is None:
+                while chunk := process.stdout.read(64 * 1024):
+                    log.write(chunk)
+                    log.flush()
+                    sys.stdout.buffer.write(chunk)
+                    sys.stdout.buffer.flush()
+                return_code = process.wait()
+            else:
+                try:
+                    output, _ = process.communicate(timeout=arguments.timeout_seconds)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    output, _ = process.communicate()
+                    timed_out = True
+                log.write(output)
                 log.flush()
-                sys.stdout.buffer.write(chunk)
+                sys.stdout.buffer.write(output)
                 sys.stdout.buffer.flush()
-            return_code = process.wait()
+                return_code = process.returncode
     except OSError as error:
         print(
             f"{arguments.label}: launch_error={error.__class__.__name__} "
@@ -362,11 +379,16 @@ def main() -> int:
         f"{arguments.label}: process_exit {format_status(return_code)}",
         flush=True,
     )
+    if timed_out:
+        print(
+            f"{arguments.label}: timeout_seconds={arguments.timeout_seconds:g}",
+            flush=True,
+        )
     if return_code != 0:
         report_windows_application_errors(arguments.label, executable_name)
         if dump_configured or monitored:
             report_windows_local_dump(arguments.label, dump_directory)
-    return 0 if return_code == 0 else 1
+    return 0 if return_code == 0 and not timed_out else 1
 
 
 if __name__ == "__main__":
