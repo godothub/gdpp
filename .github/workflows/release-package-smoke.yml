@@ -154,22 +154,6 @@ jobs:
             grep -q '^export_targets macos-universal,windows-x64,android-arm64,web-wasm32-nothreads,web-wasm32-threads$' \
               "$project/addons/gdpp/PACKAGE_MANIFEST.txt"
           fi
-      - name: Install the pinned Windows exception monitor
-        if: runner.os == 'Windows'
-        shell: bash
-        run: |
-          set -euo pipefail
-          root="$RUNNER_TEMP/gdpp-procdump-12.01"
-          archive="$root/Procdump.zip"
-          mkdir -p "$root"
-          bash tools/download_with_retry.sh \
-            https://download.sysinternals.com/files/Procdump.zip "$archive"
-          printf '%s  %s\n' \
-            68e057587b0fd654efa095f76d80d633c0e5c60ea26fd3e7c0011c076bb2d00c \
-            "$archive" | sha256sum -c -
-          unzip -qo "$archive" procdump64.exe -d "$root"
-          test -f "$root/procdump64.exe"
-          printf 'GDPP_WINDOWS_PROCDUMP=%s\n' "$root/procdump64.exe" >> "$GITHUB_ENV"
       - name: Import, export, run and audit the installed package
         shell: bash
         env:
@@ -246,9 +230,10 @@ jobs:
             "$root/export.log" \
             --contains 'GDPP_AOT_SUMMARY scenes='
 
-          mapfile -t pcks < <(
-            find "$output_root" -type f -name '*.pck' | LC_ALL=C sort
-          )
+          pcks=()
+          while IFS= read -r -d '' pck_path; do
+            pcks+=("$pck_path")
+          done < <(find "$output_root" -type f -name '*.pck' -print0)
           if [[ ${#pcks[@]} -ne 1 ]]; then
             printf 'Installed release export produced %d PCK files; expected 1.\n' \
               "${#pcks[@]}"

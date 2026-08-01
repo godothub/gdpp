@@ -158,22 +158,5 @@ GDPP_RAW_STACK_END
         )
         self.assertNotIn("private", "\n".join(evidence).lower())
 
-    def test_procdump_launch_preserves_the_exact_child_argument_vector(self) -> None:
-        command = [
-            "D:\\tools\\Godot.exe",
-            "--path",
-            "D:\\客户项目-é",
-            "--export-release",
-            "Windows x86_64",
-        ]
-        launch = RUN_PROCESS.procdump_launch_command(
-            Path("D:\\tools\\procdump64.exe"),
-            Path("D:\\private-dumps"),
-            command,
-        )
-        self.assertEqual(launch[-len(command) :], command)
-        self.assertEqual(launch[1:6], ["-accepteula", "-mt", "-e", "-x", "D:\\private-dumps"])
-
-
 if __name__ == "__main__":
     unittest.main()

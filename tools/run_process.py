@@ -192,35 +192,6 @@ def find_windows_debugger() -> Path | None:
     return None
 
 
-def procdump_launch_command(
-    executable: Path, dump_directory: Path, command: list[str]
-) -> list[str]:
-    return [
-        str(executable),
-        "-accepteula",
-        "-mt",
-        "-e",
-        "-x",
-        str(dump_directory),
-        *command,
-    ]
-
-
-def windows_monitored_command(
-    command: list[str], dump_directory: Path
-) -> tuple[list[str], bool]:
-    if os.name != "nt":
-        return command, False
-    configured = os.environ.get("GDPP_WINDOWS_PROCDUMP", "").strip()
-    if not configured:
-        return command, False
-    executable = Path(configured)
-    if not executable.is_file():
-        return command, False
-    dump_directory.mkdir(parents=True, exist_ok=True)
-    return procdump_launch_command(executable, dump_directory, command), True
-
-
 def safe_windows_dump_evidence(output: str) -> list[str]:
     fields = (
         "PROCESS_NAME:",
@@ -330,17 +301,12 @@ def main() -> int:
     dump_configured = configure_windows_local_dumps(executable_name, dump_directory)
     if dump_configured:
         print(f"{arguments.label}: local_dump_capture=enabled", flush=True)
-    launch_command, monitored = windows_monitored_command(
-        arguments.command, dump_directory
-    )
-    if monitored:
-        print(f"{arguments.label}: exception_monitor=enabled", flush=True)
 
     timed_out = False
     try:
         with arguments.log.open("wb") as log:
             process = subprocess.Popen(
-                launch_command,
+                arguments.command,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
             )
@@ -386,7 +352,7 @@ def main() -> int:
         )
     if return_code != 0:
         report_windows_application_errors(arguments.label, executable_name)
-        if dump_configured or monitored:
+        if dump_configured:
             report_windows_local_dump(arguments.label, dump_directory)
     return 0 if return_code == 0 and not timed_out else 1
 

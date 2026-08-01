@@ -173,6 +173,8 @@ def main() -> int:
         fail("release-package-smoke.yml must diagnose export and all runtime processes")
     if smoke_source.count("$GITHUB_WORKSPACE/tools/check_log_contract.py") != 5:
         fail("release-package-smoke.yml must validate every portable log contract")
+    if "GDPP_WINDOWS_PROCDUMP" in smoke_source or "procdump" in smoke_source.lower():
+        fail("release package smoke must run customer binaries without an output-hiding wrapper")
 
     print(
         f"Validated {len(parallel)} parallel producers, one gated package stage, "
