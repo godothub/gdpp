@@ -156,6 +156,9 @@ endforeach()
 foreach(required_windows_process_contract IN ITEMS
         "CreateProcessW("
         "CreatePipe(&output_read, &output_write"
+        "PeekNamedPipe(output_read"
+        "WaitForSingleObject(process_information.hProcess, pipe_open ? DWORD{20} : INFINITE)"
+        "persistent MSVC helper processes"
         "CreateFileW(L\"NUL\""
         "STARTF_USESHOWWINDOW"
         "STARTF_USESTDHANDLES"

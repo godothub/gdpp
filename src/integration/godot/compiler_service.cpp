@@ -2,6 +2,7 @@
 
 #include "gdpp/compiler/compiler.hpp"
 #include "gdpp/core/diagnostic.hpp"
+#include "gdpp/core/path_utf8.hpp"
 #include "gdpp/core/source.hpp"
 #include "gdpp/project/export_worker_snapshot.hpp"
 #include "gdpp/project/native_builder.hpp"
@@ -9,7 +10,6 @@
 #include "gdpp/project/xcframework_artifact.hpp"
 #include "gdpp/runtime/attached_script.hpp"
 #include "gdpp/semantic/godot_api.hpp"
-#include "gdpp/core/path_utf8.hpp"
 #include "gdpp/support/sha256.hpp"
 #include "gdpp/version.hpp"
 
@@ -1074,20 +1074,70 @@ NativeProcessResult execute_hidden_windows_command_line(std::wstring command_lin
     constexpr std::size_t maximum_captured_output = 512U * 1024U;
     bool output_truncated = false;
     char buffer[4096];
-    DWORD bytes_read = 0;
-    while (ReadFile(output_read, buffer, sizeof(buffer), &bytes_read, nullptr) != FALSE &&
-           bytes_read != 0) {
+    const auto capture_output = [&](const DWORD bytes_read) {
         const auto remaining = maximum_captured_output - result.output.size();
         const auto captured = std::min(remaining, static_cast<std::size_t>(bytes_read));
         result.output.append(buffer, captured);
         if (options.output_callback)
             options.output_callback(std::string_view{buffer, static_cast<std::size_t>(bytes_read)});
         output_truncated = output_truncated || captured != bytes_read;
+    };
+    const auto drain_available_output = [&]() {
+        for (;;) {
+            DWORD available = 0;
+            if (PeekNamedPipe(output_read, nullptr, 0, nullptr, &available, nullptr) == FALSE) {
+                const auto pipe_error = GetLastError();
+                if (pipe_error != ERROR_BROKEN_PIPE && result.launch_error.empty()) {
+                    result.launch_error = "cannot inspect C++ toolchain output (Windows error " +
+                                          std::to_string(pipe_error) + ")";
+                }
+                return false;
+            }
+            if (available == 0)
+                return true;
+            DWORD bytes_read = 0;
+            const auto requested = std::min<DWORD>(available, static_cast<DWORD>(sizeof(buffer)));
+            if (ReadFile(output_read, buffer, requested, &bytes_read, nullptr) == FALSE) {
+                const auto pipe_error = GetLastError();
+                if (pipe_error != ERROR_BROKEN_PIPE && result.launch_error.empty()) {
+                    result.launch_error = "cannot read C++ toolchain output (Windows error " +
+                                          std::to_string(pipe_error) + ")";
+                }
+                return false;
+            }
+            if (bytes_read == 0)
+                return false;
+            capture_output(bytes_read);
+        }
+    };
+
+    bool pipe_open = true;
+    bool process_finished = false;
+    bool wait_failed = false;
+    while (!process_finished) {
+        if (pipe_open)
+            pipe_open = drain_available_output();
+        const auto wait_result =
+            WaitForSingleObject(process_information.hProcess, pipe_open ? DWORD{20} : INFINITE);
+        if (wait_result == WAIT_OBJECT_0) {
+            process_finished = true;
+        } else if (wait_result == WAIT_FAILED) {
+            wait_failed = true;
+            if (result.launch_error.empty()) {
+                result.launch_error = "cannot wait for the C++ toolchain (Windows error " +
+                                      std::to_string(GetLastError()) + ")";
+            }
+            break;
+        }
     }
+    // Ninja waits for every build edge it owns. Once Ninja itself exits, all compiler/linker
+    // diagnostics are already in the pipe. Do not wait for EOF: persistent MSVC helper processes
+    // such as VCTIP may inherit the write handle even though the build completed successfully.
+    if (process_finished && pipe_open)
+        (void)drain_available_output();
     CloseHandle(output_read);
-    const auto wait_result = WaitForSingleObject(process_information.hProcess, INFINITE);
     DWORD exit_code = 0;
-    const bool completed = wait_result == WAIT_OBJECT_0 &&
+    const bool completed = process_finished && !wait_failed &&
                            GetExitCodeProcess(process_information.hProcess, &exit_code) != FALSE;
     CloseHandle(process_information.hProcess);
     result.exit_code = completed ? static_cast<int64_t>(exit_code) : int64_t{-1};
