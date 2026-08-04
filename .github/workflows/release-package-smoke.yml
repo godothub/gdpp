@@ -127,32 +127,32 @@ jobs:
           diff -u \
             <(printf 'Ninja 1.13.2\ncommit 3441b633c2fe2c494e958780ba0f4227b1327634\n') \
             "$project/addons/gdpp/tools/NINJA-VERSION.txt"
-          test "$(find "$project/addons/gdpp/sdk" -mindepth 1 -maxdepth 1 \
-            -type d | wc -l)" -eq 2
-          test -d "$project/addons/gdpp/sdk/4.6"
-          test -d "$project/addons/gdpp/sdk/4.7"
+          test -d "$project/addons/gdpp/sdk/targets"
+          test ! -e "$project/addons/gdpp/sdk/4.4"
+          test ! -e "$project/addons/gdpp/sdk/4.5"
+          test ! -e "$project/addons/gdpp/sdk/4.6"
+          test ! -e "$project/addons/gdpp/sdk/4.7"
+          test -z "$(find "$project/addons/gdpp/sdk" \
+            -type d -name godot-cpp -print -quit)"
           if [[ '${{ matrix.archive }}' == gdpp-lite.zip ]]; then
             test "$(find "$project/addons/gdpp/binary" -maxdepth 1 -type f | wc -l)" -eq 4
-            if grep -q . < <(
-              find "$project/addons/gdpp/binary" -maxdepth 1 -type f \
-                \( -iname '*linux*' -o -iname '*ios*' \) -print
-              find "$project/addons/gdpp/sdk" -type f \
-                \( -path '*/lib/*' -o -path '*/manifests/*' \) \
-                \( -iname '*linux*' -o -iname '*ios*' \) -print
-            ); then
+            test "$(find "$project/addons/gdpp/sdk/targets" \
+              -type f -name sdk.manifest | wc -l)" -eq 7
+            if find "$project/addons/gdpp/binary" -maxdepth 1 -type f \
+                -iname '*linux*' -print -quit | grep -q . \
+                || test -e "$project/addons/gdpp/sdk/targets/linux" \
+                || test -e "$project/addons/gdpp/sdk/targets/ios"; then
               echo 'Installed gdpp-lite.zip contains a Linux or iOS payload.'
               exit 1
             fi
-            for godot in 4.6 4.7; do
-              test "$(find "$project/addons/gdpp/sdk/$godot/lib" \
-                -maxdepth 1 -type f | wc -l)" -eq 5
-              test "$(find "$project/addons/gdpp/sdk/$godot/manifests" \
-                -maxdepth 1 -type f | wc -l)" -eq 5
-            done
             grep -q '^editor_hosts macos-universal,windows-x86_64$' \
               "$project/addons/gdpp/PACKAGE_MANIFEST.txt"
-            grep -q '^export_targets macos-universal,windows-x64,android-arm64,web-wasm32-nothreads,web-wasm32-threads$' \
+            grep -q '^export_targets macos-universal,windows-x86_64,android-arm64,web-wasm32-nothreads,web-wasm32-threads$' \
               "$project/addons/gdpp/PACKAGE_MANIFEST.txt"
+          else
+            test "$(find "$project/addons/gdpp/binary" -maxdepth 1 -type f | wc -l)" -eq 6
+            test "$(find "$project/addons/gdpp/sdk/targets" \
+              -type f -name sdk.manifest | wc -l)" -eq 9
           fi
       - name: Import, export, run and audit the installed package
         shell: bash

@@ -111,6 +111,24 @@ def main() -> int:
     expected_package_needs = sorted([*parallel, "preflight"])
     if sorted(needs(package_job)) != expected_package_needs:
         fail("packages must wait for preflight and every producer")
+    package_source = (WORKFLOW_ROOT / "package-release.yml").read_text(
+        encoding="utf-8"
+    )
+    if "gdpp-all.zip" in package_source or "for package in standard all lite" in package_source:
+        fail("version-neutral Host ABI releases must not publish the retired all edition")
+    for archive in ("gdpp.zip", "gdpp-lite.zip"):
+        if archive not in package_source:
+            fail(f"package-release.yml must assemble and audit {archive}")
+    for retired_option in (
+        "GDPP_ANDROID_SDK_VERSIONS",
+        "GDPP_WEB_SDK_VERSIONS",
+        "GDPP_IOS_SDK_VERSIONS",
+    ):
+        if any(
+            retired_option in (WORKFLOW_ROOT / name).read_text(encoding="utf-8")
+            for name in ("android.yml", "web.yml", "ios.yml")
+        ):
+            fail(f"target workflows still use retired option {retired_option}")
 
     smoke_workflow = workflows["release-package-smoke.yml"]
     require_private_source_contract("release-package-smoke.yml", smoke_workflow)
