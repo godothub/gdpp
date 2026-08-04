@@ -36,13 +36,9 @@ defaults:
 
 jobs:
   target-sdk:
-    name: Android SDK / Godot ${{ matrix.godot }} / arm64
+    name: Android Host SDK / arm64
     runs-on: ubuntu-24.04
     timeout-minutes: 60
-    strategy:
-      fail-fast: false
-      matrix:
-        godot: [4.4, 4.5, 4.6, 4.7]
     steps:
       - name: Check out public pipeline
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
@@ -63,7 +59,7 @@ jobs:
         run: >-
           cmake --preset dev
           -DGDPP_ANDROID_NDK_ROOT="$ANDROID_SDK_ROOT/ndk/$GDPP_ANDROID_NDK_VERSION"
-          -DGDPP_ANDROID_SDK_VERSIONS=${{ matrix.godot }}
+          -DGDPP_BUILD_ANDROID_SDK=ON
           -DGDPP_ANDROID_ARCHITECTURES=arm64
       - name: Build Android Release target SDK
         run: cmake --build --preset dev --target gdpp_android_sdk --parallel
@@ -71,21 +67,23 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          sdk="example/addons/gdpp/sdk/${{ matrix.godot }}/android/arm64"
+          sdk="example/addons/gdpp/sdk/targets/android/arm64"
           grep -q '^platform android$' "$sdk/sdk.manifest"
           grep -q '^arch arm64$' "$sdk/sdk.manifest"
           grep -q '^profiles debug,release$' "$sdk/sdk.manifest"
-          grep -q '^distribution_binding template_release$' "$sdk/sdk.manifest"
-          grep -q '^distribution_optimization Release$' "$sdk/sdk.manifest"
+          grep -q '^engine_range 4.4-4.7$' "$sdk/sdk.manifest"
+          grep -q '^host_abi 1$' "$sdk/sdk.manifest"
+          grep -q '^script_abi 1$' "$sdk/sdk.manifest"
+          grep -q '^exceptions enabled$' "$sdk/sdk.manifest"
           grep -q '^android_api_level 28$' "$sdk/sdk.manifest"
-          test "$(find "$sdk/lib" -maxdepth 1 -type f -name '*template_debug*.a' | wc -l)" -eq 0
-          test "$(find "$sdk/lib" -maxdepth 1 -type f -name '*template_release*.a' | wc -l)" -eq 1
           test "$(find "$sdk/lib" -maxdepth 1 -type f -name '*.a' | wc -l)" -eq 1
+          test ! -e "$sdk/godot-cpp"
+          test ! -e "$sdk/src"
       - name: Upload target SDK
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: gdpp-android-arm64-godot-${{ matrix.godot }}
-          path: source/example/addons/gdpp/sdk/${{ matrix.godot }}/android/arm64
+          name: gdpp-android-arm64
+          path: source/example/addons/gdpp/sdk/targets/android/arm64
           if-no-files-found: error
           retention-days: 7
 
@@ -138,7 +136,7 @@ jobs:
             -DGDPP_GODOT_EXECUTABLE="$GODOT" \
             -DGDPP_PACKAGE_GODOT_VERSIONS=4.5 \
             -DGDPP_ANDROID_NDK_ROOT="$ANDROID_SDK_ROOT/ndk/$GDPP_ANDROID_NDK_VERSION" \
-            -DGDPP_ANDROID_SDK_VERSIONS=4.5 \
+            -DGDPP_BUILD_ANDROID_SDK=ON \
             -DGDPP_ANDROID_ARCHITECTURES=arm64
           cmake --build --preset plugin --parallel
           cmake --build --preset plugin --target gdpp_android_sdk --parallel
