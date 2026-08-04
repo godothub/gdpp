@@ -152,8 +152,7 @@ jobs:
           GODOT: ${{ steps.godot.outputs.executable }}
         run: |
           cmake --preset plugin \
-            -DGDPP_GODOT_EXECUTABLE="$GODOT" \
-            -DGDPP_PACKAGE_GODOT_VERSIONS=4.5
+            -DGDPP_GODOT_EXECUTABLE="$GODOT"
           cmake --build --preset plugin --parallel
           ctest --preset plugin --output-on-failure
       - name: Export Web AOT package

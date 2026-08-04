@@ -77,11 +77,9 @@ jobs:
           templates: linux
       - name: Configure compiler plugin and SDK
         shell: bash
-        run: |
-          sdk_version="$(printf '%s' '${{ matrix.version }}' | cut -d. -f1,2)"
-          cmake --preset plugin \
-            -DGDPP_GODOT_EXECUTABLE=${{ steps.godot.outputs.executable }} \
-            -DGDPP_PACKAGE_GODOT_VERSIONS="$sdk_version"
+        run: >-
+          cmake --preset plugin
+          -DGDPP_GODOT_EXECUTABLE=${{ steps.godot.outputs.executable }}
       - name: Build compiler plugin and direct native targets
         run: cmake --build --preset plugin --parallel
       - name: Run compiler and Godot integration tests
@@ -330,11 +328,10 @@ jobs:
         run: |
           set -euo pipefail
           output=example/addons/gdpp/build/export
-          sdk_version="$(printf '%s' "$GODOT_VERSION" | cut -d. -f1,2)"
-          test "$(find "example/addons/gdpp/sdk/$sdk_version/lib" -maxdepth 1 \
-            -type f -name '*template_debug*' | wc -l)" -eq 0
-          test "$(find "example/addons/gdpp/sdk/$sdk_version/lib" -maxdepth 1 \
-            -type f -name '*template_release*' | wc -l)" -eq 1
+          sdk=example/addons/gdpp/sdk/targets/linux/x86_64
+          test "$(find "$sdk/lib" -maxdepth 1 -type f -name '*.a' | wc -l)" -eq 1
+          test ! -e "$sdk/godot-cpp"
+          grep -q '^engine_range 4.4-4.7$' "$sdk/sdk.manifest"
           "$GODOT" --headless --editor --path example \
             --export-debug 'Linux x86_64' \
             "$GDPP_SOURCE_ROOT/$output/debug/gdpp-runtime-debug.x86_64" \
@@ -394,8 +391,7 @@ jobs:
           GODOT: ${{ steps.godot.outputs.executable }}
         run: |
           set -euo pipefail
-          sdk_version="$(printf '%s' '${{ matrix.version }}' | cut -d. -f1,2)"
-          sdk="example/addons/gdpp/sdk/$sdk_version"
+          sdk="example/addons/gdpp/sdk/targets/linux/x86_64"
           project="example/addons/gdpp/binary/libgdpp.release.linux.x86_64.so"
           test -f "$project"
           mv "$sdk" "$sdk.unavailable"
@@ -549,7 +545,6 @@ jobs:
         run: >-
           cmake --preset plugin
           -DGDPP_GODOT_EXECUTABLE=${{ steps.godot.outputs.executable }}
-          -DGDPP_PACKAGE_GODOT_VERSIONS=${{ steps.contract.outputs.target }}
           &&
           cmake --build --preset plugin --parallel
       - name: Fetch the complete moving upstream project
