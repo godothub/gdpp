@@ -45,11 +45,15 @@ jobs:
           path: source/build/components/gdpp-android-arm64
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
-          pattern: gdpp-web-legacy-*
+          pattern: gdpp-web-godot44-*
           path: source/build/components
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
-          pattern: gdpp-web-modern-*
+          pattern: gdpp-web-godot45-*
+          path: source/build/components
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          pattern: gdpp-web-godot46_47-*
           path: source/build/components
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
@@ -98,8 +102,8 @@ jobs:
               exit 1
             fi
           }
-          audit_archive build/release/gdpp.zip 9 6 3
-          audit_archive build/release/gdpp-lite.zip 7 4 2
+          audit_archive build/release/gdpp.zip 11 6 3
+          audit_archive build/release/gdpp-lite.zip 9 4 2
 
           audit=build/package-audit
           rm -rf "$audit"

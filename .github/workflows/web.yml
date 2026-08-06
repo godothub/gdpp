@@ -43,12 +43,14 @@ jobs:
       fail-fast: false
       matrix:
         variant: [nothreads, threads]
-        profile: [legacy, modern]
+        profile: [godot44, godot45, godot46_47]
         include:
-          - profile: legacy
+          - profile: godot44
             emscripten: 3.1.64
-          - profile: modern
-            emscripten: 4.0.11
+          - profile: godot45
+            emscripten: 4.0.10
+          - profile: godot46_47
+            emscripten: 4.0.20
     steps:
       - name: Check out public pipeline
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
@@ -114,7 +116,7 @@ jobs:
       matrix:
         include:
           - variant: nothreads
-            profile: legacy
+            profile: godot44
             emscripten: 3.1.64
             godot: 4.4.1
             project: test/web_compatibility/project
@@ -123,7 +125,7 @@ jobs:
             output: web-4.4-nothreads
             port: 8060
           - variant: threads
-            profile: legacy
+            profile: godot44
             emscripten: 3.1.64
             godot: 4.4.1
             project: test/web_compatibility/project
@@ -132,8 +134,44 @@ jobs:
             output: web-4.4-threads
             port: 8061
           - variant: nothreads
-            profile: modern
-            emscripten: 4.0.11
+            profile: godot45
+            emscripten: 4.0.10
+            godot: 4.5.2
+            project: example
+            preset: Web AOT
+            product: GDPPExample
+            output: web-4.5-nothreads
+            port: 8062
+          - variant: threads
+            profile: godot45
+            emscripten: 4.0.10
+            godot: 4.5.2
+            project: example
+            preset: Web AOT Threads
+            product: GDPPExample
+            output: web-4.5-threads
+            port: 8063
+          - variant: nothreads
+            profile: godot46_47
+            emscripten: 4.0.20
+            godot: 4.6.3
+            project: example
+            preset: Web AOT
+            product: GDPPExample
+            output: web-4.6-nothreads
+            port: 8064
+          - variant: threads
+            profile: godot46_47
+            emscripten: 4.0.20
+            godot: 4.6.3
+            project: example
+            preset: Web AOT Threads
+            product: GDPPExample
+            output: web-4.6-threads
+            port: 8065
+          - variant: nothreads
+            profile: godot46_47
+            emscripten: 4.0.20
             godot: 4.7.1
             project: example
             preset: Web AOT
@@ -141,8 +179,8 @@ jobs:
             output: web-4.7-nothreads
             port: 8060
           - variant: threads
-            profile: modern
-            emscripten: 4.0.11
+            profile: godot46_47
+            emscripten: 4.0.20
             godot: 4.7.1
             project: example
             preset: Web AOT Threads
