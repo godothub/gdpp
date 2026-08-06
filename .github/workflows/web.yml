@@ -103,7 +103,7 @@ jobs:
           retention-days: 7
 
   browser:
-    name: Web browser / Godot 4.5.2 / ${{ matrix.variant }}
+    name: Web browser / Godot ${{ matrix.godot }} / ${{ matrix.variant }}
     needs: target-sdk
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -112,12 +112,32 @@ jobs:
       matrix:
         include:
           - variant: nothreads
+            profile: legacy
+            emscripten: 3.1.62
+            godot: 4.4.1
             preset: Web AOT
-            output: web
+            output: web-4.4-nothreads
             port: 8060
           - variant: threads
+            profile: legacy
+            emscripten: 3.1.62
+            godot: 4.4.1
             preset: Web AOT Threads
-            output: web-threads
+            output: web-4.4-threads
+            port: 8061
+          - variant: nothreads
+            profile: modern
+            emscripten: 4.0.0
+            godot: 4.7.1
+            preset: Web AOT
+            output: web-4.7-nothreads
+            port: 8060
+          - variant: threads
+            profile: modern
+            emscripten: 4.0.0
+            godot: 4.7.1
+            preset: Web AOT Threads
+            output: web-4.7-threads
             port: 8061
     steps:
       - name: Check out public pipeline
@@ -130,18 +150,18 @@ jobs:
           token: ${{ secrets.GDPP_TOKEN }}
       - uses: emscripten-core/setup-emsdk@4528d102f7230f0e7b276855c01ea1159be0e984 # v16
         with:
-          version: 4.0.0
+          version: ${{ matrix.emscripten }}
           actions-cache-folder: build/ci/emsdk-cache
       - id: godot
         uses: ./.github/actions/setup-godot
         with:
           source-root: ${{ env.GDPP_SOURCE_ROOT }}
-          version: 4.5.2
+          version: ${{ matrix.godot }}
           templates: web
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
-          name: gdpp-web-modern-${{ matrix.variant }}
-          path: source/example/addons/gdpp/sdk/targets/web/wasm32/${{ matrix.variant }}/modern
+          name: gdpp-web-${{ matrix.profile }}-${{ matrix.variant }}
+          path: source/example/addons/gdpp/sdk/targets/web/wasm32/${{ matrix.variant }}/${{ matrix.profile }}
       - name: Install Wasm inspection tools
         run: sudo apt-get update && sudo apt-get install -y binaryen wabt
       - name: Build compiler plugin
@@ -260,7 +280,7 @@ jobs:
         if: ${{ always() && steps.evidence_audit.outcome == 'success' }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: gdpp-web-runtime-godot-4.5.2-${{ matrix.variant }}
+          name: gdpp-web-runtime-godot-${{ matrix.godot }}-${{ matrix.variant }}
           path: source/example/addons/gdpp/build/${{ matrix.output }}
           if-no-files-found: warn
           retention-days: 14
