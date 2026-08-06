@@ -133,7 +133,7 @@ jobs:
 
           test -x "$output/gdpp-attached.x86_64"
           test -f "$output/gdpp-attached.pck"
-          test -f "$fixture/addons/vendor/binary/libgdpp_test_vendor.release.linux.x86_64.so"
+          test -f "$fixture/addons/vendor/binary/libgdpp_test_vendor.linux.x86_64.so"
           test -f "$fixture/addons/gdpp/binary/libgdpp.release.linux.x86_64.so"
           timeout 15s "$output/gdpp-attached.x86_64" --headless \
             2>&1 | tee "$output/gdpp-attached-runtime.log"
@@ -202,51 +202,6 @@ jobs:
             "$output/gdpp-attached-accessor-aot.log"
             "$output/gdpp-attached-pck-audit.log"
           )
-          if [[ "$GODOT_VERSION" == 4.4.* ]]; then
-            # Godot 4.4's built-in GDScript parser does not understand typed
-            # variadics or the current stable nested-block shadowing rule. GDPP
-            # owns the source grammar, so these diagnostics are non-authoritative
-            # as long as the AOT export and runtime assertions above pass. Keep
-            # the allowlist exact so unrelated failures remain release blockers.
-            grep -q 'Parse Error: Expected parameter name\.' \
-              "$output/gdpp-attached-import.log"
-            typed_variadic_line="$(
-              grep -n -m1 -E '\.\.\.[[:alpha:]_][[:alnum:]_]*[[:space:]]*:' \
-                "$fixture/vendor_child.gd" | cut -d: -f1
-            )"
-            test -n "$typed_variadic_line"
-            grep -Fq "GDScript::reload (res://vendor_child.gd:$typed_variadic_line)" \
-              "$output/gdpp-attached-import.log"
-            grep -q 'Parse Error: There is already a variable named "label" declared in this scope\.' \
-              "$output/gdpp-attached-import.log"
-            shadowing_line="$(
-              grep -n -m1 'var label := value' \
-                "$fixture/breakpoint_probe.gd" | cut -d: -f1
-            )"
-            test -n "$shadowing_line"
-            grep -Fq "GDScript::reload (res://breakpoint_probe.gd:$shadowing_line)" \
-              "$output/gdpp-attached-import.log"
-            for log in \
-                "$output/gdpp-attached-import.log" \
-                "$output/gdpp-attached-export.log"; do
-              sed -E \
-                -e '/^SCRIPT ERROR: Parse Error: Expected parameter name\.$/d' \
-                -e '/^SCRIPT ERROR: Parse Error: There is already a variable named "label" declared in this scope\.$/d' \
-                -e '/^SCRIPT ERROR: Parse Error: Could not resolve super class inheritance from "res:\/\/vendor_(child|grandchild)\.gd"\.$/d' \
-                -e '/^[[:space:]]+at: GDScript::reload \(res:\/\/(breakpoint_probe|export_main|vendor_child|vendor_grandchild)\.gd:[0-9]+\)$/d' \
-                -e '/^ERROR: Failed to load script "res:\/\/(breakpoint_probe|export_main|vendor_child|vendor_grandchild)\.gd" with error "Parse error"\.$/d' \
-                -e '/^[[:space:]]+at: load \(modules\/gdscript\/gdscript\.cpp:[0-9]+\)$/d' \
-                "$log" > "$log.authoritative"
-            done
-            diagnostic_logs=(
-              "$output/gdpp-attached-import.log.authoritative"
-              "$output/gdpp-attached-export.log.authoritative"
-              "$output/gdpp-attached-runtime.log"
-              "$output/gdpp-attached-await-default-aot.log"
-              "$output/gdpp-attached-accessor-aot.log"
-              "$output/gdpp-attached-pck-audit.log"
-            )
-          fi
 
           if grep -E -q '(^| )ERROR:|SCRIPT ERROR:|Parse Error:|WARNING:|Unable to open' \
               "${diagnostic_logs[@]}"; then
