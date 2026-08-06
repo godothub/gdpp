@@ -347,7 +347,7 @@ jobs:
             --aot-artifact-directory "$output/aot" \
             --output "$output/runtime-matrix.json" \
             --work-directory example/addons/gdpp/build/runtime-matrix \
-            --repeats 5 --samples 5 --iterations 10000 --enforce
+            --repeats 5 --samples 9 --iterations 20000 --enforce
       - name: Verify binary-only export fails closed without its SDK
         shell: bash
         env:
