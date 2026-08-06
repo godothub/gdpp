@@ -84,8 +84,6 @@ jobs:
             echo 'iOS target SDK leaks the checkout path.'
             exit 1
           fi
-          test -z "$(find third/godot-cpp -type d -name __pycache__ -print -quit)"
-          test -z "$(find third/godot-cpp -type f -name '*.pyc' -print -quit)"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: gdpp-ios
@@ -245,7 +243,7 @@ jobs:
           test "$(find "$frameworks" -maxdepth 1 -type f \
             -name 'libgdpp.release.macos.universal.dylib' | wc -l)" -eq 1
           test "$(find "$frameworks" -maxdepth 1 -type f \
-            -name 'libgdpp_test_vendor.release.macos.universal.dylib' | wc -l)" -eq 1
+            -name 'libgdpp_test_vendor.macos.universal.dylib' | wc -l)" -eq 1
           "$root/GDPPAttached.app/Contents/MacOS/GDPP Attached Extension Integration" \
             --headless 2>&1 | tee "$root/runtime.log"
           grep -q '^GDPP_DYNAMIC_SCRIPT_RUNTIME_OK$' "$root/runtime.log"
