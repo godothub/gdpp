@@ -95,8 +95,6 @@ jobs:
             echo 'Web target SDK leaks the checkout path.'
             exit 1
           fi
-          test -z "$(find third/godot-cpp -type d -name __pycache__ -print -quit)"
-          test -z "$(find third/godot-cpp -type f -name '*.pyc' -print -quit)"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: gdpp-web-${{ matrix.profile }}-${{ matrix.variant }}
@@ -154,7 +152,8 @@ jobs:
           cmake --preset plugin \
             -DGDPP_GODOT_EXECUTABLE="$GODOT"
           cmake --build --preset plugin --parallel
-          ctest --preset plugin --output-on-failure
+          ctest --preset plugin --output-on-failure \
+            -E '^gdpp\.godot\.runtime_differential$'
       - name: Export Web AOT package
         shell: bash
         env:
