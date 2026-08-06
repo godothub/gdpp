@@ -115,28 +115,36 @@ jobs:
             profile: legacy
             emscripten: 3.1.62
             godot: 4.4.1
+            project: test/web_compatibility/project
             preset: Web AOT
+            product: GDPPWeb
             output: web-4.4-nothreads
             port: 8060
           - variant: threads
             profile: legacy
             emscripten: 3.1.62
             godot: 4.4.1
+            project: test/web_compatibility/project
             preset: Web AOT Threads
+            product: GDPPWeb
             output: web-4.4-threads
             port: 8061
           - variant: nothreads
             profile: modern
             emscripten: 4.0.0
             godot: 4.7.1
+            project: example
             preset: Web AOT
+            product: GDPPExample
             output: web-4.7-nothreads
             port: 8060
           - variant: threads
             profile: modern
             emscripten: 4.0.0
             godot: 4.7.1
+            project: example
             preset: Web AOT Threads
+            product: GDPPExample
             output: web-4.7-threads
             port: 8061
     steps:
@@ -174,25 +182,30 @@ jobs:
           cmake --build --preset plugin --parallel
           ctest --preset plugin --output-on-failure \
             -E '^gdpp\.godot\.runtime_differential$'
+          if [[ '${{ matrix.project }}' != example ]]; then
+            mkdir -p '${{ matrix.project }}/addons'
+            cp -R example/addons/gdpp '${{ matrix.project }}/addons/gdpp'
+          fi
       - name: Export Web AOT package
         shell: bash
         env:
           GODOT: ${{ steps.godot.outputs.executable }}
         run: |
           set -euo pipefail
-          root="$GDPP_SOURCE_ROOT/example/addons/gdpp/build/${{ matrix.output }}"
+          project='${{ matrix.project }}'
+          root="$GDPP_SOURCE_ROOT/$project/addons/gdpp/build/${{ matrix.output }}"
           mkdir -p "$root"
-          "$GODOT" --headless --editor --path example --quit-after 120 \
+          "$GODOT" --headless --editor --path "$project" --quit-after 120 \
             2>&1 | tee "$root/warmup.log"
-          "$GODOT" --headless --editor --path example --import \
+          "$GODOT" --headless --editor --path "$project" --import \
             2>&1 | tee "$root/import.log"
           python3 tools/verify_export_immutability.py snapshot \
-            --project example --state "$root/extension-state.json"
-          "$GODOT" --headless --editor --path example \
-            --export-release '${{ matrix.preset }}' "$root/GDPPExample.html" \
+            --project "$project" --state "$root/extension-state.json"
+          "$GODOT" --headless --editor --path "$project" \
+            --export-release '${{ matrix.preset }}' "$root/${{ matrix.product }}.html" \
             2>&1 | tee "$root/export.log"
           python3 tools/verify_export_immutability.py verify \
-            --project example --state "$root/extension-state.json"
+            --project "$project" --state "$root/extension-state.json"
           grep -q 'GDPP_AOT_SUMMARY scenes=' "$root/export.log"
           if grep -E -q '(^| )ERROR:|SCRIPT ERROR:|WARNING:|Unable to open' \
               "$root/import.log" "$root/export.log"; then
@@ -205,7 +218,7 @@ jobs:
           GODOT: ${{ steps.godot.outputs.executable }}
         run: |
           set -euo pipefail
-          root="example/addons/gdpp/build/${{ matrix.output }}"
+          root="${{ matrix.project }}/addons/gdpp/build/${{ matrix.output }}"
           mapfile -t modules < <(find "$root" -maxdepth 1 -type f \
             -name 'libgdpp.release.web.wasm32*.wasm' | LC_ALL=C sort)
           test "${#modules[@]}" -eq 1
@@ -219,14 +232,14 @@ jobs:
           if [[ '${{ matrix.variant }}' == threads ]]; then
             grep -q 'shared' "$root/project-wasm.txt"
           fi
-          grep -q "$(basename "$module")" "$root/GDPPExample.html"
+          grep -q "$(basename "$module")" "$root/${{ matrix.product }}.html"
 
           mkdir -p build/pck-audit
           cp tools/audit_export_pck.gd build/pck-audit/audit_export_pck.gd
           printf '[application]\nconfig/name="GDPP Web PCK Audit"\n' > build/pck-audit/project.godot
           "$GODOT" --headless --path build/pck-audit \
             --script "$GDPP_SOURCE_ROOT/build/pck-audit/audit_export_pck.gd" -- \
-            "$GDPP_SOURCE_ROOT/$root/GDPPExample.pck" \
+            "$GDPP_SOURCE_ROOT/$root/${{ matrix.product }}.pck" \
             "$GDPP_SOURCE_ROOT/$root" "$GDPP_SOURCE_ROOT/$module" \
             2>&1 | tee "$root/pck-audit.log"
           grep -q '^PCK_AUDIT_VIOLATIONS=0$' "$root/pck-audit.log"
@@ -235,14 +248,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          root="example/addons/gdpp/build/${{ matrix.output }}"
+          root="${{ matrix.project }}/addons/gdpp/build/${{ matrix.output }}"
           python3 tools/serve_web.py "$root" --port '${{ matrix.port }}' \
             > "$root/server.log" 2>&1 &
           server_pid=$!
           trap 'kill "$server_pid" 2>/dev/null || true' EXIT
           for _ in {1..30}; do
             if curl --fail --silent --head \
-                "http://127.0.0.1:${{ matrix.port }}/GDPPExample.html" \
+                "http://127.0.0.1:${{ matrix.port }}/${{ matrix.product }}.html" \
                 > "$root/headers.txt"; then
               break
             fi
@@ -251,7 +264,7 @@ jobs:
           grep -qi '^Cross-Origin-Opener-Policy: same-origin' "$root/headers.txt"
           grep -qi '^Cross-Origin-Embedder-Policy: require-corp' "$root/headers.txt"
           python3 tools/run_web_browser_smoke.py \
-            --url "http://127.0.0.1:${{ matrix.port }}/GDPPExample.html" \
+            --url "http://127.0.0.1:${{ matrix.port }}/${{ matrix.product }}.html" \
             --dom-output "$root/browser-dom.txt" \
             --log-output "$root/browser.log" \
             --timeout 150
@@ -264,7 +277,7 @@ jobs:
             echo 'Web runtime reported an invalid AOT behavior oracle.'
             exit 1
           fi
-          if grep -E -q 'GDPP_EXPORTED_PROPERTIES_INVALID|LinkError|RuntimeError|CompileError|SCRIPT ERROR' \
+          if grep -E -q 'GDPP_EXPORTED_PROPERTIES_INVALID|LinkError|RuntimeError|CompileError|SCRIPT ERROR|undefined symbol|loadDylibs|Uncaught \\(in promise\\)|Aborted' \
               "$root/browser.log"; then
             echo 'Web runtime emitted a forbidden diagnostic.'
             exit 1
@@ -275,12 +288,12 @@ jobs:
         run: >-
           python3 "$GITHUB_WORKSPACE/tools/audit_public_artifact.py"
           --source .
-          --path example/addons/gdpp/build/${{ matrix.output }}
+          --path ${{ matrix.project }}/addons/gdpp/build/${{ matrix.output }}
       - name: Upload Web evidence
         if: ${{ always() && steps.evidence_audit.outcome == 'success' }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: gdpp-web-runtime-godot-${{ matrix.godot }}-${{ matrix.variant }}
-          path: source/example/addons/gdpp/build/${{ matrix.output }}
+          path: source/${{ matrix.project }}/addons/gdpp/build/${{ matrix.output }}
           if-no-files-found: warn
           retention-days: 14
