@@ -46,9 +46,9 @@ jobs:
         profile: [legacy, modern]
         include:
           - profile: legacy
-            emscripten: 3.1.62
+            emscripten: 3.1.64
           - profile: modern
-            emscripten: 4.0.0
+            emscripten: 4.0.11
     steps:
       - name: Check out public pipeline
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
@@ -82,7 +82,9 @@ jobs:
           grep -q '^profiles debug,release$' "$sdk/sdk.manifest"
           grep -q '^host_abi 1$' "$sdk/sdk.manifest"
           grep -q '^script_abi 1$' "$sdk/sdk.manifest"
-          grep -q '^exceptions enabled$' "$sdk/sdk.manifest"
+          grep -q '^exceptions disabled$' "$sdk/sdk.manifest"
+          grep -q '^fault_model explicit_status$' "$sdk/sdk.manifest"
+          grep -q '^compiler_version ${{ matrix.emscripten }}$' "$sdk/sdk.manifest"
           grep -q '^web_threads ${{ matrix.variant }}$' "$sdk/sdk.manifest"
           grep -q '^web_toolchain ${{ matrix.profile }}$' "$sdk/sdk.manifest"
           grep -q '^compiler Emscripten$' "$sdk/sdk.manifest"
@@ -113,7 +115,7 @@ jobs:
         include:
           - variant: nothreads
             profile: legacy
-            emscripten: 3.1.62
+            emscripten: 3.1.64
             godot: 4.4.1
             project: test/web_compatibility/project
             preset: Web AOT
@@ -122,7 +124,7 @@ jobs:
             port: 8060
           - variant: threads
             profile: legacy
-            emscripten: 3.1.62
+            emscripten: 3.1.64
             godot: 4.4.1
             project: test/web_compatibility/project
             preset: Web AOT Threads
@@ -131,7 +133,7 @@ jobs:
             port: 8061
           - variant: nothreads
             profile: modern
-            emscripten: 4.0.0
+            emscripten: 4.0.11
             godot: 4.7.1
             project: example
             preset: Web AOT
@@ -140,7 +142,7 @@ jobs:
             port: 8060
           - variant: threads
             profile: modern
-            emscripten: 4.0.0
+            emscripten: 4.0.11
             godot: 4.7.1
             project: example
             preset: Web AOT Threads
@@ -229,6 +231,11 @@ jobs:
             -o "build/ci/web-validation/${{ matrix.variant }}.wasm"
           wasm-objdump -x "$module" > "$root/project-wasm.txt"
           grep -q 'gdpp_library_init' "$root/project-wasm.txt"
+          if grep -E -q 'invoke_|__cxa_(throw|rethrow|begin_catch|end_catch|allocate_exception|free_exception|find_matching_catch)|__cpp_exception|__resumeException' \
+              "$root/project-wasm.txt"; then
+            echo 'Web side module depends on a C++ exception runtime unavailable in stock templates.'
+            exit 1
+          fi
           if [[ '${{ matrix.variant }}' == threads ]]; then
             grep -q 'shared' "$root/project-wasm.txt"
           fi
@@ -277,7 +284,7 @@ jobs:
             echo 'Web runtime reported an invalid AOT behavior oracle.'
             exit 1
           fi
-          if grep -E -q 'GDPP_EXPORTED_PROPERTIES_INVALID|LinkError|RuntimeError|CompileError|SCRIPT ERROR|undefined symbol|loadDylibs|Uncaught \\(in promise\\)|Aborted' \
+          if grep -E -q 'GDPP_EXPORTED_PROPERTIES_INVALID|LinkError|RuntimeError|CompileError|SCRIPT ERROR|undefined symbol|loadDylibs|Uncaught \\(in promise\\)|Aborted|resolved is not a function' \
               "$root/browser.log"; then
             echo 'Web runtime emitted a forbidden diagnostic.'
             exit 1
