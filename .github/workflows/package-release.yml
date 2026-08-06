@@ -79,7 +79,8 @@ jobs:
             local expected_manifests="$2"
             local expected_binaries="$3"
             local expected_executors="$4"
-            local contents="build/$(basename "$archive").contents"
+            local contents
+            contents="build/$(basename "$archive").contents"
             unzip -Z1 "$archive" | LC_ALL=C sort > "$contents"
             test -s "$contents"
             test "$(grep -cv '^addons/gdpp/' "$contents")" -eq 0
