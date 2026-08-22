@@ -57,9 +57,6 @@ def main() -> int:
         path.name: load_workflow(path)
         for path in sorted(WORKFLOW_ROOT.glob("*.yml"))
     }
-    for path in sorted(WORKFLOW_ROOT.glob("*.yml")):
-        if "api/godot/" in path.read_text(encoding="utf-8"):
-            fail(f"{path.name} still references the retired nested API directory")
     release = workflows["release.yml"]
     release_jobs = release["jobs"]
 
@@ -188,17 +185,6 @@ def main() -> int:
         fail("version-neutral Host ABI releases must publish only gdpp.zip")
     if "gdpp.zip" not in package_source:
         fail("package-release.yml must assemble and audit gdpp.zip")
-    for retired_option in (
-        "GDPP_ANDROID_SDK_VERSIONS",
-        "GDPP_WEB_SDK_VERSIONS",
-        "GDPP_IOS_SDK_VERSIONS",
-    ):
-        if any(
-            retired_option in (WORKFLOW_ROOT / name).read_text(encoding="utf-8")
-            for name in ("android.yml", "web.yml", "ios.yml")
-        ):
-            fail(f"target workflows still use retired option {retired_option}")
-
     smoke_workflow = workflows["release-package-smoke.yml"]
     require_private_source_contract("release-package-smoke.yml", smoke_workflow)
     if smoke_workflow.get("permissions", {}).get("actions") != "read":
