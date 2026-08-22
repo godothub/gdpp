@@ -135,11 +135,10 @@ def main() -> int:
     package_source = (WORKFLOW_ROOT / "package-release.yml").read_text(
         encoding="utf-8"
     )
-    if "gdpp-all.zip" in package_source or "for package in standard all lite" in package_source:
-        fail("version-neutral Host ABI releases must not publish the retired all edition")
-    for archive in ("gdpp.zip", "gdpp-lite.zip"):
-        if archive not in package_source:
-            fail(f"package-release.yml must assemble and audit {archive}")
+    if "gdpp-all.zip" in package_source or "gdpp-lite.zip" in package_source:
+        fail("version-neutral Host ABI releases must publish only gdpp.zip")
+    if "gdpp.zip" not in package_source:
+        fail("package-release.yml must assemble and audit gdpp.zip")
     for retired_option in (
         "GDPP_ANDROID_SDK_VERSIONS",
         "GDPP_WEB_SDK_VERSIONS",
@@ -168,8 +167,6 @@ def main() -> int:
             ("gdpp.zip", "macos-15"),
             ("gdpp.zip", "ubuntu-22.04"),
             ("gdpp.zip", "windows-2025"),
-            ("gdpp-lite.zip", "macos-15"),
-            ("gdpp-lite.zip", "windows-2025"),
         )
     )
     if actual_smokes != expected_smokes:

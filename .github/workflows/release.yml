@@ -238,7 +238,7 @@ jobs:
             "$HOST_COMPONENTS" "$PACKAGES" "$PACKAGE_SMOKE"; do
             test "$result" = success
           done
-          printf '### Complete delivery gate passed\n\nAll tests, both packages, and installed macOS/Linux/Windows package smokes passed.\n' \
+          printf '### Complete delivery gate passed\n\nAll tests, the complete package, and installed macOS/Linux/Windows package smokes passed.\n' \
             >> "$GITHUB_STEP_SUMMARY"
 
   publish:
@@ -265,7 +265,7 @@ jobs:
         with:
           name: gdpp-release-packages
           path: source/build/release
-      - name: Validate the unprefixed version and two-archive matrix
+      - name: Validate the unprefixed version and release archive
         shell: bash
         env:
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
@@ -295,10 +295,8 @@ jobs:
             echo "Release $RELEASE_VERSION appeared while the release was running."
             exit 1
           fi
-          for archive in gdpp.zip gdpp-lite.zip; do
-            test -f "build/release/$archive"
-          done
-          test "$(find build/release -maxdepth 1 -type f -name '*.zip' | wc -l)" -eq 2
+          test -f build/release/gdpp.zip
+          test "$(find build/release -maxdepth 1 -type f -name '*.zip' | wc -l)" -eq 1
       - name: Read release notes from CHANGELOG.md
         env:
           RELEASE_VERSION: ${{ inputs.release_version }}
@@ -309,7 +307,7 @@ jobs:
           --output build/release-notes.md
       - name: Create checksums
         working-directory: source/build/release
-        run: LC_ALL=C sha256sum -- gdpp.zip gdpp-lite.zip > SHA256SUMS
+        run: LC_ALL=C sha256sum -- gdpp.zip > SHA256SUMS
       - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           tag_name: ${{ inputs.release_version }}
@@ -319,7 +317,6 @@ jobs:
           fail_on_unmatched_files: true
           files: |
             source/build/release/gdpp.zip
-            source/build/release/gdpp-lite.zip
             source/build/release/SHA256SUMS
       - name: Verify the published release contract
         shell: bash
@@ -334,11 +331,11 @@ jobs:
           test "$(jq -r '.draft' <<< "$release")" = false
           test "$(jq -r '.prerelease' <<< "$release")" = false
           test "$(jq '[.assets[] | select(.state == "uploaded" and .size > 0)] | length' \
-            <<< "$release")" -eq 3
-          test "$(jq '.assets | length' <<< "$release")" -eq 3
-          test "$(jq '[.assets[] | select(.name | endswith(".zip"))] | length' \
             <<< "$release")" -eq 2
-          for name in gdpp.zip gdpp-lite.zip SHA256SUMS; do
+          test "$(jq '.assets | length' <<< "$release")" -eq 2
+          test "$(jq '[.assets[] | select(.name | endswith(".zip"))] | length' \
+            <<< "$release")" -eq 1
+          for name in gdpp.zip SHA256SUMS; do
             test "$(jq --arg name "$name" \
               '[.assets[] | select(.name == $name)] | length' <<< "$release")" -eq 1
           done

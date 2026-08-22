@@ -23,7 +23,7 @@ defaults:
 
 jobs:
   package:
-    name: ZIP / complete and lite editions
+    name: ZIP / complete edition
     runs-on: ubuntu-22.04
     timeout-minutes: 45
     steps:
@@ -64,16 +64,12 @@ jobs:
           python3 test/release_packaging_test.py
           "$GDPP_SOURCE_ROOT"
           "$GDPP_SOURCE_ROOT/build/package-contract"
-      - name: Assemble deterministic plugin ZIPs
-        shell: bash
-        run: |
-          set -euo pipefail
-          for package in standard lite; do
-            python3 tools/package_platform_release.py \
-              --components build/components \
-              --output build/release \
-              --package "$package"
-          done
+      - name: Assemble deterministic plugin ZIP
+        run: >-
+          python3 tools/package_platform_release.py
+          --components build/components
+          --output build/release
+          --package standard
       - name: Audit package topology and source isolation
         shell: bash
         run: |
@@ -103,7 +99,6 @@ jobs:
             fi
           }
           audit_archive build/release/gdpp.zip 11 6 3
-          audit_archive build/release/gdpp-lite.zip 9 4 2
 
           audit=build/package-audit
           rm -rf "$audit"
@@ -119,25 +114,21 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          sha256sum build/release/gdpp.zip build/release/gdpp-lite.zip \
-            > build/release/first.sha256
-          for package in standard lite; do
-            python3 tools/package_platform_release.py \
-              --components build/components \
-              --output build/release \
-              --package "$package"
-          done
+          sha256sum build/release/gdpp.zip > build/release/first.sha256
+          python3 tools/package_platform_release.py \
+            --components build/components \
+            --output build/release \
+            --package standard
           sha256sum -c build/release/first.sha256
       - name: Write checksums
         run: >-
           bash -c 'cd build/release &&
-          LC_ALL=C sha256sum -- gdpp.zip gdpp-lite.zip > SHA256SUMS'
+          LC_ALL=C sha256sum -- gdpp.zip > SHA256SUMS'
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: gdpp-release-packages
           path: |
             source/build/release/gdpp.zip
-            source/build/release/gdpp-lite.zip
             source/build/release/SHA256SUMS
           if-no-files-found: error
           retention-days: 14

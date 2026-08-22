@@ -58,14 +58,6 @@ jobs:
             os: windows-2025
             preset: Windows x86_64
             archive: gdpp.zip
-          - platform_host: mac-lite
-            os: macos-15
-            preset: macOS Universal
-            archive: gdpp-lite.zip
-          - platform_host: win-lite
-            os: windows-2025
-            preset: Windows x86_64
-            archive: gdpp-lite.zip
     steps:
       - name: Check out public pipeline
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
@@ -134,13 +126,9 @@ jobs:
           test ! -e "$project/addons/gdpp/sdk/4.7"
           test -z "$(find "$project/addons/gdpp/sdk" \
             -type d -name godot-cpp -print -quit)"
-          edition=standard
-          if [[ '${{ matrix.archive }}' == gdpp-lite.zip ]]; then
-            edition=lite
-          fi
           python3 tools/package_platform_release.py \
             --validate-addon "$project/addons/gdpp" \
-            --package "$edition"
+            --package standard
       - name: Import, export, run and audit the installed package
         shell: bash
         env:
