@@ -57,6 +57,9 @@ def main() -> int:
         path.name: load_workflow(path)
         for path in sorted(WORKFLOW_ROOT.glob("*.yml"))
     }
+    for path in sorted(WORKFLOW_ROOT.glob("*.yml")):
+        if "api/godot/" in path.read_text(encoding="utf-8"):
+            fail(f"{path.name} still references the retired nested API directory")
     release = workflows["release.yml"]
     release_jobs = release["jobs"]
 
