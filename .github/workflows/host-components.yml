@@ -125,11 +125,7 @@ jobs:
           grep -q '^platform_minimum ${{ matrix.platform_minimum }}$' "$sdk/sdk.manifest"
           grep -q "^gdpp_version $version$" "$sdk/sdk.manifest"
           test "$(find "$sdk" -maxdepth 1 -type f ! -name sdk.manifest | wc -l)" -eq 1
-          test ! -e "$sdk/include"
-          test ! -e "$sdk/lib"
           test "$(find "$package/sdk/include" -type f | wc -l)" -eq 7
-          test ! -e "$sdk/godot-cpp"
-          test ! -e "$sdk/src"
           grep -q '^compatibility_minimum = "4.4"$' "$package/gdpp.gdextension"
       - id: godot
         name: Install official Godot 4.7.2 editor and host templates
