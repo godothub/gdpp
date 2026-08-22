@@ -29,7 +29,7 @@ runs:
         fetch-depth: 0
         persist-credentials: false
     - id: contract
-      name: Validate source and pipeline revisions
+      name: Validate source and pipeline control plane
       shell: bash
       run: |
         set -euo pipefail
@@ -37,8 +37,9 @@ runs:
         test -f "$source_root/CMakeLists.txt"
         test -e "$source_root/ci/.git"
         source_sha="$(git -C "$source_root" rev-parse HEAD)"
-        pipeline_sha="$(git -C "$source_root/ci" rev-parse HEAD)"
-        test "$pipeline_sha" = "$GITHUB_SHA"
+        public_pipeline_tree="$(git -C "$GITHUB_WORKSPACE" rev-parse HEAD:.github)"
+        source_pipeline_tree="$(git -C "$source_root/ci" rev-parse HEAD:.github)"
+        test "$source_pipeline_tree" = "$public_pipeline_tree"
         test -z "$(git -C "$source_root" status --short)"
         echo "sha=$source_sha" >> "$GITHUB_OUTPUT"
         printf 'Private source revision: `%s`\n' "$source_sha" >> "$GITHUB_STEP_SUMMARY"
