@@ -48,18 +48,22 @@ jobs:
         with:
           ref: ${{ inputs.source_ref }}
           token: ${{ secrets.GDPP_TOKEN }}
-      - name: Check formatting of changed C++ files
+      - name: Check formatting of the complete product release range
         shell: bash
         run: |
-          base="$(git rev-parse HEAD^ 2>/dev/null || true)"
-          if [[ -z "$base" ]]; then
-            echo 'No parent commit is available; skipping the incremental format check.'
-            exit 0
-          fi
+          version="$(sed -n 's/^[[:space:]]*VERSION[[:space:]]\+\([0-9][0-9.]*\)$/\1/p' \
+            CMakeLists.txt)"
+          test -n "$version"
+          release_start="$(git log -1 --format=%H --fixed-strings \
+            -S "VERSION $version" -- CMakeLists.txt)"
+          test -n "$release_start"
+          base="$(git rev-parse "$release_start^" 2>/dev/null || \
+            git hash-object -t tree /dev/null)"
           mapfile -t files < <(git diff --name-only --diff-filter=ACMR "$base" HEAD -- \
-            include src test | grep -E '\.(cpp|hpp)$' || true)
+            include src test | grep -E '\.(cpp|hpp|h)$' | \
+            grep -v '^include/gdextension_interface\.h$' || true)
           if [[ ${#files[@]} -eq 0 ]]; then
-            echo 'No changed C++ files.'
+            echo 'No C++ files changed in the current product release range.'
             exit 0
           fi
           clang-format --dry-run --Werror "${files[@]}"

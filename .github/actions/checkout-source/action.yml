@@ -26,7 +26,7 @@ runs:
         token: ${{ inputs.token }}
         path: source
         submodules: recursive
-        fetch-depth: 2
+        fetch-depth: 0
         persist-credentials: false
     - id: contract
       name: Validate source and pipeline revisions

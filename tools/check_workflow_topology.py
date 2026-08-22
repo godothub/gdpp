@@ -60,6 +60,21 @@ def main() -> int:
     release = workflows["release.yml"]
     release_jobs = release["jobs"]
 
+    checkout_source = (ROOT / ".github/actions/checkout-source/action.yml").read_text(
+        encoding="utf-8"
+    )
+    if "fetch-depth: 0" not in checkout_source:
+        fail("private source checkout must retain complete history for release-range gates")
+
+    quality_source = (WORKFLOW_ROOT / "quality.yml").read_text(encoding="utf-8")
+    if (
+        '-S "VERSION $version"' not in quality_source
+        or '"$release_start^"' not in quality_source
+    ):
+        fail("quality formatting must cover the complete current product release range")
+    if "git rev-parse HEAD^" in quality_source:
+        fail("quality formatting cannot inspect only the final source commit")
+
     for name, workflow in workflows.items():
         if workflow.get("permissions", {}).get("contents") != "read":
             fail(f"{name} must default to contents: read")
