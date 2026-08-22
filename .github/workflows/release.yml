@@ -14,10 +14,10 @@ on:
         type: boolean
         default: false
       release_version:
-        description: Release version without a v prefix (for example, 2.0.1)
+        description: Release version without a v prefix (for example, 2.0.2)
         required: true
         type: string
-        default: 2.0.1
+        default: 2.0.2
 
 permissions:
   actions: read
