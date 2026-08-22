@@ -1,0 +1,215 @@
+name: Compiler core
+
+on:
+  workflow_call:
+    inputs:
+      source_ref:
+        description: Private source revision to validate
+        type: string
+        required: false
+        default: main
+    secrets:
+      GDPP_TOKEN:
+        required: true
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: Private source revision to validate
+        type: string
+        required: false
+        default: main
+
+permissions:
+  contents: read
+
+env:
+  GDPP_SOURCE_ROOT: ${{ github.workspace }}/source
+
+defaults:
+  run:
+    working-directory: source
+
+concurrency:
+  group: core-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Core / ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, macos-15, windows-2025]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - name: Check out public pipeline
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/checkout-source
+        with:
+          ref: ${{ inputs.source_ref }}
+          token: ${{ secrets.GDPP_TOKEN }}
+      - name: Initialize the MSVC x64 toolchain
+        if: runner.os == 'Windows'
+        uses: ./.github/actions/setup-msvc
+        with:
+          arch: x64
+      - name: Configure compiler
+        shell: bash
+        run: |
+          arguments=(--preset dev)
+          if [[ "$RUNNER_OS" == Windows ]]; then
+            arguments+=("-DCMAKE_CXX_COMPILER=cl.exe")
+          fi
+          cmake "${arguments[@]}"
+      - name: Build compiler and unit tests
+        run: cmake --build --preset dev --parallel
+      - name: Run compiler tests
+        run: ctest --preset dev
+
+  ubsan:
+    name: Core / Ubuntu / undefined behavior
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    steps:
+      - name: Check out public pipeline
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/checkout-source
+        with:
+          ref: ${{ inputs.source_ref }}
+          token: ${{ secrets.GDPP_TOKEN }}
+      - name: Configure undefined-behavior instrumentation
+        shell: bash
+        run: |
+          cmake -S . -B build/ci-ubsan -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DGDPP_BUILD_EXTENSION=OFF \
+            -DGDPP_BUILD_TESTS=ON \
+            -DGDPP_WARNINGS_AS_ERRORS=ON \
+            '-DCMAKE_CXX_FLAGS=-fsanitize=undefined -fno-sanitize-recover=undefined -fno-omit-frame-pointer' \
+            '-DCMAKE_EXE_LINKER_FLAGS=-fsanitize=undefined'
+      - name: Build instrumented compiler and tests
+        run: cmake --build build/ci-ubsan --parallel
+      - name: Run instrumented compiler tests
+        env:
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+        run: ctest --test-dir build/ci-ubsan --output-on-failure
+
+  asan:
+    name: Core / Ubuntu / address safety
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    steps:
+      - name: Check out public pipeline
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/checkout-source
+        with:
+          ref: ${{ inputs.source_ref }}
+          token: ${{ secrets.GDPP_TOKEN }}
+      - name: Configure address-safety instrumentation
+        shell: bash
+        run: |
+          cmake -S . -B build/ci-asan -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DGDPP_BUILD_EXTENSION=OFF \
+            -DGDPP_BUILD_TESTS=ON \
+            -DGDPP_WARNINGS_AS_ERRORS=ON \
+            '-DCMAKE_CXX_FLAGS=-fsanitize=address -fno-omit-frame-pointer' \
+            '-DCMAKE_EXE_LINKER_FLAGS=-fsanitize=address'
+      - name: Build instrumented compiler and tests
+        run: cmake --build build/ci-asan --parallel
+      - name: Run instrumented compiler tests
+        env:
+          ASAN_OPTIONS: halt_on_error=1:detect_leaks=1
+        run: ctest --test-dir build/ci-asan --output-on-failure
+
+  frontend-fuzz:
+    name: Core / Ubuntu / frontend fuzz
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out public pipeline
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/checkout-source
+        with:
+          ref: ${{ inputs.source_ref }}
+          token: ${{ secrets.GDPP_TOKEN }}
+      - name: Configure coverage-guided frontend fuzzing
+        run: |
+          cmake -S . -B build/ci-frontend-fuzz -G Ninja \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCMAKE_CXX_COMPILER=clang++ \
+            -DGDPP_BUILD_CLI=OFF \
+            -DGDPP_BUILD_TESTS=OFF \
+            -DGDPP_BUILD_EXTENSION=OFF \
+            -DGDPP_BUILD_FUZZERS=ON \
+            -DGDPP_WARNINGS_AS_ERRORS=ON
+      - name: Build the instrumented frontend
+        run: cmake --build build/ci-frontend-fuzz --target gdpp_frontend_fuzzer --parallel
+      - name: Fuzz lexer and recoverable parser
+        env:
+          ASAN_OPTIONS: halt_on_error=1:detect_leaks=1
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+        run: |
+          mkdir -p build/ci-frontend-fuzz/fuzz-artifacts
+          build/ci-frontend-fuzz/bin/gdpp_frontend_fuzzer \
+            build/ci-frontend-fuzz/fuzz-corpus/frontend \
+            -dict=test/fuzz/gdscript.dict \
+            -max_len=65536 \
+            -timeout=5 \
+            -rss_limit_mb=0 \
+            -max_total_time=90 \
+            -artifact_prefix=build/ci-frontend-fuzz/fuzz-artifacts/
+      - id: fuzz_evidence_audit
+        name: Audit public fuzz failure for source disclosure
+        if: failure()
+        run: >-
+          python3 "$GITHUB_WORKSPACE/.github/tools/audit_public_artifact.py"
+          --source .
+          --path build/ci-frontend-fuzz/fuzz-artifacts
+      - name: Preserve frontend fuzz failure
+        if: ${{ failure() && steps.fuzz_evidence_audit.outcome == 'success' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: frontend-fuzz-failure-${{ github.run_id }}
+          path: source/build/ci-frontend-fuzz/fuzz-artifacts/
+          if-no-files-found: error
+          retention-days: 7
+
+  tsan:
+    name: Core / Ubuntu / thread safety
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    steps:
+      - name: Check out public pipeline
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/checkout-source
+        with:
+          ref: ${{ inputs.source_ref }}
+          token: ${{ secrets.GDPP_TOKEN }}
+      - name: Configure thread-safety instrumentation
+        shell: bash
+        run: |
+          cmake -S . -B build/ci-tsan -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DGDPP_BUILD_EXTENSION=OFF \
+            -DGDPP_BUILD_TESTS=ON \
+            -DGDPP_WARNINGS_AS_ERRORS=ON \
+            '-DCMAKE_CXX_FLAGS=-fsanitize=thread -fno-omit-frame-pointer' \
+            '-DCMAKE_EXE_LINKER_FLAGS=-fsanitize=thread'
+      - name: Build instrumented compiler and tests
+        run: cmake --build build/ci-tsan --parallel
+      - name: Run instrumented compiler tests
+        env:
+          TSAN_OPTIONS: halt_on_error=1
+        run: ctest --test-dir build/ci-tsan --output-on-failure

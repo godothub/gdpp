@@ -1,0 +1,132 @@
+name: Quality gates
+
+on:
+  workflow_call:
+    inputs:
+      source_ref:
+        description: Private source revision to validate
+        type: string
+        required: false
+        default: main
+    secrets:
+      GDPP_TOKEN:
+        required: true
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: Private source revision to validate
+        type: string
+        required: false
+        default: main
+
+permissions:
+  contents: read
+
+env:
+  GDPP_SOURCE_ROOT: ${{ github.workspace }}/source
+
+defaults:
+  run:
+    working-directory: source
+
+concurrency:
+  group: quality-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  source:
+    name: Quality / Source and repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out public pipeline
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+      - id: source
+        uses: ./.github/actions/checkout-source
+        with:
+          ref: ${{ inputs.source_ref }}
+          token: ${{ secrets.GDPP_TOKEN }}
+      - name: Check formatting of the complete product release range
+        shell: bash
+        run: |
+          version="$(sed -n 's/^[[:space:]]*VERSION[[:space:]]\+\([0-9][0-9.]*\)$/\1/p' \
+            CMakeLists.txt)"
+          test -n "$version"
+          release_start="$(git log -1 --format=%H --fixed-strings \
+            -S "VERSION $version" -- CMakeLists.txt)"
+          test -n "$release_start"
+          base="$(git rev-parse "$release_start^" 2>/dev/null || \
+            git hash-object -t tree /dev/null)"
+          mapfile -t files < <(git diff --name-only --diff-filter=ACMR "$base" HEAD -- \
+            include src test | grep -E '\.(cpp|hpp|h)$' | \
+            grep -v '^include/gdextension_interface\.h$' || true)
+          if [[ ${#files[@]} -eq 0 ]]; then
+            echo 'No C++ files changed in the current product release range.'
+            exit 0
+          fi
+          clang-format --dry-run --Werror "${files[@]}"
+      - name: Install pinned CI validation dependencies
+        run: >-
+          python3 -m pip install
+          --disable-pip-version-check
+          --requirement "$GITHUB_WORKSPACE/.github/tools/requirements.txt"
+      - name: Validate workflow YAML, ownership and delivery topology
+        run: python3 "$GITHUB_WORKSPACE/.github/tools/check_workflow_topology.py"
+      - name: Validate public diagnostic source-disclosure guard
+        run: python3 "$GITHUB_WORKSPACE/.github/tools/test_audit_public_artifact.py"
+      - name: Validate portable process and log-contract runners
+        run: |
+          python3 "$GITHUB_WORKSPACE/.github/tools/test_run_process.py"
+          python3 "$GITHUB_WORKSPACE/.github/tools/test_check_log_contract.py"
+      - name: Reject mutable external Action references
+        shell: bash
+        run: |
+          set -euo pipefail
+          validation_status=0
+          while IFS= read -r entry; do
+            reference="${entry#*@}"
+            reference="${reference%% *}"
+            if [[ ! "$reference" =~ ^[0-9a-f]{40}$ ]]; then
+              echo "Mutable external Action reference: $entry"
+              validation_status=1
+            fi
+          done < <(grep -RInE \
+            'uses:[[:space:]]+[^./][^@[:space:]]+@' \
+            "$GITHUB_WORKSPACE/.github" --include='*.yml' --include='*.yaml')
+          test "$validation_status" -eq 0
+      - name: Validate module layout and dependency direction
+        run: python3 tools/check_architecture.py
+      - name: Validate documentation contracts
+        run: python3 tools/check_docs.py
+      - name: Validate GitHub Actions semantics
+        shell: bash
+        run: |
+          mkdir -p build/tools/go-cache build/tools/go-mod
+          (
+            cd "$GITHUB_WORKSPACE"
+            GOCACHE="$GDPP_SOURCE_ROOT/build/tools/go-cache" \
+              GOMODCACHE="$GDPP_SOURCE_ROOT/build/tools/go-mod" \
+              go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+          )
+      - name: Validate the Node.js 24 MSVC bootstrap action
+        run: node test/setup_msvc_action_test.js
+      - name: Reject generated and platform metadata
+        shell: bash
+        run: |
+          if test -n "$(find . -path './.git' -prune -o \
+              \( -name '._*' -o -name '.DS_Store' -o -name '__MACOSX' -o \
+                 -name '__pycache__' -o -name '*.pyc' \) -print -quit)"; then
+            echo 'Repository contains generated or cross-platform metadata.'
+            exit 1
+          fi
+          if test -n "$(find . -path './.git' -prune -o -path './third' -prune -o \
+              -path './build' -prune -o -path './example/addons/gdpp/binary' -prune -o \
+              -path './example/addons/gdpp/sdk' -prune -o \
+              -type f \( -name '*.o' -o -name '*.obj' -o -name '*.a' -o -name '*.so' \
+                         -o -name '*.dylib' -o -name '*.dll' -o -name '*.wasm' \) \
+              -print -quit)"; then
+            echo 'Native build products exist outside approved output directories.'
+            exit 1
+          fi

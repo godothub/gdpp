@@ -1,0 +1,344 @@
+name: Web target and browser runtime
+
+on:
+  workflow_call:
+    inputs:
+      source_ref:
+        description: Private source revision to validate
+        type: string
+        required: false
+        default: main
+    secrets:
+      GDPP_TOKEN:
+        required: true
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: Private source revision to validate
+        type: string
+        required: false
+        default: main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: web-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  EM_CACHE: ${{ github.workspace }}/source/build/emscripten-cache
+  GDPP_SOURCE_ROOT: ${{ github.workspace }}/source
+
+defaults:
+  run:
+    working-directory: source
+
+jobs:
+  target-sdk:
+    name: Web Host SDK / ${{ matrix.profile }} / ${{ matrix.variant }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [nothreads, threads]
+        profile: [godot44, godot45, godot46_47]
+        include:
+          - profile: godot44
+            emscripten: 3.1.64
+          - profile: godot45
+            emscripten: 4.0.10
+          - profile: godot46_47
+            emscripten: 4.0.20
+    steps:
+      - name: Check out public pipeline
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/checkout-source
+        with:
+          ref: ${{ inputs.source_ref }}
+          token: ${{ secrets.GDPP_TOKEN }}
+      - uses: emscripten-core/setup-emsdk@4528d102f7230f0e7b276855c01ea1159be0e984 # v16
+        with:
+          version: ${{ matrix.emscripten }}
+          actions-cache-folder: build/ci/emsdk-cache
+      - name: Configure Web target SDK builder
+        shell: bash
+        run: >-
+          cmake --preset dev
+          -DGDPP_BUILD_WEB_SDK=ON
+          -DGDPP_WEB_TOOLCHAIN_PROFILE=${{ matrix.profile }}
+          -DGDPP_WEB_VARIANTS=${{ matrix.variant }}
+          -DGDPP_WEB_EMCMAKE="$(command -v emcmake)"
+      - name: Build Release target SDK
+        run: cmake --build --preset dev --target gdpp_web_sdk --parallel
+      - name: Validate SDK and thread-mode isolation
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdk="example/addons/gdpp/sdk/targets/web/wasm32/${{ matrix.variant }}/${{ matrix.profile }}"
+          grep -q '^platform web$' "$sdk/sdk.manifest"
+          grep -q '^arch wasm32$' "$sdk/sdk.manifest"
+          grep -q '^profiles debug,release$' "$sdk/sdk.manifest"
+          grep -q '^host_abi 1$' "$sdk/sdk.manifest"
+          grep -q '^script_abi 1$' "$sdk/sdk.manifest"
+          grep -q '^exceptions disabled$' "$sdk/sdk.manifest"
+          grep -q '^fault_model explicit_status$' "$sdk/sdk.manifest"
+          grep -q '^compiler_version ${{ matrix.emscripten }}$' "$sdk/sdk.manifest"
+          grep -q '^web_threads ${{ matrix.variant }}$' "$sdk/sdk.manifest"
+          grep -q '^web_toolchain ${{ matrix.profile }}$' "$sdk/sdk.manifest"
+          grep -q '^compiler Emscripten$' "$sdk/sdk.manifest"
+          grep -q '^source_paths mapped$' "$sdk/sdk.manifest"
+          test "$(find "$sdk/lib" -maxdepth 1 -type f -name '*.a' | wc -l)" -eq 1
+          test ! -e "$sdk/godot-cpp"
+          test ! -e "$sdk/src"
+          if find "$sdk/lib" -maxdepth 1 -type f -name '*.a' -exec strings {} + \
+              | grep -F "$GDPP_SOURCE_ROOT" >/dev/null; then
+            echo 'Web target SDK leaks the checkout path.'
+            exit 1
+          fi
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: gdpp-web-${{ matrix.profile }}-${{ matrix.variant }}
+          path: source/example/addons/gdpp/sdk/targets/web/wasm32/${{ matrix.variant }}/${{ matrix.profile }}
+          if-no-files-found: error
+          retention-days: 7
+
+  browser:
+    name: Web browser / Godot ${{ matrix.godot }} / ${{ matrix.variant }}
+    needs: target-sdk
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - variant: nothreads
+            profile: godot44
+            emscripten: 3.1.64
+            godot: 4.4.1
+            project: test/web_compatibility/project
+            preset: Web AOT
+            product: GDPPWeb
+            output: web-4.4-nothreads
+            port: 8060
+          - variant: threads
+            profile: godot44
+            emscripten: 3.1.64
+            godot: 4.4.1
+            project: test/web_compatibility/project
+            preset: Web AOT Threads
+            product: GDPPWeb
+            output: web-4.4-threads
+            port: 8061
+          - variant: nothreads
+            profile: godot45
+            emscripten: 4.0.10
+            godot: 4.5.2
+            project: example
+            preset: Web AOT
+            product: GDPPExample
+            output: web-4.5-nothreads
+            port: 8062
+          - variant: threads
+            profile: godot45
+            emscripten: 4.0.10
+            godot: 4.5.2
+            project: example
+            preset: Web AOT Threads
+            product: GDPPExample
+            output: web-4.5-threads
+            port: 8063
+          - variant: nothreads
+            profile: godot46_47
+            emscripten: 4.0.20
+            godot: 4.6.3
+            project: example
+            preset: Web AOT
+            product: GDPPExample
+            output: web-4.6-nothreads
+            port: 8064
+          - variant: threads
+            profile: godot46_47
+            emscripten: 4.0.20
+            godot: 4.6.3
+            project: example
+            preset: Web AOT Threads
+            product: GDPPExample
+            output: web-4.6-threads
+            port: 8065
+          - variant: nothreads
+            profile: godot46_47
+            emscripten: 4.0.20
+            godot: 4.7.2
+            project: example
+            preset: Web AOT
+            product: GDPPExample
+            output: web-4.7-nothreads
+            port: 8060
+          - variant: threads
+            profile: godot46_47
+            emscripten: 4.0.20
+            godot: 4.7.2
+            project: example
+            preset: Web AOT Threads
+            product: GDPPExample
+            output: web-4.7-threads
+            port: 8061
+    steps:
+      - name: Check out public pipeline
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/checkout-source
+        with:
+          ref: ${{ inputs.source_ref }}
+          token: ${{ secrets.GDPP_TOKEN }}
+      - uses: emscripten-core/setup-emsdk@4528d102f7230f0e7b276855c01ea1159be0e984 # v16
+        with:
+          version: ${{ matrix.emscripten }}
+          actions-cache-folder: build/ci/emsdk-cache
+      - id: godot
+        uses: ./.github/actions/setup-godot
+        with:
+          source-root: ${{ env.GDPP_SOURCE_ROOT }}
+          version: ${{ matrix.godot }}
+          templates: web
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: gdpp-web-${{ matrix.profile }}-${{ matrix.variant }}
+          path: source/example/addons/gdpp/sdk/targets/web/wasm32/${{ matrix.variant }}/${{ matrix.profile }}
+      - name: Install Wasm inspection tools
+        run: sudo apt-get update && sudo apt-get install -y binaryen wabt
+      - name: Build compiler plugin
+        shell: bash
+        env:
+          GODOT: ${{ steps.godot.outputs.executable }}
+        run: |
+          cmake --preset plugin \
+            -DGDPP_GODOT_EXECUTABLE="$GODOT"
+          cmake --build --preset plugin --parallel
+          ctest --preset plugin --output-on-failure \
+            -E '^gdpp\.godot\.runtime_differential$'
+          if [[ '${{ matrix.project }}' != example ]]; then
+            mkdir -p '${{ matrix.project }}/addons'
+            cp -R example/addons/gdpp '${{ matrix.project }}/addons/gdpp'
+          fi
+      - name: Export Web AOT package
+        shell: bash
+        env:
+          GODOT: ${{ steps.godot.outputs.executable }}
+        run: |
+          set -euo pipefail
+          project='${{ matrix.project }}'
+          root="$GDPP_SOURCE_ROOT/$project/addons/gdpp/build/${{ matrix.output }}"
+          mkdir -p "$root"
+          "$GODOT" --headless --editor --path "$project" --quit-after 120 \
+            2>&1 | tee "$root/warmup.log"
+          "$GODOT" --headless --editor --path "$project" --import \
+            2>&1 | tee "$root/import.log"
+          python3 tools/verify_export_immutability.py snapshot \
+            --project "$project" --state "$root/extension-state.json"
+          "$GODOT" --headless --editor --path "$project" \
+            --export-release '${{ matrix.preset }}' "$root/${{ matrix.product }}.html" \
+            2>&1 | tee "$root/export.log"
+          python3 tools/verify_export_immutability.py verify \
+            --project "$project" --state "$root/extension-state.json"
+          grep -q 'GDPP_AOT_SUMMARY scenes=' "$root/export.log"
+          if grep -E -q '(^| )ERROR:|SCRIPT ERROR:|WARNING:|Unable to open' \
+              "$root/import.log" "$root/export.log"; then
+            echo 'Godot reported a Web import/export failure.'
+            exit 1
+          fi
+      - name: Audit PCK, descriptor and Wasm side module
+        shell: bash
+        env:
+          GODOT: ${{ steps.godot.outputs.executable }}
+        run: |
+          set -euo pipefail
+          root="${{ matrix.project }}/addons/gdpp/build/${{ matrix.output }}"
+          mapfile -t modules < <(find "$root" -maxdepth 1 -type f \
+            -name 'libgdpp.release.web.wasm32*.wasm' | LC_ALL=C sort)
+          test "${#modules[@]}" -eq 1
+          module="${modules[0]}"
+          mkdir -p build/ci/web-validation
+          wasm-validate --enable-all "$module"
+          wasm-opt "$module" --all-features \
+            -o "build/ci/web-validation/${{ matrix.variant }}.wasm"
+          wasm-objdump -x "$module" > "$root/project-wasm.txt"
+          grep -q 'gdpp_library_init' "$root/project-wasm.txt"
+          if grep -E -q '^ - (func|tag)\[[0-9]+\].*<(env\.)?(invoke_|__cxa_(throw|rethrow|begin_catch|end_catch|allocate_exception|free_exception|find_matching_catch)|__cpp_exception|__resumeException)' \
+              "$root/project-wasm.txt"; then
+            echo 'Web side module depends on a C++ exception runtime unavailable in stock templates.'
+            exit 1
+          fi
+          if [[ '${{ matrix.variant }}' == threads ]]; then
+            grep -q 'shared' "$root/project-wasm.txt"
+          fi
+          grep -q "$(basename "$module")" "$root/${{ matrix.product }}.html"
+
+          mkdir -p build/pck-audit
+          cp tools/audit_export_pck.gd build/pck-audit/audit_export_pck.gd
+          printf '[application]\nconfig/name="GDPP Web PCK Audit"\n' > build/pck-audit/project.godot
+          "$GODOT" --headless --path build/pck-audit \
+            --script "$GDPP_SOURCE_ROOT/build/pck-audit/audit_export_pck.gd" -- \
+            "$GDPP_SOURCE_ROOT/$root/${{ matrix.product }}.pck" \
+            "$GDPP_SOURCE_ROOT/$root" "$GDPP_SOURCE_ROOT/$module" \
+            2>&1 | tee "$root/pck-audit.log"
+          grep -q '^PCK_AUDIT_VIOLATIONS=0$' "$root/pck-audit.log"
+          grep -q '^PCK_AUDIT_PROJECT_LIBRARIES=1$' "$root/pck-audit.log"
+      - name: Run Chromium smoke test with cross-origin isolation
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="${{ matrix.project }}/addons/gdpp/build/${{ matrix.output }}"
+          python3 tools/serve_web.py "$root" --port '${{ matrix.port }}' \
+            > "$root/server.log" 2>&1 &
+          server_pid=$!
+          trap 'kill "$server_pid" 2>/dev/null || true' EXIT
+          for _ in {1..30}; do
+            if curl --fail --silent --head \
+                "http://127.0.0.1:${{ matrix.port }}/${{ matrix.product }}.html" \
+                > "$root/headers.txt"; then
+              break
+            fi
+            sleep 1
+          done
+          grep -qi '^Cross-Origin-Opener-Policy: same-origin' "$root/headers.txt"
+          grep -qi '^Cross-Origin-Embedder-Policy: require-corp' "$root/headers.txt"
+          python3 tools/run_web_browser_smoke.py \
+            --url "http://127.0.0.1:${{ matrix.port }}/${{ matrix.product }}.html" \
+            --dom-output "$root/browser-dom.txt" \
+            --log-output "$root/browser.log" \
+            --timeout 150
+          if ! grep -q 'data-gdpp-status="ok"' "$root/browser-dom.txt"; then
+            echo 'Web runtime did not publish its successful DOM oracle.'
+            tail -80 "$root/browser.log"
+            exit 1
+          fi
+          if grep -q 'data-gdpp-status="invalid"' "$root/browser-dom.txt"; then
+            echo 'Web runtime reported an invalid AOT behavior oracle.'
+            exit 1
+          fi
+          if grep -E -q 'GDPP_EXPORTED_PROPERTIES_INVALID|LinkError|RuntimeError|CompileError|SCRIPT ERROR|undefined symbol|loadDylibs|Uncaught \\(in promise\\)|Aborted|resolved is not a function' \
+              "$root/browser.log"; then
+            echo 'Web runtime emitted a forbidden diagnostic.'
+            exit 1
+          fi
+      - id: evidence_audit
+        name: Audit public Web evidence for source disclosure
+        if: always()
+        run: >-
+          python3 "$GITHUB_WORKSPACE/.github/tools/audit_public_artifact.py"
+          --source .
+          --path ${{ matrix.project }}/addons/gdpp/build/${{ matrix.output }}
+      - name: Upload Web evidence
+        if: ${{ always() && steps.evidence_audit.outcome == 'success' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: gdpp-web-runtime-godot-${{ matrix.godot }}-${{ matrix.variant }}
+          path: source/${{ matrix.project }}/addons/gdpp/build/${{ matrix.output }}
+          if-no-files-found: warn
+          retention-days: 14

@@ -1,0 +1,44 @@
+name: Checkout private GDPP source
+description: Resolve and check out one immutable private source revision without persisting its credential.
+
+inputs:
+  ref:
+    description: Private source branch, tag, or commit to check out.
+    required: false
+    default: main
+  token:
+    description: Read-only token for the private GDPP source repository.
+    required: true
+
+outputs:
+  sha:
+    description: Immutable private source commit used by this job.
+    value: ${{ steps.contract.outputs.sha }}
+
+runs:
+  using: composite
+  steps:
+    - name: Check out private source
+      uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      with:
+        repository: abandoft/gdpp
+        ref: ${{ inputs.ref }}
+        token: ${{ inputs.token }}
+        path: source
+        submodules: recursive
+        fetch-depth: 0
+        persist-credentials: false
+    - id: contract
+      name: Validate source and pipeline revisions
+      shell: bash
+      run: |
+        set -euo pipefail
+        source_root="$GITHUB_WORKSPACE/source"
+        test -f "$source_root/CMakeLists.txt"
+        test -e "$source_root/ci/.git"
+        source_sha="$(git -C "$source_root" rev-parse HEAD)"
+        pipeline_sha="$(git -C "$source_root/ci" rev-parse HEAD)"
+        test "$pipeline_sha" = "$GITHUB_SHA"
+        test -z "$(git -C "$source_root" status --short)"
+        echo "sha=$source_sha" >> "$GITHUB_OUTPUT"
+        printf 'Private source revision: `%s`\n' "$source_sha" >> "$GITHUB_STEP_SUMMARY"

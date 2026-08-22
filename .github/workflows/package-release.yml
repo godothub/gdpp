@@ -1,0 +1,134 @@
+name: Release package assembly
+
+on:
+  workflow_call:
+    inputs:
+      source_ref:
+        description: Private source revision to package
+        type: string
+        required: true
+    secrets:
+      GDPP_TOKEN:
+        required: true
+
+permissions:
+  contents: read
+
+env:
+  GDPP_SOURCE_ROOT: ${{ github.workspace }}/source
+
+defaults:
+  run:
+    working-directory: source
+
+jobs:
+  package:
+    name: ZIP / complete edition
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    steps:
+      - name: Check out public pipeline
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/checkout-source
+        with:
+          ref: ${{ inputs.source_ref }}
+          token: ${{ secrets.GDPP_TOKEN }}
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          pattern: gdpp-host-*
+          path: source/build/components
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: gdpp-android-arm64
+          path: source/build/components/gdpp-android-arm64
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          pattern: gdpp-web-godot44-*
+          path: source/build/components
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          pattern: gdpp-web-godot45-*
+          path: source/build/components
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          pattern: gdpp-web-godot46_47-*
+          path: source/build/components
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: gdpp-ios
+          path: source/build/components/gdpp-ios
+      - name: Validate release packager contracts
+        run: >-
+          python3 test/release_packaging_test.py
+          "$GDPP_SOURCE_ROOT"
+          "$GDPP_SOURCE_ROOT/build/package-contract"
+      - name: Assemble deterministic plugin ZIP
+        run: >-
+          python3 tools/package_platform_release.py
+          --components build/components
+          --output build/release
+          --package standard
+      - name: Audit package topology and source isolation
+        shell: bash
+        run: |
+          set -euo pipefail
+          audit_archive() {
+            local archive="$1"
+            local expected_manifests="$2"
+            local expected_binaries="$3"
+            local expected_executors="$4"
+            local contents
+            contents="build/$(basename "$archive").contents"
+            unzip -Z1 "$archive" | LC_ALL=C sort > "$contents"
+            test -s "$contents"
+            test "$(grep -cv '^addons/gdpp/' "$contents")" -eq 0
+            test "$(grep -c '/sdk/targets/.*/sdk\.manifest$' "$contents")" \
+              -eq "$expected_manifests"
+            test "$(grep -c '^addons/gdpp/binary/[^/]*$' "$contents")" \
+              -eq "$expected_binaries"
+            test "$(grep -Ec '^addons/gdpp/tools/[^/]+/gdpp-ninja(\.exe)?$' "$contents")" \
+              -eq "$expected_executors"
+            test "$(grep -c '^addons/gdpp/PACKAGE_MANIFEST.txt$' "$contents")" -eq 1
+            if grep -E -q \
+              '(^|/)(godot-cpp|4\.[4-7]|build)(/|$)|/sdk/.*\.(c|cc|cpp|cxx)$|\.DS_Store$|(^|/)\._' \
+              "$contents"; then
+              echo "$archive contains a retired SDK, source, or generated product."
+              exit 1
+            fi
+          }
+          audit_archive build/release/gdpp.zip 11 6 3
+
+          audit=build/package-audit
+          rm -rf "$audit"
+          mkdir -p "$audit"
+          unzip -q build/release/gdpp.zip -d "$audit"
+          if find "$audit/addons/gdpp/sdk/targets" -type f \
+              \( -name '*.a' -o -name '*.lib' \) -exec strings {} + \
+              | grep -E -q '/home/runner/work/|[A-Za-z]:[/\\].*(source|work)[/\\]'; then
+            echo 'A packaged Host Runtime leaks a build checkout path.'
+            exit 1
+          fi
+      - name: Verify deterministic rebuild
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha256sum build/release/gdpp.zip > build/release/first.sha256
+          python3 tools/package_platform_release.py \
+            --components build/components \
+            --output build/release \
+            --package standard
+          sha256sum -c build/release/first.sha256
+      - name: Write checksums
+        run: >-
+          bash -c 'cd build/release &&
+          LC_ALL=C sha256sum -- gdpp.zip > SHA256SUMS'
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: gdpp-release-packages
+          path: |
+            source/build/release/gdpp.zip
+            source/build/release/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 14

@@ -1,0 +1,252 @@
+name: Installed release package smoke
+
+on:
+  workflow_call:
+    inputs:
+      source_ref:
+        description: Private source revision to validate
+        type: string
+        required: true
+      artifact_run_id:
+        description: Existing package run to validate instead of the current caller
+        type: string
+        required: false
+        default: ""
+    secrets:
+      GDPP_TOKEN:
+        required: true
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: Immutable private source revision to validate
+        type: string
+        required: true
+      artifact_run_id:
+        description: Completed release workflow run containing gdpp-release-packages
+        type: string
+        required: true
+
+permissions:
+  actions: read
+  contents: read
+
+env:
+  GDPP_SOURCE_ROOT: ${{ github.workspace }}/source
+
+defaults:
+  run:
+    working-directory: source
+
+jobs:
+  desktop:
+    name: Installed ${{ matrix.archive }} / ${{ matrix.platform_host }} / Godot 4.7.2
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform_host: mac
+            os: macos-15
+            preset: macOS Universal
+            archive: gdpp.zip
+          - platform_host: linux
+            os: ubuntu-22.04
+            preset: Linux x86_64
+            archive: gdpp.zip
+          - platform_host: win
+            os: windows-2025
+            preset: Windows x86_64
+            archive: gdpp.zip
+    steps:
+      - name: Check out public pipeline
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/checkout-source
+        with:
+          ref: ${{ inputs.source_ref }}
+          token: ${{ secrets.GDPP_TOKEN }}
+      - name: Initialize the MSVC x64 toolchain
+        if: runner.os == 'Windows'
+        uses: ./.github/actions/setup-msvc
+        with:
+          arch: x64
+      - id: godot
+        name: Install official Godot 4.7.2 editor and host templates
+        uses: ./.github/actions/setup-godot
+        with:
+          source-root: ${{ env.GDPP_SOURCE_ROOT }}
+          version: 4.7.2
+          templates: host
+      - name: Download packages from the current delivery run
+        if: inputs.artifact_run_id == ''
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: gdpp-release-packages
+          path: source/build/release-package-smoke/archive
+      - name: Download packages from an existing delivery run
+        if: inputs.artifact_run_id != ''
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: gdpp-release-packages
+          path: source/build/release-package-smoke/archive
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.artifact_run_id }}
+      - name: Install the final ZIP into a clean customer project
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="$GDPP_SOURCE_ROOT/build/release-package-smoke"
+          project="$root/客户项目-é"
+          archive="$root/archive/${{ matrix.archive }}"
+          test -f "$archive"
+          rm -rf "$project"
+          cp -R example "$project"
+          rm -rf "$project/.godot" "$project/addons/gdpp"
+          unzip -q "$archive" -d "$project"
+          test -f "$project/addons/gdpp/plugin.cfg"
+          test -f "$project/addons/gdpp/gdpp.gdextension"
+          if [[ "$RUNNER_OS" == macOS ]]; then
+            executor="$project/addons/gdpp/tools/mac-universal/gdpp-ninja"
+          elif [[ "$RUNNER_OS" == Windows ]]; then
+            executor="$project/addons/gdpp/tools/windows-x64/gdpp-ninja.exe"
+          else
+            executor="$project/addons/gdpp/tools/linux-x64/gdpp-ninja"
+          fi
+          test -f "$executor"
+          test "$("$executor" --version)" = 1.13.2
+          diff -u \
+            <(printf 'Ninja 1.13.2\ncommit 3441b633c2fe2c494e958780ba0f4227b1327634\n') \
+            "$project/addons/gdpp/tools/NINJA-VERSION.txt"
+          test -d "$project/addons/gdpp/sdk/targets"
+          test ! -e "$project/addons/gdpp/sdk/4.4"
+          test ! -e "$project/addons/gdpp/sdk/4.5"
+          test ! -e "$project/addons/gdpp/sdk/4.6"
+          test ! -e "$project/addons/gdpp/sdk/4.7"
+          test -z "$(find "$project/addons/gdpp/sdk" \
+            -type d -name godot-cpp -print -quit)"
+          python3 tools/package_platform_release.py \
+            --validate-addon "$project/addons/gdpp" \
+            --package standard
+      - name: Import, export, run and audit the installed package
+        shell: bash
+        env:
+          GODOT: ${{ steps.godot.outputs.executable }}
+          GDPP_WINDOWS_LOCAL_DUMPS: ${{ runner.os == 'Windows' && '1' || '0' }}
+        run: |
+          set -euo pipefail
+          root="$GDPP_SOURCE_ROOT/build/release-package-smoke"
+          project="$root/客户项目-é"
+          output_root="$root/output"
+          mkdir -p "$output_root"
+          if [[ "$RUNNER_OS" == macOS ]]; then
+            output="$output_root/GDPPExample.app"
+            runtime="$output/Contents/MacOS/GDPP Example"
+            project_library="$output/Contents/Frameworks/libgdpp.release.macos.universal.dylib"
+          elif [[ "$RUNNER_OS" == Windows ]]; then
+            output="$output_root/GDPPExample.exe"
+            runtime="$output"
+            project_library="$output_root/gdpp.release.windows.x86_64.dll"
+          else
+            output="$output_root/GDPPExample.x86_64"
+            runtime="$output"
+            project_library="$output_root/libgdpp.release.linux.x86_64.so"
+          fi
+
+          "$GODOT" --headless --editor --path "$project" --quit-after 120 \
+            2>&1 | tee "$root/warmup.log"
+          "$GODOT" --headless --editor --path "$project" --import \
+            2>&1 | tee "$root/import.log"
+          python3 tools/verify_export_immutability.py snapshot \
+            --project "$project" --state "$root/extension-state.json"
+          python3 "$GITHUB_WORKSPACE/.github/tools/run_process.py" \
+            --label godot-export --log "$root/export.log" -- \
+            "$GODOT" --headless --editor --path "$project" \
+            --export-release '${{ matrix.preset }}' "$output"
+          python3 tools/verify_export_immutability.py verify \
+            --project "$project" --state "$root/extension-state.json"
+
+          test -f "$runtime"
+          test -f "$project_library"
+          test "$(find "$output_root" -type f \
+            \( -name 'gdpp.release.*' -o -name 'libgdpp.release.*' \) \
+            | wc -l)" -eq 1
+          if find "$output_root" -type f \
+              \( -name '*gdpp_compiler*' -o -name '*gdpp_fallback*' \) \
+              -print -quit | grep -q .; then
+            echo 'Installed release export contains an editor or fallback library.'
+            exit 1
+          fi
+
+          python3 "$GITHUB_WORKSPACE/.github/tools/run_process.py" \
+            --label installed-runtime --log "$root/runtime.log" \
+            --timeout-seconds 30 -- \
+            "$runtime" --headless --quit-after 2
+          python3 "$GITHUB_WORKSPACE/.github/tools/run_process.py" \
+            --label installed-coroutine-loop --log "$root/coroutine-loop.log" \
+            --timeout-seconds 30 -- \
+            "$runtime" --headless --audio-driver Dummy -- --gdpp-coroutine-loop
+          python3 "$GITHUB_WORKSPACE/.github/tools/run_process.py" \
+            --label installed-runtime-failure --log "$root/runtime-failure.log" \
+            --timeout-seconds 30 -- \
+            "$runtime" --headless --audio-driver Dummy -- --gdpp-runtime-failure
+          python3 "$GITHUB_WORKSPACE/.github/tools/check_log_contract.py" \
+            "$root/runtime.log" \
+            --line GDPP_EXPORTED_PROPERTIES_OK \
+            --line GDPP_ASYNC_VIRTUAL_OK
+          python3 "$GITHUB_WORKSPACE/.github/tools/check_log_contract.py" \
+            "$root/coroutine-loop.log" \
+            --line GDPP_COROUTINE_LOOP_OK
+          python3 "$GITHUB_WORKSPACE/.github/tools/check_log_contract.py" \
+            "$root/runtime-failure.log" \
+            --line GDPP_RUNTIME_FAILURE_OK
+          python3 "$GITHUB_WORKSPACE/.github/tools/check_log_contract.py" \
+            "$root/export.log" \
+            --contains 'GDPP_AOT_SUMMARY scenes='
+
+          pcks=()
+          while IFS= read -r -d '' pck_path; do
+            pcks+=("$pck_path")
+          done < <(find "$output_root" -type f -name '*.pck' -print0)
+          if [[ ${#pcks[@]} -ne 1 ]]; then
+            printf 'Installed release export produced %d PCK files; expected 1.\n' \
+              "${#pcks[@]}"
+            printf 'PCK: %s\n' "${pcks[@]}"
+            exit 1
+          fi
+          pck="${pcks[0]}"
+          audit="$root/pck-audit"
+          mkdir -p "$audit"
+          cp tools/audit_export_pck.gd "$audit/audit_export_pck.gd"
+          printf '[application]\nconfig/name="GDPP Installed ZIP Audit"\n' \
+            > "$audit/project.godot"
+          "$GODOT" --headless --path "$audit" \
+            --script "$audit/audit_export_pck.gd" -- \
+            "$pck" "$output_root" "$project_library" \
+            2>&1 | tee "$root/pck-audit.log"
+          python3 "$GITHUB_WORKSPACE/.github/tools/check_log_contract.py" \
+            "$root/pck-audit.log" \
+            --line PCK_AUDIT_VIOLATIONS=0 \
+            --line PCK_AUDIT_PROJECT_LIBRARIES=1
+
+          if grep -E -q '(^| )ERROR:|SCRIPT ERROR:|Parse Error:|WARNING:|Unable to open' \
+              "$root/warmup.log" "$root/import.log" "$root/export.log" \
+              "$root/runtime.log" "$root/coroutine-loop.log" "$root/pck-audit.log"; then
+            echo 'Installed release package emitted a forbidden diagnostic.'
+            exit 1
+          fi
+      - name: Validate final macOS Universal 2 project library
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          library="$GDPP_SOURCE_ROOT/build/release-package-smoke/output/GDPPExample.app/Contents/Frameworks/libgdpp.release.macos.universal.dylib"
+          architectures="$(lipo -archs "$library")"
+          grep -qw arm64 <<<"$architectures"
+          grep -qw x86_64 <<<"$architectures"
+          for architecture in arm64 x86_64; do
+            load_commands="$(otool -arch "$architecture" -l "$library")"
+            grep -q 'LC_BUILD_VERSION' <<<"$load_commands"
+            grep -q 'minos 11.0' <<<"$load_commands"
+          done
