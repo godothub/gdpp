@@ -285,7 +285,7 @@ jobs:
             git add -- "${release_files[@]}"
             test -n "$(git diff --cached --name-only)"
             if git diff --cached --name-only | grep -Ev \
-                '^(CHANGELOG\.md|CHANGELOG-ZH\.md|README\.md|README-ZH\.md)$'; then
+                "^(CHANGELOG\.md|CHANGELOG-ZH\.md|README\.md|README-ZH\.md)$"; then
               echo 'Release synchronization staged a file outside the fixed allowlist.'
               exit 1
             fi
