@@ -39,7 +39,7 @@ defaults:
 
 jobs:
   desktop:
-    name: Installed ${{ matrix.archive }} / ${{ matrix.platform_host }} / Godot 4.7.1
+    name: Installed ${{ matrix.archive }} / ${{ matrix.platform_host }} / Godot 4.7.2
     runs-on: ${{ matrix.os }}
     timeout-minutes: 90
     strategy:
@@ -81,11 +81,11 @@ jobs:
         with:
           arch: x64
       - id: godot
-        name: Install official Godot 4.7.1 editor and host templates
+        name: Install official Godot 4.7.2 editor and host templates
         uses: ./.github/actions/setup-godot
         with:
           source-root: ${{ env.GDPP_SOURCE_ROOT }}
-          version: 4.7.1
+          version: 4.7.2
           templates: host
       - name: Download packages from the current delivery run
         if: inputs.artifact_run_id == ''

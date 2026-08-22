@@ -172,7 +172,7 @@ jobs:
           - variant: nothreads
             profile: godot46_47
             emscripten: 4.0.20
-            godot: 4.7.1
+            godot: 4.7.2
             project: example
             preset: Web AOT
             product: GDPPExample
@@ -181,7 +181,7 @@ jobs:
           - variant: threads
             profile: godot46_47
             emscripten: 4.0.20
-            godot: 4.7.1
+            godot: 4.7.2
             project: example
             preset: Web AOT Threads
             product: GDPPExample
