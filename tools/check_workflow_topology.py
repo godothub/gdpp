@@ -88,6 +88,12 @@ def main() -> int:
         fail("release.yml must allow called workflows to read package artifacts")
     if set(triggers(release)) != {"workflow_dispatch"}:
         fail("release.yml must expose only workflow_dispatch")
+    preflight_steps = release_jobs["preflight"].get("steps", [])
+    if not any(
+        step.get("name") == "Verify the latest supported Godot stable frontend pin"
+        for step in preflight_steps
+    ):
+        fail("release preflight must reject a stale supported Godot frontend pin")
 
     parallel = {
         "quality-gate": "quality.yml",

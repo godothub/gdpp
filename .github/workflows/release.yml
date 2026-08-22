@@ -85,6 +85,16 @@ jobs:
               exit 1
             fi
           fi
+      - name: Verify the latest supported Godot stable frontend pin
+        run: >-
+          python3 tools/update_godot_frontend.py
+          --manifest test/compatibility/godot_parser_4_7.json
+          --snapshot test/compatibility/godot_frontend_4_7.json
+          --language-features src/frontend/language_features.cpp
+          --unicode-table src/frontend/unicode_identifier_ranges.inc
+          --build-root build
+          --output build/godot-frontend-update
+          --check-only
 
   quality-gate:
     name: Gate / Quality
