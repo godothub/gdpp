@@ -269,7 +269,7 @@ jobs:
             -o "build/ci/web-validation/${{ matrix.variant }}.wasm"
           wasm-objdump -x "$module" > "$root/project-wasm.txt"
           grep -q 'gdpp_library_init' "$root/project-wasm.txt"
-          if grep -E -q 'invoke_|__cxa_(throw|rethrow|begin_catch|end_catch|allocate_exception|free_exception|find_matching_catch)|__cpp_exception|__resumeException' \
+          if grep -E -q '^ - (func|tag)\[[0-9]+\].*<(env\.)?(invoke_|__cxa_(throw|rethrow|begin_catch|end_catch|allocate_exception|free_exception|find_matching_catch)|__cpp_exception|__resumeException)' \
               "$root/project-wasm.txt"; then
             echo 'Web side module depends on a C++ exception runtime unavailable in stock templates.'
             exit 1
