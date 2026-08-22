@@ -32,9 +32,16 @@ class ReleaseFileSyncTest(unittest.TestCase):
 
     def test_exact_allowlist_is_copied_and_then_stable(self) -> None:
         (self.destination / "README.md").write_text("stale\n", encoding="utf-8")
+        (self.destination / "CHANGELOG-ZH.md").write_text(
+            "public-only\n", encoding="utf-8"
+        )
         (self.destination / "unrelated.txt").write_text("retain\n", encoding="utf-8")
         self.assertEqual(SYNC.synchronize(self.source, self.destination), list(SYNC.RELEASE_FILES))
         self.assertEqual(SYNC.synchronize(self.source, self.destination), [])
+        self.assertEqual(
+            (self.destination / "CHANGELOG-ZH.md").read_text(encoding="utf-8"),
+            "public-only\n",
+        )
         self.assertEqual(
             (self.destination / "unrelated.txt").read_text(encoding="utf-8"),
             "retain\n",

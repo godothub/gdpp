@@ -11,7 +11,6 @@ from pathlib import Path
 
 RELEASE_FILES = (
     "CHANGELOG.md",
-    "CHANGELOG-ZH.md",
     "README.md",
     "README-ZH.md",
 )

@@ -113,9 +113,11 @@ def main() -> int:
     if ".github/tools/sync_release_files.py" not in str(release_files.get("run", "")):
         fail("publish must use the fixed release-file synchronizer")
     metadata_source = str(public_metadata.get("run", ""))
-    for release_file in ("CHANGELOG.md", "CHANGELOG-ZH.md", "README.md", "README-ZH.md"):
+    for release_file in ("CHANGELOG.md", "README.md", "README-ZH.md"):
         if release_file not in metadata_source:
             fail(f"publish release-file allowlist is missing {release_file}")
+    if "CHANGELOG-ZH.md" in metadata_source:
+        fail("publish must not synchronize the private Chinese changelog")
     release_action = next(
         (
             step

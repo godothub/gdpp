@@ -280,15 +280,20 @@ jobs:
           RELEASE_VERSION: ${{ inputs.release_version }}
         run: |
           set -euo pipefail
-          release_files=(CHANGELOG.md CHANGELOG-ZH.md README.md README-ZH.md)
+          release_files=(CHANGELOG.md README.md README-ZH.md)
           if [[ "$CHANGED" == true ]]; then
             git add -- "${release_files[@]}"
             test -n "$(git diff --cached --name-only)"
-            if git diff --cached --name-only | grep -Ev \
-                "^(CHANGELOG\.md|CHANGELOG-ZH\.md|README\.md|README-ZH\.md)$"; then
-              echo 'Release synchronization staged a file outside the fixed allowlist.'
-              exit 1
-            fi
+            while IFS= read -r staged_file; do
+              case "$staged_file" in
+                CHANGELOG.md|README.md|README-ZH.md) ;;
+                *)
+                  printf 'Release synchronization staged an unexpected file: %s\n' \
+                    "$staged_file"
+                  exit 1
+                  ;;
+              esac
+            done < <(git diff --cached --name-only)
             git config user.name 'github-actions[bot]'
             git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
             git commit -m "docs(release): sync ${RELEASE_VERSION} public files"
@@ -298,7 +303,7 @@ jobs:
           fi
           public_sha="$(git rev-parse HEAD)"
           echo "public_sha=$public_sha" >> "$GITHUB_OUTPUT"
-          printf 'Public release metadata revision: `%s`\n' "$public_sha" \
+          printf 'Public release metadata revision: %s\n' "$public_sha" \
             >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
