@@ -113,8 +113,8 @@ jobs:
             "$package/tools/NINJA-VERSION.txt"
           test -s "$package/tools/NINJA-LICENSE.txt"
           test -f "$package/tools/.gdignore"
-          sdk="$package/sdk/targets/${{ matrix.sdk_platform }}/${{ matrix.sdk_arch }}"
-          test "$(find "$package/sdk/targets" -type f -name sdk.manifest | wc -l)" -eq 1
+          sdk="$package/sdk/lib/${{ matrix.sdk_platform }}/${{ matrix.sdk_arch }}"
+          test "$(find "$package/sdk/lib" -type f -name sdk.manifest | wc -l)" -eq 1
           grep -q '^platform ${{ matrix.sdk_platform }}$' "$sdk/sdk.manifest"
           grep -q '^arch ${{ matrix.sdk_arch }}$' "$sdk/sdk.manifest"
           grep -q '^profiles debug,release$' "$sdk/sdk.manifest"
@@ -124,7 +124,10 @@ jobs:
           grep -q '^exceptions enabled$' "$sdk/sdk.manifest"
           grep -q '^platform_minimum ${{ matrix.platform_minimum }}$' "$sdk/sdk.manifest"
           grep -q "^gdpp_version $version$" "$sdk/sdk.manifest"
-          test "$(find "$sdk/lib" -maxdepth 1 -type f | wc -l)" -eq 1
+          test "$(find "$sdk" -maxdepth 1 -type f ! -name sdk.manifest | wc -l)" -eq 1
+          test ! -e "$sdk/include"
+          test ! -e "$sdk/lib"
+          test "$(find "$package/sdk/include" -type f | wc -l)" -eq 7
           test ! -e "$sdk/godot-cpp"
           test ! -e "$sdk/src"
           grep -q '^compatibility_minimum = "4.4"$' "$package/gdpp.gdextension"
@@ -379,7 +382,7 @@ jobs:
           for binary in \
             example/addons/gdpp/binary/libgdpp_compiler.macos.universal.dylib \
             example/addons/gdpp/binary/libgdpp_fallback.macos.universal.dylib \
-            example/addons/gdpp/sdk/targets/macos/universal/lib/libgdpp_host_runtime.macos.universal.a; do
+            example/addons/gdpp/sdk/lib/macos/universal/libgdpp_host_runtime.macos.universal.a; do
             architectures="$(lipo -archs "$binary")"
             grep -qw arm64 <<<"$architectures"
             grep -qw x86_64 <<<"$architectures"
