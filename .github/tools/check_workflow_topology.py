@@ -65,6 +65,10 @@ def main() -> int:
     )
     if "fetch-depth: 0" not in checkout_source:
         fail("private source checkout must retain complete history for release-range gates")
+    if "HEAD:.github" not in checkout_source or "source_pipeline_tree" not in checkout_source:
+        fail("private source checkout must validate the public control-plane tree")
+    if "pipeline_sha" in checkout_source or 'test "$pipeline_sha" = "$GITHUB_SHA"' in checkout_source:
+        fail("private source checkout cannot bind release-file commits to a pipeline SHA")
 
     quality_source = (WORKFLOW_ROOT / "quality.yml").read_text(encoding="utf-8")
     if (
@@ -74,6 +78,8 @@ def main() -> int:
         fail("quality formatting must cover the complete current product release range")
     if "git rev-parse HEAD^" in quality_source:
         fail("quality formatting cannot inspect only the final source commit")
+    if ".github/tools/test_sync_release_files.py" not in quality_source:
+        fail("quality.yml must validate the fixed release-file synchronizer")
 
     for name, workflow in workflows.items():
         if workflow.get("permissions", {}).get("contents") != "read":
@@ -84,6 +90,44 @@ def main() -> int:
     publish = release_jobs["publish"]
     if publish.get("permissions", {}).get("contents") != "write":
         fail("only the publish job may request contents: write")
+    publish_steps = publish.get("steps", [])
+    public_checkout = next(
+        (step for step in publish_steps if step.get("name") == "Check out public pipeline"),
+        None,
+    )
+    if not isinstance(public_checkout, dict):
+        fail("publish must check out the public control plane")
+    checkout_options = public_checkout.get("with", {})
+    if checkout_options.get("persist-credentials") is not True:
+        fail("publish checkout must expose its scoped token for the release-file commit")
+    if checkout_options.get("ref") != "${{ github.event.repository.default_branch }}":
+        fail("publish must synchronize release files on the default branch")
+    release_files = next(
+        (step for step in publish_steps if step.get("id") == "release-files"), None
+    )
+    public_metadata = next(
+        (step for step in publish_steps if step.get("id") == "public-metadata"), None
+    )
+    if not isinstance(release_files, dict) or not isinstance(public_metadata, dict):
+        fail("publish must synchronize and commit public release files")
+    if ".github/tools/sync_release_files.py" not in str(release_files.get("run", "")):
+        fail("publish must use the fixed release-file synchronizer")
+    metadata_source = str(public_metadata.get("run", ""))
+    for release_file in ("CHANGELOG.md", "CHANGELOG-ZH.md", "README.md", "README-ZH.md"):
+        if release_file not in metadata_source:
+            fail(f"publish release-file allowlist is missing {release_file}")
+    release_action = next(
+        (
+            step
+            for step in publish_steps
+            if str(step.get("uses", "")).startswith("softprops/action-gh-release@")
+        ),
+        None,
+    )
+    if not isinstance(release_action, dict) or release_action.get("with", {}).get(
+        "target_commitish"
+    ) != "${{ steps.public-metadata.outputs.public_sha }}":
+        fail("release tag must target the synchronized public metadata commit")
     if release.get("permissions", {}).get("actions") != "read":
         fail("release.yml must allow called workflows to read package artifacts")
     if set(triggers(release)) != {"workflow_dispatch"}:

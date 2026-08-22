@@ -255,12 +255,51 @@ jobs:
       - name: Check out public pipeline
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
+          ref: ${{ github.event.repository.default_branch }}
           fetch-depth: 0
-          persist-credentials: false
+          persist-credentials: true
       - uses: ./.github/actions/checkout-source
         with:
           ref: ${{ needs.preflight.outputs.source_sha }}
           token: ${{ secrets.GDPP_TOKEN }}
+      - id: release-files
+        name: Synchronize public release files
+        working-directory: ${{ github.workspace }}
+        run: >-
+          python3 .github/tools/sync_release_files.py
+          --source source
+          --destination .
+          --github-output "$GITHUB_OUTPUT"
+      - id: public-metadata
+        name: Commit synchronized public release files
+        shell: bash
+        working-directory: ${{ github.workspace }}
+        env:
+          CHANGED: ${{ steps.release-files.outputs.changed }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          RELEASE_VERSION: ${{ inputs.release_version }}
+        run: |
+          set -euo pipefail
+          release_files=(CHANGELOG.md CHANGELOG-ZH.md README.md README-ZH.md)
+          if [[ "$CHANGED" == true ]]; then
+            git add -- "${release_files[@]}"
+            test -n "$(git diff --cached --name-only)"
+            if git diff --cached --name-only | grep -Ev \
+                '^(CHANGELOG\.md|CHANGELOG-ZH\.md|README\.md|README-ZH\.md)$'; then
+              echo 'Release synchronization staged a file outside the fixed allowlist.'
+              exit 1
+            fi
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git commit -m "docs(release): sync ${RELEASE_VERSION} public files"
+            git push origin "HEAD:refs/heads/$DEFAULT_BRANCH"
+          else
+            git diff --exit-code -- "${release_files[@]}"
+          fi
+          public_sha="$(git rev-parse HEAD)"
+          echo "public_sha=$public_sha" >> "$GITHUB_OUTPUT"
+          printf 'Public release metadata revision: `%s`\n' "$public_sha" \
+            >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: gdpp-release-packages
@@ -271,6 +310,7 @@ jobs:
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           GH_TOKEN: ${{ github.token }}
           GDPP_TOKEN: ${{ secrets.GDPP_TOKEN }}
+          PUBLIC_SHA: ${{ steps.public-metadata.outputs.public_sha }}
           RELEASE_VERSION: ${{ inputs.release_version }}
           SOURCE_SHA: ${{ needs.preflight.outputs.source_sha }}
         run: |
@@ -280,8 +320,8 @@ jobs:
             example/addons/gdpp/plugin.cfg)"
           test "$RELEASE_VERSION" = "$plugin_version"
           git -C "$GITHUB_WORKSPACE" fetch --no-tags origin "refs/heads/$DEFAULT_BRANCH"
-          test "$(git -C "$GITHUB_WORKSPACE" rev-parse HEAD)" \
-            = "$(git -C "$GITHUB_WORKSPACE" rev-parse FETCH_HEAD)"
+          test "$(git -C "$GITHUB_WORKSPACE" rev-parse HEAD)" = "$PUBLIC_SHA"
+          test "$PUBLIC_SHA" = "$(git -C "$GITHUB_WORKSPACE" rev-parse FETCH_HEAD)"
           private_main="$(GH_TOKEN="$GDPP_TOKEN" gh api \
             repos/abandoft/gdpp/commits/main --jq .sha)"
           test "$SOURCE_SHA" = "$private_main"
@@ -312,6 +352,7 @@ jobs:
         with:
           tag_name: ${{ inputs.release_version }}
           name: ${{ inputs.release_version }}
+          target_commitish: ${{ steps.public-metadata.outputs.public_sha }}
           body_path: source/build/release-notes.md
           generate_release_notes: false
           fail_on_unmatched_files: true
@@ -322,6 +363,7 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          PUBLIC_SHA: ${{ steps.public-metadata.outputs.public_sha }}
           RELEASE_VERSION: ${{ inputs.release_version }}
         run: |
           set -euo pipefail
@@ -341,6 +383,6 @@ jobs:
           done
           test "$(git -C "$GITHUB_WORKSPACE" ls-remote origin \
             "refs/tags/$RELEASE_VERSION" | awk '{print $1}')" \
-            = "$GITHUB_SHA"
+            = "$PUBLIC_SHA"
           printf 'Published %s: %s\n' "$RELEASE_VERSION" \
             "$(jq -r '.html_url' <<< "$release")" >> "$GITHUB_STEP_SUMMARY"
