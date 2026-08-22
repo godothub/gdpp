@@ -119,7 +119,7 @@ jobs:
           diff -u \
             <(printf 'Ninja 1.13.2\ncommit 3441b633c2fe2c494e958780ba0f4227b1327634\n') \
             "$project/addons/gdpp/tools/NINJA-VERSION.txt"
-          test -d "$project/addons/gdpp/sdk/targets"
+          test -d "$project/addons/gdpp/sdk/lib"
           test ! -e "$project/addons/gdpp/sdk/4.4"
           test ! -e "$project/addons/gdpp/sdk/4.5"
           test ! -e "$project/addons/gdpp/sdk/4.6"

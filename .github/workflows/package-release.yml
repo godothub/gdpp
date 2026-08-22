@@ -84,8 +84,13 @@ jobs:
             unzip -Z1 "$archive" | LC_ALL=C sort > "$contents"
             test -s "$contents"
             test "$(grep -cv '^addons/gdpp/' "$contents")" -eq 0
-            test "$(grep -c '/sdk/targets/.*/sdk\.manifest$' "$contents")" \
+            test "$(grep -c '/sdk/lib/.*/sdk\.manifest$' "$contents")" \
               -eq "$expected_manifests"
+            test "$(grep -c '^addons/gdpp/sdk/include/[^/].*$' "$contents")" -eq 7
+            if grep -E -q '/sdk/lib/.*/(include|lib)/' "$contents"; then
+              echo "$archive duplicates shared headers or nests a target library directory."
+              exit 1
+            fi
             test "$(grep -c '^addons/gdpp/binary/[^/]*$' "$contents")" \
               -eq "$expected_binaries"
             test "$(grep -Ec '^addons/gdpp/tools/[^/]+/gdpp-ninja(\.exe)?$' "$contents")" \
@@ -104,7 +109,7 @@ jobs:
           rm -rf "$audit"
           mkdir -p "$audit"
           unzip -q build/release/gdpp.zip -d "$audit"
-          if find "$audit/addons/gdpp/sdk/targets" -type f \
+          if find "$audit/addons/gdpp/sdk/lib" -type f \
               \( -name '*.a' -o -name '*.lib' \) -exec strings {} + \
               | grep -E -q '/home/runner/work/|[A-Za-z]:[/\\].*(source|work)[/\\]'; then
             echo 'A packaged Host Runtime leaks a build checkout path.'
