@@ -78,7 +78,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          sdk="example/addons/gdpp/sdk/targets/web/wasm32/${{ matrix.variant }}/${{ matrix.profile }}"
+          sdk="example/addons/gdpp/sdk/lib/web/wasm32/${{ matrix.variant }}/${{ matrix.profile }}"
           grep -q '^platform web$' "$sdk/sdk.manifest"
           grep -q '^arch wasm32$' "$sdk/sdk.manifest"
           grep -q '^profiles debug,release$' "$sdk/sdk.manifest"
@@ -91,10 +91,13 @@ jobs:
           grep -q '^web_toolchain ${{ matrix.profile }}$' "$sdk/sdk.manifest"
           grep -q '^compiler Emscripten$' "$sdk/sdk.manifest"
           grep -q '^source_paths mapped$' "$sdk/sdk.manifest"
-          test "$(find "$sdk/lib" -maxdepth 1 -type f -name '*.a' | wc -l)" -eq 1
+          test "$(find "$sdk" -maxdepth 1 -type f -name '*.a' | wc -l)" -eq 1
+          test ! -e "$sdk/include"
+          test ! -e "$sdk/lib"
+          test -f example/addons/gdpp/sdk/include/gdextension_interface.h
           test ! -e "$sdk/godot-cpp"
           test ! -e "$sdk/src"
-          if find "$sdk/lib" -maxdepth 1 -type f -name '*.a' -exec strings {} + \
+          if find "$sdk" -maxdepth 1 -type f -name '*.a' -exec strings {} + \
               | grep -F "$GDPP_SOURCE_ROOT" >/dev/null; then
             echo 'Web target SDK leaks the checkout path.'
             exit 1
@@ -102,7 +105,9 @@ jobs:
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: gdpp-web-${{ matrix.profile }}-${{ matrix.variant }}
-          path: source/example/addons/gdpp/sdk/targets/web/wasm32/${{ matrix.variant }}/${{ matrix.profile }}
+          path: |
+            source/example/addons/gdpp/sdk/include
+            source/example/addons/gdpp/sdk/lib/web/wasm32/${{ matrix.variant }}/${{ matrix.profile }}
           if-no-files-found: error
           retention-days: 7
 
@@ -209,7 +214,7 @@ jobs:
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: gdpp-web-${{ matrix.profile }}-${{ matrix.variant }}
-          path: source/example/addons/gdpp/sdk/targets/web/wasm32/${{ matrix.variant }}/${{ matrix.profile }}
+          path: source/example/addons/gdpp/sdk
       - name: Install Wasm inspection tools
         run: sudo apt-get update && sudo apt-get install -y binaryen wabt
       - name: Build compiler plugin
