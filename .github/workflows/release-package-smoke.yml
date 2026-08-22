@@ -134,26 +134,13 @@ jobs:
           test ! -e "$project/addons/gdpp/sdk/4.7"
           test -z "$(find "$project/addons/gdpp/sdk" \
             -type d -name godot-cpp -print -quit)"
+          edition=standard
           if [[ '${{ matrix.archive }}' == gdpp-lite.zip ]]; then
-            test "$(find "$project/addons/gdpp/binary" -maxdepth 1 -type f | wc -l)" -eq 4
-            test "$(find "$project/addons/gdpp/sdk/targets" \
-              -type f -name sdk.manifest | wc -l)" -eq 7
-            if find "$project/addons/gdpp/binary" -maxdepth 1 -type f \
-                -iname '*linux*' -print -quit | grep -q . \
-                || test -e "$project/addons/gdpp/sdk/targets/linux" \
-                || test -e "$project/addons/gdpp/sdk/targets/ios"; then
-              echo 'Installed gdpp-lite.zip contains a Linux or iOS payload.'
-              exit 1
-            fi
-            grep -q '^editor_hosts macos-universal,windows-x86_64$' \
-              "$project/addons/gdpp/PACKAGE_MANIFEST.txt"
-            grep -q '^export_targets macos-universal,windows-x86_64,android-arm64,web-wasm32-nothreads,web-wasm32-threads$' \
-              "$project/addons/gdpp/PACKAGE_MANIFEST.txt"
-          else
-            test "$(find "$project/addons/gdpp/binary" -maxdepth 1 -type f | wc -l)" -eq 6
-            test "$(find "$project/addons/gdpp/sdk/targets" \
-              -type f -name sdk.manifest | wc -l)" -eq 9
+            edition=lite
           fi
+          python3 tools/package_platform_release.py \
+            --validate-addon "$project/addons/gdpp" \
+            --package "$edition"
       - name: Import, export, run and audit the installed package
         shell: bash
         env:
