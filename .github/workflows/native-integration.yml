@@ -109,7 +109,7 @@ jobs:
           import json
           from pathlib import Path
 
-          source = Path("api/godot/extension_api-4.7.json")
+          source = Path("api/extension_api-4.7.json")
           output = Path("build/ci-custom-double-input/extension_api.json")
           api = json.loads(source.read_text(encoding="utf-8"))
           api["header"]["version_build"] = "gdpp_ci_custom_double"
