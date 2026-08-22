@@ -1,3 +1,7 @@
+## 2.0.2
+
+- Share one Host ABI header set across all export targets to reduce plugin size.
+
 ## 2.0.1
 
 - Support newer editor versions by falling back to an earlier API profile.
