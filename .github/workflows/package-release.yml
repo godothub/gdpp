@@ -74,41 +74,16 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          audit_archive() {
-            local archive="$1"
-            local expected_manifests="$2"
-            local expected_binaries="$3"
-            local expected_executors="$4"
-            local contents
-            contents="build/$(basename "$archive").contents"
-            unzip -Z1 "$archive" | LC_ALL=C sort > "$contents"
-            test -s "$contents"
-            test "$(grep -cv '^addons/gdpp/' "$contents")" -eq 0
-            test "$(grep -c '/sdk/lib/.*/sdk\.manifest$' "$contents")" \
-              -eq "$expected_manifests"
-            test "$(grep -c '^addons/gdpp/sdk/include/[^/].*$' "$contents")" -eq 7
-            if grep -E -q '/sdk/lib/.*/(include|lib)/' "$contents"; then
-              echo "$archive duplicates shared headers or nests a target library directory."
-              exit 1
-            fi
-            test "$(grep -c '^addons/gdpp/binary/[^/]*$' "$contents")" \
-              -eq "$expected_binaries"
-            test "$(grep -Ec '^addons/gdpp/tools/[^/]+/gdpp-ninja(\.exe)?$' "$contents")" \
-              -eq "$expected_executors"
-            test "$(grep -c '^addons/gdpp/PACKAGE_MANIFEST.txt$' "$contents")" -eq 1
-            if grep -E -q \
-              '(^|/)(godot-cpp|4\.[4-7]|build)(/|$)|/sdk/.*\.(c|cc|cpp|cxx)$|\.DS_Store$|(^|/)\._' \
-              "$contents"; then
-              echo "$archive contains a retired SDK, source, or generated product."
-              exit 1
-            fi
-          }
-          audit_archive build/release/gdpp.zip 11 6 3
-
+          unzip -Z1 build/release/gdpp.zip | LC_ALL=C sort > build/gdpp.zip.contents
+          test -s build/gdpp.zip.contents
+          test "$(grep -cv '^addons/gdpp/' build/gdpp.zip.contents)" -eq 0
           audit=build/package-audit
           rm -rf "$audit"
           mkdir -p "$audit"
           unzip -q build/release/gdpp.zip -d "$audit"
+          python3 tools/package_platform_release.py \
+            --validate-addon "$audit/addons/gdpp" \
+            --package standard
           if find "$audit/addons/gdpp/sdk/lib" -type f \
               \( -name '*.a' -o -name '*.lib' \) -exec strings {} + \
               | grep -E -q '/home/runner/work/|[A-Za-z]:[/\\].*(source|work)[/\\]'; then
