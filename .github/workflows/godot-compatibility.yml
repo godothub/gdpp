@@ -340,6 +340,7 @@ jobs:
           python3 tools/run_runtime_matrix.py \
             --gds-executable "$output/gds/gdpp-runtime-gds.x86_64" \
             --aot-executable "$output/aot/gdpp-runtime.x86_64" \
+            --cpp-baseline-executable build/plugin/bin/gdpp_performance_native_baseline \
             --gds-pck "$output/gds/gdpp-runtime-gds.pck" \
             --aot-pck "$output/aot/gdpp-runtime.pck" \
             --gds-artifact-directory "$output/gds" \
