@@ -118,6 +118,12 @@ def main() -> int:
             fail(f"publish release-file allowlist is missing {release_file}")
     if "CHANGELOG-ZH.md" in metadata_source:
         fail("publish must not synchronize the private Chinese changelog")
+    if "git config user.name 'moluopro'" not in metadata_source or (
+        "git config user.email 'moluopro@qq.com'"
+    ) not in metadata_source:
+        fail("public release-file commits must use the product owner identity")
+    if "github-actions[bot]" in metadata_source:
+        fail("public release-file commits must not be attributed to an automation bot")
     release_action = next(
         (
             step
