@@ -88,6 +88,7 @@ jobs:
           cmake --preset plugin
           -DGDPP_GODOT_EXECUTABLE=${{ steps.godot.outputs.executable }}
           -DGDPP_GDSCRIPT_ORACLE_EXECUTABLE=${{ steps.oracle.outputs.executable }}
+          -DGDPP_ENABLE_PERFORMANCE_GATE=ON
       - name: Build compiler plugin and direct native targets
         run: cmake --build --preset plugin --parallel
       - name: Run compiler and Godot integration tests
