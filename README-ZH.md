@@ -1,10 +1,19 @@
-# GDPP
+# Godot GDScript AOT & Extension
 
-GDPP：Godot GDScript AOT & Extension
-> 将您的 GDScript 项目编译为二进制、导出后不含脚本代码。
+**GDPP** 可以将 GDScript 代码编译为二进制：
 
-- 超高性能：像C/CPP一样快
+- 高性能：像C/CPP一样快
+- 跨平台：支持所有主流平台
 - 简单易用：启用插件后一键导出
 - 自动加密：尽可能地保护您的资产
 - 语法拓展：更强大的GDScript语言
-- 跨平台：在所有Godot支持的平台可用
+
+## 性能数据
+
+| 场景 | GDScript | GDPP AOT | 相对性能（GDScript = 100%） |
+| --- | ---: | ---: | ---: |
+| 2D 案例 | 18.350 μs/帧 | 0.150 μs/帧 | 12,233.33% |
+| 500阶矩阵乘法 `Array[int]` | 3.207 s | 29.644 ms | 10,819.09% |
+| 500阶矩阵乘法 `PackedInt64Array` | 2.654 s | 25.631 ms | 10,356.40% |
+
+> 注：以上测试数据基于 Mac mini M4（10 核）/ 16 GB 内存，系统为 macOS 26.6.2，采用官方 Godot 4.7.1 和导出模板。测试项目不代表实际开发场景，仅供参考。

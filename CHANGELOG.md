@@ -1,3 +1,8 @@
+## 2.0.3
+
+- Unify optimization planning for native types, containers, Callables, and expressions to improve AOT performance.
+- Fix Windows performance regressions caused by cross-compiler differences and improve native integer and compound-expression performance.
+
 ## 2.0.2
 
 - Share one Host ABI header set across all export targets to reduce plugin size.
@@ -9,8 +14,8 @@
 
 ## 2.0.0
 
-- Introduce a new AOT engine to improve GDScript compatibility, runtime performance, and stability for Godot 4.4-4.7 projects.
-- Improve the export experience with parallel compilation, link-time optimization, real-time progress, cancellation support, and clearer diagnostics.
+- Introduce a new AOT engine to improve GDScript compatibility, runtime performance, and stability.
+- Improve the export experience with parallel compilation, link-time optimization, and clearer diagnostics.
 
 ## 1.9.0
 
