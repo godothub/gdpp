@@ -1,3 +1,9 @@
+## 2.0.4
+
+- Fix export failures when GDPP is used with third-party GDExtensions.
+- Complete third-party class inheritance, dynamic property, enum, and runtime resource loading support.
+- Support cross-version Godot API calls in third-party plugins.
+
 ## 2.0.3
 
 - Unify optimization planning for native types, containers, Callables, and expressions to improve AOT performance.

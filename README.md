@@ -10,7 +10,7 @@
 
 ## Performance Results
 
-| Workload | GDScript | GDPP AOT | Relative performance (GDScript = 100%) |
+| Workload | GDScript | GDPP AOT | Performance improvement |
 | --- | ---: | ---: | ---: |
 | 2D workload | 18.350 μs/frame | 0.150 μs/frame | 12,233.33% |
 | 500×500 matrix multiplication with `Array[int]` | 3.207 s | 29.644 ms | 10,819.09% |
