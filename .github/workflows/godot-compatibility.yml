@@ -475,6 +475,10 @@ jobs:
           - name: Source of Mana
             id: source-of-mana
             manifest: test/compatibility/source_of_mana.json
+          - name: Terrain3D
+            id: terrain3d
+            manifest: test/compatibility/terrain3d.json
+            build_extension: true
     steps:
       - name: Check out public pipeline
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
@@ -517,6 +521,23 @@ jobs:
           --manifest ${{ matrix.manifest }}
           --destination build/external-projects/${{ matrix.id }}
           --build-root build
+      - name: Set up Terrain3D's pinned SCons toolchain
+        if: ${{ matrix.build_extension == true }}
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: '3.12'
+      - name: Build Terrain3D's customer GDExtension
+        if: ${{ matrix.build_extension == true }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          project=build/external-projects/${{ matrix.id }}
+          git -C "$project" submodule update --init --recursive --depth=1
+          python3 -m pip install --disable-pip-version-check scons==4.10.1
+          scons --directory="$project" target=template_debug platform=linux \
+            arch=x86_64 debug_symbols=no -j4
+          scons --directory="$project" target=template_release platform=linux \
+            arch=x86_64 debug_symbols=no -j4
       - name: Import, AOT build, export, audit and launch
         run: >-
           python3 tools/run_external_project_e2e.py
