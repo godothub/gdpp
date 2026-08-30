@@ -341,6 +341,10 @@ jobs:
           fi
           test -f build/release/gdpp.zip
           test "$(find build/release -maxdepth 1 -type f -name '*.zip' | wc -l)" -eq 1
+      - name: Verify packaged release assets
+        run: >-
+          python3 "$GITHUB_WORKSPACE/.github/tools/verify_release_assets.py"
+          build/release
       - name: Read release notes from CHANGELOG.md
         env:
           RELEASE_VERSION: ${{ inputs.release_version }}
@@ -349,9 +353,6 @@ jobs:
           --changelog CHANGELOG.md
           --version "$RELEASE_VERSION"
           --output build/release-notes.md
-      - name: Create checksums
-        working-directory: source/build/release
-        run: LC_ALL=C sha256sum -- gdpp.zip > SHA256SUMS
       - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           tag_name: ${{ inputs.release_version }}
@@ -388,5 +389,14 @@ jobs:
           test "$(git -C "$GITHUB_WORKSPACE" ls-remote origin \
             "refs/tags/$RELEASE_VERSION" | awk '{print $1}')" \
             = "$PUBLIC_SHA"
+          verification_root="$(mktemp -d "${RUNNER_TEMP}/gdpp-release-assets.XXXXXX")"
+          trap 'rm -rf "$verification_root"' EXIT
+          gh release download "$RELEASE_VERSION" \
+            --repo "$GITHUB_REPOSITORY" \
+            --dir "$verification_root" \
+            --pattern gdpp.zip \
+            --pattern SHA256SUMS
+          python3 "$GITHUB_WORKSPACE/.github/tools/verify_release_assets.py" \
+            "$verification_root"
           printf 'Published %s: %s\n' "$RELEASE_VERSION" \
             "$(jq -r '.html_url' <<< "$release")" >> "$GITHUB_STEP_SUMMARY"
