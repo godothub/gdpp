@@ -12,6 +12,10 @@ inputs:
     description: "Export templates to install: none, host, linux, android, or web."
     required: false
     default: none
+  edition:
+    description: "Official editor edition: standard or dotnet."
+    required: false
+    default: standard
 
 outputs:
   executable:
@@ -27,35 +31,75 @@ runs:
       env:
         GODOT_VERSION: ${{ inputs.version }}
         GODOT_TEMPLATES: ${{ inputs.templates }}
+        GODOT_EDITION: ${{ inputs.edition }}
         GDPP_SOURCE_ROOT: ${{ inputs.source-root }}
       run: |
         set -euo pipefail
         test -f "$GDPP_SOURCE_ROOT/tools/download_with_retry.sh"
-        root="$GDPP_SOURCE_ROOT/build/ci/godot/$GODOT_VERSION"
+        if [[ "$GODOT_EDITION" != "standard" && "$GODOT_EDITION" != "dotnet" ]]; then
+          echo "Unsupported Godot editor edition: $GODOT_EDITION" >&2
+          exit 2
+        fi
+        root="$GDPP_SOURCE_ROOT/build/ci/godot/$GODOT_VERSION/$GODOT_EDITION"
         mkdir -p "$root"
         case "$RUNNER_OS" in
           Linux)
-            editor_archive="Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip"
-            editor="$root/Godot_v${GODOT_VERSION}-stable_linux.x86_64"
+            if [[ "$GODOT_EDITION" == "dotnet" ]]; then
+              editor_archive="Godot_v${GODOT_VERSION}-stable_mono_linux_x86_64.zip"
+            else
+              editor_archive="Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip"
+            fi
             ;;
           macOS)
-            editor_archive="Godot_v${GODOT_VERSION}-stable_macos.universal.zip"
-            editor="$root/Godot.app/Contents/MacOS/Godot"
+            if [[ "$GODOT_EDITION" == "dotnet" ]]; then
+              editor_archive="Godot_v${GODOT_VERSION}-stable_mono_macos.universal.zip"
+            else
+              editor_archive="Godot_v${GODOT_VERSION}-stable_macos.universal.zip"
+            fi
             ;;
           Windows)
-            editor_archive="Godot_v${GODOT_VERSION}-stable_win64.exe.zip"
-            editor="$root/Godot_v${GODOT_VERSION}-stable_win64.exe"
+            if [[ "$GODOT_EDITION" == "dotnet" ]]; then
+              editor_archive="Godot_v${GODOT_VERSION}-stable_mono_win64.zip"
+            else
+              editor_archive="Godot_v${GODOT_VERSION}-stable_win64.exe.zip"
+            fi
             ;;
           *)
             echo "Unsupported Godot editor host: $RUNNER_OS" >&2
-            exit 2
+            exit 3
             ;;
         esac
+        editor_path_file="$root/editor-path.txt"
+        editor=""
+        if [[ -f "$editor_path_file" ]]; then
+          editor="$(<"$editor_path_file")"
+        fi
         if [[ ! -f "$editor" ]]; then
           bash "$GDPP_SOURCE_ROOT/tools/download_with_retry.sh" \
             "https://github.com/godotengine/godot-builds/releases/download/${GODOT_VERSION}-stable/$editor_archive" \
             "$root/editor.zip"
           unzip -q "$root/editor.zip" -d "$root"
+          case "$RUNNER_OS" in
+            Linux)
+              if [[ "$GODOT_EDITION" == "dotnet" ]]; then
+                editor="$(find "$root" -type f -name 'Godot*_mono_linux*.x86_64' -print -quit)"
+              else
+                editor="$(find "$root" -type f -name 'Godot*_linux.x86_64' -print -quit)"
+              fi
+              ;;
+            macOS)
+              editor="$(find "$root" -type f -path '*/Contents/MacOS/Godot' -print -quit)"
+              ;;
+            Windows)
+              if [[ "$GODOT_EDITION" == "dotnet" ]]; then
+                editor="$(find "$root" -type f -name 'Godot*_mono_win64.exe' -print -quit)"
+              else
+                editor="$(find "$root" -type f -name 'Godot*_win64.exe' -print -quit)"
+              fi
+              ;;
+          esac
+          test -n "$editor"
+          printf '%s\n' "$editor" > "$editor_path_file"
         fi
         if [[ "$RUNNER_OS" != Windows ]]; then
           chmod +x "$editor"
@@ -73,8 +117,12 @@ runs:
           exit 3
         fi
         archive="$root/export_templates.tpz"
+        template_edition=""
+        if [[ "$GODOT_EDITION" == "dotnet" ]]; then
+          template_edition="_mono"
+        fi
         bash "$GDPP_SOURCE_ROOT/tools/download_with_retry.sh" \
-          "https://github.com/godotengine/godot-builds/releases/download/${GODOT_VERSION}-stable/Godot_v${GODOT_VERSION}-stable_export_templates.tpz" \
+          "https://github.com/godotengine/godot-builds/releases/download/${GODOT_VERSION}-stable/Godot_v${GODOT_VERSION}-stable${template_edition}_export_templates.tpz" \
           "$archive"
         extracted="$root/export-templates"
         rm -rf "$extracted"
@@ -118,6 +166,10 @@ runs:
             template_root="$(cygpath -u "$APPDATA")/Godot"
             ;;
         esac
-        destination="$template_root/export_templates/${GODOT_VERSION}.stable"
+        version_suffix=""
+        if [[ "$GODOT_EDITION" == "dotnet" ]]; then
+          version_suffix=".mono"
+        fi
+        destination="$template_root/export_templates/${GODOT_VERSION}.stable${version_suffix}"
         mkdir -p "$destination"
         cp "$extracted"/templates/* "$destination/"
