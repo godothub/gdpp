@@ -125,7 +125,9 @@ jobs:
           grep -q '^platform_minimum ${{ matrix.platform_minimum }}$' "$sdk/sdk.manifest"
           grep -q "^gdpp_version $version$" "$sdk/sdk.manifest"
           test "$(find "$sdk" -maxdepth 1 -type f ! -name sdk.manifest | wc -l)" -eq 1
-          test "$(find "$package/sdk/include" -type f | wc -l)" -eq 7
+          PYTHONPATH=tools python3 -c \
+            'from pathlib import Path; import sys; from host_runtime_sdk import staged_header_bundle_entries; staged_header_bundle_entries(Path(sys.argv[1]))' \
+            "$package/sdk/include"
           grep -q '^compatibility_minimum = "4.4"$' "$package/gdpp.gdextension"
       - id: godot
         name: Install official Godot 4.7.2 editor and host templates
