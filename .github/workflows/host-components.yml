@@ -252,7 +252,7 @@ jobs:
           fixture=build/release/attached-extension-project
           root="$GDPP_SOURCE_ROOT/build/host-rpc-integration"
           mkdir -p "$root" "$fixture/.godot"
-          cp "$fixture/extension_list.compiler.cfg" \
+          cp "$fixture/extension_list.editor.cfg" \
             "$fixture/.godot/extension_list.cfg"
 
           if [[ "$RUNNER_OS" == macOS ]]; then
