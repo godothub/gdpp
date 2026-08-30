@@ -74,6 +74,7 @@ jobs:
           grep -q '^engine_range 4.4-4.7$' "$sdk/sdk.manifest"
           grep -q '^host_abi 1$' "$sdk/sdk.manifest"
           grep -q '^script_abi 1$' "$sdk/sdk.manifest"
+          grep -q '^precision single$' "$sdk/sdk.manifest"
           grep -q '^exceptions enabled$' "$sdk/sdk.manifest"
           grep -q '^android_api_level 28$' "$sdk/sdk.manifest"
           test "$(find "$sdk" -maxdepth 1 -type f -name '*.a' | wc -l)" -eq 1

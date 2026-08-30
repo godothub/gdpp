@@ -121,6 +121,7 @@ jobs:
           grep -q '^engine_range 4.4-4.7$' "$sdk/sdk.manifest"
           grep -q '^host_abi 1$' "$sdk/sdk.manifest"
           grep -q '^script_abi 1$' "$sdk/sdk.manifest"
+          grep -q '^precision single$' "$sdk/sdk.manifest"
           grep -q '^exceptions enabled$' "$sdk/sdk.manifest"
           grep -q '^platform_minimum ${{ matrix.platform_minimum }}$' "$sdk/sdk.manifest"
           grep -q "^gdpp_version $version$" "$sdk/sdk.manifest"

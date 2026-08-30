@@ -124,14 +124,23 @@ jobs:
         run: |
           cmake -S . -B build/ci-custom-double -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
-            -DGDPP_BUILD_TESTS=OFF \
+            -DGDPP_BUILD_TESTS=ON \
             -DGDPP_BUILD_CLI=ON \
             -DGDPP_BUILD_EXTENSION=ON \
             -DGDPP_GODOT_PRECISION=double \
             -DGDPP_CUSTOM_GDEXTENSION_API_FILE="$PWD/build/ci-custom-double-input/extension_api.json" \
             -DGDPP_PACKAGE_GODOT_VERSIONS=4.7
       - name: Build the complete custom add-on
-        run: cmake --build build/ci-custom-double --target gdpp_custom_addon --parallel
+        run: >-
+          cmake --build build/ci-custom-double
+          --target gdpp_custom_addon gdpp_double_precision_native_layout_contract
+          gdpp_gde_host_adapter_enum_boundary gdpp_c_abi_header_contract
+          --parallel
+      - name: Verify double-precision native layout and exact-value transport
+        run: >-
+          ctest --test-dir build/ci-custom-double
+          -R '^gdpp\.(runtime\.(double_precision_native_layout|godot_native_size_contract)|gde_host_adapter\.enum_boundary)$'
+          --output-on-failure
       - name: Audit the custom ABI package
         shell: bash
         run: |
