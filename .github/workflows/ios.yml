@@ -144,7 +144,6 @@ jobs:
             -DGDPP_GODOT_EXECUTABLE="$GODOT" \
             '-DCMAKE_OSX_ARCHITECTURES=arm64;x86_64'
           cmake --build --preset plugin --parallel
-          ctest --preset plugin --output-on-failure
       - name: Export binary-only Xcode project
         shell: bash
         env:

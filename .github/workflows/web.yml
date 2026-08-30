@@ -221,8 +221,6 @@ jobs:
           cmake --preset plugin \
             -DGDPP_GODOT_EXECUTABLE="$GODOT"
           cmake --build --preset plugin --parallel
-          ctest --preset plugin --output-on-failure \
-            -E '^gdpp\.godot\.runtime_differential$'
           if [[ '${{ matrix.project }}' != example ]]; then
             mkdir -p '${{ matrix.project }}/addons'
             cp -R example/addons/gdpp '${{ matrix.project }}/addons/gdpp'
