@@ -243,6 +243,21 @@ def main() -> int:
             fail(f"{name} must check out private source")
 
     compatibility_jobs = workflows["godot-compatibility.yml"]["jobs"]
+    performance_steps = compatibility_jobs["external-release-performance"]["steps"]
+    performance_build = next(
+        (
+            step
+            for step in performance_steps
+            if step.get("name")
+            == "Build the macOS editor add-on and universal Release SDK"
+        ),
+        None,
+    )
+    if not isinstance(performance_build, dict) or (
+        "-DCMAKE_OSX_ARCHITECTURES=arm64;x86_64"
+        not in str(performance_build.get("run", ""))
+    ):
+        fail("external Release performance must build the macOS universal SDK")
     external_projects = compatibility_jobs["external-projects"]
     external_matrix = external_projects["strategy"]["matrix"]["include"]
     supplemental_projects = {
