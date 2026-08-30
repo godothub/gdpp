@@ -64,6 +64,24 @@ jobs:
             arguments+=("-DCMAKE_CXX_COMPILER=cl.exe")
           fi
           cmake "${arguments[@]}"
+      - name: Validate the MSVC performance receipt contract
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          output=build/performance-receipt-contract
+          cmake -S . -B "$output" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_CXX_COMPILER=cl.exe \
+            -DGDPP_BUILD_TESTS=ON \
+            -DGDPP_BUILD_EXTENSION=OFF \
+            -DGDPP_BUILD_CLI=OFF \
+            -DGDPP_BUILD_PERFORMANCE_BASELINE=ON
+          receipt="$output/gdpp-performance-baseline-Release.receipt"
+          test -f "$receipt"
+          grep -Fxq 'configuration Release' "$receipt"
+          grep -Fxq 'compile_options /O2|/Oi|/U_DEBUG' "$receipt"
+          grep -Fxq 'compile_definitions NDEBUG|_ITERATOR_DEBUG_LEVEL=0' "$receipt"
       - name: Build compiler and unit tests
         run: cmake --build --preset dev --parallel
       - name: Run compiler tests
