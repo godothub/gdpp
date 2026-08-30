@@ -260,6 +260,14 @@ jobs:
         run: |
           set -euo pipefail
           root="${{ matrix.project }}/addons/gdpp/build/${{ matrix.output }}"
+          python3 tools/audit_export_payload.py \
+            --directory "$root" \
+            --platform web \
+            --architecture wasm32 \
+            --web-threads '${{ matrix.variant }}' \
+            --report "$root/payload-audit.json" \
+            2>&1 | tee "$root/payload-audit.log"
+          grep -q '^EXPORT_PAYLOAD_VIOLATIONS=0$' "$root/payload-audit.log"
           mapfile -t modules < <(find "$root" -maxdepth 1 -type f \
             -name 'libgdpp.release.web.wasm32*.wasm' | LC_ALL=C sort)
           test "${#modules[@]}" -eq 1
@@ -281,10 +289,14 @@ jobs:
           grep -q "$(basename "$module")" "$root/${{ matrix.product }}.html"
 
           mkdir -p build/pck-audit
-          cp tools/audit_export_pck.gd build/pck-audit/audit_export_pck.gd
+          audit_harness="build/pck-audit/gdpp-pck-audit-$(python3 -c \
+            'import secrets; print(secrets.token_hex(16))')"
+          audit_harness_name="${audit_harness##*/}"
+          mkdir "$audit_harness"
+          cp tools/audit_export_pck.gd "$audit_harness/audit_export_pck.gd"
           printf '[application]\nconfig/name="GDPP Web PCK Audit"\n' > build/pck-audit/project.godot
           "$GODOT" --headless --path build/pck-audit \
-            --script "$GDPP_SOURCE_ROOT/build/pck-audit/audit_export_pck.gd" -- \
+            --script "res://$audit_harness_name/audit_export_pck.gd" -- \
             "$GDPP_SOURCE_ROOT/$root/${{ matrix.product }}.pck" \
             "$GDPP_SOURCE_ROOT/$root" "$GDPP_SOURCE_ROOT/$module" \
             2>&1 | tee "$root/pck-audit.log"
