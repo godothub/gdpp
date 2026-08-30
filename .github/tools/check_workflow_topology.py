@@ -70,6 +70,13 @@ def main() -> int:
     if "pipeline_sha" in checkout_source or 'test "$pipeline_sha" = "$GITHUB_SHA"' in checkout_source:
         fail("private source checkout cannot bind release-file commits to a pipeline SHA")
 
+    setup_godot = (ROOT / ".github/actions/setup-godot/action.yml").read_text(
+        encoding="utf-8"
+    )
+    for template_set in ("host", "linux", "macos", "windows", "android", "web"):
+        if f'$GODOT_TEMPLATES" != "{template_set}"' not in setup_godot:
+            fail(f"official Godot setup must accept the {template_set} template set")
+
     quality_source = (WORKFLOW_ROOT / "quality.yml").read_text(encoding="utf-8")
     if (
         '-S "VERSION $version"' not in quality_source

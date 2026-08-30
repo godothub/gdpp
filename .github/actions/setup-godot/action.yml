@@ -9,7 +9,7 @@ inputs:
     description: Exact stable Godot version, for example 4.5.2.
     required: true
   templates:
-    description: "Export templates to install: none, host, linux, android, or web."
+    description: "Export templates to install: none, host, linux, macos, windows, android, or web."
     required: false
     default: none
   edition:
@@ -111,6 +111,8 @@ runs:
           exit 0
         fi
         if [[ "$GODOT_TEMPLATES" != "host" && "$GODOT_TEMPLATES" != "linux" && \
+              "$GODOT_TEMPLATES" != "macos" && \
+              "$GODOT_TEMPLATES" != "windows" && \
               "$GODOT_TEMPLATES" != "android" && \
               "$GODOT_TEMPLATES" != "web" ]]; then
           echo "Unsupported template set: $GODOT_TEMPLATES" >&2
