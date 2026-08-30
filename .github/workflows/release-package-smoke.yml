@@ -99,6 +99,10 @@ jobs:
           path: source/build/release-package-smoke/archive
           github-token: ${{ github.token }}
           run-id: ${{ inputs.artifact_run_id }}
+      - name: Verify downloaded release assets
+        run: >-
+          python3 "$GITHUB_WORKSPACE/.github/tools/verify_release_assets.py"
+          build/release-package-smoke/archive
       - name: Install the final ZIP into a clean customer project
         shell: bash
         run: |
