@@ -161,16 +161,21 @@ jobs:
             --project example --state "$root/extension-state.json"
           apk="$root/GDPPExample.apk"
           test -f "$apk"
-          unzip -Z1 "$apk" | LC_ALL=C sort > "$root/contents.txt"
-          project_library="$(awk '/^lib\/arm64-v8a\/libgdpp\.release\.android\.arm64\.so$/{print}' "$root/contents.txt")"
-          test "$(printf '%s\n' "$project_library" | sed '/^$/d' | wc -l)" -eq 1
-          if grep -E -q '\.(gd|gdc)$|/sdk/|libgdpp_compiler' "$root/contents.txt"; then
-            echo 'Android package contains GDScript or compiler-only payload.'
-            exit 1
-          fi
-          unzip -j "$apk" "$project_library" -d "$root/audit" >/dev/null
-          project_so="$root/audit/$(basename "$project_library")"
+          project_library='lib/arm64-v8a/libgdpp.release.android.arm64.so'
+          pck="$root/audit/GDPPExample.pck"
+          python3 tools/audit_export_payload.py \
+            --zip "$apk" \
+            --platform android \
+            --architecture arm64 \
+            --extract-pck "$pck" \
+            --report "$root/payload-audit.json" \
+            2>&1 | tee "$root/payload-audit.log"
+          grep -q '^EXPORT_PAYLOAD_VIOLATIONS=0$' "$root/payload-audit.log"
+          project_so="$root/audit/libgdpp.release.android.arm64.so"
+          unzip -p "$apk" "$project_library" > "$project_so"
           llvm_bin="$ANDROID_SDK_ROOT/ndk/$GDPP_ANDROID_NDK_VERSION/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          "$llvm_bin/llvm-readelf" -h "$project_so" | \
+            grep -Eq 'Machine:[[:space:]]+AArch64$'
           test "$("$llvm_bin/llvm-nm" -D --defined-only "$project_so" | awk 'NF {print $NF}' | wc -l)" -eq 1
           "$llvm_bin/llvm-nm" -D --defined-only "$project_so" | awk 'NF {print $NF}' | \
             grep -qx gdpp_library_init
@@ -178,8 +183,23 @@ jobs:
             echo 'Android Release project library contains a normal symbol table.'
             exit 1
           fi
+
+          audit_host="$root/pck-audit"
+          audit_harness="$audit_host/gdpp-pck-audit-$(python3 -c \
+            'import secrets; print(secrets.token_hex(16))')"
+          audit_harness_name="${audit_harness##*/}"
+          mkdir -p "$audit_harness"
+          cp tools/audit_export_pck.gd "$audit_harness/audit_export_pck.gd"
+          printf '[application]\nconfig/name="GDPP Android PCK Audit"\n' \
+            > "$audit_host/project.godot"
+          "$GODOT" --headless --path "$audit_host" \
+            --script "res://$audit_harness_name/audit_export_pck.gd" -- \
+            "$pck" "$root/audit" "$project_so" \
+            2>&1 | tee "$root/pck-audit.log"
+          grep -q '^PCK_AUDIT_VIOLATIONS=0$' "$root/pck-audit.log"
+          grep -q '^PCK_AUDIT_PROJECT_LIBRARIES=1$' "$root/pck-audit.log"
           if grep -E -q '(^| )ERROR:|SCRIPT ERROR:|WARNING:|Unable to open' \
-              "$root/import.log" "$root/export.log"; then
+              "$root/import.log" "$root/export.log" "$root/pck-audit.log"; then
             echo 'Godot reported an Android import/export diagnostic.'
             exit 1
           fi
