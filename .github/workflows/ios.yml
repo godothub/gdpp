@@ -180,11 +180,56 @@ jobs:
             echo 'Godot reported an iOS import/export failure.'
             exit 1
           fi
-          test "$(find "$root" -type d -name 'libgdpp.release.ios.arm64.xcframework' | wc -l)" -eq 1
+          xcframework="$(find "$root" -type d \
+            -name 'libgdpp.release.ios.arm64.xcframework' -print -quit)"
+          test -n "$xcframework"
+          test "$(find "$root" -type d \
+            -name 'libgdpp.release.ios.arm64.xcframework' | wc -l)" -eq 1
           test "$(find "$root" -type d -name '*.xcodeproj' | wc -l)" -eq 1
-          if find "$root" -type f \( -name '*.gd' -o -name '*.gdc' \) -print -quit \
-              | grep -q .; then
-            echo 'iOS export contains project GDScript.'
+          audit_root="$GDPP_SOURCE_ROOT/build/ci/ios-payload-audit"
+          mkdir -p "$audit_root"
+          pck="$audit_root/GDPPExample.pck"
+          python3 tools/audit_export_payload.py \
+            --directory "$root" \
+            --platform ios \
+            --architecture arm64 \
+            --extract-pck "$pck" \
+            --report "$root/payload-audit.json" \
+            2>&1 | tee "$root/payload-audit.log"
+          grep -q '^EXPORT_PAYLOAD_VIOLATIONS=0$' "$root/payload-audit.log"
+
+          device="$xcframework/ios-arm64/libgdpp.dylib"
+          simulator="$xcframework/ios-arm64_x86_64-simulator/libgdpp.dylib"
+          test "$(xcrun lipo -archs "$device")" = arm64
+          simulator_archs="$(xcrun lipo -archs "$simulator")"
+          test "$(wc -w <<<"$simulator_archs")" -eq 2
+          grep -qw arm64 <<<"$simulator_archs"
+          grep -qw x86_64 <<<"$simulator_archs"
+          for contract in "$device:arm64" "$simulator:arm64" "$simulator:x86_64"; do
+            library="${contract%:*}"
+            architecture="${contract##*:}"
+            symbols="$(xcrun nm -arch "$architecture" -gU "$library" | \
+              awk 'NF {print $NF}')"
+            test "$(wc -l <<<"$symbols")" -eq 1
+            grep -qx _gdpp_library_init <<<"$symbols"
+          done
+
+          audit_host="$audit_root/pck-host"
+          audit_harness="$audit_host/gdpp-pck-audit-$(python3 -c \
+            'import secrets; print(secrets.token_hex(16))')"
+          audit_harness_name="${audit_harness##*/}"
+          mkdir -p "$audit_harness"
+          cp tools/audit_export_pck.gd "$audit_harness/audit_export_pck.gd"
+          printf '[application]\nconfig/name="GDPP iOS PCK Audit"\n' \
+            > "$audit_host/project.godot"
+          "$GODOT" --headless --path "$audit_host" \
+            --script "res://$audit_harness_name/audit_export_pck.gd" -- \
+            "$pck" - "$device" \
+            2>&1 | tee "$root/pck-audit.log"
+          grep -q '^PCK_AUDIT_VIOLATIONS=0$' "$root/pck-audit.log"
+          if grep -E -q '(^| )ERROR:|SCRIPT ERROR:|Parse Error:|WARNING:|Unable to open' \
+              "$root/pck-audit.log"; then
+            echo 'Independent iOS PCK audit emitted a forbidden diagnostic.'
             exit 1
           fi
       - name: Build the exported project for iOS Simulator without signing
@@ -197,7 +242,7 @@ jobs:
           engine_archive="$(find "$root" -path \
             '*/GDPPExample.xcframework/*-simulator/libgodot.a' -print -quit)"
           project_pattern='*libgdpp.release.ios.arm64.xcframework/'
-          project_pattern+='*-simulator/libgdpp.framework/libgdpp'
+          project_pattern+='ios-arm64_x86_64-simulator/libgdpp.dylib'
           project_library="$(find "$root" -path "$project_pattern" -print -quit)"
           test -n "$engine_archive"
           test -n "$project_library"
@@ -228,7 +273,7 @@ jobs:
           root="$GDPP_SOURCE_ROOT/build/ci/attached-macos"
           state="$root/extension-state.json"
           mkdir -p "$root"
-          cp "$fixture/extension_list.compiler.cfg" \
+          cp "$fixture/extension_list.editor.cfg" \
             "$fixture/.godot/extension_list.cfg"
           "$GODOT" --headless --editor --path "$fixture" --import \
             2>&1 | tee "$root/import.log"
