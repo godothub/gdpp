@@ -520,6 +520,7 @@ jobs:
         shell: bash
         run: >-
           cmake --preset plugin
+          '-DCMAKE_OSX_ARCHITECTURES=arm64;x86_64'
           -DGDPP_GODOT_EXECUTABLE=${{ steps.godot.outputs.executable }}
           -DGDPP_GDSCRIPT_ORACLE_EXECUTABLE=${{ steps.godot.outputs.executable }}
           &&
