@@ -235,6 +235,84 @@ def main() -> int:
         if source_checkouts == 0:
             fail(f"{name} must check out private source")
 
+    compatibility_jobs = workflows["godot-compatibility.yml"]["jobs"]
+    external_projects = compatibility_jobs["external-projects"]
+    external_matrix = external_projects["strategy"]["matrix"]["include"]
+    supplemental_projects = {
+        entry["id"]: entry.get("supplemental_engine")
+        for entry in external_matrix
+        if entry.get("supplemental_engine") is not None
+    }
+    expected_supplemental_projects = {
+        "konado": "4.7.2",
+        "pixelorama": "4.7.2",
+        "source-of-mana": "4.7.2",
+        "dialogue-manager": "4.7.2",
+    }
+    if supplemental_projects != expected_supplemental_projects:
+        fail(
+            "the external-project matrix must supplement every declared 4.7 project "
+            "with Godot 4.7.2"
+        )
+    external_steps = external_projects["steps"]
+    steps_by_name = {
+        step.get("name"): step for step in external_steps if step.get("name")
+    }
+    steps_by_id = {
+        step.get("id"): step for step in external_steps if step.get("id")
+    }
+    primary_step = steps_by_name.get("Import, AOT build, export, audit and launch")
+    supplemental_step = steps_by_name.get(
+        "Run the source-identical supplemental complete-project lifecycle"
+    )
+    supplemental_rebuild = steps_by_name.get(
+        "Rebuild the installed add-on for the supplemental Godot patch"
+    )
+    supplemental_setup = steps_by_id.get("supplemental_godot")
+    if not all(
+        isinstance(step, dict)
+        for step in (
+            primary_step,
+            supplemental_step,
+            supplemental_rebuild,
+            supplemental_setup,
+        )
+    ):
+        fail("external-project compatibility must declare primary and supplemental lifecycles")
+    assert isinstance(primary_step, dict)
+    assert isinstance(supplemental_step, dict)
+    assert isinstance(supplemental_rebuild, dict)
+    assert isinstance(supplemental_setup, dict)
+    primary_command = str(primary_step.get("run", ""))
+    supplemental_command = str(supplemental_step.get("run", ""))
+    if "--mode primary" not in primary_command:
+        fail("the declared-engine external-project lifecycle must be an explicit primary gate")
+    for contract in (
+        "--mode supplemental",
+        "--primary-report build/external-e2e/${{ matrix.id }}/report.json",
+        "--output build/external-e2e/${{ matrix.id }}-supplemental-",
+    ):
+        if contract not in supplemental_command:
+            fail(f"the supplemental external-project lifecycle is missing {contract}")
+    if external_steps.index(primary_step) >= external_steps.index(supplemental_setup):
+        fail("the supplemental Godot patch cannot be installed before the primary lifecycle")
+    supplemental_options = supplemental_setup.get("with", {})
+    expected_supplemental_condition = (
+        "${{ success() && matrix.supplemental_engine == '4.7.2' }}"
+    )
+    for step in (supplemental_setup, supplemental_rebuild, supplemental_step):
+        if step.get("if") != expected_supplemental_condition:
+            fail("the supplemental lifecycle must run only after a successful primary gate")
+    if supplemental_options.get("version") != "${{ matrix.supplemental_engine }}" or (
+        supplemental_options.get("edition")
+        != "${{ steps.contract.outputs.edition }}"
+    ):
+        fail("the supplemental editor must preserve the matrix engine and declared edition")
+    if "primary_evidence_audit" not in steps_by_id or (
+        "supplemental_evidence_audit" not in steps_by_id
+    ):
+        fail("primary and supplemental complete-project evidence must be audited separately")
+
     runtime_log_workflows = ("host-components.yml",)
     for name in runtime_log_workflows:
         source = (WORKFLOW_ROOT / name).read_text(encoding="utf-8")
