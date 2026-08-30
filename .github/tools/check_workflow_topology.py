@@ -94,6 +94,20 @@ def main() -> int:
         if "pull_request" in triggers(workflow):
             fail(f"{name} must never execute for pull requests")
 
+    native_steps = [
+        step
+        for job in workflows["native-integration.yml"]["jobs"].values()
+        for step in job.get("steps", [])
+    ]
+    if any(
+        str(step.get("uses", "")).startswith("actions/upload-artifact@")
+        for step in native_steps
+    ):
+        fail(
+            "native-integration.yml must not publish unreleased plugin sources or "
+            "diagnostic bundles"
+        )
+
     publish = release_jobs["publish"]
     if publish.get("permissions", {}).get("contents") != "write":
         fail("only the publish job may request contents: write")
