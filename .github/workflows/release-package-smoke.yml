@@ -50,14 +50,20 @@ jobs:
             os: macos-15
             preset: macOS Universal
             archive: gdpp.zip
+            payload_platform: macos
+            payload_architecture: universal
           - platform_host: linux
             os: ubuntu-22.04
             preset: Linux x86_64
             archive: gdpp.zip
+            payload_platform: linux
+            payload_architecture: x86_64
           - platform_host: win
             os: windows-2025
             preset: Windows x86_64
             archive: gdpp.zip
+            payload_platform: windows
+            payload_architecture: x86_64
     steps:
       - name: Check out public pipeline
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
@@ -163,6 +169,13 @@ jobs:
 
           test -f "$runtime"
           test -f "$project_library"
+          python3 tools/audit_export_payload.py \
+            --directory "$output_root" \
+            --platform '${{ matrix.payload_platform }}' \
+            --architecture '${{ matrix.payload_architecture }}' \
+            --report "$root/payload-audit.json" \
+            2>&1 | tee "$root/payload-audit.log"
+          grep -q '^EXPORT_PAYLOAD_VIOLATIONS=0$' "$root/payload-audit.log"
           test "$(find "$output_root" -type f \
             \( -name 'gdpp.release.*' -o -name 'libgdpp.release.*' \) \
             | wc -l)" -eq 1
@@ -212,11 +225,15 @@ jobs:
           pck="${pcks[0]}"
           audit="$root/pck-audit"
           mkdir -p "$audit"
-          cp tools/audit_export_pck.gd "$audit/audit_export_pck.gd"
+          audit_harness="$audit/gdpp-pck-audit-$(python3 -c \
+            'import secrets; print(secrets.token_hex(16))')"
+          audit_harness_name="${audit_harness##*/}"
+          mkdir "$audit_harness"
+          cp tools/audit_export_pck.gd "$audit_harness/audit_export_pck.gd"
           printf '[application]\nconfig/name="GDPP Installed ZIP Audit"\n' \
             > "$audit/project.godot"
           "$GODOT" --headless --path "$audit" \
-            --script "$audit/audit_export_pck.gd" -- \
+            --script "res://$audit_harness_name/audit_export_pck.gd" -- \
             "$pck" "$output_root" "$project_library" \
             2>&1 | tee "$root/pck-audit.log"
           python3 "$GITHUB_WORKSPACE/.github/tools/check_log_contract.py" \
