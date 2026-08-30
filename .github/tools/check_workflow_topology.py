@@ -346,6 +346,36 @@ def main() -> int:
     smoke_source = (WORKFLOW_ROOT / "release-package-smoke.yml").read_text(
         encoding="utf-8"
     )
+    verifier = "$GITHUB_WORKSPACE/.github/tools/verify_release_assets.py"
+    if smoke_source.count(verifier) != 1:
+        fail("release package smoke must verify the downloaded package checksum once")
+    release_source = (WORKFLOW_ROOT / "release.yml").read_text(encoding="utf-8")
+    if release_source.count(verifier) != 2:
+        fail("release publish must verify packaged and downloaded release assets")
+    if "Create checksums" in release_source or (
+        "sha256sum -- gdpp.zip > SHA256SUMS" in release_source
+    ):
+        fail("publish must preserve rather than replace the package checksum manifest")
+    publish_step_names = [step.get("name") for step in publish_steps]
+    release_action_index = publish_steps.index(release_action)
+    try:
+        packaged_verification_index = publish_step_names.index(
+            "Verify packaged release assets"
+        )
+        published_verification_index = publish_step_names.index(
+            "Verify the published release contract"
+        )
+    except ValueError as error:
+        fail("publish must verify release assets before and after publication")
+    if not (
+        packaged_verification_index < release_action_index < published_verification_index
+    ):
+        fail("release asset verification must surround the publish action")
+    published_verification = publish_steps[published_verification_index]
+    published_command = str(published_verification.get("run", ""))
+    for contract in ("mktemp -d", "gh release download", "gdpp.zip", "SHA256SUMS"):
+        if contract not in published_command:
+            fail(f"published release verification is missing {contract}")
     if smoke_source.count("$GITHUB_WORKSPACE/.github/tools/run_process.py") != 4:
         fail("release-package-smoke.yml must diagnose export and all runtime processes")
     if smoke_source.count("$GITHUB_WORKSPACE/.github/tools/check_log_contract.py") != 5:
