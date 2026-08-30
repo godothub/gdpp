@@ -82,6 +82,8 @@ jobs:
           source-root: ${{ env.GDPP_SOURCE_ROOT }}
           version: 4.7.2
           templates: none
+      - name: Install the official protobuf wire-format oracle
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
       - name: Configure compiler plugin and SDK
         shell: bash
         run: >-
@@ -103,7 +105,7 @@ jobs:
           fixture=build/plugin/attached-extension-project
           output="$fixture/export"
           mkdir -p "$output"
-          cp "$fixture/extension_list.compiler.cfg" \
+          cp "$fixture/extension_list.editor.cfg" \
             "$fixture/.godot/extension_list.cfg"
 
           "$GODOT" --headless --editor --path "$fixture" --import \
@@ -185,11 +187,16 @@ jobs:
 
           audit=build/attached-pck-audit
           mkdir -p "$audit"
-          cp tools/audit_attached_export_pck.gd "$audit/audit_attached_export_pck.gd"
+          audit_harness="$audit/gdpp-pck-audit-$(python3 -c \
+            'import secrets; print(secrets.token_hex(16))')"
+          audit_harness_name="${audit_harness##*/}"
+          mkdir "$audit_harness"
+          cp tools/audit_attached_export_pck.gd \
+            "$audit_harness/audit_attached_export_pck.gd"
           printf '[application]\nconfig/name="GDPP Attached PCK Audit"\n' \
             > "$audit/project.godot"
           "$GODOT" --headless --path "$audit" \
-            --script "$GDPP_SOURCE_ROOT/$audit/audit_attached_export_pck.gd" -- \
+            --script "res://$audit_harness_name/audit_attached_export_pck.gd" -- \
             "$GDPP_SOURCE_ROOT/$output/gdpp-attached.pck" \
             2>&1 | tee "$output/gdpp-attached-pck-audit.log"
           grep -q '^GDPP_ATTACHED_PCK_VIOLATIONS=0$' \
@@ -275,10 +282,14 @@ jobs:
           fi
 
           mkdir -p build/pck-audit
-          cp tools/audit_export_pck.gd build/pck-audit/audit_export_pck.gd
+          audit_harness="build/pck-audit/gdpp-pck-audit-$(python3 -c \
+            'import secrets; print(secrets.token_hex(16))')"
+          audit_harness_name="${audit_harness##*/}"
+          mkdir "$audit_harness"
+          cp tools/audit_export_pck.gd "$audit_harness/audit_export_pck.gd"
           printf '[application]\nconfig/name="GDPP PCK Audit"\n' > build/pck-audit/project.godot
           "$GODOT" --headless --path build/pck-audit \
-            --script "$GDPP_SOURCE_ROOT/build/pck-audit/audit_export_pck.gd" -- \
+            --script "res://$audit_harness_name/audit_export_pck.gd" -- \
             "$GDPP_SOURCE_ROOT/$output/aot/gdpp-runtime.pck" \
             "$GDPP_SOURCE_ROOT/$output/aot" "$GDPP_SOURCE_ROOT/$project" \
             2>&1 | tee "$output/gdpp-pck-audit.log"
@@ -320,35 +331,30 @@ jobs:
             echo 'Optimized Debug export or runtime emitted a forbidden diagnostic.'
             exit 1
           fi
-      - name: Compare GDScript and AOT behavior/performance
+      - name: Compare isolated GDScript baseline and AOT behavior/performance
         shell: bash
         env:
           GODOT: ${{ steps.godot.outputs.executable }}
         run: |
           set -euo pipefail
-          output=example/addons/gdpp/build/export
-          "$GODOT" --headless --editor --path example \
-            --export-release 'Linux GDScript Fallback' \
-            "$GDPP_SOURCE_ROOT/$output/gds/gdpp-runtime-gds.x86_64" \
-            2>&1 | tee "$output/gdpp-gds-export.log"
+          output="$GDPP_SOURCE_ROOT/build/ci/performance"
+          python3 tools/run_performance_gate.py \
+            --source-root "$GDPP_SOURCE_ROOT" \
+            --godot "$GODOT" \
+            --project "$GDPP_SOURCE_ROOT/example" \
+            --gds-preset 'Linux GDScript Baseline' \
+            --aot-preset 'Linux x86_64' \
+            --output-directory "$output" \
+            --gds-output "$output/baseline/GDScript.x86_64" \
+            --aot-output "$output/aot/AOT.x86_64" \
+            --cpp-baseline \
+              "$GDPP_SOURCE_ROOT/build/plugin/bin/gdpp_performance_native_baseline" \
+            --report "$output/runtime-matrix.json" \
+            --repeats 5 \
+            --samples 9 \
+            --iterations 100000
           python3 tools/verify_export_immutability.py verify \
             --project example --state build/ci/example-extension-state.json
-          if grep -E -q '(^| )ERROR:|SCRIPT ERROR:|WARNING:|Unable to open' \
-              "$output/gdpp-gds-export.log"; then
-            echo 'GDScript comparison export emitted a forbidden diagnostic.'
-            exit 1
-          fi
-          python3 tools/run_runtime_matrix.py \
-            --gds-executable "$output/gds/gdpp-runtime-gds.x86_64" \
-            --aot-executable "$output/aot/gdpp-runtime.x86_64" \
-            --cpp-baseline-executable build/plugin/bin/gdpp_performance_native_baseline \
-            --gds-pck "$output/gds/gdpp-runtime-gds.pck" \
-            --aot-pck "$output/aot/gdpp-runtime.pck" \
-            --gds-artifact-directory "$output/gds" \
-            --aot-artifact-directory "$output/aot" \
-            --output "$output/runtime-matrix.json" \
-            --work-directory example/addons/gdpp/build/runtime-matrix \
-            --repeats 5 --samples 9 --iterations 20000 --enforce
       - name: Verify binary-only export fails closed without its SDK
         shell: bash
         env:
@@ -387,7 +393,8 @@ jobs:
           --source .
           --path
           example/addons/gdpp/build/export/*.log
-          example/addons/gdpp/build/export/runtime-matrix.json
+          build/ci/performance/*.log
+          build/ci/performance/runtime-matrix.json
           build/plugin/attached-extension-project/export/*.log
       - name: Upload compatibility evidence
         if: ${{ always() && steps.evidence_audit.outcome == 'success' }}
@@ -396,7 +403,8 @@ jobs:
           name: godot-${{ matrix.version }}-compatibility
           path: |
             source/example/addons/gdpp/build/export/*.log
-            source/example/addons/gdpp/build/export/runtime-matrix.json
+            source/build/ci/performance/*.log
+            source/build/ci/performance/runtime-matrix.json
             source/build/plugin/attached-extension-project/export/*.log
           if-no-files-found: warn
           retention-days: 14
@@ -421,7 +429,7 @@ jobs:
           --manifest test/compatibility/godot_parser_4_7.json
           --snapshot test/compatibility/godot_frontend_4_7.json
           --language-features src/frontend/language_features.cpp
-          --unicode-table src/frontend/unicode_identifier_ranges.inc
+          --unicode-table include/gdpp/core/unicode_identifier_ranges.inc
           --build-root build
           --output build/godot-frontend-update
           --check-only
@@ -454,6 +462,97 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
+  official-runtime-semantics:
+    if: ${{ inputs.target == 'all' || inputs.target == 'project-corpus' || inputs.target == '4.7.2' }}
+    name: Official GDScript runtime semantics
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    steps:
+      - name: Check out public pipeline
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/checkout-source
+        with:
+          ref: ${{ inputs.source_ref }}
+          token: ${{ secrets.GDPP_TOKEN }}
+      - id: godot
+        uses: ./.github/actions/setup-godot
+        with:
+          source-root: ${{ env.GDPP_SOURCE_ROOT }}
+          version: 4.7.2
+          templates: linux
+      - name: Configure the official runtime differential
+        shell: bash
+        run: >-
+          cmake --preset plugin
+          -DGDPP_GODOT_EXECUTABLE=${{ steps.godot.outputs.executable }}
+          -DGDPP_GDSCRIPT_ORACLE_EXECUTABLE=${{ steps.godot.outputs.executable }}
+          -DGDPP_ENABLE_COMPATIBILITY_CORPUS_TESTS=ON
+      - name: Build the compiler, plugin and runtime fixture
+        run: cmake --build --preset plugin --parallel
+      - name: Run every directly runnable official GDScript case
+        run: >-
+          ctest --preset plugin --verbose --output-on-failure
+          -R '^gdpp\.compatibility\.(fetch_parser_4_7|official_runtime_features)$'
+
+  external-release-performance:
+    if: ${{ inputs.target == 'all' || inputs.target == '4.7.2' }}
+    name: External Release performance / Godot 4.7.2
+    runs-on: macos-15
+    timeout-minutes: 120
+    steps:
+      - name: Check out public pipeline
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/checkout-source
+        with:
+          ref: ${{ inputs.source_ref }}
+          token: ${{ secrets.GDPP_TOKEN }}
+      - id: godot
+        uses: ./.github/actions/setup-godot
+        with:
+          source-root: ${{ env.GDPP_SOURCE_ROOT }}
+          version: 4.7.2
+          templates: macos
+      - name: Build the macOS editor add-on and universal Release SDK
+        shell: bash
+        run: >-
+          cmake --preset plugin
+          -DGDPP_GODOT_EXECUTABLE=${{ steps.godot.outputs.executable }}
+          -DGDPP_GDSCRIPT_ORACLE_EXECUTABLE=${{ steps.godot.outputs.executable }}
+          &&
+          cmake --build --preset plugin --parallel
+      - name: Run source-identical public-project Release comparisons
+        shell: bash
+        run: >-
+          python3 tools/run_external_performance_gate.py
+          --godot ${{ steps.godot.outputs.executable }}
+          --addon example/addons/gdpp
+          --work-directory build/external-performance/work
+          --output build/external-performance/evidence
+          --host macos
+          --samples 3
+      - id: evidence_audit
+        name: Audit public performance evidence for source disclosure
+        if: always()
+        run: >-
+          python3 "$GITHUB_WORKSPACE/.github/tools/audit_public_artifact.py"
+          --source .
+          --path build/external-performance/evidence/*.json
+          build/external-performance/evidence/*.log
+      - name: Upload source-free external performance evidence
+        if: ${{ always() && steps.evidence_audit.outcome == 'success' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: external-release-performance-4.7.2
+          path: |
+            source/build/external-performance/evidence/*.json
+            source/build/external-performance/evidence/*.log
+          if-no-files-found: error
+          retention-days: 14
+
   external-projects:
     if: ${{ inputs.target == 'all' || inputs.target == 'project-corpus' }}
     name: External project / ${{ matrix.name }}
@@ -466,19 +565,34 @@ jobs:
           - name: Konado
             id: konado
             manifest: test/compatibility/konado.json
+            supplemental_engine: 4.7.2
           - name: Pixelorama
             id: pixelorama
             manifest: test/compatibility/pixelorama.json
+            supplemental_engine: 4.7.2
           - name: Open RPG
             id: open-rpg
             manifest: test/compatibility/open_rpg.json
           - name: Source of Mana
             id: source-of-mana
             manifest: test/compatibility/source_of_mana.json
+            supplemental_engine: 4.7.2
           - name: Terrain3D
             id: terrain3d
             manifest: test/compatibility/terrain3d.json
-            build_extension: true
+          - name: Godobuf
+            id: godobuf
+            manifest: test/compatibility/godobuf.json
+          - name: Sunshine Clouds 2
+            id: sunshine-clouds2
+            manifest: test/compatibility/sunshine_clouds2.json
+          - name: Dialogue Manager
+            id: dialogue-manager
+            manifest: test/compatibility/dialogue_manager.json
+            supplemental_engine: 4.7.2
+          - name: Phantom Camera
+            id: phantom-camera
+            manifest: test/compatibility/phantom_camera.json
     steps:
       - name: Check out public pipeline
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
@@ -496,11 +610,17 @@ jobs:
           python3 - "$MANIFEST" >> "$GITHUB_OUTPUT" <<'PY'
           import sys
           from pathlib import Path
-          from tools.validate_compatibility_godot import load_manifest, manifest_contract
+          from tools.validate_compatibility_godot import (
+              load_manifest,
+              manifest_contract,
+              manifest_edition,
+          )
 
-          target, engine = manifest_contract(load_manifest(Path(sys.argv[1])))
+          manifest = load_manifest(Path(sys.argv[1]))
+          target, engine = manifest_contract(manifest)
           print(f"target={target}")
           print(f"engine={engine}")
+          print(f"edition={manifest_edition(manifest)}")
           PY
       - id: godot
         uses: ./.github/actions/setup-godot
@@ -508,6 +628,14 @@ jobs:
           source-root: ${{ env.GDPP_SOURCE_ROOT }}
           version: ${{ steps.contract.outputs.engine }}
           templates: linux
+          edition: ${{ steps.contract.outputs.edition }}
+      - name: Verify the declared .NET toolchain
+        if: ${{ steps.contract.outputs.edition == 'dotnet' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          dotnet --info
+          dotnet --list-sdks | grep -E '^8\.'
       - name: Build the installed add-on and matching SDK
         shell: bash
         run: >-
@@ -521,23 +649,6 @@ jobs:
           --manifest ${{ matrix.manifest }}
           --destination build/external-projects/${{ matrix.id }}
           --build-root build
-      - name: Set up Terrain3D's pinned SCons toolchain
-        if: ${{ matrix.build_extension == true }}
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
-        with:
-          python-version: '3.12'
-      - name: Build Terrain3D's customer GDExtension
-        if: ${{ matrix.build_extension == true }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          project=build/external-projects/${{ matrix.id }}
-          git -C "$project" submodule update --init --recursive --depth=1
-          python3 -m pip install --disable-pip-version-check scons==4.10.1
-          scons --directory="$project" target=template_debug platform=linux \
-            arch=x86_64 debug_symbols=no -j4
-          scons --directory="$project" target=template_release platform=linux \
-            arch=x86_64 debug_symbols=no -j4
       - name: Import, AOT build, export, audit and launch
         run: >-
           python3 tools/run_external_project_e2e.py
@@ -549,8 +660,9 @@ jobs:
           --immutability-script tools/verify_export_immutability.py
           --output build/external-e2e/${{ matrix.id }}
           --host linux
-      - id: evidence_audit
-        name: Audit public complete-project evidence for source disclosure
+          --mode primary
+      - id: primary_evidence_audit
+        name: Audit public primary complete-project evidence for source disclosure
         if: always()
         run: >-
           python3 "$GITHUB_WORKSPACE/.github/tools/audit_public_artifact.py"
@@ -558,13 +670,63 @@ jobs:
           --path
           build/external-e2e/${{ matrix.id }}/*.json
           build/external-e2e/${{ matrix.id }}/*.log
-      - name: Upload complete-project evidence
-        if: ${{ always() && steps.evidence_audit.outcome == 'success' }}
+      - name: Upload primary complete-project evidence
+        if: ${{ always() && steps.primary_evidence_audit.outcome == 'success' }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: external-project-${{ matrix.id }}
           path: |
             source/build/external-e2e/${{ matrix.id }}/*.json
             source/build/external-e2e/${{ matrix.id }}/*.log
+          if-no-files-found: warn
+          retention-days: 14
+      - id: supplemental_godot
+        name: Install the supplemental Godot patch
+        if: ${{ success() && matrix.supplemental_engine == '4.7.2' }}
+        uses: ./.github/actions/setup-godot
+        with:
+          source-root: ${{ env.GDPP_SOURCE_ROOT }}
+          version: ${{ matrix.supplemental_engine }}
+          templates: linux
+          edition: ${{ steps.contract.outputs.edition }}
+      - name: Rebuild the installed add-on for the supplemental Godot patch
+        if: ${{ success() && matrix.supplemental_engine == '4.7.2' }}
+        shell: bash
+        run: >-
+          cmake --preset plugin
+          -DGDPP_GODOT_EXECUTABLE=${{ steps.supplemental_godot.outputs.executable }}
+          &&
+          cmake --build --preset plugin --parallel
+      - name: Run the source-identical supplemental complete-project lifecycle
+        if: ${{ success() && matrix.supplemental_engine == '4.7.2' }}
+        run: >-
+          python3 tools/run_external_project_e2e.py
+          --manifest ${{ matrix.manifest }}
+          --corpus build/external-projects/${{ matrix.id }}
+          --addon example/addons/gdpp
+          --godot-executable ${{ steps.supplemental_godot.outputs.executable }}
+          --audit-script tools/audit_export_pck.gd
+          --immutability-script tools/verify_export_immutability.py
+          --output build/external-e2e/${{ matrix.id }}-supplemental-${{ matrix.supplemental_engine }}
+          --host linux
+          --mode supplemental
+          --primary-report build/external-e2e/${{ matrix.id }}/report.json
+      - id: supplemental_evidence_audit
+        name: Audit public supplemental complete-project evidence for source disclosure
+        if: ${{ always() && matrix.supplemental_engine == '4.7.2' }}
+        run: >-
+          python3 "$GITHUB_WORKSPACE/.github/tools/audit_public_artifact.py"
+          --source .
+          --path
+          build/external-e2e/${{ matrix.id }}-supplemental-${{ matrix.supplemental_engine }}/*.json
+          build/external-e2e/${{ matrix.id }}-supplemental-${{ matrix.supplemental_engine }}/*.log
+      - name: Upload supplemental complete-project evidence
+        if: ${{ always() && steps.supplemental_evidence_audit.outcome == 'success' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: external-project-${{ matrix.id }}-supplemental-${{ matrix.supplemental_engine }}
+          path: |
+            source/build/external-e2e/${{ matrix.id }}-supplemental-${{ matrix.supplemental_engine }}/*.json
+            source/build/external-e2e/${{ matrix.id }}-supplemental-${{ matrix.supplemental_engine }}/*.log
           if-no-files-found: warn
           retention-days: 14
