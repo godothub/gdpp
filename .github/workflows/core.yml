@@ -186,22 +186,6 @@ jobs:
             -rss_limit_mb=0 \
             -max_total_time=90 \
             -artifact_prefix=build/ci-frontend-fuzz/fuzz-artifacts/
-      - id: fuzz_evidence_audit
-        name: Audit public fuzz failure for source disclosure
-        if: failure()
-        run: >-
-          python3 "$GITHUB_WORKSPACE/.github/tools/audit_public_artifact.py"
-          --source .
-          --path build/ci-frontend-fuzz/fuzz-artifacts
-      - name: Preserve frontend fuzz failure
-        if: ${{ failure() && steps.fuzz_evidence_audit.outcome == 'success' }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
-        with:
-          name: frontend-fuzz-failure-${{ github.run_id }}
-          path: source/build/ci-frontend-fuzz/fuzz-artifacts/
-          if-no-files-found: error
-          retention-days: 7
-
   tsan:
     name: Core / Ubuntu / thread safety
     runs-on: ubuntu-22.04

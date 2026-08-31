@@ -56,7 +56,8 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
           persist-credentials: false
-      - uses: ./.github/actions/checkout-source
+      - id: source
+        uses: ./.github/actions/checkout-source
         with:
           ref: ${{ inputs.source_ref }}
           token: ${{ secrets.GDPP_TOKEN }}
@@ -99,13 +100,29 @@ jobs:
             echo 'Web target SDK leaks the checkout path.'
             exit 1
           fi
+      - name: Seal the source-bound target SDK artifact
+        shell: bash
+        env:
+          ARTIFACT_NAME: gdpp-web-${{ matrix.profile }}-${{ matrix.variant }}-${{ steps.source.outputs.sha }}
+          SOURCE_SHA: ${{ steps.source.outputs.sha }}
+        run: |
+          set -euo pipefail
+          artifact="build/component-artifacts/$ARTIFACT_NAME"
+          target="lib/web/wasm32/${{ matrix.variant }}/${{ matrix.profile }}"
+          test ! -e "$artifact"
+          mkdir -p "$artifact/lib/web/wasm32/${{ matrix.variant }}"
+          cp -R example/addons/gdpp/sdk/include "$artifact/include"
+          cp -R "example/addons/gdpp/sdk/$target" "$artifact/$target"
+          python3 "$GITHUB_WORKSPACE/.github/tools/component_artifact.py" seal \
+            --root "$artifact" \
+            --artifact-name "$ARTIFACT_NAME" \
+            --source-sha "$SOURCE_SHA"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: gdpp-web-${{ matrix.profile }}-${{ matrix.variant }}
-          path: |
-            source/example/addons/gdpp/sdk/include
-            source/example/addons/gdpp/sdk/lib/web/wasm32/${{ matrix.variant }}/${{ matrix.profile }}
+          name: gdpp-web-${{ matrix.profile }}-${{ matrix.variant }}-${{ steps.source.outputs.sha }}
+          path: source/build/component-artifacts/gdpp-web-${{ matrix.profile }}-${{ matrix.variant }}-${{ steps.source.outputs.sha }}
           if-no-files-found: error
+          include-hidden-files: true
           retention-days: 7
 
   browser:
@@ -194,7 +211,8 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
           persist-credentials: false
-      - uses: ./.github/actions/checkout-source
+      - id: source
+        uses: ./.github/actions/checkout-source
         with:
           ref: ${{ inputs.source_ref }}
           token: ${{ secrets.GDPP_TOKEN }}
@@ -210,8 +228,27 @@ jobs:
           templates: web
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
-          name: gdpp-web-${{ matrix.profile }}-${{ matrix.variant }}
-          path: source/example/addons/gdpp/sdk
+          name: gdpp-web-${{ matrix.profile }}-${{ matrix.variant }}-${{ steps.source.outputs.sha }}
+          path: source/build/component-downloads/gdpp-web-${{ matrix.profile }}-${{ matrix.variant }}-${{ steps.source.outputs.sha }}
+      - name: Authenticate and install the target SDK component
+        shell: bash
+        env:
+          ARTIFACT_NAME: gdpp-web-${{ matrix.profile }}-${{ matrix.variant }}-${{ steps.source.outputs.sha }}
+          SOURCE_SHA: ${{ steps.source.outputs.sha }}
+        run: |
+          set -euo pipefail
+          artifact="build/component-downloads/$ARTIFACT_NAME"
+          authenticated="build/authenticated-components/$ARTIFACT_NAME"
+          python3 "$GITHUB_WORKSPACE/.github/tools/component_artifact.py" materialize \
+            --root "$artifact" \
+            --destination "$authenticated" \
+            --artifact-name "$ARTIFACT_NAME" \
+            --source-sha "$SOURCE_SHA"
+          diff -ru example/addons/gdpp/sdk/include "$authenticated/include"
+          target="lib/web/wasm32/${{ matrix.variant }}/${{ matrix.profile }}"
+          rm -rf "example/addons/gdpp/sdk/$target"
+          mkdir -p "example/addons/gdpp/sdk/lib/web/wasm32/${{ matrix.variant }}"
+          cp -R "$authenticated/$target" "example/addons/gdpp/sdk/$target"
       - name: Install Wasm inspection tools
         run: sudo apt-get update && sudo apt-get install -y binaryen wabt
       - name: Build compiler plugin
@@ -339,18 +376,3 @@ jobs:
             echo 'Web runtime emitted a forbidden diagnostic.'
             exit 1
           fi
-      - id: evidence_audit
-        name: Audit public Web evidence for source disclosure
-        if: always()
-        run: >-
-          python3 "$GITHUB_WORKSPACE/.github/tools/audit_public_artifact.py"
-          --source .
-          --path ${{ matrix.project }}/addons/gdpp/build/${{ matrix.output }}
-      - name: Upload Web evidence
-        if: ${{ always() && steps.evidence_audit.outcome == 'success' }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
-        with:
-          name: gdpp-web-runtime-godot-${{ matrix.godot }}-${{ matrix.variant }}
-          path: source/${{ matrix.project }}/addons/gdpp/build/${{ matrix.output }}
-          if-no-files-found: warn
-          retention-days: 14

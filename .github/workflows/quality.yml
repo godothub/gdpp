@@ -77,14 +77,15 @@ jobs:
           --requirement "$GITHUB_WORKSPACE/.github/tools/requirements.txt"
       - name: Validate workflow YAML, ownership and delivery topology
         run: python3 "$GITHUB_WORKSPACE/.github/tools/check_workflow_topology.py"
-      - name: Validate public diagnostic source-disclosure guard
-        run: python3 "$GITHUB_WORKSPACE/.github/tools/test_audit_public_artifact.py"
+      - name: Validate authenticated cross-job component artifacts
+        run: python3 "$GITHUB_WORKSPACE/.github/tools/test_component_artifact.py"
       - name: Validate portable process and log-contract runners
         run: |
           python3 "$GITHUB_WORKSPACE/.github/tools/test_run_process.py"
           python3 "$GITHUB_WORKSPACE/.github/tools/test_check_log_contract.py"
           python3 "$GITHUB_WORKSPACE/.github/tools/test_sync_release_files.py"
           python3 "$GITHUB_WORKSPACE/.github/tools/test_verify_release_assets.py"
+          python3 "$GITHUB_WORKSPACE/.github/tools/test_publish_release_transaction.py"
       - name: Reject mutable external Action references
         shell: bash
         run: |

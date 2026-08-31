@@ -63,7 +63,8 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
           persist-credentials: false
-      - uses: ./.github/actions/checkout-source
+      - id: source
+        uses: ./.github/actions/checkout-source
         with:
           ref: ${{ inputs.source_ref }}
           token: ${{ secrets.GDPP_TOKEN }}
@@ -420,22 +421,34 @@ jobs:
           done
       - name: Remove project products and stage the host component
         shell: bash
+        env:
+          ARTIFACT_NAME: gdpp-host-${{ matrix.host }}-${{ steps.source.outputs.sha }}
         run: |
           set -euo pipefail
           cmake \
             -DGDPP_ADDON_DIRECTORY="$GDPP_SOURCE_ROOT/example/addons/gdpp" \
             -P cmake/CleanAddonBuild.cmake
-          destination=build/host-component/addons/gdpp
+          destination="build/component-artifacts/$ARTIFACT_NAME/addons/gdpp"
           python3 tools/stage_host_component.py \
             --source example/addons/gdpp \
             --destination "$destination" \
             --host '${{ matrix.host }}'
           test ! -e "$destination/build"
           test "$(find "$destination/binary" -maxdepth 1 -type f | wc -l)" -eq 2
+      - name: Seal the source-bound host component artifact
+        shell: bash
+        env:
+          ARTIFACT_NAME: gdpp-host-${{ matrix.host }}-${{ steps.source.outputs.sha }}
+          SOURCE_SHA: ${{ steps.source.outputs.sha }}
+        run: >-
+          python3 "$GITHUB_WORKSPACE/.github/tools/component_artifact.py" seal
+          --root "build/component-artifacts/$ARTIFACT_NAME"
+          --artifact-name "$ARTIFACT_NAME"
+          --source-sha "$SOURCE_SHA"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: gdpp-host-${{ matrix.host }}
-          path: source/build/host-component
+          name: gdpp-host-${{ matrix.host }}-${{ steps.source.outputs.sha }}
+          path: source/build/component-artifacts/gdpp-host-${{ matrix.host }}-${{ steps.source.outputs.sha }}
           if-no-files-found: error
           include-hidden-files: true
           retention-days: 7

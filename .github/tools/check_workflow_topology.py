@@ -67,7 +67,9 @@ def main() -> int:
         fail("private source checkout must retain complete history for release-range gates")
     if "HEAD:.github" not in checkout_source or "source_pipeline_tree" not in checkout_source:
         fail("private source checkout must validate the public control-plane tree")
-    if "pipeline_sha" in checkout_source or 'test "$pipeline_sha" = "$GITHUB_SHA"' in checkout_source:
+    if "pipeline_sha" in checkout_source or (
+        'test "$pipeline_sha" = "$GITHUB_SHA"' in checkout_source
+    ):
         fail("private source checkout cannot bind release-file commits to a pipeline SHA")
 
     setup_godot = (ROOT / ".github/actions/setup-godot/action.yml").read_text(
@@ -87,6 +89,13 @@ def main() -> int:
         fail("quality formatting cannot inspect only the final source commit")
     if ".github/tools/test_sync_release_files.py" not in quality_source:
         fail("quality.yml must validate the fixed release-file synchronizer")
+    for test_tool in (
+        "test_component_artifact.py",
+        "test_publish_release_transaction.py",
+        "test_verify_release_assets.py",
+    ):
+        if test_tool not in quality_source:
+            fail(f"quality.yml must validate {test_tool}")
 
     for name, workflow in workflows.items():
         if workflow.get("permissions", {}).get("contents") != "read":
@@ -94,19 +103,100 @@ def main() -> int:
         if "pull_request" in triggers(workflow):
             fail(f"{name} must never execute for pull requests")
 
-    native_steps = [
-        step
-        for job in workflows["native-integration.yml"]["jobs"].values()
-        for step in job.get("steps", [])
-    ]
-    if any(
-        str(step.get("uses", "")).startswith("actions/upload-artifact@")
-        for step in native_steps
+    permitted_artifact_jobs = {
+        ("android.yml", "target-sdk"),
+        ("host-components.yml", "build"),
+        ("ios.yml", "target-sdk"),
+        ("package-release.yml", "package"),
+        ("web.yml", "target-sdk"),
+    }
+    expected_component_uploads = {
+        ("android.yml", "target-sdk"): (
+            "gdpp-android-arm64-${{ steps.source.outputs.sha }}",
+            "source/build/component-artifacts/"
+            "gdpp-android-arm64-${{ steps.source.outputs.sha }}",
+        ),
+        ("host-components.yml", "build"): (
+            "gdpp-host-${{ matrix.host }}-${{ steps.source.outputs.sha }}",
+            "source/build/component-artifacts/"
+            "gdpp-host-${{ matrix.host }}-${{ steps.source.outputs.sha }}",
+        ),
+        ("ios.yml", "target-sdk"): (
+            "gdpp-ios-${{ steps.source.outputs.sha }}",
+            "source/build/component-artifacts/gdpp-ios-${{ steps.source.outputs.sha }}",
+        ),
+        ("web.yml", "target-sdk"): (
+            "gdpp-web-${{ matrix.profile }}-${{ matrix.variant }}-"
+            "${{ steps.source.outputs.sha }}",
+            "source/build/component-artifacts/"
+            "gdpp-web-${{ matrix.profile }}-${{ matrix.variant }}-"
+            "${{ steps.source.outputs.sha }}",
+        ),
+    }
+    observed_artifact_jobs: set[tuple[str, str]] = set()
+    for workflow_name, workflow in workflows.items():
+        for job_name, job in workflow["jobs"].items():
+            uploads = [
+                step
+                for step in job.get("steps", [])
+                if str(step.get("uses", "")).startswith("actions/upload-artifact@")
+            ]
+            if uploads and (workflow_name, job_name) not in permitted_artifact_jobs:
+                fail(
+                    f"{workflow_name}:{job_name} cannot upload private diagnostics or "
+                    "unreleased source trees"
+                )
+            if uploads:
+                observed_artifact_jobs.add((workflow_name, job_name))
+            if len(uploads) > (1 if (workflow_name, job_name) in permitted_artifact_jobs else 0):
+                fail(f"{workflow_name}:{job_name} declares unexpected artifact uploads")
+            for upload in uploads:
+                options = upload.get("with", {})
+                name = str(options.get("name", ""))
+                path = str(options.get("path", ""))
+                if workflow_name == "package-release.yml":
+                    if name != "gdpp-release-packages-${{ steps.source.outputs.sha }}":
+                        fail("release package artifact must bind the private source SHA")
+                    package_paths = [
+                        line.strip() for line in path.splitlines() if line.strip()
+                    ]
+                    if package_paths != [
+                        "source/build/release/gdpp.zip",
+                        "source/build/release/SHA256SUMS",
+                    ]:
+                        fail("release package artifact must contain the exact public assets")
+                else:
+                    expected_name, expected_path = expected_component_uploads[
+                        (workflow_name, job_name)
+                    ]
+                    if name != expected_name or path != expected_path:
+                        fail(f"{workflow_name}:{job_name} component upload is not exact")
+                    if options.get("include-hidden-files") is not True:
+                        fail(
+                            f"{workflow_name}:{job_name} must preserve its exact sealed topology"
+                        )
+    if observed_artifact_jobs != permitted_artifact_jobs:
+        fail("required authenticated component/package artifact producers are incomplete")
+    control_plane_source = "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in sorted(WORKFLOW_ROOT.parent.rglob("*.yml"))
+    )
+    if "audit_public_artifact" in control_plane_source:
+        fail("the control plane cannot rely on a heuristic diagnostic source scanner")
+    for workflow_name in (
+        "android.yml",
+        "host-components.yml",
+        "ios.yml",
+        "web.yml",
     ):
-        fail(
-            "native-integration.yml must not publish unreleased plugin sources or "
-            "diagnostic bundles"
-        )
+        source = (WORKFLOW_ROOT / workflow_name).read_text(encoding="utf-8")
+        if "component_artifact.py\" seal" not in source:
+            fail(f"{workflow_name} must seal every uploaded component artifact")
+    package_source_text = (WORKFLOW_ROOT / "package-release.yml").read_text(
+        encoding="utf-8"
+    )
+    if "component_artifact.py\" materialize" not in package_source_text:
+        fail("package-release.yml must authenticate components before assembly")
 
     publish = release_jobs["publish"]
     if publish.get("permissions", {}).get("contents") != "write":
@@ -121,8 +211,22 @@ def main() -> int:
     checkout_options = public_checkout.get("with", {})
     if checkout_options.get("persist-credentials") is not True:
         fail("publish checkout must expose its scoped token for the release-file commit")
-    if checkout_options.get("ref") != "${{ github.event.repository.default_branch }}":
-        fail("publish must synchronize release files on the default branch")
+    if checkout_options.get("ref") != "${{ github.sha }}":
+        fail("publish must execute trusted local actions from the triggering control-plane SHA")
+    public_worktree = next(
+        (step for step in publish_steps if step.get("id") == "public-worktree"), None
+    )
+    if not isinstance(public_worktree, dict):
+        fail("publish must authenticate a separate writable default-branch worktree")
+    worktree_source = str(public_worktree.get("run", ""))
+    for contract in (
+        'trusted_pipeline_tree="$(git rev-parse "$GITHUB_SHA:.github")"',
+        'default_pipeline_tree="$(git rev-parse "$default_sha:.github")"',
+        'test "$default_pipeline_tree" = "$trusted_pipeline_tree"',
+        "git worktree add --detach",
+    ):
+        if contract not in worktree_source:
+            fail(f"publish default-branch worktree authentication is missing {contract}")
     release_files = next(
         (step for step in publish_steps if step.get("id") == "release-files"), None
     )
@@ -145,22 +249,45 @@ def main() -> int:
         fail("public release-file commits must use the product owner identity")
     if "github-actions[bot]" in metadata_source:
         fail("public release-file commits must not be attributed to an automation bot")
-    release_action = next(
+    release_transaction = next(
         (
             step
             for step in publish_steps
-            if str(step.get("uses", "")).startswith("softprops/action-gh-release@")
+            if step.get("name") == "Commit the authenticated draft release transaction"
         ),
         None,
     )
-    if not isinstance(release_action, dict) or release_action.get("with", {}).get(
-        "target_commitish"
-    ) != "${{ steps.public-metadata.outputs.public_sha }}":
-        fail("release tag must target the synchronized public metadata commit")
+    if not isinstance(release_transaction, dict):
+        fail("publish must use the authenticated draft release transaction")
+    transaction_source = str(release_transaction.get("run", ""))
+    for contract in (
+        ".github/tools/publish_release_transaction.py",
+        '--source-sha "$SOURCE_SHA"',
+        '--target-sha "$PUBLIC_SHA"',
+        "--assets build/release",
+    ):
+        if contract not in transaction_source:
+            fail(f"authenticated release transaction is missing {contract}")
     if release.get("permissions", {}).get("actions") != "read":
         fail("release.yml must allow called workflows to read package artifacts")
     if set(triggers(release)) != {"workflow_dispatch"}:
         fail("release.yml must expose only workflow_dispatch")
+    release_inputs = triggers(release)["workflow_dispatch"].get("inputs", {})
+    source_input = release_inputs.get("source_ref", {})
+    if not source_input.get("required") or "default" in source_input:
+        fail("release source_ref must be a required exact SHA without a mutable default")
+    source_validation = next(
+        (
+            step
+            for step in release_jobs["preflight"].get("steps", [])
+            if step.get("name") == "Validate the immutable private source input"
+        ),
+        None,
+    )
+    if not isinstance(source_validation, dict) or "^[0-9a-f]{40}$" not in str(
+        source_validation.get("run", "")
+    ):
+        fail("release preflight must require an exact 40-character private source SHA")
     preflight_steps = release_jobs["preflight"].get("steps", [])
     if not any(
         step.get("name") == "Verify the latest supported Godot stable frontend pin"
@@ -205,9 +332,7 @@ def main() -> int:
     expected_package_needs = sorted([*parallel, "preflight"])
     if sorted(needs(package_job)) != expected_package_needs:
         fail("packages must wait for preflight and every producer")
-    package_source = (WORKFLOW_ROOT / "package-release.yml").read_text(
-        encoding="utf-8"
-    )
+    package_source = package_source_text
     if "gdpp-all.zip" in package_source or "gdpp-lite.zip" in package_source:
         fail("version-neutral Host ABI releases must publish only gdpp.zip")
     if "gdpp.zip" not in package_source:
@@ -216,12 +341,13 @@ def main() -> int:
     require_private_source_contract("release-package-smoke.yml", smoke_workflow)
     if smoke_workflow.get("permissions", {}).get("actions") != "read":
         fail("release-package-smoke.yml must read assembled package artifacts")
-    smoke_dispatch = triggers(smoke_workflow).get("workflow_dispatch", {})
-    smoke_dispatch_inputs = smoke_dispatch.get("inputs", {})
-    if not smoke_dispatch_inputs.get("source_ref", {}).get("required"):
-        fail("release-package-smoke.yml dispatch must require an immutable source_ref")
-    if not smoke_dispatch_inputs.get("artifact_run_id", {}).get("required"):
-        fail("release-package-smoke.yml dispatch must require an assembled artifact run")
+    if "workflow_dispatch" in triggers(smoke_workflow):
+        fail("release package smoke cannot combine an arbitrary source with a cross-run artifact")
+    smoke_source_text = (WORKFLOW_ROOT / "release-package-smoke.yml").read_text(
+        encoding="utf-8"
+    )
+    if "artifact_run_id" in smoke_source_text:
+        fail("release package smoke cannot accept an unauthenticated artifact run identifier")
     smoke_matrix = smoke_workflow["jobs"]["desktop"]["strategy"]["matrix"]["include"]
     actual_smokes = sorted((entry["archive"], entry["os"]) for entry in smoke_matrix)
     expected_smokes = sorted(
@@ -344,11 +470,6 @@ def main() -> int:
         != "${{ steps.contract.outputs.edition }}"
     ):
         fail("the supplemental editor must preserve the matrix engine and declared edition")
-    if "primary_evidence_audit" not in steps_by_id or (
-        "supplemental_evidence_audit" not in steps_by_id
-    ):
-        fail("primary and supplemental complete-project evidence must be audited separately")
-
     runtime_log_workflows = ("host-components.yml",)
     for name in runtime_log_workflows:
         source = (WORKFLOW_ROOT / name).read_text(encoding="utf-8")
@@ -357,39 +478,27 @@ def main() -> int:
         if writes == 0 or portable_writes != writes:
             fail(f"{name} must persist subprocess logs with portable LF line endings")
 
-    smoke_source = (WORKFLOW_ROOT / "release-package-smoke.yml").read_text(
-        encoding="utf-8"
-    )
+    smoke_source = smoke_source_text
     verifier = "$GITHUB_WORKSPACE/.github/tools/verify_release_assets.py"
     if smoke_source.count(verifier) != 1:
         fail("release package smoke must verify the downloaded package checksum once")
     release_source = (WORKFLOW_ROOT / "release.yml").read_text(encoding="utf-8")
-    if release_source.count(verifier) != 2:
-        fail("release publish must verify packaged and downloaded release assets")
+    if release_source.count(verifier) != 1:
+        fail("release publish must verify the downloaded package before opening its draft")
     if "Create checksums" in release_source or (
         "sha256sum -- gdpp.zip > SHA256SUMS" in release_source
     ):
         fail("publish must preserve rather than replace the package checksum manifest")
     publish_step_names = [step.get("name") for step in publish_steps]
-    release_action_index = publish_steps.index(release_action)
     try:
         packaged_verification_index = publish_step_names.index(
             "Verify packaged release assets"
         )
-        published_verification_index = publish_step_names.index(
-            "Verify the published release contract"
-        )
+        transaction_index = publish_steps.index(release_transaction)
     except ValueError as error:
-        fail("publish must verify release assets before and after publication")
-    if not (
-        packaged_verification_index < release_action_index < published_verification_index
-    ):
-        fail("release asset verification must surround the publish action")
-    published_verification = publish_steps[published_verification_index]
-    published_command = str(published_verification.get("run", ""))
-    for contract in ("mktemp -d", "gh release download", "gdpp.zip", "SHA256SUMS"):
-        if contract not in published_command:
-            fail(f"published release verification is missing {contract}")
+        fail("publish must verify release assets before its draft transaction")
+    if packaged_verification_index >= transaction_index:
+        fail("release assets must be verified before the authenticated draft transaction")
     if smoke_source.count("$GITHUB_WORKSPACE/.github/tools/run_process.py") != 4:
         fail("release-package-smoke.yml must diagnose export and all runtime processes")
     if smoke_source.count("$GITHUB_WORKSPACE/.github/tools/check_log_contract.py") != 5:

@@ -385,30 +385,6 @@ jobs:
             example/addons/gdpp/build/export/gdpp-must-fail.log
           python3 tools/verify_export_immutability.py verify \
             --project example --state build/ci/example-extension-state.json
-      - id: evidence_audit
-        name: Audit public compatibility evidence for source disclosure
-        if: always()
-        run: >-
-          python3 "$GITHUB_WORKSPACE/.github/tools/audit_public_artifact.py"
-          --source .
-          --path
-          example/addons/gdpp/build/export/*.log
-          build/ci/performance/*.log
-          build/ci/performance/runtime-matrix.json
-          build/plugin/attached-extension-project/export/*.log
-      - name: Upload compatibility evidence
-        if: ${{ always() && steps.evidence_audit.outcome == 'success' }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
-        with:
-          name: godot-${{ matrix.version }}-compatibility
-          path: |
-            source/example/addons/gdpp/build/export/*.log
-            source/build/ci/performance/*.log
-            source/build/ci/performance/runtime-matrix.json
-            source/build/plugin/attached-extension-project/export/*.log
-          if-no-files-found: warn
-          retention-days: 14
-
   project-corpus:
     if: ${{ inputs.target == 'all' || inputs.target == 'project-corpus' }}
     name: Project and parser corpora
@@ -441,27 +417,6 @@ jobs:
         run: >-
           ctest --preset dev --verbose --output-on-failure
           -R '^gdpp\.compatibility\.'
-      - id: report_audit
-        name: Audit public compatibility reports for source disclosure
-        if: always()
-        run: >-
-          python3 "$GITHUB_WORKSPACE/.github/tools/audit_public_artifact.py"
-          --source .
-          --path build/dev/compatibility/results/report.json
-          --path build/dev/compatibility/parser-results/report.json
-          --path build/dev/compatibility/frontend-snapshot-diff.json
-      - name: Upload compatibility report
-        if: ${{ always() && steps.report_audit.outcome == 'success' }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
-        with:
-          name: compatibility-reports
-          path: |
-            source/build/dev/compatibility/results/report.json
-            source/build/dev/compatibility/parser-results/report.json
-            source/build/dev/compatibility/frontend-snapshot-diff.json
-          if-no-files-found: warn
-          retention-days: 14
-
   official-runtime-semantics:
     if: ${{ inputs.target == 'all' || inputs.target == 'project-corpus' || inputs.target == '4.7.2' }}
     name: Official GDScript runtime semantics
@@ -535,25 +490,6 @@ jobs:
           --output build/external-performance/evidence
           --host macos
           --samples 3
-      - id: evidence_audit
-        name: Audit public performance evidence for source disclosure
-        if: always()
-        run: >-
-          python3 "$GITHUB_WORKSPACE/.github/tools/audit_public_artifact.py"
-          --source .
-          --path build/external-performance/evidence/*.json
-          build/external-performance/evidence/*.log
-      - name: Upload source-free external performance evidence
-        if: ${{ always() && steps.evidence_audit.outcome == 'success' }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
-        with:
-          name: external-release-performance-4.7.2
-          path: |
-            source/build/external-performance/evidence/*.json
-            source/build/external-performance/evidence/*.log
-          if-no-files-found: error
-          retention-days: 14
-
   external-projects:
     if: ${{ inputs.target == 'all' || inputs.target == 'project-corpus' }}
     name: External project / ${{ matrix.name }}
@@ -662,25 +598,6 @@ jobs:
           --output build/external-e2e/${{ matrix.id }}
           --host linux
           --mode primary
-      - id: primary_evidence_audit
-        name: Audit public primary complete-project evidence for source disclosure
-        if: always()
-        run: >-
-          python3 "$GITHUB_WORKSPACE/.github/tools/audit_public_artifact.py"
-          --source .
-          --path
-          build/external-e2e/${{ matrix.id }}/*.json
-          build/external-e2e/${{ matrix.id }}/*.log
-      - name: Upload primary complete-project evidence
-        if: ${{ always() && steps.primary_evidence_audit.outcome == 'success' }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
-        with:
-          name: external-project-${{ matrix.id }}
-          path: |
-            source/build/external-e2e/${{ matrix.id }}/*.json
-            source/build/external-e2e/${{ matrix.id }}/*.log
-          if-no-files-found: warn
-          retention-days: 14
       - id: supplemental_godot
         name: Install the supplemental Godot patch
         if: ${{ success() && matrix.supplemental_engine == '4.7.2' }}
@@ -712,22 +629,3 @@ jobs:
           --host linux
           --mode supplemental
           --primary-report build/external-e2e/${{ matrix.id }}/report.json
-      - id: supplemental_evidence_audit
-        name: Audit public supplemental complete-project evidence for source disclosure
-        if: ${{ always() && matrix.supplemental_engine == '4.7.2' }}
-        run: >-
-          python3 "$GITHUB_WORKSPACE/.github/tools/audit_public_artifact.py"
-          --source .
-          --path
-          build/external-e2e/${{ matrix.id }}-supplemental-${{ matrix.supplemental_engine }}/*.json
-          build/external-e2e/${{ matrix.id }}-supplemental-${{ matrix.supplemental_engine }}/*.log
-      - name: Upload supplemental complete-project evidence
-        if: ${{ always() && steps.supplemental_evidence_audit.outcome == 'success' }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
-        with:
-          name: external-project-${{ matrix.id }}-supplemental-${{ matrix.supplemental_engine }}
-          path: |
-            source/build/external-e2e/${{ matrix.id }}-supplemental-${{ matrix.supplemental_engine }}/*.json
-            source/build/external-e2e/${{ matrix.id }}-supplemental-${{ matrix.supplemental_engine }}/*.log
-          if-no-files-found: warn
-          retention-days: 14

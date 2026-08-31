@@ -31,34 +31,72 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
           persist-credentials: false
-      - uses: ./.github/actions/checkout-source
+      - id: source
+        uses: ./.github/actions/checkout-source
         with:
           ref: ${{ inputs.source_ref }}
           token: ${{ secrets.GDPP_TOKEN }}
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
-          pattern: gdpp-host-*
-          path: source/build/components
+          pattern: gdpp-host-*-${{ steps.source.outputs.sha }}
+          path: source/build/component-downloads
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
-          name: gdpp-android-arm64
-          path: source/build/components/gdpp-android-arm64
+          name: gdpp-android-arm64-${{ steps.source.outputs.sha }}
+          path: source/build/component-downloads/gdpp-android-arm64-${{ steps.source.outputs.sha }}
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
-          pattern: gdpp-web-godot44-*
-          path: source/build/components
+          pattern: gdpp-web-godot44-*-${{ steps.source.outputs.sha }}
+          path: source/build/component-downloads
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
-          pattern: gdpp-web-godot45-*
-          path: source/build/components
+          pattern: gdpp-web-godot45-*-${{ steps.source.outputs.sha }}
+          path: source/build/component-downloads
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
-          pattern: gdpp-web-godot46_47-*
-          path: source/build/components
+          pattern: gdpp-web-godot46_47-*-${{ steps.source.outputs.sha }}
+          path: source/build/component-downloads
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
-          name: gdpp-ios
-          path: source/build/components/gdpp-ios
+          name: gdpp-ios-${{ steps.source.outputs.sha }}
+          path: source/build/component-downloads/gdpp-ios-${{ steps.source.outputs.sha }}
+      - name: Authenticate and materialize the complete component set
+        shell: bash
+        env:
+          SOURCE_SHA: ${{ steps.source.outputs.sha }}
+        run: |
+          set -euo pipefail
+          downloads=build/component-downloads
+          components=build/components
+          names=(
+            gdpp-host-mac-universal
+            gdpp-host-linux-x64
+            gdpp-host-windows-x64
+            gdpp-android-arm64
+            gdpp-web-godot44-nothreads
+            gdpp-web-godot44-threads
+            gdpp-web-godot45-nothreads
+            gdpp-web-godot45-threads
+            gdpp-web-godot46_47-nothreads
+            gdpp-web-godot46_47-threads
+            gdpp-ios
+          )
+          test ! -e "$components"
+          mkdir -p "$components"
+          for name in "${names[@]}"; do
+            printf '%s\n' "$name-$SOURCE_SHA"
+          done | LC_ALL=C sort > build/expected-component-artifacts.txt
+          find "$downloads" -mindepth 1 -maxdepth 1 -printf '%f\n' \
+            | LC_ALL=C sort > build/actual-component-artifacts.txt
+          diff -u build/expected-component-artifacts.txt build/actual-component-artifacts.txt
+          for name in "${names[@]}"; do
+            artifact_name="$name-$SOURCE_SHA"
+            python3 "$GITHUB_WORKSPACE/.github/tools/component_artifact.py" materialize \
+              --root "$downloads/$artifact_name" \
+              --destination "$components/$name" \
+              --artifact-name "$artifact_name" \
+              --source-sha "$SOURCE_SHA"
+          done
       - name: Validate release packager contracts
         run: >-
           python3 test/release_packaging_test.py
@@ -106,7 +144,7 @@ jobs:
           LC_ALL=C sha256sum -- gdpp.zip > SHA256SUMS'
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: gdpp-release-packages
+          name: gdpp-release-packages-${{ steps.source.outputs.sha }}
           path: |
             source/build/release/gdpp.zip
             source/build/release/SHA256SUMS

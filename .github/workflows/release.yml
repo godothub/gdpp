@@ -4,10 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       source_ref:
-        description: Private source branch, tag, or commit to release
+        description: Exact 40-character private source commit SHA to release
         required: true
         type: string
-        default: main
       publish:
         description: Create the GitHub Release after the complete delivery gate passes
         required: true
@@ -46,6 +45,14 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+      - name: Validate the immutable private source input
+        shell: bash
+        working-directory: ${{ github.workspace }}
+        env:
+          SOURCE_SHA: ${{ inputs.source_ref }}
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
       - id: source
         uses: ./.github/actions/checkout-source
         with:
@@ -55,11 +62,13 @@ jobs:
         shell: bash
         env:
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
-          GH_TOKEN: ${{ github.token }}
+          INPUT_SOURCE_SHA: ${{ inputs.source_ref }}
           PUBLISH: ${{ github.event_name == 'workflow_dispatch' && inputs.publish || false }}
           REQUESTED_VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.release_version || '' }}
+          RESOLVED_SOURCE_SHA: ${{ steps.source.outputs.sha }}
         run: |
           set -euo pipefail
+          test "$RESOLVED_SOURCE_SHA" = "$INPUT_SOURCE_SHA"
           plugin_version="$(sed -n 's/^version="\([^"]*\)"$/\1/p' \
             example/addons/gdpp/plugin.cfg)"
           test "$plugin_version" = "$(printf '%s' "$plugin_version" | tr -d '[:space:]')"
@@ -74,15 +83,6 @@ jobs:
           test -s build/release-preflight/notes.md
           if [[ "$PUBLISH" == true ]]; then
             test "$GITHUB_REF_NAME" = "$DEFAULT_BRANCH"
-            if git -C "$GITHUB_WORKSPACE" ls-remote --exit-code --tags origin \
-                "refs/tags/$version" >/dev/null 2>&1; then
-              echo "Tag $version already exists; releases are immutable."
-              exit 1
-            fi
-            if gh api "repos/$GITHUB_REPOSITORY/releases/tags/$version" >/dev/null 2>&1; then
-              echo "Release $version already exists; releases are immutable."
-              exit 1
-            fi
           fi
       - name: Verify the latest supported Godot stable frontend pin
         run: >-
@@ -254,25 +254,47 @@ jobs:
       - name: Check out public pipeline
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
-          ref: ${{ github.event.repository.default_branch }}
+          ref: ${{ github.sha }}
           fetch-depth: 0
           persist-credentials: true
-      - uses: ./.github/actions/checkout-source
+      - id: source
+        uses: ./.github/actions/checkout-source
         with:
           ref: ${{ needs.preflight.outputs.source_sha }}
           token: ${{ secrets.GDPP_TOKEN }}
+      - id: public-worktree
+        name: Authenticate the writable public default-branch worktree
+        shell: bash
+        working-directory: ${{ github.workspace }}
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          trusted_pipeline_tree="$(git rev-parse "$GITHUB_SHA:.github")"
+          git fetch --no-tags origin \
+            "+refs/heads/$DEFAULT_BRANCH:refs/remotes/origin/$DEFAULT_BRANCH"
+          default_sha="$(git rev-parse "refs/remotes/origin/$DEFAULT_BRANCH")"
+          default_pipeline_tree="$(git rev-parse "$default_sha:.github")"
+          test "$default_pipeline_tree" = "$trusted_pipeline_tree"
+          worktree="$GITHUB_WORKSPACE/build/public-release-worktree"
+          test ! -e "$worktree"
+          mkdir -p "$(dirname "$worktree")"
+          git worktree add --detach "$worktree" "$default_sha"
+          echo "path=$worktree" >> "$GITHUB_OUTPUT"
+          echo "base_sha=$default_sha" >> "$GITHUB_OUTPUT"
       - id: release-files
         name: Synchronize public release files
         working-directory: ${{ github.workspace }}
         run: >-
           python3 .github/tools/sync_release_files.py
           --source source
-          --destination .
+          --destination '${{ steps.public-worktree.outputs.path }}'
           --github-output "$GITHUB_OUTPUT"
       - id: public-metadata
         name: Commit synchronized public release files
         shell: bash
-        working-directory: ${{ github.workspace }}
+        working-directory: ${{ steps.public-worktree.outputs.path }}
         env:
           CHANGED: ${{ steps.release-files.outputs.changed }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
@@ -306,14 +328,11 @@ jobs:
             >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
-          name: gdpp-release-packages
+          name: gdpp-release-packages-${{ needs.preflight.outputs.source_sha }}
           path: source/build/release
       - name: Validate the unprefixed version and release archive
         shell: bash
         env:
-          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
-          GH_TOKEN: ${{ github.token }}
-          GDPP_TOKEN: ${{ secrets.GDPP_TOKEN }}
           PUBLIC_SHA: ${{ steps.public-metadata.outputs.public_sha }}
           RELEASE_VERSION: ${{ inputs.release_version }}
           SOURCE_SHA: ${{ needs.preflight.outputs.source_sha }}
@@ -323,22 +342,8 @@ jobs:
           plugin_version="$(sed -n 's/^version="\([^"]*\)"$/\1/p' \
             example/addons/gdpp/plugin.cfg)"
           test "$RELEASE_VERSION" = "$plugin_version"
-          git -C "$GITHUB_WORKSPACE" fetch --no-tags origin "refs/heads/$DEFAULT_BRANCH"
-          test "$(git -C "$GITHUB_WORKSPACE" rev-parse HEAD)" = "$PUBLIC_SHA"
-          test "$PUBLIC_SHA" = "$(git -C "$GITHUB_WORKSPACE" rev-parse FETCH_HEAD)"
-          private_main="$(GH_TOKEN="$GDPP_TOKEN" gh api \
-            repos/abandoft/gdpp/commits/main --jq .sha)"
-          test "$SOURCE_SHA" = "$private_main"
-          if git -C "$GITHUB_WORKSPACE" ls-remote --exit-code --tags origin \
-              "refs/tags/$RELEASE_VERSION" >/dev/null 2>&1; then
-            echo "Tag $RELEASE_VERSION appeared while the release was running."
-            exit 1
-          fi
-          if gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_VERSION" \
-              >/dev/null 2>&1; then
-            echo "Release $RELEASE_VERSION appeared while the release was running."
-            exit 1
-          fi
+          test "$SOURCE_SHA" = "$(git rev-parse HEAD)"
+          test "$PUBLIC_SHA" = "$(git -C '${{ steps.public-worktree.outputs.path }}' rev-parse HEAD)"
           test -f build/release/gdpp.zip
           test "$(find build/release -maxdepth 1 -type f -name '*.zip' | wc -l)" -eq 1
       - name: Verify packaged release assets
@@ -353,50 +358,17 @@ jobs:
           --changelog CHANGELOG.md
           --version "$RELEASE_VERSION"
           --output build/release-notes.md
-      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
-        with:
-          tag_name: ${{ inputs.release_version }}
-          name: ${{ inputs.release_version }}
-          target_commitish: ${{ steps.public-metadata.outputs.public_sha }}
-          body_path: source/build/release-notes.md
-          generate_release_notes: false
-          fail_on_unmatched_files: true
-          files: |
-            source/build/release/gdpp.zip
-            source/build/release/SHA256SUMS
-      - name: Verify the published release contract
-        shell: bash
+      - name: Commit the authenticated draft release transaction
         env:
           GH_TOKEN: ${{ github.token }}
           PUBLIC_SHA: ${{ steps.public-metadata.outputs.public_sha }}
           RELEASE_VERSION: ${{ inputs.release_version }}
-        run: |
-          set -euo pipefail
-          release="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_VERSION")"
-          test "$(jq -r '.tag_name' <<< "$release")" = "$RELEASE_VERSION"
-          test "$(jq -r '.name' <<< "$release")" = "$RELEASE_VERSION"
-          test "$(jq -r '.draft' <<< "$release")" = false
-          test "$(jq -r '.prerelease' <<< "$release")" = false
-          test "$(jq '[.assets[] | select(.state == "uploaded" and .size > 0)] | length' \
-            <<< "$release")" -eq 2
-          test "$(jq '.assets | length' <<< "$release")" -eq 2
-          test "$(jq '[.assets[] | select(.name | endswith(".zip"))] | length' \
-            <<< "$release")" -eq 1
-          for name in gdpp.zip SHA256SUMS; do
-            test "$(jq --arg name "$name" \
-              '[.assets[] | select(.name == $name)] | length' <<< "$release")" -eq 1
-          done
-          test "$(git -C "$GITHUB_WORKSPACE" ls-remote origin \
-            "refs/tags/$RELEASE_VERSION" | awk '{print $1}')" \
-            = "$PUBLIC_SHA"
-          verification_root="$(mktemp -d "${RUNNER_TEMP}/gdpp-release-assets.XXXXXX")"
-          trap 'rm -rf "$verification_root"' EXIT
-          gh release download "$RELEASE_VERSION" \
-            --repo "$GITHUB_REPOSITORY" \
-            --dir "$verification_root" \
-            --pattern gdpp.zip \
-            --pattern SHA256SUMS
-          python3 "$GITHUB_WORKSPACE/.github/tools/verify_release_assets.py" \
-            "$verification_root"
-          printf 'Published %s: %s\n' "$RELEASE_VERSION" \
-            "$(jq -r '.html_url' <<< "$release")" >> "$GITHUB_STEP_SUMMARY"
+          SOURCE_SHA: ${{ needs.preflight.outputs.source_sha }}
+        run: >-
+          python3 "$GITHUB_WORKSPACE/.github/tools/publish_release_transaction.py"
+          --repository "$GITHUB_REPOSITORY"
+          --version "$RELEASE_VERSION"
+          --source-sha "$SOURCE_SHA"
+          --target-sha "$PUBLIC_SHA"
+          --notes build/release-notes.md
+          --assets build/release

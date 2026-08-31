@@ -7,23 +7,8 @@ on:
         description: Private source revision to validate
         type: string
         required: true
-      artifact_run_id:
-        description: Existing package run to validate instead of the current caller
-        type: string
-        required: false
-        default: ""
     secrets:
       GDPP_TOKEN:
-        required: true
-  workflow_dispatch:
-    inputs:
-      source_ref:
-        description: Immutable private source revision to validate
-        type: string
-        required: true
-      artifact_run_id:
-        description: Completed release workflow run containing gdpp-release-packages
-        type: string
         required: true
 
 permissions:
@@ -69,7 +54,8 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
           persist-credentials: false
-      - uses: ./.github/actions/checkout-source
+      - id: source
+        uses: ./.github/actions/checkout-source
         with:
           ref: ${{ inputs.source_ref }}
           token: ${{ secrets.GDPP_TOKEN }}
@@ -85,20 +71,11 @@ jobs:
           source-root: ${{ env.GDPP_SOURCE_ROOT }}
           version: 4.7.2
           templates: host
-      - name: Download packages from the current delivery run
-        if: inputs.artifact_run_id == ''
+      - name: Download the source-bound package from the current delivery run
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
-          name: gdpp-release-packages
+          name: gdpp-release-packages-${{ steps.source.outputs.sha }}
           path: source/build/release-package-smoke/archive
-      - name: Download packages from an existing delivery run
-        if: inputs.artifact_run_id != ''
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
-        with:
-          name: gdpp-release-packages
-          path: source/build/release-package-smoke/archive
-          github-token: ${{ github.token }}
-          run-id: ${{ inputs.artifact_run_id }}
       - name: Verify downloaded release assets
         run: >-
           python3 "$GITHUB_WORKSPACE/.github/tools/verify_release_assets.py"

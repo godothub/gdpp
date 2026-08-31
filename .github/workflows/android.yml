@@ -44,7 +44,8 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
           persist-credentials: false
-      - uses: ./.github/actions/checkout-source
+      - id: source
+        uses: ./.github/actions/checkout-source
         with:
           ref: ${{ inputs.source_ref }}
           token: ${{ secrets.GDPP_TOKEN }}
@@ -79,14 +80,29 @@ jobs:
           grep -q '^android_api_level 28$' "$sdk/sdk.manifest"
           test "$(find "$sdk" -maxdepth 1 -type f -name '*.a' | wc -l)" -eq 1
           test -f example/addons/gdpp/sdk/include/gdextension_interface.h
+      - name: Seal the source-bound target SDK artifact
+        shell: bash
+        env:
+          ARTIFACT_NAME: gdpp-android-arm64-${{ steps.source.outputs.sha }}
+          SOURCE_SHA: ${{ steps.source.outputs.sha }}
+        run: |
+          set -euo pipefail
+          artifact="build/component-artifacts/$ARTIFACT_NAME"
+          test ! -e "$artifact"
+          mkdir -p "$artifact/lib/android"
+          cp -R example/addons/gdpp/sdk/include "$artifact/include"
+          cp -R example/addons/gdpp/sdk/lib/android/arm64 "$artifact/lib/android/arm64"
+          python3 "$GITHUB_WORKSPACE/.github/tools/component_artifact.py" seal \
+            --root "$artifact" \
+            --artifact-name "$ARTIFACT_NAME" \
+            --source-sha "$SOURCE_SHA"
       - name: Upload target SDK
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: gdpp-android-arm64
-          path: |
-            source/example/addons/gdpp/sdk/include
-            source/example/addons/gdpp/sdk/lib/android/arm64
+          name: gdpp-android-arm64-${{ steps.source.outputs.sha }}
+          path: source/build/component-artifacts/gdpp-android-arm64-${{ steps.source.outputs.sha }}
           if-no-files-found: error
+          include-hidden-files: true
           retention-days: 7
 
   apk:
@@ -205,18 +221,3 @@ jobs:
             exit 1
           fi
           grep -q 'GDPP_AOT_SUMMARY scenes=' "$root/export.log"
-      - id: evidence_audit
-        name: Audit public APK evidence for source disclosure
-        if: always()
-        run: >-
-          python3 "$GITHUB_WORKSPACE/.github/tools/audit_public_artifact.py"
-          --source .
-          --path example/addons/gdpp/build/android
-      - name: Upload APK evidence
-        if: ${{ always() && steps.evidence_audit.outcome == 'success' }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
-        with:
-          name: gdpp-android-apk-godot-4.5.2
-          path: source/example/addons/gdpp/build/android
-          if-no-files-found: warn
-          retention-days: 14

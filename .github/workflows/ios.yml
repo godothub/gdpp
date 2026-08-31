@@ -43,7 +43,8 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
           persist-credentials: false
-      - uses: ./.github/actions/checkout-source
+      - id: source
+        uses: ./.github/actions/checkout-source
         with:
           ref: ${{ inputs.source_ref }}
           token: ${{ secrets.GDPP_TOKEN }}
@@ -84,13 +85,28 @@ jobs:
             echo 'iOS target SDK leaks the checkout path.'
             exit 1
           fi
+      - name: Seal the source-bound target SDK artifact
+        shell: bash
+        env:
+          ARTIFACT_NAME: gdpp-ios-${{ steps.source.outputs.sha }}
+          SOURCE_SHA: ${{ steps.source.outputs.sha }}
+        run: |
+          set -euo pipefail
+          artifact="build/component-artifacts/$ARTIFACT_NAME"
+          test ! -e "$artifact"
+          mkdir -p "$artifact/lib/ios"
+          cp -R example/addons/gdpp/sdk/include "$artifact/include"
+          cp -R example/addons/gdpp/sdk/lib/ios/arm64 "$artifact/lib/ios/arm64"
+          python3 "$GITHUB_WORKSPACE/.github/tools/component_artifact.py" seal \
+            --root "$artifact" \
+            --artifact-name "$ARTIFACT_NAME" \
+            --source-sha "$SOURCE_SHA"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: gdpp-ios
-          path: |
-            source/example/addons/gdpp/sdk/include
-            source/example/addons/gdpp/sdk/lib/ios/arm64
+          name: gdpp-ios-${{ steps.source.outputs.sha }}
+          path: source/build/component-artifacts/gdpp-ios-${{ steps.source.outputs.sha }}
           if-no-files-found: error
+          include-hidden-files: true
           retention-days: 7
 
   xcode-project:
@@ -103,14 +119,33 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
           persist-credentials: false
-      - uses: ./.github/actions/checkout-source
+      - id: source
+        uses: ./.github/actions/checkout-source
         with:
           ref: ${{ inputs.source_ref }}
           token: ${{ secrets.GDPP_TOKEN }}
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
-          name: gdpp-ios
-          path: source/example/addons/gdpp/sdk
+          name: gdpp-ios-${{ steps.source.outputs.sha }}
+          path: source/build/component-downloads/gdpp-ios-${{ steps.source.outputs.sha }}
+      - name: Authenticate and install the target SDK component
+        shell: bash
+        env:
+          ARTIFACT_NAME: gdpp-ios-${{ steps.source.outputs.sha }}
+          SOURCE_SHA: ${{ steps.source.outputs.sha }}
+        run: |
+          set -euo pipefail
+          artifact="build/component-downloads/$ARTIFACT_NAME"
+          authenticated="build/authenticated-components/$ARTIFACT_NAME"
+          python3 "$GITHUB_WORKSPACE/.github/tools/component_artifact.py" materialize \
+            --root "$artifact" \
+            --destination "$authenticated" \
+            --artifact-name "$ARTIFACT_NAME" \
+            --source-sha "$SOURCE_SHA"
+          diff -ru example/addons/gdpp/sdk/include "$authenticated/include"
+          rm -rf example/addons/gdpp/sdk/lib/ios/arm64
+          mkdir -p example/addons/gdpp/sdk/lib/ios
+          cp -R "$authenticated/lib/ios/arm64" example/addons/gdpp/sdk/lib/ios/arm64
       - id: godot
         name: Install official Godot editor and iOS template
         shell: bash
@@ -300,26 +335,3 @@ jobs:
             echo 'Universal 2 provider export emitted a forbidden diagnostic.'
             exit 1
           fi
-      - id: evidence_audit
-        name: Audit public iOS evidence for source disclosure
-        if: always()
-        run: >-
-          python3 "$GITHUB_WORKSPACE/.github/tools/audit_public_artifact.py"
-          --source .
-          --path
-          example/addons/gdpp/build/ios/*.log
-          example/addons/gdpp/build/ios/extension-state.json
-          build/ci/attached-macos/*.log
-          build/ci/attached-macos/extension-state.json
-      - name: Upload iOS integration evidence
-        if: ${{ always() && steps.evidence_audit.outcome == 'success' }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
-        with:
-          name: gdpp-ios-xcode-godot-4.6.2
-          path: |
-            source/example/addons/gdpp/build/ios/*.log
-            source/example/addons/gdpp/build/ios/extension-state.json
-            source/build/ci/attached-macos/*.log
-            source/build/ci/attached-macos/extension-state.json
-          if-no-files-found: warn
-          retention-days: 14
