@@ -338,11 +338,24 @@ def publish(
         raise ReleaseError("multiple GitHub releases claim the requested version")
     if matches:
         release = matches[0]
-        if release.get("draft") is not True:
-            raise ReleaseError("the requested version is already publicly released")
-        validate_release(
-            release, version=version, target_sha=target_sha, body=body, draft=True
-        )
+        if release.get("draft") is True:
+            validate_release(
+                release, version=version, target_sha=target_sha, body=body, draft=True
+            )
+        else:
+            # Publishing the draft is the transaction's only externally visible commit point.
+            # The PATCH response can still be lost after GitHub has committed it, so a retry must
+            # authenticate the complete public state and finish successfully instead of leaving a
+            # valid immutable release in an unrecoverable "already exists" state.
+            validate_release(
+                release, version=version, target_sha=target_sha, body=body, draft=False
+            )
+            verify_remote_assets(github, release, assets_directory)
+            if github.tag_target(version) != target_sha:
+                raise ReleaseError(
+                    "published release tag does not target the authenticated public commit"
+                )
+            return release
     else:
         if github.tag_target(version) is not None:
             raise ReleaseError("the requested release tag already exists")

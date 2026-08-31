@@ -210,10 +210,18 @@ class PublishReleaseTransactionTest(unittest.TestCase):
         with self.assertRaisesRegex(release_transaction.ReleaseError, "unexpected"):
             self.publish()
 
-    def test_rejects_already_public_release_and_existing_tag(self) -> None:
-        draft = self.create_bound_draft()
-        self.github._release(draft["id"])["draft"] = False
-        with self.assertRaisesRegex(release_transaction.ReleaseError, "already publicly"):
+    def test_recovers_after_the_public_commit_response_is_lost(self) -> None:
+        published = self.publish()
+        next_asset_id = self.github.next_asset_id
+        recovered = self.publish()
+        self.assertEqual(recovered, published)
+        self.assertFalse(recovered["draft"])
+        self.assertEqual(self.github.next_asset_id, next_asset_id)
+
+    def test_rejects_mismatched_public_release_and_unowned_tag(self) -> None:
+        published = self.publish()
+        self.github._release(published["id"])["body"] = "forged\n"
+        with self.assertRaisesRegex(release_transaction.ReleaseError, "body"):
             self.publish()
         self.github.releases.clear()
         self.github.tag = "3" * 40
