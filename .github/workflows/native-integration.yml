@@ -27,6 +27,7 @@ env:
 
 defaults:
   run:
+    shell: bash
     working-directory: source
 
 concurrency:
@@ -51,17 +52,29 @@ jobs:
         with:
           ref: ${{ inputs.source_ref }}
           token: ${{ secrets.GDPP_TOKEN }}
+      - name: Validate the private output boundary
+        run: test "${GDPP_PRIVATE_CAPTURE_ACTIVE:-}" = 1
       - name: Initialize the MSVC x64 toolchain
         if: runner.os == 'Windows'
         uses: ./.github/actions/setup-msvc
         with:
           arch: x64
+      - id: godot
+        if: runner.os == 'Windows'
+        uses: ./.github/actions/setup-godot
+        with:
+          source-root: ${{ env.GDPP_SOURCE_ROOT }}
+          version: 4.7.2
+          templates: windows
       - name: Configure compiler GDExtension
         shell: bash
+        env:
+          GODOT_EXECUTABLE: ${{ steps.godot.outputs.executable }}
         run: |
           arguments=(--preset plugin)
           if [[ "$RUNNER_OS" == Windows ]]; then
             arguments+=("-DCMAKE_CXX_COMPILER=cl.exe")
+            arguments+=("-DGDPP_GODOT_EXECUTABLE=$GODOT_EXECUTABLE")
           fi
           cmake "${arguments[@]}"
       - name: Build compiler, SDK and generated-code smoke target
@@ -72,9 +85,10 @@ jobs:
         run: |
           cmake -E rm -rf example/addons/gdpp/build/project/native-direct
           env -u INCLUDE -u LIB -u LIBPATH \
-            ctest --test-dir build/plugin -R '^gdpp\.godot\.direct_export_build$' --output-on-failure
+            ctest --test-dir build/plugin -R '^gdpp\.godot\.direct_export_build$' \
+              --output-on-failure --no-tests=error
       - name: Run GDExtension and export-build tests
-        run: ctest --preset plugin
+        run: ctest --preset plugin --no-tests=error
       - name: Remove example project native products
         run: >-
           cmake
@@ -133,7 +147,7 @@ jobs:
         run: >-
           ctest --test-dir build/ci-custom-double
           -R '^gdpp\.(runtime\.(double_precision_native_layout|godot_native_size_contract)|gde_host_adapter\.enum_boundary)$'
-          --output-on-failure
+          --output-on-failure --no-tests=error
       - name: Audit the custom ABI package
         shell: bash
         run: |
