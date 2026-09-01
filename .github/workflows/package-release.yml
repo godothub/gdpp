@@ -19,6 +19,7 @@ env:
 
 defaults:
   run:
+    shell: bash
     working-directory: source
 
 jobs:
@@ -122,12 +123,9 @@ jobs:
           python3 tools/package_platform_release.py \
             --validate-addon "$audit/addons/gdpp" \
             --package standard
-          if find "$audit/addons/gdpp/sdk/lib" -type f \
-              \( -name '*.a' -o -name '*.lib' \) -exec strings {} + \
-              | grep -E -q '/home/runner/work/|[A-Za-z]:[/\\].*(source|work)[/\\]'; then
-            echo 'A packaged Host Runtime leaks a build checkout path.'
-            exit 1
-          fi
+          python3 "$GITHUB_WORKSPACE/.github/tools/audit_packaged_binaries.py" \
+            --addon "$audit/addons/gdpp" \
+            --source-root "$GDPP_SOURCE_ROOT"
       - name: Verify deterministic rebuild
         shell: bash
         run: |

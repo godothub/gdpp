@@ -27,6 +27,7 @@ env:
 
 defaults:
   run:
+    shell: bash
     working-directory: source
 
 concurrency:
@@ -82,10 +83,12 @@ jobs:
       - name: Validate portable process and log-contract runners
         run: |
           python3 "$GITHUB_WORKSPACE/.github/tools/test_run_process.py"
+          python3 "$GITHUB_WORKSPACE/.github/tools/test_private_step_capture.py"
           python3 "$GITHUB_WORKSPACE/.github/tools/test_check_log_contract.py"
           python3 "$GITHUB_WORKSPACE/.github/tools/test_sync_release_files.py"
           python3 "$GITHUB_WORKSPACE/.github/tools/test_verify_release_assets.py"
           python3 "$GITHUB_WORKSPACE/.github/tools/test_publish_release_transaction.py"
+          python3 "$GITHUB_WORKSPACE/.github/tools/test_audit_packaged_binaries.py"
       - name: Reject mutable external Action references
         shell: bash
         run: |
