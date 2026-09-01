@@ -44,6 +44,7 @@ env:
 
 defaults:
   run:
+    shell: bash
     working-directory: source
 
 concurrency:
@@ -370,7 +371,7 @@ jobs:
             mv "$sdk.unavailable" "$sdk" 2>/dev/null || true
             mv "$project.unavailable" "$project" 2>/dev/null || true
           }
-          trap restore_fault_injection EXIT
+          trap 'status=$?; restore_fault_injection; gdpp_private_capture_exit "$status"' EXIT
           set +e
           "$GODOT" --headless --editor --path example \
             --export-pack 'Linux x86_64' \

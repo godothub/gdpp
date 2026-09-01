@@ -297,7 +297,9 @@ def main() -> int:
     free_before = disk_free_bytes(arguments.log)
     print(f"{arguments.label}: disk_free_before={free_before}", flush=True)
     executable_name = Path(arguments.command[0]).name
-    dump_directory = arguments.log.parent / "windows-local-dumps"
+    runner_temp = os.environ.get("RUNNER_TEMP", "").strip()
+    dump_root = Path(runner_temp) if runner_temp else arguments.log.parent
+    dump_directory = dump_root / "gdpp-windows-local-dumps"
     dump_configured = configure_windows_local_dumps(executable_name, dump_directory)
     if dump_configured:
         print(f"{arguments.label}: local_dump_capture=enabled", flush=True)

@@ -71,6 +71,34 @@ def main() -> int:
         'test "$pipeline_sha" = "$GITHUB_SHA"' in checkout_source
     ):
         fail("private source checkout cannot bind release-file commits to a pipeline SHA")
+    for contract in (
+        "private_step_capture.sh",
+        "private_step_capture.py",
+        "BASH_ENV=",
+    ):
+        if contract not in checkout_source:
+            fail(f"private source checkout must arm the output boundary with {contract}")
+    if checkout_source.find("BASH_ENV=") > checkout_source.find(
+        "repository: abandoft/gdpp"
+    ):
+        fail("private output boundary must be armed before the private checkout")
+
+    for name, workflow in workflows.items():
+        default_run = workflow.get("defaults", {}).get("run", {})
+        if default_run.get("shell") != "bash":
+            fail(f"{name} must route every private run step through BASH_ENV")
+        for job_name, job in workflow.get("jobs", {}).items():
+            for step in job.get("steps", []):
+                if "run" in step and step.get("shell", "bash") != "bash":
+                    fail(
+                        f"{name}:{job_name} overrides the protected Bash output boundary"
+                    )
+        source_text = (WORKFLOW_ROOT / name).read_text(encoding="utf-8")
+        for line in source_text.splitlines():
+            if "trap " in line and " EXIT" in line and (
+                "gdpp_private_capture_exit" not in line
+            ):
+                fail(f"{name} declares an EXIT trap that bypasses the output boundary")
 
     setup_godot = (ROOT / ".github/actions/setup-godot/action.yml").read_text(
         encoding="utf-8"
@@ -78,6 +106,12 @@ def main() -> int:
     for template_set in ("host", "linux", "macos", "windows", "android", "web"):
         if f'$GODOT_TEMPLATES" != "{template_set}"' not in setup_godot:
             fail(f"official Godot setup must accept the {template_set} template set")
+
+    native_integration = (WORKFLOW_ROOT / "native-integration.yml").read_text(
+        encoding="utf-8"
+    )
+    if 'test "${GDPP_PRIVATE_CAPTURE_ACTIVE:-}" = 1' not in native_integration:
+        fail("native integration must exercise the private output boundary on every host")
 
     quality_source = (WORKFLOW_ROOT / "quality.yml").read_text(encoding="utf-8")
     if (
@@ -92,6 +126,8 @@ def main() -> int:
     for test_tool in (
         "test_component_artifact.py",
         "test_publish_release_transaction.py",
+        "test_private_step_capture.py",
+        "test_audit_packaged_binaries.py",
         "test_verify_release_assets.py",
     ):
         if test_tool not in quality_source:

@@ -18,6 +18,23 @@ outputs:
 runs:
   using: composite
   steps:
+    - name: Arm the private output boundary
+      shell: bash
+      run: |
+        set -euo pipefail
+        source_root="$GITHUB_WORKSPACE/source"
+        capture="$GITHUB_WORKSPACE/.github/tools/private_step_capture.sh"
+        summary="$GITHUB_WORKSPACE/.github/tools/private_step_capture.py"
+        test -f "$capture"
+        test -f "$summary"
+        printf '::add-mask::%s\n' "$source_root"
+        if [[ "$RUNNER_OS" == Windows ]]; then
+          printf '::add-mask::%s\n' "$(cygpath -u "$source_root")"
+          printf '::add-mask::%s\n' "$(cygpath -w "$source_root")"
+          printf '::add-mask::%s\n' "$(cygpath -m "$source_root")"
+          capture="$(cygpath -u "$capture")"
+        fi
+        printf 'BASH_ENV=%s\n' "$capture" >> "$GITHUB_ENV"
     - name: Check out private source
       uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
       with:

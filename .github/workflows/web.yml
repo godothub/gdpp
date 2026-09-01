@@ -32,6 +32,7 @@ env:
 
 defaults:
   run:
+    shell: bash
     working-directory: source
 
 jobs:
@@ -346,7 +347,7 @@ jobs:
           python3 tools/serve_web.py "$root" --port '${{ matrix.port }}' \
             > "$root/server.log" 2>&1 &
           server_pid=$!
-          trap 'kill "$server_pid" 2>/dev/null || true' EXIT
+          trap 'status=$?; kill "$server_pid" 2>/dev/null || true; gdpp_private_capture_exit "$status"' EXIT
           for _ in {1..30}; do
             if curl --fail --silent --head \
                 "http://127.0.0.1:${{ matrix.port }}/${{ matrix.product }}.html" \
