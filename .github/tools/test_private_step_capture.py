@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
 from pathlib import Path
 import stat
@@ -55,6 +56,9 @@ class PrivateStepCaptureTest(unittest.TestCase):
         result = self.run_script(
             "printf '%s\\n' "
             "'/home/runner/work/private/source.cpp:41: fatal error: secret' "
+            "'[fail] private unit case' "
+            "'       /private/source/test.cpp:42: requirement failed: secret' "
+            "'[fail] private unit case' "
             "'The following tests FAILED:' "
             "'  7 - gdpp.runtime.contract (Failed)'; exit 7"
         )
@@ -64,6 +68,12 @@ class PrivateStepCaptureTest(unittest.TestCase):
         self.assertIn(b"category=compile", result.stdout)
         self.assertIn(b"exit=7", result.stdout)
         self.assertIn(b"tests=gdpp.runtime.contract", result.stdout)
+        case_id = hashlib.sha256(b"private unit case").hexdigest().encode("ascii")[:16]
+        self.assertIn(b"cases=" + case_id, result.stdout)
+        self.assertEqual(result.stdout.count(case_id), 1)
+        self.assertNotIn(b"private unit case", result.stdout)
+        self.assertNotIn(b"secret", result.stdout)
+        self.assertNotIn(b"test.cpp", result.stdout)
         self.assertNotIn(b"runner/work", result.stdout)
         logs = list(self.root.glob("gdpp-private-step.*.log"))
         self.assertEqual(len(logs), 1)

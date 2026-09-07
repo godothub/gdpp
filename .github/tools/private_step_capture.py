@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 from pathlib import Path
 import re
 
@@ -14,6 +15,7 @@ FAILED_TEST = re.compile(
     rb"(?m)^\s*\d+\s+-\s+([A-Za-z0-9_.:+-]{1,160})\s+"
     rb"\((?:Failed|Timeout|SEGFAULT|Not Run)\)\s*$"
 )
+FAILED_CASE = re.compile(rb"(?m)^\[fail\] ([^\r\n]{1,1024})\r?$")
 PACKAGED_BINARY_PATH = re.compile(
     rb"(?m)^binary path audit: checkout path in "
     rb"((?:binary|sdk/lib)/[A-Za-z0-9_.+/-]{1,240})\s*$"
@@ -107,6 +109,12 @@ def summary(log: Path, status: int, job: str, step: str) -> str:
     tests = failed_tests(payload)
     if tests:
         fields.append(f"tests={','.join(tests)}")
+    cases = sorted({
+        hashlib.sha256(match.group(1)).hexdigest()[:16]
+        for match in FAILED_CASE.finditer(payload)
+    })[:12]
+    if cases:
+        fields.append(f"cases={','.join(cases)}")
     paths = safe_package_paths(payload)
     if paths:
         fields.append(f"paths={','.join(paths)}")
