@@ -129,24 +129,6 @@ jobs:
         with:
           name: gdpp-ios-${{ steps.source.outputs.sha }}
           path: source/build/component-downloads/gdpp-ios-${{ steps.source.outputs.sha }}
-      - name: Authenticate and install the target SDK component
-        shell: bash
-        env:
-          ARTIFACT_NAME: gdpp-ios-${{ steps.source.outputs.sha }}
-          SOURCE_SHA: ${{ steps.source.outputs.sha }}
-        run: |
-          set -euo pipefail
-          artifact="build/component-downloads/$ARTIFACT_NAME"
-          authenticated="build/authenticated-components/$ARTIFACT_NAME"
-          python3 "$GITHUB_WORKSPACE/.github/tools/component_artifact.py" materialize \
-            --root "$artifact" \
-            --destination "$authenticated" \
-            --artifact-name "$ARTIFACT_NAME" \
-            --source-sha "$SOURCE_SHA"
-          diff -ru example/addons/gdpp/sdk/include "$authenticated/include"
-          rm -rf example/addons/gdpp/sdk/lib/ios/arm64
-          mkdir -p example/addons/gdpp/sdk/lib/ios
-          cp -R "$authenticated/lib/ios/arm64" example/addons/gdpp/sdk/lib/ios/arm64
       - id: godot
         name: Install official Godot editor and iOS template
         shell: bash
@@ -181,6 +163,24 @@ jobs:
             -DGDPP_GODOT_EXECUTABLE="$GODOT" \
             '-DCMAKE_OSX_ARCHITECTURES=arm64;x86_64'
           cmake --build --preset plugin --parallel
+      - name: Authenticate and install the target SDK component
+        shell: bash
+        env:
+          ARTIFACT_NAME: gdpp-ios-${{ steps.source.outputs.sha }}
+          SOURCE_SHA: ${{ steps.source.outputs.sha }}
+        run: |
+          set -euo pipefail
+          artifact="build/component-downloads/$ARTIFACT_NAME"
+          authenticated="build/authenticated-components/$ARTIFACT_NAME"
+          python3 "$GITHUB_WORKSPACE/.github/tools/component_artifact.py" materialize \
+            --root "$artifact" \
+            --destination "$authenticated" \
+            --artifact-name "$ARTIFACT_NAME" \
+            --source-sha "$SOURCE_SHA"
+          diff -ru example/addons/gdpp/sdk/include "$authenticated/include"
+          rm -rf example/addons/gdpp/sdk/lib/ios/arm64
+          mkdir -p example/addons/gdpp/sdk/lib/ios
+          cp -R "$authenticated/lib/ios/arm64" example/addons/gdpp/sdk/lib/ios/arm64
       - name: Export binary-only Xcode project
         shell: bash
         env:

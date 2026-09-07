@@ -231,6 +231,16 @@ jobs:
         with:
           name: gdpp-web-${{ matrix.profile }}-${{ matrix.variant }}-${{ steps.source.outputs.sha }}
           path: source/build/component-downloads/gdpp-web-${{ matrix.profile }}-${{ matrix.variant }}-${{ steps.source.outputs.sha }}
+      - name: Install Wasm inspection tools
+        run: sudo apt-get update && sudo apt-get install -y binaryen wabt
+      - name: Build compiler plugin
+        shell: bash
+        env:
+          GODOT: ${{ steps.godot.outputs.executable }}
+        run: |
+          cmake --preset plugin \
+            -DGDPP_GODOT_EXECUTABLE="$GODOT"
+          cmake --build --preset plugin --parallel
       - name: Authenticate and install the target SDK component
         shell: bash
         env:
@@ -250,16 +260,6 @@ jobs:
           rm -rf "example/addons/gdpp/sdk/$target"
           mkdir -p "example/addons/gdpp/sdk/lib/web/wasm32/${{ matrix.variant }}"
           cp -R "$authenticated/$target" "example/addons/gdpp/sdk/$target"
-      - name: Install Wasm inspection tools
-        run: sudo apt-get update && sudo apt-get install -y binaryen wabt
-      - name: Build compiler plugin
-        shell: bash
-        env:
-          GODOT: ${{ steps.godot.outputs.executable }}
-        run: |
-          cmake --preset plugin \
-            -DGDPP_GODOT_EXECUTABLE="$GODOT"
-          cmake --build --preset plugin --parallel
           if [[ '${{ matrix.project }}' != example ]]; then
             mkdir -p '${{ matrix.project }}/addons'
             cp -R example/addons/gdpp '${{ matrix.project }}/addons/gdpp'
