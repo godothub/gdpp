@@ -234,8 +234,8 @@ jobs:
             2>&1 | tee "$root/payload-audit.log"
           grep -q '^EXPORT_PAYLOAD_VIOLATIONS=0$' "$root/payload-audit.log"
 
-          device="$xcframework/ios-arm64/libgdpp.dylib"
-          simulator="$xcframework/ios-arm64_x86_64-simulator/libgdpp.dylib"
+          device="$xcframework/ios-arm64/libgdpp.framework/libgdpp"
+          simulator="$xcframework/ios-arm64_x86_64-simulator/libgdpp.framework/libgdpp"
           test "$(xcrun lipo -archs "$device")" = arm64
           simulator_archs="$(xcrun lipo -archs "$simulator")"
           test "$(wc -w <<<"$simulator_archs")" -eq 2
@@ -278,7 +278,7 @@ jobs:
           engine_archive="$(find "$root" -path \
             '*/GDPPExample.xcframework/*-simulator/libgodot.a' -print -quit)"
           project_pattern='*libgdpp.release.ios.arm64.xcframework/'
-          project_pattern+='ios-arm64_x86_64-simulator/libgdpp.dylib'
+          project_pattern+='ios-arm64_x86_64-simulator/libgdpp.framework/libgdpp'
           project_library="$(find "$root" -path "$project_pattern" -print -quit)"
           test -n "$engine_archive"
           test -n "$project_library"
