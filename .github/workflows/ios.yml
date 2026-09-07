@@ -229,7 +229,7 @@ jobs:
             --directory "$root" \
             --platform ios \
             --architecture arm64 \
-            --extract-pck "$pck" \
+            --extract-resource-pack "$pck" \
             --report "$root/payload-audit.json" \
             2>&1 | tee "$root/payload-audit.log"
           grep -q '^EXPORT_PAYLOAD_VIOLATIONS=0$' "$root/payload-audit.log"

@@ -180,12 +180,12 @@ jobs:
           apk="$root/GDPPExample.apk"
           test -f "$apk"
           project_library='lib/arm64-v8a/libgdpp.release.android.arm64.so'
-          pck="$root/audit/GDPPExample.pck"
+          resource_pack="$root/audit/GDPPExample.zip"
           python3 tools/audit_export_payload.py \
             --zip "$apk" \
             --platform android \
             --architecture arm64 \
-            --extract-pck "$pck" \
+            --extract-resource-pack "$resource_pack" \
             --report "$root/payload-audit.json" \
             2>&1 | tee "$root/payload-audit.log"
           grep -q '^EXPORT_PAYLOAD_VIOLATIONS=0$' "$root/payload-audit.log"
@@ -212,7 +212,7 @@ jobs:
             > "$audit_host/project.godot"
           "$GODOT" --headless --path "$audit_host" \
             --script "res://$audit_harness_name/audit_export_pck.gd" -- \
-            "$pck" "$root/audit" "$project_so" \
+            "$resource_pack" "$root/audit" "$project_so" \
             2>&1 | tee "$root/pck-audit.log"
           grep -q '^PCK_AUDIT_VIOLATIONS=0$' "$root/pck-audit.log"
           grep -q '^PCK_AUDIT_PROJECT_LIBRARIES=1$' "$root/pck-audit.log"
