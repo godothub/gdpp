@@ -80,6 +80,30 @@ class PrivateStepCaptureTest(unittest.TestCase):
         self.assertIn(b"secret", logs[0].read_bytes())
         self.assertEqual(stat.S_IMODE(logs[0].stat().st_mode), 0o600)
 
+    def test_unittest_failures_hash_only_method_names(self) -> None:
+        result = self.run_script(
+            "printf '%s\\n' "
+            "'FAIL: test_timeout (__main__.PrivateCase.test_timeout) (argument=secret)' "
+            "'ERROR: test_shutdown (__main__.PrivateCase.test_shutdown)' "
+            "'FAIL: test_timeout (__main__.PrivateCase.test_timeout) (argument=another-secret)' "
+            "'ERROR: parse_file (/private/source.py:42)' "
+            "'FAIL: secret assertion content' "
+            "'AssertionError: /private/source.py: secret'; exit 1"
+        )
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(result.stderr, b"")
+        cases = sorted(
+            hashlib.sha256(name).hexdigest().encode("ascii")[:16]
+            for name in (b"test_timeout", b"test_shutdown")
+        )
+        fields = result.stdout.split()
+        self.assertEqual(
+            [field for field in fields if field.startswith(b"cases=")],
+            [b"cases=" + b",".join(cases)],
+        )
+        for private in (b"test_timeout", b"test_shutdown", b"PrivateCase", b"secret", b"source.py"):
+            self.assertNotIn(private, result.stdout)
+
     def test_workflow_cleanup_can_chain_the_capture_exit_handler(self) -> None:
         result = self.run_script(
             "trap 'status=$?; printf cleanup-secret; "
@@ -107,6 +131,24 @@ class PrivateStepCaptureTest(unittest.TestCase):
         self.assertIn(b"category=package", result.stdout)
         self.assertIn(b"paths=sdk/lib/linux/x86_64/runtime.a", result.stdout)
         self.assertNotIn(b"source.cpp", result.stdout)
+
+    def test_download_failure_exposes_only_the_last_valid_status_fields(self) -> None:
+        result = self.run_script(
+            "printf '%s\\n' "
+            "'https://private.example/asset?signature=secret' "
+            "'GDPP_DOWNLOAD_FAILED artifact=editor http=503 curl=22' "
+            "'GDPP_DOWNLOAD_FAILED artifact=templates http=404 curl=22' "
+            "'GDPP_DOWNLOAD_FAILED artifact=/private/source http=404 curl=22' "
+            "'GDPP_DOWNLOAD_FAILED artifact=other http=secret curl=22'; exit 22"
+        )
+        self.assertEqual(result.returncode, 22)
+        self.assertEqual(result.stderr, b"")
+        self.assertIn(b"category=download", result.stdout)
+        self.assertIn(b"artifact=templates http=404 curl=22", result.stdout)
+        self.assertNotIn(b"artifact=editor", result.stdout)
+        self.assertNotIn(b"artifact=other", result.stdout)
+        self.assertNotIn(b"secret", result.stdout)
+        self.assertNotIn(b"private", result.stdout.replace(b"private-stage", b""))
 
 
 if __name__ == "__main__":

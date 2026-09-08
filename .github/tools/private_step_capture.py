@@ -16,6 +16,14 @@ FAILED_TEST = re.compile(
     rb"\((?:Failed|Timeout|SEGFAULT|Not Run)\)\s*$"
 )
 FAILED_CASE = re.compile(rb"(?m)^\[fail\] ([^\r\n]{1,1024})\r?$")
+FAILED_UNITTEST_CASE = re.compile(
+    rb"(?m)^(?:FAIL|ERROR): ([A-Za-z_][A-Za-z0-9_]{0,159}) "
+    rb"\([A-Za-z_][A-Za-z0-9_.]{0,319}\)(?:[ \t]+\([^\r\n]{0,1024}\))?[ \t]*\r?$"
+)
+FAILED_DOWNLOAD = re.compile(
+    rb"(?m)^GDPP_DOWNLOAD_FAILED artifact=(editor|templates|other) "
+    rb"http=([0-9]{3}) curl=([0-9]{1,3})\r?$"
+)
 PACKAGED_BINARY_PATH = re.compile(
     rb"(?m)^binary path audit: checkout path in "
     rb"((?:binary|sdk/lib)/[A-Za-z0-9_.+/-]{1,240})\s*$"
@@ -48,6 +56,8 @@ def bounded_tail(log: Path) -> bytes:
 
 
 def failure_category(payload: bytes) -> str:
+    if FAILED_DOWNLOAD.search(payload):
+        return "download"
     text = payload.lower()
     categories = (
         (b"timeout", "timeout"),
@@ -112,13 +122,18 @@ def summary(log: Path, status: int, job: str, step: str) -> str:
         fields.append(f"tests={','.join(tests)}")
     cases = sorted({
         hashlib.sha256(match.group(1)).hexdigest()[:16]
-        for match in FAILED_CASE.finditer(payload)
+        for pattern in (FAILED_CASE, FAILED_UNITTEST_CASE)
+        for match in pattern.finditer(payload)
     })[:12]
     if cases:
         fields.append(f"cases={','.join(cases)}")
     paths = safe_package_paths(payload)
     if paths:
         fields.append(f"paths={','.join(paths)}")
+    downloads = FAILED_DOWNLOAD.findall(payload)
+    if downloads:
+        artifact, http_status, curl_status = (value.decode("ascii") for value in downloads[-1])
+        fields.extend((f"artifact={artifact}", f"http={http_status}", f"curl={curl_status}"))
     return " ".join(fields)
 
 
