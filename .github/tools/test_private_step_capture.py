@@ -89,6 +89,14 @@ class PrivateStepCaptureTest(unittest.TestCase):
         self.assertIn(b"status=failed", result.stdout)
         self.assertNotIn(b"cleanup-secret", result.stdout)
 
+    def test_command_timeout_is_classified_without_exposing_its_log_path(self) -> None:
+        result = self.run_script(
+            "printf '%s\\n' 'command timed out after 600s; see /private/export.log'; exit 1"
+        )
+        self.assertEqual(result.returncode, 1)
+        self.assertIn(b"category=timeout", result.stdout)
+        self.assertNotIn(b"/private/export.log", result.stdout)
+
     def test_package_failure_allows_only_a_packaged_relative_binary_path(self) -> None:
         result = self.run_script(
             "printf '%s\\n' "

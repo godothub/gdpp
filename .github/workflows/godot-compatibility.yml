@@ -357,36 +357,18 @@ jobs:
             --iterations 100000
           python3 tools/verify_export_immutability.py verify \
             --project example --state build/ci/example-extension-state.json
-      - name: Verify binary-only export fails closed without its SDK
+      - name: Reject missing or incompatible SDK exports
         shell: bash
         env:
           GODOT: ${{ steps.godot.outputs.executable }}
         run: |
-          set -euo pipefail
-          sdk="example/addons/gdpp/sdk/lib/linux/x86_64"
-          project="example/addons/gdpp/binary/libgdpp.release.linux.x86_64.so"
-          test -f "$project"
-          mv "$sdk" "$sdk.unavailable"
-          mv "$project" "$project.unavailable"
-          restore_fault_injection() {
-            mv "$sdk.unavailable" "$sdk" 2>/dev/null || true
-            mv "$project.unavailable" "$project" 2>/dev/null || true
-          }
-          trap 'status=$?; restore_fault_injection; gdpp_private_capture_exit "$status"' EXIT
-          set +e
-          "$GODOT" --headless --editor --path example \
-            --export-pack 'Linux x86_64' \
-            "$GDPP_SOURCE_ROOT/example/addons/gdpp/build/export/gdpp-must-fail.pck" \
-            > example/addons/gdpp/build/export/gdpp-must-fail.log 2>&1
-          status=$?
-          set -e
-          test "$status" -ne 0 || \
-            grep -q 'binary-only export is blocked to prevent source disclosure' \
-              example/addons/gdpp/build/export/gdpp-must-fail.log
-          grep -q 'binary-only export is blocked to prevent source disclosure' \
-            example/addons/gdpp/build/export/gdpp-must-fail.log
-          python3 tools/verify_export_immutability.py verify \
-            --project example --state build/ci/example-extension-state.json
+          python3 test/sdk_export_failure_test.py \
+            --godot "$GODOT" --project example --preset 'Linux x86_64' \
+            --sdk-directory example/addons/gdpp/sdk/lib/linux/x86_64 \
+            --project-library example/addons/gdpp/binary/libgdpp.release.linux.x86_64.so \
+            --prior-product example/addons/gdpp/build/export/aot/gdpp-runtime.pck \
+            --output-directory build/ci/sdk-export-failure \
+            --immutability-state build/ci/example-extension-state.json
   project-corpus:
     if: ${{ inputs.target == 'all' || inputs.target == 'project-corpus' }}
     name: Project and parser corpora

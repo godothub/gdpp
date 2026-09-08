@@ -51,6 +51,7 @@ def failure_category(payload: bytes) -> str:
     text = payload.lower()
     categories = (
         (b"timeout", "timeout"),
+        (b"timed out", "timeout"),
         (b"addresssanitizer", "sanitizer"),
         (b"undefinedbehaviorsanitizer", "sanitizer"),
         (b"threadsanitizer", "sanitizer"),
