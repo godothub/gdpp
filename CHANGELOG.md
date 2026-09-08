@@ -1,3 +1,10 @@
+## 2.0.5
+
+- Improve GDScript semantics for type inference, script construction, pattern matching, annotations, default arguments, inherited inner classes, `@onready`, name shadowing, static constants, typed containers, and range iteration.
+- Unify execution boundaries for cross-script calls, parameters, containers, and native values, optimizing proven pure computation, loop type checks, and container access while preserving GDScript runtime semantics.
+- Support AOT compilation and binary export of embedded GDScript in scenes and resources.
+- Improve export compatibility with third-party GDExtensions, editor plugins, and .NET projects.
+
 ## 2.0.4
 
 - Fix export failures when GDPP is used with third-party GDExtensions.
@@ -44,7 +51,7 @@
 - Preserve compiled Script identity across paths, UIDs, threaded loading, `load`/`preload`, properties, signals, construction, attachment, inheritance, rollback, and shutdown.
 - Improve Callable, typed Array and Dictionary, enum, PackedArray, nested write, dynamic `len`, operator, and conversion compatibility.
 - Preserve asynchronous initialization, awaited `super` calls, coroutine lifetimes, and safe cancellation during script replacement or shutdown.
-- Preserve foreign scripts, scenes, nested resources, serialized references, export exclusions, presets, diagnostics, and customer sources during binary-only export.
+- Improve handling of external scripts, scenes, nested resources, serialized references, export exclusions, presets, and diagnostics without modifying customer project files.
 - Improve cross-platform startup and shutdown safety for generated static state, Script caches, attached instances, and compiler-specific native branches.
 
 ## 1.8.2
@@ -68,7 +75,7 @@
 - Contain fatal script operations to the current generated call while preserving caller execution, source order, lazy evaluation, and exact `.gd` diagnostics.
 - Match Dictionary missing-key, stored-null, typed key/value, read-only, named access, direct assignment, and compound assignment behavior.
 - Enforce strict runtime storage conversions for Variant, Object, Ref, Array, Dictionary, PackedArray, and attached properties without silently creating default values.
-- Improve exact integer, Variant, Dictionary, Callable, and conversion fast paths while keeping AOT performance within the commercial 10% regression limit.
+- Improve exact integer, Variant, Dictionary, Callable, and conversion fast paths.
 - Make static, preload, field, `_init`, and `@onready` initialization transactional and improve null, freed-object, `Object.free()`, and attached-instance lifetime safety.
 - Add end-to-end `breakpoint` support and source-level debugger frames for methods, accessors, lambdas, inherited members, attached classes, and suspended coroutines.
 - Improve parser recovery, large-project worker-stack safety, deterministic MIR validation, and transactional optimization failures.
@@ -83,7 +90,7 @@
 - Preserve PackedArray element types, shared storage, Signal and Callable arguments, local signal behavior, and direct generated method dispatch.
 - Track true generated-header dependencies so implementation-only edits rebuild fewer files while public script changes rebuild all required dependents.
 - Preserve coroutine loop-carried state across process-frame and signal suspension and retain legal unused GDScript bindings in warning-clean generated C++.
-- Enforce the commercial performance contract that AOT startup, frame work, and benchmark families remain within 10% of GDScript.
+- Compare AOT and GDScript startup, frame work, and benchmark performance.
 
 ## 1.7.9
 
