@@ -89,6 +89,7 @@ jobs:
         shell: bash
         run: >-
           cmake --preset plugin
+          -DCMAKE_BUILD_TYPE=Release
           -DGDPP_GODOT_EXECUTABLE=${{ steps.godot.outputs.executable }}
           -DGDPP_GDSCRIPT_ORACLE_EXECUTABLE=${{ steps.oracle.outputs.executable }}
           -DGDPP_BUILD_PERFORMANCE_BASELINE=ON
