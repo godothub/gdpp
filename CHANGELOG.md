@@ -1,3 +1,11 @@
+## 2.0.6
+
+- Fix export failures when CSV translations or custom importers generate resources in project directories.
+- Fix enums and bitfields from GDExtensions such as GodotSteam being misidentified as missing types.
+- Support `@export` properties initialized to `null` while preserving their export metadata.
+- Fix lingering error state after script runtime errors and invalid external call arguments.
+- Fix AOT unary plus (`+value`) operations on dynamic values.
+
 ## 2.0.5
 
 - Improve GDScript semantics for type inference, script construction, pattern matching, annotations, default arguments, inherited inner classes, `@onready`, name shadowing, static constants, typed containers, and range iteration.
