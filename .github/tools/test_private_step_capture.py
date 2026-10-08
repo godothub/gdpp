@@ -166,6 +166,35 @@ class PrivateStepCaptureTest(unittest.TestCase):
         self.assertIn(b"category=timeout", result.stdout)
         self.assertNotIn(b"/private/export.log", result.stdout)
 
+    def test_ctest_timeout_configuration_does_not_mask_a_test_failure(self) -> None:
+        result = self.run_script(
+            "printf '%s\\n' 'Test timeout computed to be: 1200' "
+            "'The following tests FAILED:' "
+            "'  7 - gdpp.runtime.contract (Failed)'; exit 8"
+        )
+        self.assertEqual(result.returncode, 8)
+        self.assertIn(b"category=test", result.stdout)
+        self.assertNotIn(b"category=timeout", result.stdout)
+
+    def test_actual_ctest_timeout_retains_its_category(self) -> None:
+        result = self.run_script(
+            "printf '%s\\n' '7/7 Test #7: gdpp.runtime.contract ***Timeout 1200s' "
+            "'  7 - gdpp.runtime.contract (Timeout)'; exit 8"
+        )
+        self.assertEqual(result.returncode, 8)
+        self.assertIn(b"category=timeout", result.stdout)
+
+    def test_semantic_failures_expose_only_fixed_diagnostic_codes(self) -> None:
+        result = self.run_script(
+            "printf '%s\\n' '/private/plugin/source.gd:12: error[GDS4046]: secret' "
+            "'ERROR: GDPP AOT: /private/source.gd:6: GDS4075: secret' "
+            "'The following tests FAILED:'; exit 8"
+        )
+        self.assertEqual(result.returncode, 8)
+        self.assertIn(b"codes=GDS4046,GDS4075", result.stdout)
+        for private in (b"source.gd", b"secret", b"plugin"):
+            self.assertNotIn(private, result.stdout)
+
     def test_package_failure_allows_only_a_packaged_relative_binary_path(self) -> None:
         result = self.run_script(
             "printf '%s\\n' "
