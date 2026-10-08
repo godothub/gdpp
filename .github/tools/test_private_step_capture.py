@@ -150,6 +150,14 @@ class PrivateStepCaptureTest(unittest.TestCase):
         self.assertNotIn(b"cmake-policy-floor", result.stdout)
         self.assertNotIn(b"private target name", result.stdout)
 
+    def test_script_error_keeps_its_godot_category(self) -> None:
+        result = self.run_script(
+            "printf '%s\\n' 'SCRIPT ERROR: private detail'; exit 1"
+        )
+        self.assertEqual(result.returncode, 1)
+        self.assertIn(b"category=godot", result.stdout)
+        self.assertNotIn(b"private detail", result.stdout)
+
     def test_command_timeout_is_classified_without_exposing_its_log_path(self) -> None:
         result = self.run_script(
             "printf '%s\\n' 'command timed out after 600s; see /private/export.log'; exit 1"

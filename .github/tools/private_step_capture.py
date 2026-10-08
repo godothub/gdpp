@@ -31,6 +31,10 @@ PACKAGED_BINARY_PATH = re.compile(
 COMPILER_DIAGNOSTIC_CODE = re.compile(
     rb"(?:(?:\[|,)(-W(?:error=)?[A-Za-z0-9_+.-]{1,80})(?=[,\]])|\b(?:fatal error|error|warning) (C[0-9]{4}|LNK[0-9]{4})\b)"
 )
+COMPILER_ERROR = re.compile(
+    rb"(?m)^(?:[^\r\n]{1,1024}:\d+:(?:\d+:)?\s*|(?:clang(?:\+\+)?|gcc|g\+\+):\s*)(?:fatal )?error:",
+    re.IGNORECASE,
+)
 BUILD_FAILURE_MARKERS = (
     (b"killed: 9", "process-killed"),
     (b"killed signal terminated program", "process-killed"),
@@ -89,7 +93,6 @@ def failure_category(payload: bytes) -> str:
         (b"fatal error", "compile"),
         (b"compilation terminated", "compile"),
         (b"error c", "compile"),
-        (b"error:", "compile"),
         (b"the following tests failed", "test"),
         (b"tests failed", "test"),
         (b"ctest", "test"),
@@ -101,6 +104,8 @@ def failure_category(payload: bytes) -> str:
     for marker, category in categories:
         if marker in text:
             return category
+    if COMPILER_ERROR.search(payload):
+        return "compile"
     return "command"
 
 
