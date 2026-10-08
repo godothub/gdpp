@@ -138,6 +138,18 @@ class PrivateStepCaptureTest(unittest.TestCase):
         self.assertNotIn(b"secret", result.stdout)
         self.assertNotIn(b"CMakeLists.txt", result.stdout)
 
+    def test_dependency_policy_warning_does_not_obscure_a_generator_error(self) -> None:
+        result = self.run_script(
+            "printf '%s\\n' 'CMake Deprecation Warning:' "
+            "'Compatibility with CMake < 3.10 will be removed' "
+            "'CMake Error: Error evaluating generator expression:' "
+            "'private target name'; exit 1"
+        )
+        self.assertEqual(result.returncode, 1)
+        self.assertIn(b"codes=generator-expression", result.stdout)
+        self.assertNotIn(b"cmake-policy-floor", result.stdout)
+        self.assertNotIn(b"private target name", result.stdout)
+
     def test_command_timeout_is_classified_without_exposing_its_log_path(self) -> None:
         result = self.run_script(
             "printf '%s\\n' 'command timed out after 600s; see /private/export.log'; exit 1"

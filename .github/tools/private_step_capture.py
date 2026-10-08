@@ -39,7 +39,7 @@ BUILD_FAILURE_MARKERS = (
     (b"msvc did not report the dependency probe header", "msvc-include-prefix"),
     (b"each download failed", "dependency-download"),
     (b"hash mismatch", "dependency-digest"),
-    (b"compatibility with cmake <", "cmake-policy-floor"),
+    (b"error evaluating generator expression", "generator-expression"),
 )
 
 
@@ -111,6 +111,8 @@ def build_failure_codes(payload: bytes) -> list[str]:
     }
     text = payload.lower()
     codes.update(name for marker, name in BUILD_FAILURE_MARKERS if marker in text)
+    if re.search(rb"compatibility with cmake < [0-9.]+ has been removed", text):
+        codes.add("cmake-policy-floor")
     return sorted(codes)[:12]
 
 
