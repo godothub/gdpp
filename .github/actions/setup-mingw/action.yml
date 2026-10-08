@@ -1,0 +1,25 @@
+name: Setup GDPP MinGW-w64
+description: Install the pinned Windows x64 GCC toolchain used by the delivery SDK.
+
+runs:
+  using: composite
+  steps:
+    - name: Install GCC 14.2.0 POSIX SEH
+      shell: bash
+      run: |
+        set -euo pipefail
+        root="$RUNNER_TEMP/gdpp-mingw"
+        mkdir -p "$root"
+        archive="$root/toolchain.7z"
+        bash "$GITHUB_WORKSPACE/source/tools/download_with_retry.sh" \
+          'https://github.com/niXman/mingw-builds-binaries/releases/download/14.2.0-rt_v12-rev1/x86_64-14.2.0-release-posix-seh-msvcrt-rt_v12-rev1.7z' \
+          "$archive"
+        printf '%s  %s\n' \
+          055291a5bdec4d4d9b9541605eafb5131025841d156c7ba09d3c2d2bc3f926ee \
+          "$archive" | sha256sum --check
+        7z x -y "-o$root" "$archive" > "$root/extract.log"
+        test -f "$root/mingw64/bin/g++.exe"
+        "$root/mingw64/bin/g++.exe" -dumpfullversion | grep -Fx 14.2.0
+        "$root/mingw64/bin/g++.exe" -dumpmachine | grep -Fx x86_64-w64-mingw32
+        printf '%s\n' "$root/mingw64/bin" >> "$GITHUB_PATH"
+        printf 'GDPP_MINGW_ROOT=%s\n' "$root/mingw64" >> "$GITHUB_ENV"
