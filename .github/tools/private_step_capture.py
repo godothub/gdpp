@@ -28,6 +28,19 @@ PACKAGED_BINARY_PATH = re.compile(
     rb"(?m)^binary path audit: checkout path in "
     rb"((?:binary|sdk/lib)/[A-Za-z0-9_.+/-]{1,240})\s*$"
 )
+COMPILER_DIAGNOSTIC_CODE = re.compile(
+    rb"(?:\[(-W(?:error=)?[A-Za-z0-9_+.-]{1,80})\]|\b(?:fatal error|error|warning) (C[0-9]{4}|LNK[0-9]{4})\b)"
+)
+BUILD_FAILURE_MARKERS = (
+    (b"killed: 9", "process-killed"),
+    (b"killed signal terminated program", "process-killed"),
+    (b"out of memory", "out-of-memory"),
+    (b"cannot detect msvc header dependencies", "msvc-include-probe"),
+    (b"msvc did not report the dependency probe header", "msvc-include-prefix"),
+    (b"each download failed", "dependency-download"),
+    (b"hash mismatch", "dependency-digest"),
+    (b"compatibility with cmake <", "cmake-policy-floor"),
+)
 
 
 def parse_arguments() -> argparse.Namespace:
@@ -60,6 +73,9 @@ def failure_category(payload: bytes) -> str:
         return "download"
     text = payload.lower()
     categories = (
+        (b"killed: 9", "resource"),
+        (b"killed signal terminated program", "resource"),
+        (b"out of memory", "resource"),
         (b"timeout", "timeout"),
         (b"timed out", "timeout"),
         (b"addresssanitizer", "sanitizer"),
@@ -73,6 +89,7 @@ def failure_category(payload: bytes) -> str:
         (b"fatal error", "compile"),
         (b"compilation terminated", "compile"),
         (b"error c", "compile"),
+        (b"error:", "compile"),
         (b"the following tests failed", "test"),
         (b"tests failed", "test"),
         (b"ctest", "test"),
@@ -85,6 +102,16 @@ def failure_category(payload: bytes) -> str:
         if marker in text:
             return category
     return "command"
+
+
+def build_failure_codes(payload: bytes) -> list[str]:
+    codes = {
+        (match.group(1) or match.group(2)).decode("ascii")
+        for match in COMPILER_DIAGNOSTIC_CODE.finditer(payload)
+    }
+    text = payload.lower()
+    codes.update(name for marker, name in BUILD_FAILURE_MARKERS if marker in text)
+    return sorted(codes)[:12]
 
 
 def failed_tests(payload: bytes) -> list[str]:
@@ -127,6 +154,9 @@ def summary(log: Path, status: int, job: str, step: str) -> str:
     })[:12]
     if cases:
         fields.append(f"cases={','.join(cases)}")
+    codes = build_failure_codes(payload)
+    if codes:
+        fields.append(f"codes={','.join(codes)}")
     paths = safe_package_paths(payload)
     if paths:
         fields.append(f"paths={','.join(paths)}")

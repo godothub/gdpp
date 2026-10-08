@@ -113,6 +113,30 @@ class PrivateStepCaptureTest(unittest.TestCase):
         self.assertIn(b"status=failed", result.stdout)
         self.assertNotIn(b"cleanup-secret", result.stdout)
 
+    def test_build_failures_expose_only_tool_codes_and_fixed_categories(self) -> None:
+        result = self.run_script(
+            "printf '%s\\n' "
+            "'/private/source.cpp:17: error: secret [-Werror=unused-parameter]' "
+            "'/private/source.cpp(17): error C2664: secret' "
+            "'clang: error: unable to execute command: Killed: 9'; exit 1"
+        )
+        self.assertEqual(result.returncode, 1)
+        self.assertIn(b"category=resource", result.stdout)
+        self.assertIn(b"codes=-Werror=unused-parameter,C2664,process-killed", result.stdout)
+        for private in (b"source.cpp", b"secret", b"unable to execute command"):
+            self.assertNotIn(private, result.stdout)
+
+    def test_configure_failures_identify_the_probe_without_its_output(self) -> None:
+        result = self.run_script(
+            "printf '%s\\n' 'CMake Error at /private/CMakeLists.txt:17:' "
+            "'Cannot detect MSVC header dependencies: secret'; exit 1"
+        )
+        self.assertEqual(result.returncode, 1)
+        self.assertIn(b"category=configure", result.stdout)
+        self.assertIn(b"codes=msvc-include-probe", result.stdout)
+        self.assertNotIn(b"secret", result.stdout)
+        self.assertNotIn(b"CMakeLists.txt", result.stdout)
+
     def test_command_timeout_is_classified_without_exposing_its_log_path(self) -> None:
         result = self.run_script(
             "printf '%s\\n' 'command timed out after 600s; see /private/export.log'; exit 1"
