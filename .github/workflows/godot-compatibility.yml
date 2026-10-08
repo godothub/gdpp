@@ -339,22 +339,29 @@ jobs:
           GODOT: ${{ steps.godot.outputs.executable }}
         run: |
           set -euo pipefail
-          output="$GDPP_SOURCE_ROOT/build/ci/performance"
-          python3 tools/run_performance_gate.py \
-            --source-root "$GDPP_SOURCE_ROOT" \
-            --godot "$GODOT" \
-            --project "$GDPP_SOURCE_ROOT/example" \
-            --gds-preset 'Linux GDScript Baseline' \
-            --aot-preset 'Linux x86_64' \
-            --output-directory "$output" \
-            --gds-output "$output/baseline/GDScript.x86_64" \
-            --aot-output "$output/aot/AOT.x86_64" \
-            --cpp-baseline \
-              "$GDPP_SOURCE_ROOT/build/plugin/bin/gdpp_performance_native_baseline" \
-            --report "$output/runtime-matrix.json" \
-            --repeats 5 \
-            --samples 9 \
-            --iterations 100000
+          for performance_mode in native bridge; do
+            output="$GDPP_SOURCE_ROOT/build/ci/performance/$performance_mode"
+            bridge_options=()
+            if [ "$performance_mode" = bridge ]; then
+              bridge_options=(--ordinary-addon-bridge)
+            fi
+            python3 tools/run_performance_gate.py \
+              --source-root "$GDPP_SOURCE_ROOT" \
+              --godot "$GODOT" \
+              --project "$GDPP_SOURCE_ROOT/example" \
+              --gds-preset 'Linux GDScript Baseline' \
+              --aot-preset 'Linux x86_64' \
+              --output-directory "$output" \
+              --gds-output "$output/baseline/GDScript.x86_64" \
+              --aot-output "$output/aot/AOT.x86_64" \
+              --cpp-baseline \
+                "$GDPP_SOURCE_ROOT/build/plugin/bin/gdpp_performance_native_baseline" \
+              --report "$output/runtime-matrix.json" \
+              --repeats 5 \
+              --samples 9 \
+              --iterations 100000 \
+              "${bridge_options[@]}"
+          done
           python3 tools/verify_export_immutability.py verify \
             --project example --state build/ci/example-extension-state.json
       - name: Reject missing or incompatible SDK exports

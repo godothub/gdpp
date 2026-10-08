@@ -194,6 +194,8 @@ jobs:
           llvm_bin="$ANDROID_SDK_ROOT/ndk/$GDPP_ANDROID_NDK_VERSION/toolchains/llvm/prebuilt/linux-x86_64/bin"
           "$llvm_bin/llvm-readelf" -h "$project_so" | \
             grep -Eq 'Machine:[[:space:]]+AArch64$'
+          "$llvm_bin/llvm-readelf" -d "$project_so" | \
+            grep -Eq 'NEEDED.*\[libc\+\+_shared\.so\]'
           test "$("$llvm_bin/llvm-nm" -D --defined-only "$project_so" | awk 'NF {print $NF}' | wc -l)" -eq 1
           "$llvm_bin/llvm-nm" -D --defined-only "$project_so" | awk 'NF {print $NF}' | \
             grep -qx gdpp_library_init
