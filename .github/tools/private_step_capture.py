@@ -29,7 +29,7 @@ PACKAGED_BINARY_PATH = re.compile(
     rb"((?:binary|sdk/lib)/[A-Za-z0-9_.+/-]{1,240})\s*$"
 )
 COMPILER_DIAGNOSTIC_CODE = re.compile(
-    rb"(?:\[(-W(?:error=)?[A-Za-z0-9_+.-]{1,80})\]|\b(?:fatal error|error|warning) (C[0-9]{4}|LNK[0-9]{4})\b)"
+    rb"(?:(?:\[|,)(-W(?:error=)?[A-Za-z0-9_+.-]{1,80})(?=[,\]])|\b(?:fatal error|error|warning) (C[0-9]{4}|LNK[0-9]{4})\b)"
 )
 BUILD_FAILURE_MARKERS = (
     (b"killed: 9", "process-killed"),

@@ -117,12 +117,13 @@ class PrivateStepCaptureTest(unittest.TestCase):
         result = self.run_script(
             "printf '%s\\n' "
             "'/private/source.cpp:17: error: secret [-Werror=unused-parameter]' "
+            "'/private/source.cpp:18: error: secret [-Werror,-Wshadow]' "
             "'/private/source.cpp(17): error C2664: secret' "
             "'clang: error: unable to execute command: Killed: 9'; exit 1"
         )
         self.assertEqual(result.returncode, 1)
         self.assertIn(b"category=resource", result.stdout)
-        self.assertIn(b"codes=-Werror=unused-parameter,C2664,process-killed", result.stdout)
+        self.assertIn(b"codes=-Werror,-Werror=unused-parameter,-Wshadow,C2664,process-killed", result.stdout)
         for private in (b"source.cpp", b"secret", b"unable to execute command"):
             self.assertNotIn(private, result.stdout)
 
