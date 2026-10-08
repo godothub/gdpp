@@ -105,9 +105,11 @@ class PublishReleaseTransactionTest(unittest.TestCase):
         self.assets.mkdir()
         archive = b"authenticated release archive"
         (self.assets / "gdpp.zip").write_bytes(archive)
-        digest = hashlib.sha256(archive).hexdigest()
+        compiler = b"authenticated standalone compiler archive"
+        (self.assets / "gdpp-compiler.zip").write_bytes(compiler)
         (self.assets / "SHA256SUMS").write_text(
-            f"{digest}  gdpp.zip\n", encoding="ascii", newline="\n"
+            f"{hashlib.sha256(compiler).hexdigest()}  gdpp-compiler.zip\n"
+            f"{hashlib.sha256(archive).hexdigest()}  gdpp.zip\n", encoding="ascii", newline="\n"
         )
         self.notes = self.root / "notes.md"
         self.notes.write_text("- Complete release.\n", encoding="utf-8", newline="\n")
@@ -147,7 +149,7 @@ class PublishReleaseTransactionTest(unittest.TestCase):
         self.assertEqual(self.github.tag, TARGET_SHA)
         self.assertEqual(
             {asset["name"] for asset in release["assets"]},
-            {"gdpp.zip", "SHA256SUMS"},
+            {"gdpp.zip", "gdpp-compiler.zip", "SHA256SUMS"},
         )
 
     def test_resumes_matching_partial_draft_without_replacing_valid_asset(self) -> None:
@@ -162,7 +164,7 @@ class PublishReleaseTransactionTest(unittest.TestCase):
     def test_resumes_matching_complete_draft_without_reuploading(self) -> None:
         draft = self.create_bound_draft()
         mutable = self.github._release(draft["id"])
-        for name in ("gdpp.zip", "SHA256SUMS"):
+        for name in ("gdpp.zip", "gdpp-compiler.zip", "SHA256SUMS"):
             self.github.add_asset(mutable, name, (self.assets / name).read_bytes())
         next_asset_id = self.github.next_asset_id
         release = self.publish()

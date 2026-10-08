@@ -20,9 +20,11 @@ class ReleaseAssetVerificationTest(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory(prefix="gdpp-release-assets-")
         self.root = Path(self.temporary.name)
-        self.archive = self.root / VERIFY.ARCHIVE_NAME
+        self.archive = self.root / "gdpp.zip"
+        self.compiler_archive = self.root / "gdpp-compiler.zip"
         self.manifest = self.root / VERIFY.CHECKSUM_NAME
         self.archive.write_bytes(b"deterministic archive payload\n")
+        self.compiler_archive.write_bytes(b"deterministic compiler archive payload\n")
         self.write_manifest()
 
     def tearDown(self) -> None:
@@ -30,7 +32,7 @@ class ReleaseAssetVerificationTest(unittest.TestCase):
 
     def write_manifest(self) -> None:
         self.manifest.write_text(
-            f"{VERIFY.sha256(self.archive)}  {VERIFY.ARCHIVE_NAME}\n",
+            "".join(f"{VERIFY.sha256(self.root / name)}  {name}\n" for name in VERIFY.ARCHIVE_NAMES),
             encoding="ascii",
         )
 
@@ -51,14 +53,23 @@ class ReleaseAssetVerificationTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "does not match"):
             VERIFY.verify(self.root)
 
+    def test_compiler_archive_is_required_and_authenticated(self) -> None:
+        self.compiler_archive.write_bytes(b"different compiler payload\n")
+        with self.assertRaisesRegex(ValueError, "does not match"):
+            VERIFY.verify(self.root)
+        self.compiler_archive.unlink()
+        with self.assertRaisesRegex(ValueError, "missing"):
+            VERIFY.verify(self.root)
+
     def test_noncanonical_manifest_is_rejected(self) -> None:
-        digest = VERIFY.sha256(self.archive)
+        canonical = self.manifest.read_text(encoding="ascii")
         for payload in (
-            f"{digest} *{VERIFY.ARCHIVE_NAME}\n",
-            f"{digest.upper()}  {VERIFY.ARCHIVE_NAME}\n",
-            f"{digest}  {VERIFY.ARCHIVE_NAME}\r\n",
-            f"{digest}  ../{VERIFY.ARCHIVE_NAME}\n",
-            f"{digest}  {VERIFY.ARCHIVE_NAME}\n{digest}  extra.zip\n",
+            canonical.replace("  gdpp.zip", " *gdpp.zip"),
+            canonical.upper(),
+            canonical.replace("\n", "\r\n"),
+            canonical.replace("  gdpp.zip", "  ../gdpp.zip"),
+            "".join(reversed(canonical.splitlines(keepends=True))),
+            canonical + "0" * 64 + "  extra.zip\n",
         ):
             with self.subTest(payload=payload):
                 self.manifest.write_text(payload, encoding="ascii", newline="")

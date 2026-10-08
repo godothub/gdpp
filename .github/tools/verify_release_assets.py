@@ -8,9 +8,9 @@ import hashlib
 from pathlib import Path
 
 
-ARCHIVE_NAME = "gdpp.zip"
+ARCHIVE_NAMES = ("gdpp-compiler.zip", "gdpp.zip")
 CHECKSUM_NAME = "SHA256SUMS"
-EXPECTED_NAMES = frozenset((ARCHIVE_NAME, CHECKSUM_NAME))
+EXPECTED_NAMES = frozenset((*ARCHIVE_NAMES, CHECKSUM_NAME))
 
 
 def sha256(path: Path) -> str:
@@ -37,11 +37,12 @@ def verify(directory: Path) -> None:
         if entry.is_symlink() or not entry.is_file():
             raise ValueError(f"release asset must be a regular file: {entry.name}")
 
-    archive = directory / ARCHIVE_NAME
-    if archive.stat().st_size == 0:
-        raise ValueError(f"release archive is empty: {ARCHIVE_NAME}")
-    digest = sha256(archive)
-    expected_manifest = f"{digest}  {ARCHIVE_NAME}\n"
+    expected_manifest = ""
+    for name in ARCHIVE_NAMES:
+        archive = directory / name
+        if archive.stat().st_size == 0:
+            raise ValueError(f"release archive is empty: {name}")
+        expected_manifest += f"{sha256(archive)}  {name}\n"
     manifest_path = directory / CHECKSUM_NAME
     if manifest_path.stat().st_size != len(expected_manifest):
         raise ValueError("release checksum manifest has a noncanonical size")
@@ -61,7 +62,7 @@ def main() -> int:
         verify(args.directory)
     except (OSError, ValueError) as error:
         raise SystemExit(f"release assets: {error}") from error
-    print(f"Verified {ARCHIVE_NAME} and {CHECKSUM_NAME}.")
+    print(f"Verified {', '.join(ARCHIVE_NAMES)} and {CHECKSUM_NAME}.")
     return 0
 
 

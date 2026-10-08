@@ -8,7 +8,8 @@ from pathlib import Path
 import re
 
 
-NATIVE_SUFFIXES = {".a", ".dll", ".dylib", ".lib", ".so"}
+NATIVE_SUFFIXES = {".a", ".dll", ".dylib", ".exe", ".lib", ".so"}
+NATIVE_EXECUTABLE_NAMES = {"gdpp", "gdpp-ninja"}
 SCAN_CHUNK_SIZE = 4 * 1024 * 1024
 SCAN_OVERLAP = 4096
 GENERIC_CHECKOUT_PATTERNS = (
@@ -20,19 +21,25 @@ GENERIC_CHECKOUT_PATTERNS = (
 
 def arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--addon", type=Path, required=True)
+    root = parser.add_mutually_exclusive_group(required=True)
+    root.add_argument("--addon", type=Path)
+    root.add_argument("--compiler-root", type=Path)
     parser.add_argument("--source-root", type=Path, required=True)
     return parser.parse_args()
 
 
 def native_products(addon: Path) -> list[Path]:
-    roots = (addon / "binary", addon / "sdk/lib")
+    roots = tuple(addon / relative for relative in (
+        "binary", "sdk/lib", "tools", "macos", "linux", "windows"
+    ))
     products = {
         path
         for root in roots
         if root.is_dir()
         for path in root.rglob("*")
-        if path.is_file() and path.suffix.lower() in NATIVE_SUFFIXES
+        if path.is_file() and (
+            path.suffix.lower() in NATIVE_SUFFIXES or path.name in NATIVE_EXECUTABLE_NAMES
+        )
     }
     return sorted(products, key=lambda path: path.relative_to(addon).as_posix())
 
@@ -90,13 +97,13 @@ def audit(addon: Path, source_root: Path) -> list[str]:
 
 def main() -> int:
     options = arguments()
-    failures = audit(options.addon, options.source_root)
+    failures = audit(options.addon or options.compiler_root, options.source_root)
     if failures:
         for relative in failures:
             print(f"binary path audit: checkout path in {relative}")
         return 1
     print(
-        "binary path audit: all packaged editor binaries and SDK archives are clean"
+        "binary path audit: all packaged native binaries and archives are clean"
     )
     return 0
 

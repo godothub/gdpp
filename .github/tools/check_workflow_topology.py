@@ -198,6 +198,7 @@ def main() -> int:
                     ]
                     if package_paths != [
                         "source/build/release/gdpp.zip",
+                        "source/build/release/gdpp-compiler.zip",
                         "source/build/release/SHA256SUMS",
                     ]:
                         fail("release package artifact must contain the exact public assets")
@@ -370,9 +371,20 @@ def main() -> int:
         fail("packages must wait for preflight and every producer")
     package_source = package_source_text
     if "gdpp-all.zip" in package_source or "gdpp-lite.zip" in package_source:
-        fail("version-neutral Host ABI releases must publish only gdpp.zip")
+        fail("version-neutral Host ABI releases cannot publish legacy plugin editions")
     if "gdpp.zip" not in package_source:
         fail("package-release.yml must assemble and audit gdpp.zip")
+    for contract in (
+        "tools/package_compiler_release.py pack",
+        "tools/package_compiler_release.py verify",
+        "gdpp-compiler.zip",
+        "sha256sum -- gdpp-compiler.zip gdpp.zip > SHA256SUMS",
+    ):
+        if contract not in package_source:
+            fail(f"package-release.yml must include the compiler asset contract: {contract}")
+    host_source = (WORKFLOW_ROOT / "host-components.yml").read_text(encoding="utf-8")
+    if "-DGDPP_BUILD_CLI=ON" not in host_source or "tools/package_compiler_release.py stage" not in host_source:
+        fail("desktop host producers must build and seal their standalone compiler")
     smoke_workflow = workflows["release-package-smoke.yml"]
     require_private_source_contract("release-package-smoke.yml", smoke_workflow)
     if smoke_workflow.get("permissions", {}).get("actions") != "read":
@@ -385,12 +397,13 @@ def main() -> int:
     if "artifact_run_id" in smoke_source_text:
         fail("release package smoke cannot accept an unauthenticated artifact run identifier")
     smoke_matrix = smoke_workflow["jobs"]["desktop"]["strategy"]["matrix"]["include"]
-    actual_smokes = sorted((entry["archive"], entry["os"]) for entry in smoke_matrix)
+    actual_smokes = sorted((entry["archive"], entry["os"], entry["toolchain"]) for entry in smoke_matrix)
     expected_smokes = sorted(
         (
-            ("gdpp.zip", "macos-15"),
-            ("gdpp.zip", "ubuntu-22.04"),
-            ("gdpp.zip", "windows-2025"),
+            ("gdpp.zip", "macos-15", "clang"),
+            ("gdpp.zip", "ubuntu-22.04", "gcc"),
+            ("gdpp.zip", "windows-2025", "msvc"),
+            ("gdpp.zip", "windows-2025", "mingw"),
         )
     )
     if actual_smokes != expected_smokes:
@@ -518,6 +531,8 @@ def main() -> int:
     verifier = "$GITHUB_WORKSPACE/.github/tools/verify_release_assets.py"
     if smoke_source.count(verifier) != 1:
         fail("release package smoke must verify the downloaded package checksum once")
+    if "test/compiler_package_smoke.py" not in smoke_source:
+        fail("installed package smokes must execute the final standalone compiler")
     release_source = (WORKFLOW_ROOT / "release.yml").read_text(encoding="utf-8")
     if release_source.count(verifier) != 1:
         fail("release publish must verify the downloaded package before opening its draft")
@@ -535,9 +550,13 @@ def main() -> int:
         fail("publish must verify release assets before its draft transaction")
     if packaged_verification_index >= transaction_index:
         fail("release assets must be verified before the authenticated draft transaction")
-    if smoke_source.count("$GITHUB_WORKSPACE/.github/tools/run_process.py") != 4:
-        fail("release-package-smoke.yml must diagnose export and all runtime processes")
-    if smoke_source.count("$GITHUB_WORKSPACE/.github/tools/check_log_contract.py") != 5:
+    if smoke_source.count("$GITHUB_WORKSPACE/.github/tools/run_process.py") != 5:
+        fail("release-package-smoke.yml must diagnose frame transactions, export and runtime processes")
+    if "test/godot/authenticated_record_frame_budget_contract.gd" not in smoke_source or (
+        "--line GDPP_AUTHENTICATED_RECORD_FRAME_BUDGET_OK" not in smoke_source
+    ):
+        fail("installed package smokes must verify authenticated frame and long-path transactions")
+    if smoke_source.count("$GITHUB_WORKSPACE/.github/tools/check_log_contract.py") != 6:
         fail("release-package-smoke.yml must validate every portable log contract")
     if "GDPP_WINDOWS_PROCDUMP" in smoke_source or "procdump" in smoke_source.lower():
         fail("release package smoke must run customer binaries without an output-hiding wrapper")

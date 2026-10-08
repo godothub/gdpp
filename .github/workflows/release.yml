@@ -346,7 +346,8 @@ jobs:
           test "$SOURCE_SHA" = "$(git rev-parse HEAD)"
           test "$PUBLIC_SHA" = "$(git -C '${{ steps.public-worktree.outputs.path }}' rev-parse HEAD)"
           test -f build/release/gdpp.zip
-          test "$(find build/release -maxdepth 1 -type f -name '*.zip' | wc -l)" -eq 1
+          test -f build/release/gdpp-compiler.zip
+          test "$(find build/release -maxdepth 1 -type f -name '*.zip' | wc -l)" -eq 2
       - name: Verify packaged release assets
         run: >-
           python3 "$GITHUB_WORKSPACE/.github/tools/verify_release_assets.py"

@@ -81,6 +81,20 @@ class PackagedBinaryAuditTest(unittest.TestCase):
             ["release contains no native products to audit"],
         )
 
+    def test_audits_standalone_compilers_and_bundled_executors(self) -> None:
+        package = self.root / "compiler-package"
+        for relative in ("macos/universal/gdpp", "linux/x86_64/gdpp", "windows/x86_64/gdpp.exe"):
+            executable = package / relative
+            executable.parent.mkdir(parents=True, exist_ok=True)
+            executable.write_bytes(b"clean executable")
+        self.assertEqual(AUDIT.audit(package, self.source), [])
+        (package / "windows/x86_64/gdpp.exe").write_bytes(str(self.source.resolve()).encode("utf-16-le"))
+        self.assertEqual(AUDIT.audit(package, self.source), ["windows/x86_64/gdpp.exe"])
+        executor = self.addon / "tools/mac-universal/gdpp-ninja"
+        executor.parent.mkdir(parents=True)
+        executor.write_bytes(str(self.source.resolve()).encode("utf-8"))
+        self.assertEqual(AUDIT.audit(self.addon, self.source), ["tools/mac-universal/gdpp-ninja"])
+
 
 if __name__ == "__main__":
     unittest.main()

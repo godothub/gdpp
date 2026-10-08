@@ -25,7 +25,7 @@ defaults:
 
 jobs:
   desktop:
-    name: Installed ${{ matrix.archive }} / ${{ matrix.platform_host }} / Godot 4.7.2
+    name: Installed ${{ matrix.archive }} / ${{ matrix.platform_host }} / ${{ matrix.toolchain }} / Godot 4.7.2
     runs-on: ${{ matrix.os }}
     timeout-minutes: 90
     strategy:
@@ -33,18 +33,28 @@ jobs:
       matrix:
         include:
           - platform_host: mac
+            toolchain: clang
             os: macos-15
             preset: macOS Universal
             archive: gdpp.zip
             payload_platform: macos
             payload_architecture: universal
           - platform_host: linux
+            toolchain: gcc
             os: ubuntu-22.04
             preset: Linux x86_64
             archive: gdpp.zip
             payload_platform: linux
             payload_architecture: x86_64
           - platform_host: win
+            toolchain: msvc
+            os: windows-2025
+            preset: Windows x86_64
+            archive: gdpp.zip
+            payload_platform: windows
+            payload_architecture: x86_64
+          - platform_host: win
+            toolchain: mingw
             os: windows-2025
             preset: Windows x86_64
             archive: gdpp.zip
@@ -61,10 +71,13 @@ jobs:
           ref: ${{ inputs.source_ref }}
           token: ${{ secrets.GDPP_TOKEN }}
       - name: Initialize the MSVC x64 toolchain
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && matrix.toolchain == 'msvc'
         uses: ./.github/actions/setup-msvc
         with:
           arch: x64
+      - name: Install the release MinGW-w64 toolchain
+        if: matrix.toolchain == 'mingw'
+        uses: ./.github/actions/setup-mingw
       - id: godot
         name: Install official Godot 4.7.2 editor and host templates
         uses: ./.github/actions/setup-godot
@@ -81,6 +94,27 @@ jobs:
         run: >-
           python3 "$GITHUB_WORKSPACE/.github/tools/verify_release_assets.py"
           build/release-package-smoke/archive
+      - name: Run the standalone compiler from the final ZIP
+        if: runner.os != 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$RUNNER_OS" == Windows ]]; then
+            host=windows-x64
+            compiler=cl.exe
+            if [[ "${{ matrix.toolchain }}" == mingw ]]; then
+              compiler=g++.exe
+            fi
+          else
+            host=linux-x64
+            compiler=g++
+          fi
+          version="$(sed -n 's/^version="\([^"]*\)"$/\1/p' example/addons/gdpp/plugin.cfg)"
+          python3 test/compiler_package_smoke.py \
+            --archive build/release-package-smoke/archive/gdpp-compiler.zip \
+            --host "$host" --version "$version" \
+            --work-root build/release-package-smoke/compiler \
+            --godot "${{ steps.godot.outputs.executable }}" --cpp-compiler "$compiler"
       - name: Install the final ZIP into a clean customer project
         shell: bash
         run: |
@@ -93,6 +127,9 @@ jobs:
           cp -R example "$project"
           rm -rf "$project/.godot" "$project/addons/gdpp"
           unzip -q "$archive" -d "$project"
+          if [[ "${{ matrix.toolchain }}" == mingw ]]; then
+            printf '\n[gdpp]\n\nbuild/cpp_compiler="g++.exe"\n' >> "$project/project.godot"
+          fi
           test -f "$project/addons/gdpp/plugin.cfg"
           test -f "$project/addons/gdpp/gdpp.gdextension"
           if [[ "$RUNNER_OS" == macOS ]]; then
@@ -111,6 +148,35 @@ jobs:
           python3 tools/package_platform_release.py \
             --validate-addon "$project/addons/gdpp" \
             --package standard
+      - name: Verify authenticated export transactions from the installed package
+        env:
+          GODOT: ${{ steps.godot.outputs.executable }}
+        run: |
+          set -euo pipefail
+          root="$GDPP_SOURCE_ROOT/build/release-package-smoke"
+          python3 "$GITHUB_WORKSPACE/.github/tools/run_process.py" \
+            --label installed-frame-transactions --log "$root/frame-transactions.log" \
+            --timeout-seconds 60 -- \
+            "$GODOT" --headless --path "$root/客户项目-é" \
+            --script "$GDPP_SOURCE_ROOT/test/godot/authenticated_record_frame_budget_contract.gd"
+          python3 "$GITHUB_WORKSPACE/.github/tools/check_log_contract.py" \
+            "$root/frame-transactions.log" --line GDPP_AUTHENTICATED_RECORD_FRAME_BUDGET_OK
+      - name: Verify mixed GDScript inheritance from the installed package
+        shell: bash
+        run: |
+          set -euo pipefail
+          compiler=g++
+          if [[ "$RUNNER_OS" == Windows ]]; then
+            compiler=cl.exe
+            if [[ "${{ matrix.toolchain }}" == mingw ]]; then compiler=g++.exe; fi
+          elif [[ "$RUNNER_OS" == macOS ]]; then
+            compiler=clang++
+          fi
+          python3 test/mixed_inheritance_test.py \
+            --godot "${{ steps.godot.outputs.executable }}" \
+            --addon "$GDPP_SOURCE_ROOT/build/release-package-smoke/客户项目-é/addons/gdpp" \
+            --work-root build/release-package-smoke/mixed-inheritance \
+            --cpp-compiler "$compiler" --export
       - name: Import, export, run and audit the installed package
         shell: bash
         env:
@@ -151,6 +217,15 @@ jobs:
 
           test -f "$runtime"
           test -f "$project_library"
+          if [[ "${{ matrix.toolchain }}" == mingw ]]; then
+            g++ -dumpfullversion | grep -Fx 14.2.0
+            objdump -p "$project_library" > "$root/mingw-pe.log"
+            if grep -Ei 'DLL Name:.*(libstdc\+\+|libgcc|libwinpthread)' "$root/mingw-pe.log"; then
+              echo 'MinGW release requires an external GCC runtime DLL.'
+              exit 1
+            fi
+            grep -q 'gdpp_library_init' "$root/mingw-pe.log"
+          fi
           python3 tools/audit_export_payload.py \
             --directory "$output_root" \
             --platform '${{ matrix.payload_platform }}' \

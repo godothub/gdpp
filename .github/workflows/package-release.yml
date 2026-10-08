@@ -99,16 +99,24 @@ jobs:
               --source-sha "$SOURCE_SHA"
           done
       - name: Validate release packager contracts
-        run: >-
-          python3 test/release_packaging_test.py
-          "$GDPP_SOURCE_ROOT"
-          "$GDPP_SOURCE_ROOT/build/package-contract"
+        run: |
+          set -euo pipefail
+          python3 test/release_packaging_test.py \
+            "$GDPP_SOURCE_ROOT" \
+            "$GDPP_SOURCE_ROOT/build/package-contract"
+          python3 test/compiler_release_packaging_test.py "$GDPP_SOURCE_ROOT"
       - name: Assemble deterministic plugin ZIP
         run: >-
           python3 tools/package_platform_release.py
           --components build/components
           --output build/release
           --package standard
+      - name: Assemble deterministic standalone compiler ZIP
+        run: >-
+          python3 tools/package_compiler_release.py pack
+          --components build/components
+          --output build/release
+          --source-root "$GDPP_SOURCE_ROOT"
       - name: Audit package topology and source isolation
         shell: bash
         run: |
@@ -126,25 +134,44 @@ jobs:
           python3 "$GITHUB_WORKSPACE/.github/tools/audit_packaged_binaries.py" \
             --addon "$audit/addons/gdpp" \
             --source-root "$GDPP_SOURCE_ROOT"
+          compiler_audit=build/compiler-package-audit
+          mkdir -p "$compiler_audit"
+          unzip -q build/release/gdpp-compiler.zip -d "$compiler_audit"
+          version="$(sed -n 's/^version="\([^"]*\)"$/\1/p' example/addons/gdpp/plugin.cfg)"
+          python3 tools/package_compiler_release.py verify \
+            --directory "$compiler_audit" --version "$version"
+          python3 "$GITHUB_WORKSPACE/.github/tools/audit_packaged_binaries.py" \
+            --compiler-root "$compiler_audit" \
+            --source-root "$GDPP_SOURCE_ROOT"
       - name: Verify deterministic rebuild
         shell: bash
         run: |
           set -euo pipefail
-          sha256sum build/release/gdpp.zip > build/release/first.sha256
+          sha256sum build/release/gdpp.zip build/release/gdpp-compiler.zip > build/first-release.sha256
           python3 tools/package_platform_release.py \
             --components build/components \
             --output build/release \
             --package standard
-          sha256sum -c build/release/first.sha256
+          python3 tools/package_compiler_release.py pack \
+            --components build/components \
+            --output build/release \
+            --source-root "$GDPP_SOURCE_ROOT"
+          sha256sum -c build/first-release.sha256
+          rmdir build/release/.staging
       - name: Write checksums
         run: >-
           bash -c 'cd build/release &&
-          LC_ALL=C sha256sum -- gdpp.zip > SHA256SUMS'
+          LC_ALL=C sha256sum -- gdpp-compiler.zip gdpp.zip > SHA256SUMS'
+      - name: Verify the exact release asset set
+        run: >-
+          python3 "$GITHUB_WORKSPACE/.github/tools/verify_release_assets.py"
+          build/release
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: gdpp-release-packages-${{ steps.source.outputs.sha }}
           path: |
             source/build/release/gdpp.zip
+            source/build/release/gdpp-compiler.zip
             source/build/release/SHA256SUMS
           if-no-files-found: error
           retention-days: 14
