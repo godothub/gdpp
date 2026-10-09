@@ -1,3 +1,42 @@
+## 2.0.7
+
+- Support Windows exports built with MinGW64.
+- Fix dependency configuration failures when building from source with CMake 3.22 or 3.23.
+- Fix resource leak errors on exit when importing a project with GDPP enabled for the first time in Godot 4.4.
+- Reduce argument packing overhead in calls between ordinary plugins and compiled scripts.
+- Optimize component operations on dynamic vectors and colors, and repeated string and container calls.
+- Fix link-time optimization not being enabled in MinGW64 builds.
+- Add performance tests for calls between ordinary plugins and compiled project scripts.
+- Add `gdpp-compiler.zip` with command-line compilers for Windows and Linux.
+- Include the missing third-party license file in release packages.
+- Exclude `addons` from project AOT and preserve ordinary Godot plugin exports.
+- Support project scripts inheriting from ordinary plugins' GDScript base classes, preserving parent calls, property access, and initialization.
+- Fix export failures when using ordinary plugins' autoloads or custom `is_class()` methods.
+- Fix exports when ordinary plugins reference compiled project classes or inner classes use mixed inheritance.
+- Fix type resolution for ordinary plugins' inner classes, typed containers, and enums, and method calls on compiled autoloads.
+- Fix exported applications crashing at startup with script-typed containers, and type references in bridge interfaces and embedded script inheritance.
+- Preserve GDScript constants and default parameters in bridge scripts, and fix native script inheritance checks.
+- Fix anonymous enum members missing from exports.
+- Fix valid `match` branches failing to export when the pattern and subject have different types.
+- Fix casts and type tests of untyped variables being incorrectly rejected.
+- Preserve GDScript diagnostics for script property assignment type errors.
+- Fix native compilation failures for nested lambda calls and captures used in default parameters.
+- Fix pending coroutines and script fields not being released when nodes are destroyed, and errors from asynchronous notifications.
+- Fix object leaks and shutdown crashes from asynchronous bridge-script calls in Godot 4.4–4.6.
+- Fix the plugin export panel failing to load with strict type warnings enabled.
+- Support exporting GDScript plugins as GDPP plugins through YAML or the editor plugin export panel.
+- Fix export and temporary-file cleanup failures caused by deeply nested Windows project paths and read-only resources.
+- Fix Android exports failing to start because their project library lacks the C++ runtime dependency.
+- Accept derived script instances when the base script is loaded by path without a `class_name`.
+- Infer method return types from untyped local variables, including `Image`, `JSON`, `ConfigFile`, and `String`.
+- Fix integer and floating-point conversions in script calls, loop variables, `range()`, integer vector constructors, and compound assignments.
+- Fix nested indexed component writes such as `colors[index][channel] += value`.
+- Fix native compilation failures for valid self-assignments and static methods called through an instance.
+- Fix exports of projects with large imported assets being rejected by the startup timeout during input verification.
+- Fix invalid node-path errors during export resource scanning for projects with scene-local viewport textures.
+- Fix legacy editor-plugin property-list compatibility notices being incorrectly treated as export failures.
+- Preserve custom resource formats and their loader behavior when they contain no embedded scripts.
+
 ## 2.0.6
 
 - Fix export failures when CSV translations or custom importers generate resources in project directories.
