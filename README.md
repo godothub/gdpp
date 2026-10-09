@@ -40,7 +40,7 @@ The panel works in macOS, Windows, and Linux editors without a separate `gdpp` c
 
 ### Export from the command line
 
-Download `gdpp-compiler.zip` from Release. Keep its `sdk/`, `tools/`, and license directories alongside the platform directories. Run the program for your system, or add its directory to `PATH`.
+Download and extract `gdpp-compiler.zip` from Release. Keep its directory structure intact. Run the program for your system, or add its directory to `PATH`.
 
 ```text
 linux/x86_64/gdpp          # glibc 2.35 or later

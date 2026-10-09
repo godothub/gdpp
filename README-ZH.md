@@ -40,7 +40,7 @@ macOS、Windows 和 Linux 编辑器均可使用该面板，无需单独安装 `g
 
 ### 使用命令行导出
 
-从 Release 下载 `gdpp-compiler.zip`，保留其中的 `sdk/`、`tools/` 和许可证目录，使用对应系统的程序；也可以将程序所在目录加入 `PATH`。
+从 Release 下载并解压 `gdpp-compiler.zip`，保持完整的目录结构，使用对应系统的程序；也可以将程序所在目录加入 `PATH`。
 
 ```text
 linux/x86_64/gdpp          # glibc 2.35 起

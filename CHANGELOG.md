@@ -1,14 +1,13 @@
 ## 2.0.7
 
 - Support Windows exports built with MinGW64.
-- Fix dependency configuration failures when building from source with CMake 3.22 or 3.23.
-- Fix resource leak errors on exit when importing a project with GDPP enabled for the first time in Godot 4.4.
+- Fix dependency configuration failures when building from source with CMake 3.22+.
+- Fix resource leak errors when importing a project with GDPP enabled for the first time in Godot 4.4.
 - Reduce argument packing overhead in calls between ordinary plugins and compiled scripts.
 - Optimize component operations on dynamic vectors and colors, and repeated string and container calls.
 - Fix link-time optimization not being enabled in MinGW64 builds.
 - Add performance tests for calls between ordinary plugins and compiled project scripts.
 - Add `gdpp-compiler.zip` with command-line compilers for Windows and Linux.
-- Include the missing third-party license file in release packages.
 - Exclude `addons` from project AOT and preserve ordinary Godot plugin exports.
 - Support project scripts inheriting from ordinary plugins' GDScript base classes, preserving parent calls, property access, and initialization.
 - Fix export failures when using ordinary plugins' autoloads or custom `is_class()` methods.
