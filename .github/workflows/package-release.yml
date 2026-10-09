@@ -116,7 +116,6 @@ jobs:
           python3 tools/package_compiler_release.py pack
           --components build/components
           --output build/release
-          --source-root "$GDPP_SOURCE_ROOT"
       - name: Audit package topology and source isolation
         shell: bash
         run: |
@@ -154,8 +153,7 @@ jobs:
             --package standard
           python3 tools/package_compiler_release.py pack \
             --components build/components \
-            --output build/release \
-            --source-root "$GDPP_SOURCE_ROOT"
+            --output build/release
           sha256sum -c build/first-release.sha256
           rmdir build/release/.staging
       - name: Write checksums
