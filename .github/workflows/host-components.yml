@@ -29,6 +29,7 @@ concurrency:
 env:
   GDPP_COMPILER_GODOT_API: 4.4
   GDPP_SOURCE_ROOT: ${{ github.workspace }}/source
+  PYTHONUTF8: "1"
 
 defaults:
   run:
@@ -263,6 +264,7 @@ jobs:
                   stderr=subprocess.STDOUT,
                   text=True,
                   timeout=30,
+                  encoding="utf-8",
                   check=False,
               )
               Path(log_path).write_text(result.stdout, encoding="utf-8", newline="\n")
@@ -334,6 +336,7 @@ jobs:
               stderr=subprocess.STDOUT,
               text=True,
               timeout=45,
+              encoding="utf-8",
               check=False,
           )
           Path(log_path).write_text(result.stdout, encoding="utf-8", newline="\n")
@@ -377,6 +380,7 @@ jobs:
                   stderr=subprocess.STDOUT,
                   text=True,
                   timeout=45,
+                  encoding="utf-8",
                   check=False,
               )
               Path(log_path).write_text(result.stdout, encoding="utf-8", newline="\n")
