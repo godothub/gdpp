@@ -1,3 +1,11 @@
+## 2.0.8
+
+- Reduce forwarding overhead when ordinary plugins call compiled scripts or access their properties.
+- Optimize chained string concatenation and formatting, cross-script calls, and object initialization and cleanup.
+- Reduce memory allocations when creating compiled objects without a script inheritance chain.
+- Fix inherited inner-class types not being recognized during single-file compilation.
+- Fix excessive parser recovery recursion for incomplete lambda expressions at the end of a file.
+
 ## 2.0.7
 
 - Support Windows exports built with MinGW64.
