@@ -115,7 +115,7 @@ def main() -> int:
         fail("native integration must exercise the private output boundary on every host")
 
     quality_source = (WORKFLOW_ROOT / "quality.yml").read_text(encoding="utf-8")
-    if "git ls-files -z -- include src test" not in quality_source:
+    if "git ls-files -z -- include src test cmake" not in quality_source:
         fail("quality formatting must inspect every tracked authored C++ source")
     if "git diff" in quality_source or "git log" in quality_source:
         fail("quality formatting cannot depend on release commit ordering")

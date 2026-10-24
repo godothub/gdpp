@@ -91,6 +91,7 @@ class QualityFormattingTest(unittest.TestCase):
     def test_late_version_bump_checks_earlier_and_unchanged_sources(self) -> None:
         self.write("CMakeLists.txt", "project(gdpp\n    VERSION 2.0.8\n)\n")
         self.write("include/existing.hpp")
+        self.write("cmake/launcher.cpp")
         self.write("include/gdextension_interface.h", "generated API\n")
         self.write("third/vendor.cpp")
         self.commit("previous release")
@@ -107,7 +108,7 @@ class QualityFormattingTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.calls(), [
             ["--version"],
-            ["--dry-run", "--Werror", "include/existing.hpp", "src/earlier.cpp",
+            ["--dry-run", "--Werror", "cmake/launcher.cpp", "include/existing.hpp", "src/earlier.cpp",
              "test/new_contract.h"],
         ])
 
@@ -121,12 +122,12 @@ class QualityFormattingTest(unittest.TestCase):
         self.assertEqual(self.calls()[-1], ["--dry-run", "--Werror", *paths])
 
     def test_bad_format_before_the_version_commit_still_fails(self) -> None:
-        self.write("src/earlier.cpp", "unformatted\n")
+        self.write("cmake/earlier.cpp", "unformatted\n")
         self.commit("implementation")
         self.write("CMakeLists.txt", "project(gdpp\n    VERSION 2.1.0\n)\n")
         self.commit("bump version last")
         self.assertNotEqual(self.run_step().returncode, 0)
-        self.assertEqual(self.calls()[-1], ["--dry-run", "--Werror", "src/earlier.cpp"])
+        self.assertEqual(self.calls()[-1], ["--dry-run", "--Werror", "cmake/earlier.cpp"])
 
     def test_wrong_formatter_version_is_rejected(self) -> None:
         self.write("src/example.cpp")
