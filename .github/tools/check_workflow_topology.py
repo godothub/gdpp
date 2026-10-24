@@ -53,6 +53,29 @@ def require_private_source_contract(name: str, workflow: dict[str, Any]) -> None
         fail(f"{name} must require GDPP_TOKEN")
 
 
+def require_elf_profile_gate(step: dict[str, Any], profile: str, platform: str,
+                             architecture: str, library: str) -> None:
+    if "if" in step or step.get("continue-on-error"):
+        fail("native ELF profile checks cannot skip or ignore failures")
+    if ".symtab" in step.get("run", ""):
+        fail("native ELF symbol policy must use the shared verifier without conflicting shell checks")
+    lines = step.get("run", "").replace("\\\n", " ").splitlines()
+    commands = [shlex.split(line) for line in lines if "verify_elf_profile.py" in line]
+    tool = "$GITHUB_WORKSPACE/.github/tools/verify_elf_profile.py"
+    if len(commands) != 1 or commands[0][:2] != ["python3", tool]:
+        fail("native ELF profile checks must use the shared verifier once")
+    arguments = commands[0][2:]
+    expected = {
+        "--library": library,
+        "--receipt": "example/addons/gdpp/build/project/diagnostics-build.json",
+        "--profile": profile,
+        "--platform": platform,
+        "--architecture": architecture,
+    }
+    if len(arguments) != 2 * len(expected) or dict(zip(arguments[::2], arguments[1::2])) != expected:
+        fail("native ELF profile check must bind the expected mode, target, library and receipt")
+
+
 def main() -> int:
     workflows = {
         path.name: load_workflow(path)
@@ -126,6 +149,7 @@ def main() -> int:
         "test_publish_release_transaction.py",
         "test_private_step_capture.py",
         "test_audit_packaged_binaries.py",
+        "test_verify_elf_profile.py",
         "test_verify_release_assets.py",
         "test_quality_formatting.py",
     ):
@@ -171,6 +195,19 @@ def main() -> int:
         fail("Godot lifecycle display validation cannot skip or ignore failures")
     if shlex.split(lifecycle["run"])[-3:] != ["ctest", "--preset", "plugin"]:
         fail("Godot lifecycle display wrapper must retain the unfiltered plugin test preset")
+
+    release_steps = [step for step in engine_steps
+                     if step.get("name") == "Export, run and audit binary-only project"]
+    debug_steps = [step for step in engine_steps if "--export-debug " in step.get("run", "")]
+    android_steps = [step for step in workflows["android.yml"]["jobs"]["apk"]["steps"]
+                     if "--export-release 'Android arm64'" in step.get("run", "")]
+    if len(release_steps) != 1 or len(debug_steps) != 1 or len(android_steps) != 1:
+        fail("ELF profile checks must cover Linux Release, native Debug and Android Release")
+    require_elf_profile_gate(release_steps[0], "release", "linux", "x86_64", "$project")
+    require_elf_profile_gate(debug_steps[0], "debug", "linux", "x86_64", "$project")
+    require_elf_profile_gate(android_steps[0], "release", "android", "arm64", "$project_so")
+    if not (ROOT / ".github/tools/verify_elf_profile.py").is_file():
+        fail("the shared ELF profile verifier is missing")
 
     for name, workflow in workflows.items():
         if workflow.get("permissions", {}).get("contents") != "read":

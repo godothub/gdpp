@@ -88,6 +88,7 @@ jobs:
           python3 "$GITHUB_WORKSPACE/.github/tools/test_verify_release_assets.py"
           python3 "$GITHUB_WORKSPACE/.github/tools/test_publish_release_transaction.py"
           python3 "$GITHUB_WORKSPACE/.github/tools/test_audit_packaged_binaries.py"
+          python3 "$GITHUB_WORKSPACE/.github/tools/test_verify_elf_profile.py"
           python3 "$GITHUB_WORKSPACE/.github/tools/test_quality_formatting.py"
       - name: Reject mutable external Action references
         shell: bash

@@ -199,10 +199,10 @@ jobs:
           test "$("$llvm_bin/llvm-nm" -D --defined-only "$project_so" | awk 'NF {print $NF}' | wc -l)" -eq 1
           "$llvm_bin/llvm-nm" -D --defined-only "$project_so" | awk 'NF {print $NF}' | \
             grep -qx gdpp_library_init
-          if "$llvm_bin/llvm-readelf" -S "$project_so" | grep '\.symtab' >/dev/null; then
-            echo 'Android Release project library contains a normal symbol table.'
-            exit 1
-          fi
+          python3 "$GITHUB_WORKSPACE/.github/tools/verify_elf_profile.py" \
+            --library "$project_so" \
+            --receipt example/addons/gdpp/build/project/diagnostics-build.json \
+            --profile release --platform android --architecture arm64
 
           audit_host="$root/pck-audit"
           audit_harness="$audit_host/gdpp-pck-audit-$(python3 -c \

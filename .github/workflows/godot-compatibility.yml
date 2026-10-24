@@ -262,10 +262,10 @@ jobs:
           test "$(nm -D --defined-only "$project" | awk 'NF {print $NF}' | wc -l)" -eq 1
           nm -D --defined-only "$project" | awk 'NF {print $NF}' | \
             grep -qx gdpp_library_init
-          if readelf -S "$project" | grep '\.symtab' >/dev/null; then
-            echo 'Linux Release project library contains a normal symbol table.'
-            exit 1
-          fi
+          python3 "$GITHUB_WORKSPACE/.github/tools/verify_elf_profile.py" \
+            --library "$project" \
+            --receipt example/addons/gdpp/build/project/diagnostics-build.json \
+            --profile release --platform linux --architecture x86_64
           timeout 15s "$output/aot/gdpp-runtime.x86_64" --headless --quit-after 2 \
             2>&1 | tee "$output/gdpp-aot-runtime.log"
           grep -q '^GDPP_EXPORTED_PROPERTIES_OK$' "$output/gdpp-aot-runtime.log"
@@ -300,7 +300,7 @@ jobs:
             2>&1 | tee "$output/gdpp-pck-audit.log"
           grep -q '^PCK_AUDIT_VIOLATIONS=0$' "$output/gdpp-pck-audit.log"
           grep -q '^PCK_AUDIT_PROJECT_LIBRARIES=1$' "$output/gdpp-pck-audit.log"
-      - name: Export and run optimized Debug project with script assertions
+      - name: Export and run native Debug project with script assertions
         shell: bash
         env:
           GODOT: ${{ steps.godot.outputs.executable }}
@@ -323,17 +323,17 @@ jobs:
           test "$(nm -D --defined-only "$project" | awk 'NF {print $NF}' | wc -l)" -eq 1
           nm -D --defined-only "$project" | awk 'NF {print $NF}' | \
             grep -qx gdpp_library_init
-          if readelf -S "$project" | grep '\.symtab' >/dev/null; then
-            echo 'Linux Debug project library was not Release-stripped.'
-            exit 1
-          fi
+          python3 "$GITHUB_WORKSPACE/.github/tools/verify_elf_profile.py" \
+            --library "$project" \
+            --receipt example/addons/gdpp/build/project/diagnostics-build.json \
+            --profile debug --platform linux --architecture x86_64
           timeout 15s "$output/debug/gdpp-runtime-debug.x86_64" --headless --quit-after 2 \
             2>&1 | tee "$output/gdpp-debug-runtime.log"
           grep -q '^GDPP_EXPORTED_PROPERTIES_OK$' "$output/gdpp-debug-runtime.log"
           grep -q 'GDPP_AOT_SUMMARY scenes=' "$output/gdpp-debug-export.log"
           if grep -E -q '(^| )ERROR:|SCRIPT ERROR:|WARNING:|Unable to open' \
               "$output/gdpp-debug-export.log" "$output/gdpp-debug-runtime.log"; then
-            echo 'Optimized Debug export or runtime emitted a forbidden diagnostic.'
+            echo 'Native Debug export or runtime emitted a forbidden diagnostic.'
             exit 1
           fi
       - name: Compare isolated GDScript baseline and AOT behavior/performance
