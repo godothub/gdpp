@@ -6,6 +6,7 @@ from __future__ import annotations
 import hashlib
 import os
 from pathlib import Path
+import shlex
 import stat
 import subprocess
 import tempfile
@@ -23,7 +24,7 @@ class PrivateStepCaptureTest(unittest.TestCase):
     def tearDown(self) -> None:
         self.temporary.cleanup()
 
-    def run_script(self, script: str) -> subprocess.CompletedProcess[bytes]:
+    def run_script(self, script: str, extra_environment: dict[str, str] | None = None) -> subprocess.CompletedProcess[bytes]:
         environment = {
             **os.environ,
             "BASH_ENV": str(HOOK),
@@ -34,6 +35,7 @@ class PrivateStepCaptureTest(unittest.TestCase):
             "RUNNER_TEMP": str(self.root),
         }
         environment.pop("GDPP_PRIVATE_CAPTURE_ACTIVE", None)
+        environment.update(extra_environment or {})
         return subprocess.run(
             ["bash", "--noprofile", "--norc", "-c", script],
             env=environment,
@@ -50,7 +52,7 @@ class PrivateStepCaptureTest(unittest.TestCase):
         self.assertIn(b"status=success", result.stdout)
         self.assertNotIn(b"source/file.cpp", result.stdout)
         self.assertNotIn(b"secret source line", result.stdout)
-        self.assertEqual(list(self.root.glob("gdpp-private-step.*.log")), [])
+        self.assertEqual(list(self.root.glob("gdpp-private-step.*")), [])
 
     def test_failure_is_bounded_to_category_exit_and_safe_test_name(self) -> None:
         result = self.run_script(
@@ -75,7 +77,7 @@ class PrivateStepCaptureTest(unittest.TestCase):
         self.assertNotIn(b"secret", result.stdout)
         self.assertNotIn(b"test.cpp", result.stdout)
         self.assertNotIn(b"runner/work", result.stdout)
-        logs = list(self.root.glob("gdpp-private-step.*.log"))
+        logs = list(self.root.glob("gdpp-private-step.*"))
         self.assertEqual(len(logs), 1)
         self.assertIn(b"secret", logs[0].read_bytes())
         self.assertEqual(stat.S_IMODE(logs[0].stat().st_mode), 0o600)
@@ -149,6 +151,86 @@ class PrivateStepCaptureTest(unittest.TestCase):
         self.assertIn(b"codes=generator-expression", result.stdout)
         self.assertNotIn(b"cmake-policy-floor", result.stdout)
         self.assertNotIn(b"private target name", result.stdout)
+
+    def test_nested_cmake_failures_expose_only_fixed_stage_codes(self) -> None:
+        stages = (
+            ("Cannot bootstrap the MSVC dependency launcher", "msvc-launcher-bootstrap"),
+            ("Cannot execute the MSVC dependency launcher", "msvc-launcher-execute"),
+            ("The MSVC host launcher does not implement the dependency encoding protocol",
+             "msvc-launcher-protocol"),
+            ("Cannot prove the MSVC Unicode header dependency contract", "msvc-unicode-probe"),
+            ("Cannot load the selected MSVC native host environment", "msvc-host-environment"),
+            ("MSVC native host environment is incomplete", "msvc-host-environment"),
+            ("Cannot locate the selected MSVC installation", "msvc-host-compiler"),
+            ("The selected MSVC installation has no native host environment", "msvc-host-compiler"),
+            ("GDPP_MSVC_DEPENDENCY_HOST_LAUNCHER must be an existing absolute executable",
+             "msvc-launcher-override"),
+            ("The C++ compiler is not able to compile a simple test program", "cmake-compiler-probe"),
+            ("The CXX compiler identification is unknown", "cmake-compiler-identification"),
+            ("Could not find compiler set in environment variable CXX", "cmake-compiler-discovery"),
+            ("Could not find CMAKE_ROOT", "cmake-installation"),
+            ("Could not find any instance of Visual Studio", "cmake-msvc-installation"),
+            ("Failed to run MSBuild command", "cmake-msbuild-probe"),
+            ("CMAKE_MAKE_PROGRAM is not set", "cmake-build-tool"),
+            ("Invalid character escape '\\U'", "cmake-path-escape"),
+            ("The source directory does not appear to contain CMakeLists.txt", "cmake-source-directory"),
+        )
+        for diagnostic, code in stages:
+            with self.subTest(code=code, diagnostic=diagnostic):
+                lines = ["CMake Error at /private/customer/CMakeLists.txt:42:",
+                         diagnostic + "; see C:\\private\\customer\\probe.stderr.bin",
+                         "private source line, private assertion, private token"]
+                result = self.run_script("printf '%s\\n' " + shlex.join(lines) + "; exit 8")
+                self.assertEqual(result.returncode, 8)
+                self.assertEqual(result.stderr, b"")
+                self.assertEqual(result.stdout,
+                    ("private-stage job=compiler-core step=__run_17 status=failed "
+                     "category=configure exit=8 codes=" + code + "\n").encode())
+                raw_logs = list(self.root.glob("gdpp-private-step.*"))
+                self.assertTrue(any(lines[-1].encode() in log.read_bytes() for log in raw_logs))
+        self.assertEqual(len(raw_logs), len(stages))
+        self.assertTrue(all(stat.S_IMODE(log.stat().st_mode) == 0o600 for log in raw_logs))
+
+    def test_unknown_configure_diagnostics_are_not_copied_to_the_summary(self) -> None:
+        result = self.run_script(
+            "printf '%s\\n' 'CMake Error: private customer diagnostic' "
+            "'/private/customer/source.cpp: private source line'; exit 8"
+        )
+        self.assertEqual(result.returncode, 8)
+        self.assertEqual(result.stdout,
+            b"private-stage job=compiler-core step=__run_17 status=failed category=configure exit=8\n")
+        self.assertEqual(result.stderr, b"")
+
+    def test_success_never_exposes_a_configure_stage_or_its_raw_diagnostics(self) -> None:
+        result = self.run_script(
+            "printf '%s\\n' 'Cannot bootstrap the MSVC dependency launcher: private detail'"
+        )
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(result.stdout,
+            b"private-stage job=compiler-core step=__run_17 status=success\n")
+        self.assertEqual(result.stderr, b"")
+        self.assertEqual(list(self.root.glob("gdpp-private-step.*")), [])
+
+    def test_capture_setup_fails_closed_when_the_temp_directory_is_missing(self) -> None:
+        result = self.run_script("printf private-command-must-not-run",
+                                 {"RUNNER_TEMP": str(self.root / "missing")})
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(result.stdout, b"")
+        self.assertEqual(result.stderr,
+            b"private-stage status=failed category=capture-initialization exit=1\n")
+
+    def test_capture_setup_fails_closed_when_permissions_cannot_be_set(self) -> None:
+        bin_root = self.root / "bin"
+        bin_root.mkdir()
+        chmod = bin_root / "chmod"
+        chmod.write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
+        chmod.chmod(0o755)
+        result = self.run_script("printf private-command-must-not-run",
+                                 {"PATH": str(bin_root) + os.pathsep + os.environ["PATH"]})
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(result.stdout, b"")
+        self.assertEqual(result.stderr,
+            b"private-stage status=failed category=capture-initialization exit=1\n")
 
     def test_script_error_keeps_its_godot_category(self) -> None:
         result = self.run_script(

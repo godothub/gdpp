@@ -15,10 +15,12 @@ GDPP_PRIVATE_CAPTURE_TEMP="${RUNNER_TEMP:?}"
 if [[ "${RUNNER_OS:-}" == Windows ]]; then
   GDPP_PRIVATE_CAPTURE_TEMP="$(cygpath -u "$GDPP_PRIVATE_CAPTURE_TEMP")"
 fi
-GDPP_PRIVATE_CAPTURE_LOG="$(
-  mktemp "$GDPP_PRIVATE_CAPTURE_TEMP/gdpp-private-step.XXXXXX.log"
-)"
-chmod 600 "$GDPP_PRIVATE_CAPTURE_LOG"
+if ! GDPP_PRIVATE_CAPTURE_LOG="$(
+  mktemp "$GDPP_PRIVATE_CAPTURE_TEMP/gdpp-private-step.XXXXXX" 2>/dev/null
+)" || ! chmod 600 "$GDPP_PRIVATE_CAPTURE_LOG" 2>/dev/null; then
+  printf 'private-stage status=failed category=capture-initialization exit=1\n' >&2
+  exit 1
+fi
 
 exec 171>&1 172>&2
 
