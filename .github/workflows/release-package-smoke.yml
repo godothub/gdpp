@@ -218,7 +218,7 @@ jobs:
           test -f "$runtime"
           test -f "$project_library"
           if [[ "${{ matrix.toolchain }}" == mingw ]]; then
-            g++ -dumpfullversion | grep -Fx 14.2.0
+            g++ -dumpfullversion | grep -Fx "$GDPP_MINGW_VERSION"
             objdump -p "$project_library" > "$root/mingw-pe.log"
             if grep -Ei 'DLL Name:.*(libstdc\+\+|libgcc|libwinpthread)' "$root/mingw-pe.log"; then
               echo 'MinGW release requires an external GCC runtime DLL.'

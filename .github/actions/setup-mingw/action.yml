@@ -4,22 +4,27 @@ description: Install the pinned Windows x64 GCC toolchain used by the delivery S
 runs:
   using: composite
   steps:
-    - name: Install GCC 14.2.0 POSIX SEH
+    - name: Install GCC 16.2.0 Win32 SEH UCRT
       shell: bash
       run: |
         set -euo pipefail
+        mingw_version=16.2.0
         root="$RUNNER_TEMP/gdpp-mingw"
         mkdir -p "$root"
         archive="$root/toolchain.7z"
         bash "$GITHUB_WORKSPACE/source/tools/download_with_retry.sh" \
-          'https://github.com/niXman/mingw-builds-binaries/releases/download/14.2.0-rt_v12-rev1/x86_64-14.2.0-release-posix-seh-msvcrt-rt_v12-rev1.7z' \
+          "https://github.com/niXman/mingw-builds-binaries/releases/download/${mingw_version}-rt_v14-rev1/x86_64-${mingw_version}-release-win32-seh-ucrt-rt_v14-rev1.7z" \
           "$archive"
         printf '%s  %s\n' \
-          055291a5bdec4d4d9b9541605eafb5131025841d156c7ba09d3c2d2bc3f926ee \
+          c9ae8e4a3afa667b3301dd28c567109d174a0fa0856a2eeaa85a91b89569a50b \
           "$archive" | sha256sum --check
         7z x -y "-o$root" "$archive" > "$root/extract.log"
         test -f "$root/mingw64/bin/g++.exe"
-        "$root/mingw64/bin/g++.exe" -dumpfullversion | grep -Fx 14.2.0
+        "$root/mingw64/bin/g++.exe" -dumpfullversion | grep -Fx "$mingw_version"
         "$root/mingw64/bin/g++.exe" -dumpmachine | grep -Fx x86_64-w64-mingw32
+        "$root/mingw64/bin/g++.exe" -v 2>&1 | grep -Fx 'Thread model: win32'
+        printf '#include <crtdefs.h>\n#ifndef _UCRT\n#error UCRT toolchain required\n#endif\n' | \
+          "$root/mingw64/bin/g++.exe" -x c++ -E - > /dev/null
         printf '%s\n' "$root/mingw64/bin" >> "$GITHUB_PATH"
         printf 'GDPP_MINGW_ROOT=%s\n' "$root/mingw64" >> "$GITHUB_ENV"
+        printf 'GDPP_MINGW_VERSION=%s\n' "$mingw_version" >> "$GITHUB_ENV"

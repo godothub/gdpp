@@ -146,7 +146,7 @@ jobs:
             expected_manifests=2
             mingw_sdk="$sdk/mingw"
             grep -q '^compiler GNU$' "$mingw_sdk/sdk.manifest"
-            grep -q '^compiler_version 14.2.0$' "$mingw_sdk/sdk.manifest"
+            grep -Fxq "compiler_version $GDPP_MINGW_VERSION" "$mingw_sdk/sdk.manifest"
             grep -q '^msvc_runtime not_applicable$' "$mingw_sdk/sdk.manifest"
             test -s "$mingw_sdk/libgdpp_host_runtime.windows.x86_64.a"
           fi
