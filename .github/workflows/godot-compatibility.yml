@@ -83,8 +83,10 @@ jobs:
           source-root: ${{ env.GDPP_SOURCE_ROOT }}
           version: 4.7.2
           templates: none
-      - name: Install the official protobuf wire-format oracle
-        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+      - name: Install editor display and wire-format oracle dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y protobuf-compiler xvfb xauth
       - name: Configure compiler plugin and SDK
         shell: bash
         run: >-
@@ -96,7 +98,8 @@ jobs:
       - name: Build compiler plugin and direct native targets
         run: cmake --build --preset plugin --parallel
       - name: Run compiler and Godot integration tests
-        run: ctest --preset plugin
+        # Ordinary EditorInterface Play intentionally remains the engine's own GUI launch.
+        run: xvfb-run -a -s "-screen 0 1280x720x24 -nolisten tcp" ctest --preset plugin
       - name: Export and run independent GDExtension inheritance project
         shell: bash
         env:

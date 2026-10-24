@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import shlex
 from typing import Any
 
 import yaml
@@ -151,6 +152,25 @@ def main() -> int:
         fail("TSan capability probe must precede project configuration")
     if '-DCMAKE_CXX_COMPILER="$CXX"' not in tsan_steps[configured[0]].get("run", ""):
         fail("TSan project and capability probe must use the same selected compiler")
+
+    engine_steps = workflows["godot-compatibility.yml"]["jobs"]["engine"]["steps"]
+    display_install = [
+        index for index, step in enumerate(engine_steps)
+        if all(package in step.get("run", "") for package in ("protobuf-compiler", "xvfb", "xauth"))
+    ]
+    lifecycle_steps = [
+        (index, step) for index, step in enumerate(engine_steps)
+        if "ctest --preset plugin" in step.get("run", "")
+    ]
+    if len(display_install) != 1 or len(lifecycle_steps) != 1:
+        fail("Godot compatibility must install a virtual display for its full lifecycle suite")
+    lifecycle_index, lifecycle = lifecycle_steps[0]
+    if display_install[0] >= lifecycle_index or not lifecycle["run"].startswith("xvfb-run "):
+        fail("Godot compatibility must run its full lifecycle suite inside the virtual display")
+    if "if" in lifecycle or lifecycle.get("continue-on-error"):
+        fail("Godot lifecycle display validation cannot skip or ignore failures")
+    if shlex.split(lifecycle["run"])[-3:] != ["ctest", "--preset", "plugin"]:
+        fail("Godot lifecycle display wrapper must retain the unfiltered plugin test preset")
 
     for name, workflow in workflows.items():
         if workflow.get("permissions", {}).get("contents") != "read":
