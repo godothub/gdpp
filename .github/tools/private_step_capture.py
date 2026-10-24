@@ -20,7 +20,7 @@ FAILED_EDITOR_CASE = re.compile(
     rb"GDPP_EDITOR_WORKFLOW_FAILED: ([^:\r\n]{1,512})(?=:|[\r\n]|$)"
 )
 OFFICIAL_RUNTIME_PHASE = re.compile(
-    rb"(?m)^GDPP_OFFICIAL_RUNTIME_PHASE stage=(import|source|export|aot) "
+    rb"(?m)^(?:[0-9]{1,8}: )?GDPP_OFFICIAL_RUNTIME_PHASE stage=(import|source|export|aot) "
     rb"case=(none|[0-9a-f]{16}) state=(start|done|failed)[ \t]*\r?$"
 )
 FAILED_UNITTEST_CASE = re.compile(

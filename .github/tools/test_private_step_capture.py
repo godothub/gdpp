@@ -273,7 +273,7 @@ class PrivateStepCaptureTest(unittest.TestCase):
     def test_runtime_timeout_identifies_only_the_last_safe_phase(self) -> None:
         lines = [
             "GDPP_OFFICIAL_RUNTIME_PHASE stage=import case=none state=done",
-            "GDPP_OFFICIAL_RUNTIME_PHASE stage=source case=0123456789abcdef state=start",
+            "53: GDPP_OFFICIAL_RUNTIME_PHASE stage=source case=0123456789abcdef state=start",
             "private source/feature.gd private token",
             "command timed out: /private/checkout/project",
         ]
@@ -292,6 +292,7 @@ class PrivateStepCaptureTest(unittest.TestCase):
             "GDPP_OFFICIAL_RUNTIME_PHASE stage=aot case=ABCDEF0123456789 state=start",
             "GDPP_OFFICIAL_RUNTIME_PHASE stage=export case=none state=private-state",
             "GDPP_OFFICIAL_RUNTIME_PHASE stage=export case=none state=start private-token",
+            "private: GDPP_OFFICIAL_RUNTIME_PHASE stage=export case=none state=start",
         ):
             with self.subTest(line=line):
                 result = self.run_script("printf '%s\\n' " + shlex.quote(line) + "; exit 8")
