@@ -83,7 +83,7 @@ jobs:
           sdk="example/addons/gdpp/sdk/lib/web/wasm32/${{ matrix.variant }}/${{ matrix.profile }}"
           grep -q '^platform web$' "$sdk/sdk.manifest"
           grep -q '^arch wasm32$' "$sdk/sdk.manifest"
-          grep -q '^profiles debug,release$' "$sdk/sdk.manifest"
+          grep -q '^profiles debug,release,profile$' "$sdk/sdk.manifest"
           grep -q '^host_abi 1$' "$sdk/sdk.manifest"
           grep -q '^script_abi 1$' "$sdk/sdk.manifest"
           grep -q '^precision single$' "$sdk/sdk.manifest"

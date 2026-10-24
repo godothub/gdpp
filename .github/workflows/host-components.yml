@@ -153,7 +153,7 @@ jobs:
           test "$(find "$package/sdk/lib" -type f -name sdk.manifest | wc -l)" -eq "$expected_manifests"
           grep -q '^platform ${{ matrix.sdk_platform }}$' "$sdk/sdk.manifest"
           grep -q '^arch ${{ matrix.sdk_arch }}$' "$sdk/sdk.manifest"
-          grep -q '^profiles debug,release$' "$sdk/sdk.manifest"
+          grep -q '^profiles debug,release,profile$' "$sdk/sdk.manifest"
           grep -q '^engine_range 4.4-4.7$' "$sdk/sdk.manifest"
           grep -q '^host_abi 1$' "$sdk/sdk.manifest"
           grep -q '^script_abi 1$' "$sdk/sdk.manifest"

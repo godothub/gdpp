@@ -60,7 +60,7 @@ jobs:
           sdk="example/addons/gdpp/sdk/lib/ios/arm64"
           grep -q '^platform ios$' "$sdk/sdk.manifest"
           grep -q '^arch arm64$' "$sdk/sdk.manifest"
-          grep -q '^profiles debug,release$' "$sdk/sdk.manifest"
+          grep -q '^profiles debug,release,profile$' "$sdk/sdk.manifest"
           grep -q '^engine_range 4.4-4.7$' "$sdk/sdk.manifest"
           grep -q '^host_abi 1$' "$sdk/sdk.manifest"
           grep -q '^script_abi 1$' "$sdk/sdk.manifest"
