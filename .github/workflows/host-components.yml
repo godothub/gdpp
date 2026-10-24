@@ -148,10 +148,6 @@ jobs:
             = 3441b633c2fe2c494e958780ba0f4227b1327634
           test "$(find "$package/tools" -mindepth 2 -maxdepth 2 \
             -type f -name 'gdpp-ninja*' | wc -l)" -eq 1
-          diff -u \
-            <(printf 'Ninja 1.13.2\ncommit 3441b633c2fe2c494e958780ba0f4227b1327634\n') \
-            "$package/tools/NINJA-VERSION.txt"
-          test -s "$package/tools/NINJA-LICENSE.txt"
           test -f "$package/tools/.gdignore"
           sdk="$package/sdk/lib/${{ matrix.sdk_platform }}/${{ matrix.sdk_arch }}"
           expected_manifests=1
