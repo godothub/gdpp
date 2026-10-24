@@ -232,6 +232,44 @@ class PrivateStepCaptureTest(unittest.TestCase):
         self.assertEqual(result.stderr,
             b"private-stage status=failed category=capture-initialization exit=1\n")
 
+    def test_editor_workflow_cases_hash_only_the_reason_before_private_details(self) -> None:
+        reason = "Native diagnostic module never connected"
+        expected = hashlib.sha256(reason.encode()).hexdigest()[:16].encode()
+        for detail in ("private checkout/source.gd", "private-token-and-customer-value"):
+            with self.subTest(detail=detail):
+                payload = "ERROR: GDPP_EDITOR_WORKFLOW_FAILED: " + reason + ": " + detail
+                result = self.run_script("printf '%s\\n' " + shlex.quote(payload) + "; exit 8")
+                self.assertEqual(result.returncode, 8)
+                self.assertEqual(result.stderr, b"")
+                self.assertIn(b"cases=" + expected, result.stdout)
+                self.assertNotIn(reason.encode(), result.stdout)
+                self.assertNotIn(detail.encode(), result.stdout)
+
+    def test_editor_workflow_case_hashes_are_bounded_and_deduplicated(self) -> None:
+        reasons = ["case-" + str(index) for index in range(20)]
+        lines = ["ERROR: GDPP_EDITOR_WORKFLOW_FAILED: " + reason + ": private details"
+                 for reason in reasons + reasons]
+        result = self.run_script("printf '%s\\n' " + shlex.join(lines) + "; exit 8")
+        wanted = sorted({hashlib.sha256(reason.encode()).hexdigest()[:16]
+                         for reason in reasons})[:12]
+        self.assertEqual(result.returncode, 8)
+        self.assertIn(("cases=" + ",".join(wanted)).encode(), result.stdout)
+        self.assertNotIn(b"private details", result.stdout)
+        self.assertNotIn(b"case-", result.stdout)
+
+    def test_editor_workflow_success_and_malformed_messages_do_not_publish_case_hashes(self) -> None:
+        for payload, status in (
+            ("GDPP_EDITOR_WORKFLOW_FAILED: private reason: private details", 0),
+            ("GDPP_EDITOR_WORKFLOW_FAILED: : private details", 8),
+            ("GDPP_EDITOR_WORKFLOW_FAILED: " + "x" * 513 + ": private details", 8),
+        ):
+            with self.subTest(status=status, length=len(payload)):
+                result = self.run_script("printf '%s\\n' " + shlex.quote(payload) +
+                                         "; exit " + str(status))
+                self.assertEqual(result.returncode, status)
+                self.assertNotIn(b"cases=", result.stdout)
+                self.assertNotIn(b"private", result.stdout.replace(b"private-stage", b""))
+
     def test_script_error_keeps_its_godot_category(self) -> None:
         result = self.run_script(
             "printf '%s\\n' 'SCRIPT ERROR: private detail'; exit 1"

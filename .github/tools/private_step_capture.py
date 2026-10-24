@@ -16,6 +16,9 @@ FAILED_TEST = re.compile(
     rb"\((?:Failed|Timeout|SEGFAULT|Not Run)\)\s*$"
 )
 FAILED_CASE = re.compile(rb"(?m)^\[fail\] ([^\r\n]{1,1024})\r?$")
+FAILED_EDITOR_CASE = re.compile(
+    rb"GDPP_EDITOR_WORKFLOW_FAILED: ([^:\r\n]{1,512})(?=:|[\r\n]|$)"
+)
 FAILED_UNITTEST_CASE = re.compile(
     rb"(?m)^(?:FAIL|ERROR): ([A-Za-z_][A-Za-z0-9_]{0,159}) "
     rb"\([A-Za-z_][A-Za-z0-9_.]{0,319}\)(?:[ \t]+\([^\r\n]{0,1024}\))?[ \t]*\r?$"
@@ -178,7 +181,7 @@ def summary(log: Path, status: int, job: str, step: str) -> str:
         fields.append(f"tests={','.join(tests)}")
     cases = sorted({
         hashlib.sha256(match.group(1)).hexdigest()[:16]
-        for pattern in (FAILED_CASE, FAILED_UNITTEST_CASE)
+        for pattern in (FAILED_CASE, FAILED_UNITTEST_CASE, FAILED_EDITOR_CASE)
         for match in pattern.finditer(payload)
     })[:12]
     if cases:
