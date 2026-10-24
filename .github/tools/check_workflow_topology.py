@@ -114,13 +114,10 @@ def main() -> int:
         fail("native integration must exercise the private output boundary on every host")
 
     quality_source = (WORKFLOW_ROOT / "quality.yml").read_text(encoding="utf-8")
-    if (
-        '-S "VERSION $version"' not in quality_source
-        or '"$release_start^"' not in quality_source
-    ):
-        fail("quality formatting must cover the complete current product release range")
-    if "git rev-parse HEAD^" in quality_source:
-        fail("quality formatting cannot inspect only the final source commit")
+    if "git ls-files -z -- include src test" not in quality_source:
+        fail("quality formatting must inspect every tracked authored C++ source")
+    if "git diff" in quality_source or "git log" in quality_source:
+        fail("quality formatting cannot depend on release commit ordering")
     if ".github/tools/test_sync_release_files.py" not in quality_source:
         fail("quality.yml must validate the fixed release-file synchronizer")
     for test_tool in (
@@ -129,6 +126,7 @@ def main() -> int:
         "test_private_step_capture.py",
         "test_audit_packaged_binaries.py",
         "test_verify_release_assets.py",
+        "test_quality_formatting.py",
     ):
         if test_tool not in quality_source:
             fail(f"quality.yml must validate {test_tool}")
