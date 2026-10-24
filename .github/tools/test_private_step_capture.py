@@ -270,6 +270,45 @@ class PrivateStepCaptureTest(unittest.TestCase):
                 self.assertNotIn(b"cases=", result.stdout)
                 self.assertNotIn(b"private", result.stdout.replace(b"private-stage", b""))
 
+    def test_runtime_timeout_identifies_only_the_last_safe_phase(self) -> None:
+        lines = [
+            "GDPP_OFFICIAL_RUNTIME_PHASE stage=import case=none state=done",
+            "GDPP_OFFICIAL_RUNTIME_PHASE stage=source case=0123456789abcdef state=start",
+            "private source/feature.gd private token",
+            "command timed out: /private/checkout/project",
+        ]
+        result = self.run_script("printf '%s\\n' " + shlex.join(lines) + "; exit 8")
+        self.assertEqual(result.returncode, 8)
+        self.assertIn(b"category=timeout", result.stdout)
+        self.assertIn(b"runtime=source:0123456789abcdef:start", result.stdout)
+        self.assertNotIn(b"runtime=import", result.stdout)
+        for detail in (b"feature.gd", b"token", b"checkout", b"GDPP_OFFICIAL_RUNTIME_PHASE"):
+            self.assertNotIn(detail, result.stdout)
+
+    def test_runtime_phase_rejects_private_paths_unknown_stages_and_unbounded_suffixes(self) -> None:
+        for line in (
+            "GDPP_OFFICIAL_RUNTIME_PHASE stage=private-source case=none state=start",
+            "GDPP_OFFICIAL_RUNTIME_PHASE stage=source case=/private/source.gd state=start",
+            "GDPP_OFFICIAL_RUNTIME_PHASE stage=aot case=ABCDEF0123456789 state=start",
+            "GDPP_OFFICIAL_RUNTIME_PHASE stage=export case=none state=private-state",
+            "GDPP_OFFICIAL_RUNTIME_PHASE stage=export case=none state=start private-token",
+        ):
+            with self.subTest(line=line):
+                result = self.run_script("printf '%s\\n' " + shlex.quote(line) + "; exit 8")
+                self.assertEqual(result.returncode, 8)
+                self.assertNotIn(b"runtime=", result.stdout)
+                self.assertNotIn(b"source.gd", result.stdout)
+                self.assertNotIn(b"private-token", result.stdout)
+
+    def test_runtime_success_never_publishes_phase_or_case_metadata(self) -> None:
+        result = self.run_script(
+            "printf '%s\\n' 'GDPP_OFFICIAL_RUNTIME_PHASE stage=aot "
+            "case=0123456789abcdef state=done'"
+        )
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(result.stdout,
+            b"private-stage job=compiler-core step=__run_17 status=success\n")
+
     def test_script_error_keeps_its_godot_category(self) -> None:
         result = self.run_script(
             "printf '%s\\n' 'SCRIPT ERROR: private detail'; exit 1"

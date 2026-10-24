@@ -19,6 +19,10 @@ FAILED_CASE = re.compile(rb"(?m)^\[fail\] ([^\r\n]{1,1024})\r?$")
 FAILED_EDITOR_CASE = re.compile(
     rb"GDPP_EDITOR_WORKFLOW_FAILED: ([^:\r\n]{1,512})(?=:|[\r\n]|$)"
 )
+OFFICIAL_RUNTIME_PHASE = re.compile(
+    rb"(?m)^GDPP_OFFICIAL_RUNTIME_PHASE stage=(import|source|export|aot) "
+    rb"case=(none|[0-9a-f]{16}) state=(start|done|failed)[ \t]*\r?$"
+)
 FAILED_UNITTEST_CASE = re.compile(
     rb"(?m)^(?:FAIL|ERROR): ([A-Za-z_][A-Za-z0-9_]{0,159}) "
     rb"\([A-Za-z_][A-Za-z0-9_.]{0,319}\)(?:[ \t]+\([^\r\n]{0,1024}\))?[ \t]*\r?$"
@@ -186,6 +190,9 @@ def summary(log: Path, status: int, job: str, step: str) -> str:
     })[:12]
     if cases:
         fields.append(f"cases={','.join(cases)}")
+    phases = list(OFFICIAL_RUNTIME_PHASE.finditer(payload))
+    if phases:
+        fields.append("runtime=" + ":".join(part.decode("ascii") for part in phases[-1].groups()))
     codes = build_failure_codes(payload)
     if codes:
         fields.append(f"codes={','.join(codes)}")
