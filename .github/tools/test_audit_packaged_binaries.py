@@ -95,6 +95,19 @@ class PackagedBinaryAuditTest(unittest.TestCase):
         executor.write_bytes(str(self.source.resolve()).encode("utf-8"))
         self.assertEqual(AUDIT.audit(self.addon, self.source), ["tools/mac-universal/gdpp-ninja"])
 
+    def test_audits_native_diagnostics_on_every_host(self) -> None:
+        for relative in (
+            "tools/mac-universal/gdpp-diagnostics",
+            "tools/linux-x64/gdpp-diagnostics",
+            "tools/windows-x64/gdpp-diagnostics.exe",
+        ):
+            with self.subTest(path=relative):
+                tool = self.addon / relative
+                tool.parent.mkdir(parents=True, exist_ok=True)
+                tool.write_bytes(str(self.source.resolve()).encode("utf-8"))
+                self.assertEqual(AUDIT.audit(self.addon, self.source), [relative])
+                tool.unlink()
+
 
 if __name__ == "__main__":
     unittest.main()

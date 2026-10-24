@@ -9,7 +9,7 @@ import re
 
 
 NATIVE_SUFFIXES = {".a", ".dll", ".dylib", ".exe", ".lib", ".so"}
-NATIVE_EXECUTABLE_NAMES = {"gdpp", "gdpp-ninja"}
+NATIVE_EXECUTABLE_NAMES = {"gdpp", "gdpp-ninja", "gdpp-diagnostics"}
 SCAN_CHUNK_SIZE = 4 * 1024 * 1024
 SCAN_OVERLAP = 4096
 GENERIC_CHECKOUT_PATTERNS = (

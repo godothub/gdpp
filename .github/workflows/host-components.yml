@@ -124,13 +124,26 @@ jobs:
           set -euo pipefail
           package=example/addons/gdpp
           executor="$package/tools/${{ matrix.host }}/gdpp-ninja"
+          diagnostics="$package/tools/${{ matrix.host }}/gdpp-diagnostics"
           if [[ "$RUNNER_OS" == Windows ]]; then
             executor="$executor.exe"
+            diagnostics="$diagnostics.exe"
           fi
           version="$(sed -n 's/^version="\([^"]*\)"$/\1/p' "$package/plugin.cfg")"
           test -n "$version"
           test -f "$executor"
           test "$("$executor" --version)" = 1.13.2
+          test -f "$diagnostics"
+          "$diagnostics" --help
+          test "$(find "$package/tools" -mindepth 2 -maxdepth 2 \
+            -type f -name 'gdpp-diagnostics*' | wc -l)" -eq 1
+          if [[ "$RUNNER_OS" == Windows ]]; then
+            dependencies="$(MSYS_NO_PATHCONV=1 dumpbin.exe /dependents "$(cygpath -w "$diagnostics")")"
+            if grep -Ei 'python[0-9_]*\.dll' <<<"$dependencies"; then
+              echo 'The native diagnostics tool depends on a Python interpreter.'
+              exit 1
+            fi
+          fi
           test "$(git -C third/ninja rev-parse HEAD)" \
             = 3441b633c2fe2c494e958780ba0f4227b1327634
           test "$(find "$package/tools" -mindepth 2 -maxdepth 2 \
@@ -420,6 +433,7 @@ jobs:
           for binary in \
             example/addons/gdpp/binary/libgdpp_compiler.macos.universal.dylib \
             example/addons/gdpp/binary/libgdpp_fallback.macos.universal.dylib \
+            example/addons/gdpp/tools/mac-universal/gdpp-diagnostics \
             example/addons/gdpp/sdk/lib/macos/universal/libgdpp_host_runtime.macos.universal.a; do
             architectures="$(lipo -archs "$binary")"
             grep -qw arm64 <<<"$architectures"
@@ -430,6 +444,11 @@ jobs:
               grep -q 'minos 11.0' <<<"$load_commands"
             done
           done
+          dependencies="$(otool -L example/addons/gdpp/tools/mac-universal/gdpp-diagnostics)"
+          if grep -Ei 'libpython|Python\.framework' <<<"$dependencies"; then
+            echo 'The native diagnostics tool depends on a Python interpreter.'
+            exit 1
+          fi
       - name: Validate Ubuntu 22.04 glibc minimum
         if: runner.os == 'Linux'
         shell: bash
@@ -438,6 +457,7 @@ jobs:
           test "$(. /etc/os-release && printf '%s' "$VERSION_ID")" = 22.04
           maximum_glibc="$(
             readelf --version-info example/addons/gdpp/binary/*.so build/release/bin/gdpp \
+              example/addons/gdpp/tools/linux-x64/gdpp-diagnostics \
               | grep -Eo 'GLIBC_[0-9]+\.[0-9]+' \
               | sed 's/^GLIBC_//' \
               | sort -Vu \
@@ -449,10 +469,15 @@ jobs:
             echo "Linux package requires GLIBC_$maximum_glibc, newer than GLIBC_2.35."
             exit 1
           fi
-          for binary in example/addons/gdpp/binary/*.so build/release/bin/gdpp; do
+          for binary in example/addons/gdpp/binary/*.so build/release/bin/gdpp \
+              example/addons/gdpp/tools/linux-x64/gdpp-diagnostics; do
             if readelf -d "$binary" \
                 | grep -E 'NEEDED.*\[(libstdc\+\+|libgcc_s)\.so' >/dev/null; then
               echo "$binary exposes a process-global C++ runtime dependency."
+              exit 1
+            fi
+            if readelf -d "$binary" | grep -Ei 'NEEDED.*\[libpython' >/dev/null; then
+              echo "$binary depends on a Python interpreter."
               exit 1
             fi
           done
