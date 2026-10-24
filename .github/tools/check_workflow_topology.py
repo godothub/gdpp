@@ -131,6 +131,27 @@ def main() -> int:
         if test_tool not in quality_source:
             fail(f"quality.yml must validate {test_tool}")
 
+    tsan = workflows["core.yml"]["jobs"]["tsan"]
+    if tsan.get("env", {}).get("CXX") != "g++-12":
+        fail("TSan must select the compiler/runtime with timed-condition-variable support")
+    tsan_steps = tsan.get("steps", [])
+    probe_steps = [
+        step for step in tsan_steps
+        if "tsan_runtime_smoke.cpp" in step.get("run", "")
+    ]
+    if len(probe_steps) != 1 or probe_steps[0].get("continue-on-error") or "if" in probe_steps[0]:
+        fail("TSan must run its timed-wait capability probe without skipping failures")
+    if not (ROOT / ".github/tools/tsan_runtime_smoke.cpp").is_file():
+        fail("TSan timed-wait capability source is missing")
+    configured = [
+        index for index, step in enumerate(tsan_steps)
+        if "Configure thread-safety" in step.get("name", "")
+    ]
+    if len(configured) != 1 or tsan_steps.index(probe_steps[0]) >= configured[0]:
+        fail("TSan capability probe must precede project configuration")
+    if '-DCMAKE_CXX_COMPILER="$CXX"' not in tsan_steps[configured[0]].get("run", ""):
+        fail("TSan project and capability probe must use the same selected compiler")
+
     for name, workflow in workflows.items():
         if workflow.get("permissions", {}).get("contents") != "read":
             fail(f"{name} must default to contents: read")

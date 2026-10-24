@@ -191,6 +191,9 @@ jobs:
     name: Core / Ubuntu / thread safety
     runs-on: ubuntu-22.04
     timeout-minutes: 60
+    env:
+      # GCC 11's libtsan misses pthread_cond_clockwait used by std::condition_variable.
+      CXX: g++-12
     steps:
       - name: Check out public pipeline
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
@@ -200,11 +203,23 @@ jobs:
         with:
           ref: ${{ inputs.source_ref }}
           token: ${{ secrets.GDPP_TOKEN }}
+      - name: Verify the thread-safety runtime
+        shell: bash
+        env:
+          TSAN_OPTIONS: halt_on_error=1
+        run: |
+          command -v "$CXX"
+          mkdir -p build/ci-tsan
+          "$CXX" -std=c++17 -g -fsanitize=thread -fno-omit-frame-pointer -pthread \
+            "$GITHUB_WORKSPACE/.github/tools/tsan_runtime_smoke.cpp" \
+            -o build/ci-tsan/tsan-runtime-smoke
+          build/ci-tsan/tsan-runtime-smoke
       - name: Configure thread-safety instrumentation
         shell: bash
         run: |
           cmake -S . -B build/ci-tsan -G Ninja \
             -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_CXX_COMPILER="$CXX" \
             -DGDPP_BUILD_EXTENSION=OFF \
             -DGDPP_BUILD_TESTS=ON \
             -DGDPP_WARNINGS_AS_ERRORS=ON \
