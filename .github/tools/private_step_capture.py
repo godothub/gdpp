@@ -23,6 +23,11 @@ OFFICIAL_RUNTIME_PHASE = re.compile(
     rb"(?m)^(?:[0-9]{1,8}: )?GDPP_OFFICIAL_RUNTIME_PHASE stage=(import|source|export|aot) "
     rb"case=(none|[0-9a-f]{16}) state=(start|done|failed)[ \t]*\r?$"
 )
+ADDON_COLD_IMPORT_PHASE = re.compile(
+    rb"(?m)^(?:[0-9]{1,8}: )?GDPP_ADDON_COLD_IMPORT_PHASE "
+    rb"phase=(export|other-export|repack|pack-reject|repack-after-rejection|cold-import|editor|runtime) "
+    rb"state=(start|done|failed)[ \t]*\r?$"
+)
 FAILED_UNITTEST_CASE = re.compile(
     rb"(?m)^(?:FAIL|ERROR): ([A-Za-z_][A-Za-z0-9_]{0,159}) "
     rb"\([A-Za-z_][A-Za-z0-9_.]{0,319}\)(?:[ \t]+\([^\r\n]{0,1024}\))?[ \t]*\r?$"
@@ -193,6 +198,9 @@ def summary(log: Path, status: int, job: str, step: str) -> str:
     phases = list(OFFICIAL_RUNTIME_PHASE.finditer(payload))
     if phases:
         fields.append("runtime=" + ":".join(part.decode("ascii") for part in phases[-1].groups()))
+    cold_phases = list(ADDON_COLD_IMPORT_PHASE.finditer(payload))
+    if cold_phases:
+        fields.append("cold_import=" + ":".join(part.decode("ascii") for part in cold_phases[-1].groups()))
     codes = build_failure_codes(payload)
     if codes:
         fields.append(f"codes={','.join(codes)}")

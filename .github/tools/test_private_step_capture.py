@@ -301,6 +301,38 @@ class PrivateStepCaptureTest(unittest.TestCase):
                 self.assertNotIn(b"source.gd", result.stdout)
                 self.assertNotIn(b"private-token", result.stdout)
 
+    def test_cold_import_failure_reports_only_last_fixed_phase(self) -> None:
+        lines = (
+            "GDPP_ADDON_COLD_IMPORT_PHASE phase=export state=done",
+            "24: GDPP_ADDON_COLD_IMPORT_PHASE phase=cold-import state=start",
+            "/private/customer/source.gd token-secret",
+        )
+        script = "printf '%s\\n' " + " ".join(shlex.quote(line) for line in lines) + "; exit 8"
+        result = self.run_script(script)
+        self.assertEqual(result.returncode, 8)
+        self.assertIn(b"cold_import=cold-import:start", result.stdout)
+        self.assertNotIn(b"cold_import=export", result.stdout)
+        for private in (b"source.gd", b"token-secret", b"customer", b"GDPP_ADDON_COLD_IMPORT_PHASE"):
+            self.assertNotIn(private, result.stdout)
+
+    def test_cold_import_phase_rejects_unbounded_fields_and_stays_hidden_on_success(self) -> None:
+        lines = (
+            "GDPP_ADDON_COLD_IMPORT_PHASE phase=/private/source state=start",
+            "GDPP_ADDON_COLD_IMPORT_PHASE phase=runtime state=secret",
+            "GDPP_ADDON_COLD_IMPORT_PHASE phase=editor state=start token-secret",
+            "private: GDPP_ADDON_COLD_IMPORT_PHASE phase=export state=start",
+        )
+        for line in lines:
+            with self.subTest(line=line):
+                result = self.run_script("printf '%s\\n' " + shlex.quote(line) + "; exit 8")
+                self.assertNotIn(b"cold_import=", result.stdout)
+                self.assertNotIn(b"token-secret", result.stdout)
+        result = self.run_script(
+            "printf '%s\\n' 'GDPP_ADDON_COLD_IMPORT_PHASE phase=runtime state=done'"
+        )
+        self.assertEqual(result.returncode, 0)
+        self.assertNotIn(b"cold_import=", result.stdout)
+
     def test_runtime_success_never_publishes_phase_or_case_metadata(self) -> None:
         result = self.run_script(
             "printf '%s\\n' 'GDPP_OFFICIAL_RUNTIME_PHASE stage=aot "
