@@ -1,3 +1,13 @@
+## 2.1.0
+
+- Add a unified GDPP panel for plugin exports, debugging, and profiling.
+- Debug the main or current scene with one click, with breakpoints, stepping, call stacks, and variable inspection.
+- Add function timings and call counts, with support for Godot Profiler and Perfetto.
+- Reduce runtime and profiling overhead, and speed up repeated exports and large resource exports on macOS.
+- Support relative export paths and improve handling of Chinese characters and long paths on Windows.
+- Add opt-in crash capture and offline symbolication tools for released games.
+- Fix script compilation errors, conflicts between plugins, unresponsive editor mouse input, and issues when starting or stopping runs.
+
 ## 2.0.8
 
 - Reduce forwarding overhead when ordinary plugins call compiled scripts or access their properties.
