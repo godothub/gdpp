@@ -130,6 +130,16 @@ class PrivateStepCaptureTest(unittest.TestCase):
         for private in (b"source.cpp", b"secret", b"unable to execute command"):
             self.assertNotIn(private, result.stdout)
 
+    def test_editor_display_failures_publish_only_fixed_capability_codes(self) -> None:
+        result = self.run_script(
+            "printf '%s\\n' 'GDPP_EDITOR_DISPLAY_FAILED=surface-extension' "
+            "'GDPP_EDITOR_DISPLAY_FAILED=cpu-device' '/private/customer/source.cpp secret'; exit 1"
+        )
+        self.assertEqual(result.returncode, 1)
+        self.assertIn(b"codes=editor-display-cpu-device,editor-display-surface-extension", result.stdout)
+        self.assertNotIn(b"customer", result.stdout)
+        self.assertNotIn(b"secret", result.stdout)
+
     def test_configure_failures_identify_the_probe_without_its_output(self) -> None:
         result = self.run_script(
             "printf '%s\\n' 'CMake Error at /private/CMakeLists.txt:17:' "

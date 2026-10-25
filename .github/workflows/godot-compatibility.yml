@@ -91,7 +91,9 @@ jobs:
       - name: Install editor display dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y xvfb xauth
+          sudo apt-get install -y xvfb xauth libvulkan1 mesa-vulkan-drivers vulkan-tools
+      - name: Configure and verify the software editor display
+        uses: ./.github/actions/setup-editor-display
       - name: Verify real editor input before compiler builds
         timeout-minutes: 3
         run: >-
@@ -159,7 +161,9 @@ jobs:
       - name: Install editor display and wire-format oracle dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y protobuf-compiler xvfb xauth
+          sudo apt-get install -y protobuf-compiler xvfb xauth libvulkan1 mesa-vulkan-drivers vulkan-tools
+      - name: Configure and verify the software editor display
+        uses: ./.github/actions/setup-editor-display
       - name: Configure compiler plugin and SDK
         shell: bash
         run: >-

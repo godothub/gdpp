@@ -254,6 +254,19 @@ def main() -> int:
     if (gui_flags != ["-DGDPP_ENABLE_EDITOR_GUI_TESTS=ON"] or gui_index >= lifecycle_index
             or "if" in gui_configuration or gui_configuration.get("continue-on-error")):
         fail("Every supported Godot version must enable the real editor GUI input tests")
+    for display_job, test_index in (
+            (fast_gui, fast_gui["steps"].index(fast_step)),
+            (compatibility["jobs"]["engine"], gui_index)):
+        steps = display_job["steps"]
+        providers = [(index, step) for index, step in enumerate(steps)
+                     if step.get("uses") == "./.github/actions/setup-editor-display"]
+        dependencies = [index for index, step in enumerate(steps)
+                        if all(package in step.get("run", "") for package in (
+                            "xvfb", "xauth", "libvulkan1", "mesa-vulkan-drivers", "vulkan-tools"))]
+        if (len(providers) != 1 or len(dependencies) != 1
+                or not dependencies[0] < providers[0][0] < test_index
+                or "if" in providers[0][1] or providers[0][1].get("continue-on-error")):
+            fail("Every editor GUI gate must configure a verified software Vulkan provider first")
 
     release_steps = [step for step in engine_steps
                      if step.get("name") == "Export, run and audit binary-only project"]

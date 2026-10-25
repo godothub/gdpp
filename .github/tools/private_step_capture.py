@@ -101,6 +101,14 @@ BUILD_FAILURE_MARKERS = (
 )
 
 
+BUILD_FAILURE_MARKERS += tuple(
+    (("gdpp_editor_display_failed=" + reason).encode("ascii"), "editor-display-" + reason)
+    for reason in ("environment", "runtime-directory", "package-query", "manifest",
+                   "probe-launch", "probe-timeout", "probe-exit", "surface-extension",
+                   "cpu-device", "environment-write", "internal")
+)
+
+
 def parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--log", type=Path, required=True)
