@@ -208,6 +208,15 @@ def main() -> int:
     seal_steps = [step for step in fast_gui["steps"] if step.get("id") == "sealed-evidence"]
     if len(seal_steps) != 1 or seal_steps[0].get("if") != diagnostic_condition:
         fail("Private GUI evidence may only be sealed for an explicitly requested failed GUI probe")
+    installers = [step for step in fast_gui["steps"]
+                  if step.get("name") == "Install the pinned private diagnostic sealer"]
+    if (len(installers) != 1 or installers[0].get("if") != diagnostic_condition
+            or shlex.split(installers[0].get("run", "")) != [
+                "python3", "-m", "pip", "install", "--disable-pip-version-check",
+                "--requirement", "$GITHUB_WORKSPACE/.github/tools/requirements.txt"]
+            or fast_gui["steps"].index(installers[0]) >= fast_gui["steps"].index(seal_steps[0])
+            or seal_steps[0].get("env", {}).get("SOURCE_SHA") != "${{ steps.source.outputs.sha }}"):
+        fail("The private sealer dependency and source identity must remain opt-in and authenticated")
     if shlex.split(seal_steps[0].get("run", "")) != [
             "python3", "$GITHUB_WORKSPACE/.github/tools/seal_private_gui_evidence.py",
             "--root", "build/ci/editor-progress-input", "--source-sha", "$SOURCE_SHA",
