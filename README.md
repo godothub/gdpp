@@ -88,6 +88,14 @@ targets:
 
 Each export target needs its toolchain: MSVC uses Windows, macOS/iOS use macOS and Xcode, Android uses the NDK, and Web uses Emscripten. Exporting preserves your original plugin.
 
+## Debugging and profiling
+
+Use the **Debug** and **Profiler** tabs in the bottom GDPP panel to run compiled scripts. Debug builds support GDScript breakpoints and variable inspection; Profile builds use optimized code. Release exports keep private crash symbols separately from the shipped game.
+
+Runtime features are selected at link time: Release keeps script execution, error reporting, and optional crash capture; Profile adds performance collection; Debug adds breakpoints, stepping, and variable inspection. The SDK shares its core code, and the editor and CLI select the corresponding entry point automatically.
+
+The bundled Host SDK keeps native function and source-line information for crash reconstruction. Clang and GCC SDKs omit native local-variable and type details to reduce download size; GDScript debugging uses its own diagnostics interface. MSVC SDKs retain full embedded CodeView information. When building GDPP itself, select `-DGDPP_SDK_NATIVE_SYMBOLS=full` (or `--native-symbols full` for an SDK builder) if full native SDK debugging information is needed.
+
 ## Crossing Boundaries
 
 GDScript code that makes frequent engine calls may not see a significant performance improvement. We are also optimizing GDPP's compilation process to reduce boundary crossings as one way to improve performance.

@@ -88,6 +88,14 @@ targets:
 
 导出目标需要相应工具链：MSVC 使用 Windows，macOS/iOS 使用 macOS 和 Xcode，Android 使用 NDK，Web 使用 Emscripten。导出不会修改原始插件。
 
+## 调试与性能分析
+
+在底部 GDPP 面板的**调试**和**性能**页运行编译后的脚本。调试构建支持 GDScript 断点和变量查看，性能构建使用优化后的代码。Release 导出将私有崩溃符号与交付的游戏分开保存。
+
+运行库按构建模式链接所需功能：Release 保留脚本执行、错误报告和可选崩溃捕获；Profile 增加性能采集；Debug 增加断点、单步和变量查看。SDK 共享核心代码，编辑器和 CLI 自动选择对应入口。
+
+内置 Host SDK 保留原生函数和源码行信息，用于崩溃还原。Clang 和 GCC SDK 省去原生局部变量和类型的详细符号，减小下载体积；GDScript 调试使用独立的诊断接口。MSVC SDK 保留完整的内嵌 CodeView 信息。编译 GDPP 本身时，如需完整的原生 SDK 调试信息，可设置 `-DGDPP_SDK_NATIVE_SYMBOLS=full`，或向 SDK 构建工具传入 `--native-symbols full`。
+
 ## 跨越边界
 
 如果 GDScript 代码涉及频繁的引擎调用，可能不会带来显著的性能提升。我们也在优化 GDPP 的编译过程以减少跨越边界的行为，这是性能改进的方向之一。

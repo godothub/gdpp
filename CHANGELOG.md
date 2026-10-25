@@ -1,3 +1,11 @@
+## 2.1.1
+
+- Remove unnecessary debug symbols to reduce disk usage for the plugin and command-line tools.
+- Trim runtime libraries by build mode to exclude unnecessary debugging and profiling code.
+- Fix type checks against engine classes and element type inference for typed constant containers.
+- Fix release archives not using the configured compression level.
+- Reduce timing overhead during profiling.
+
 ## 2.1.0
 
 - Add a unified GDPP panel for plugin exports, debugging, and profiling.
