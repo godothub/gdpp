@@ -1,0 +1,9 @@
+name: Setup software editor display
+description: Select and verify the installed amd64 Lavapipe driver for real editor tests.
+
+runs:
+  using: composite
+  steps:
+    - name: Verify software Vulkan on an isolated display
+      shell: bash
+      run: python3 "$GITHUB_ACTION_PATH/../../tools/setup_editor_display.py"
