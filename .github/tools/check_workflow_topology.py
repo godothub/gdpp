@@ -195,6 +195,18 @@ def main() -> int:
         fail("Godot lifecycle display validation cannot skip or ignore failures")
     if shlex.split(lifecycle["run"])[-3:] != ["ctest", "--preset", "plugin"]:
         fail("Godot lifecycle display wrapper must retain the unfiltered plugin test preset")
+    gui_configurations = [
+        (index, step) for index, step in enumerate(engine_steps)
+        if step.get("name") == "Configure compiler plugin and SDK"
+    ]
+    if len(gui_configurations) != 1:
+        fail("Godot compatibility must configure its editor GUI input tests")
+    gui_index, gui_configuration = gui_configurations[0]
+    gui_flags = [argument for argument in shlex.split(gui_configuration.get("run", ""))
+                 if argument.startswith("-DGDPP_ENABLE_EDITOR_GUI_TESTS")]
+    if (gui_flags != ["-DGDPP_ENABLE_EDITOR_GUI_TESTS=ON"] or gui_index >= lifecycle_index
+            or "if" in gui_configuration or gui_configuration.get("continue-on-error")):
+        fail("Every supported Godot version must enable the real editor GUI input tests")
 
     release_steps = [step for step in engine_steps
                      if step.get("name") == "Export, run and audit binary-only project"]

@@ -95,6 +95,7 @@ jobs:
           -DGDPP_GODOT_EXECUTABLE=${{ steps.godot.outputs.executable }}
           -DGDPP_GDSCRIPT_ORACLE_EXECUTABLE=${{ steps.oracle.outputs.executable }}
           -DGDPP_BUILD_PERFORMANCE_BASELINE=ON
+          -DGDPP_ENABLE_EDITOR_GUI_TESTS=ON
       - name: Build compiler plugin and direct native targets
         run: cmake --build --preset plugin --parallel
       - name: Run compiler and Godot integration tests
