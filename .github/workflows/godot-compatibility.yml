@@ -31,6 +31,7 @@ on:
         options:
           - all
           - project-corpus
+          - editor-input
           - 4.4.1
           - 4.5.2
           - 4.6.3
@@ -52,8 +53,45 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  engine:
+  editor-input:
     if: ${{ inputs.target != 'project-corpus' }}
+    name: Editor input / ${{ matrix.version }}
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        version: ${{ fromJSON(inputs.target != 'all' && inputs.target != 'editor-input' && inputs.target != 'project-corpus' && format('["{0}"]', inputs.target) || '["4.4.1","4.5.2","4.6.3","4.7.2"]') }}
+    steps:
+      - name: Check out public pipeline
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/checkout-source
+        with:
+          ref: ${{ inputs.source_ref }}
+          token: ${{ secrets.GDPP_TOKEN }}
+      - id: godot
+        uses: ./.github/actions/setup-godot
+        with:
+          source-root: ${{ env.GDPP_SOURCE_ROOT }}
+          version: ${{ matrix.version }}
+          templates: none
+      - name: Install editor display dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb xauth
+      - name: Verify real editor input before compiler builds
+        timeout-minutes: 3
+        run: >-
+          xvfb-run -a -s "-screen 0 1280x720x24 -nolisten tcp"
+          python3 test/editor_progress_input_test.py
+          --godot "${{ steps.godot.outputs.executable }}"
+          --source-root "$GDPP_SOURCE_ROOT"
+          --work-root build/ci/editor-progress-input
+
+  engine:
+    if: ${{ inputs.target != 'project-corpus' && inputs.target != 'editor-input' }}
     name: Godot / ${{ matrix.version }}
     runs-on: ubuntu-22.04
     timeout-minutes: 90

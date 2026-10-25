@@ -177,7 +177,31 @@ def main() -> int:
     if '-DCMAKE_CXX_COMPILER="$CXX"' not in tsan_steps[configured[0]].get("run", ""):
         fail("TSan project and capability probe must use the same selected compiler")
 
-    engine_steps = workflows["godot-compatibility.yml"]["jobs"]["engine"]["steps"]
+    compatibility = workflows["godot-compatibility.yml"]
+    fast_gui = compatibility["jobs"].get("editor-input", {})
+    if (fast_gui.get("runs-on") != "ubuntu-22.04" or fast_gui.get("timeout-minutes") != 15
+            or fast_gui.get("if") != "${{ inputs.target != 'project-corpus' }}"
+            or fast_gui.get("strategy", {}).get("fail-fast") is not False):
+        fail("Godot editor input must have an independent mandatory fast GUI gate")
+    fast_matrix = fast_gui.get("strategy", {}).get("matrix", {}).get("version", "")
+    if any(version not in fast_matrix for version in ("4.4.1", "4.5.2", "4.6.3", "4.7.2")):
+        fail("The fast GUI gate must cover all supported Godot versions")
+    fast_steps = [step for step in fast_gui.get("steps", [])
+                  if "test/editor_progress_input_test.py" in step.get("run", "")]
+    if len(fast_steps) != 1:
+        fail("The fast GUI gate must execute the original editor input regression")
+    fast_step = fast_steps[0]
+    fast_arguments = shlex.split(fast_step.get("run", ""))
+    if (fast_arguments != [
+            "xvfb-run", "-a", "-s", "-screen 0 1280x720x24 -nolisten tcp",
+            "python3", "test/editor_progress_input_test.py", "--godot",
+            "${{ steps.godot.outputs.executable }}", "--source-root", "$GDPP_SOURCE_ROOT",
+            "--work-root", "build/ci/editor-progress-input",
+        ] or "if" in fast_step or fast_step.get("continue-on-error")
+            or fast_step.get("timeout-minutes") != 3):
+        fail("The fast GUI gate must use a fresh display and preserve its fixture and budget")
+
+    engine_steps = compatibility["jobs"]["engine"]["steps"]
     display_install = [
         index for index, step in enumerate(engine_steps)
         if all(package in step.get("run", "") for package in ("protobuf-compiler", "xvfb", "xauth"))
