@@ -93,6 +93,8 @@ jobs:
           mkdir -p "$artifact/lib/android"
           cp -R example/addons/gdpp/sdk/include "$artifact/include"
           cp -R example/addons/gdpp/sdk/lib/android/arm64 "$artifact/lib/android/arm64"
+          python3 "$GITHUB_WORKSPACE/.github/tools/audit_packaged_binaries.py" \
+            --component-root "$artifact" --source-root "$GDPP_SOURCE_ROOT"
           python3 "$GITHUB_WORKSPACE/.github/tools/component_artifact.py" seal \
             --root "$artifact" \
             --artifact-name "$ARTIFACT_NAME" \

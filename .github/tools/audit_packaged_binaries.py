@@ -24,12 +24,13 @@ def arguments() -> argparse.Namespace:
     root = parser.add_mutually_exclusive_group(required=True)
     root.add_argument("--addon", type=Path)
     root.add_argument("--compiler-root", type=Path)
+    root.add_argument("--component-root", type=Path)
     parser.add_argument("--source-root", type=Path, required=True)
     return parser.parse_args()
 
 
-def native_products(addon: Path) -> list[Path]:
-    roots = tuple(addon / relative for relative in (
+def native_products(addon: Path, *, component: bool = False) -> list[Path]:
+    roots = (addon,) if component else tuple(addon / relative for relative in (
         "binary", "sdk/lib", "tools", "macos", "linux", "windows"
     ))
     products = {
@@ -82,9 +83,9 @@ def file_leaks_checkout_path(path: Path, needles: set[bytes]) -> bool:
     return False
 
 
-def audit(addon: Path, source_root: Path) -> list[str]:
+def audit(addon: Path, source_root: Path, *, component: bool = False) -> list[str]:
     addon = addon.resolve()
-    products = native_products(addon)
+    products = native_products(addon, component=component)
     if not products:
         return ["release contains no native products to audit"]
     needles = encoded_needles(source_root)
@@ -97,7 +98,8 @@ def audit(addon: Path, source_root: Path) -> list[str]:
 
 def main() -> int:
     options = arguments()
-    failures = audit(options.addon or options.compiler_root, options.source_root)
+    failures = audit(options.addon or options.compiler_root or options.component_root,
+                     options.source_root, component=options.component_root is not None)
     if failures:
         for relative in failures:
             print(f"binary path audit: checkout path in {relative}")

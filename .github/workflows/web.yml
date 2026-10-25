@@ -114,6 +114,8 @@ jobs:
           mkdir -p "$artifact/lib/web/wasm32/${{ matrix.variant }}"
           cp -R example/addons/gdpp/sdk/include "$artifact/include"
           cp -R "example/addons/gdpp/sdk/$target" "$artifact/$target"
+          python3 "$GITHUB_WORKSPACE/.github/tools/audit_packaged_binaries.py" \
+            --component-root "$artifact" --source-root "$GDPP_SOURCE_ROOT"
           python3 "$GITHUB_WORKSPACE/.github/tools/component_artifact.py" seal \
             --root "$artifact" \
             --artifact-name "$ARTIFACT_NAME" \

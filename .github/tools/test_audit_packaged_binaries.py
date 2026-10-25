@@ -108,6 +108,38 @@ class PackagedBinaryAuditTest(unittest.TestCase):
                 self.assertEqual(AUDIT.audit(self.addon, self.source), [relative])
                 tool.unlink()
 
+    def test_component_audit_covers_raw_sdks_host_addons_and_cli_before_sealing(self) -> None:
+        component = self.root / "component"
+        products = (
+            "lib/web/wasm32/nothreads/godot44/runtime.a",
+            "lib/ios/arm64/device/runtime.a",
+            "addons/gdpp/binary/compiler.dylib",
+            "compiler/windows/x86_64/gdpp.exe",
+            "addons/gdpp/tools/linux-x64/gdpp-diagnostics",
+        )
+        for relative in products:
+            path = component / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b"clean native payload")
+        self.assertEqual(AUDIT.audit(component, self.source, component=True), [])
+        for relative in products:
+            with self.subTest(relative=relative):
+                path = component / relative
+                path.write_bytes(b"/home/runner/work/gdpp/gdpp/build/ci/toolchain/include")
+                self.assertEqual(AUDIT.audit(component, self.source, component=True), [relative])
+                path.write_bytes(b"clean native payload")
+
+    def test_component_audit_rejects_ci_temporary_toolchains_in_sdk_debug_metadata(self) -> None:
+        component = self.root / "component"
+        sdk = component / "lib/windows/x86_64/mingw/runtime.a"
+        sdk.parent.mkdir(parents=True)
+        for path in ("D:/a/_temp/gdpp-mingw/mingw64/include/c++", "D:\\a\\_temp\\mingw64\\include"):
+            for encoding in ("utf-8", "utf-16-le"):
+                with self.subTest(path=path, encoding=encoding):
+                    sdk.write_bytes(path.encode(encoding))
+                    self.assertEqual(AUDIT.audit(component, self.source, component=True),
+                                     ["lib/windows/x86_64/mingw/runtime.a"])
+
 
 if __name__ == "__main__":
     unittest.main()

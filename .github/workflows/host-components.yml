@@ -515,11 +515,15 @@ jobs:
         env:
           ARTIFACT_NAME: gdpp-host-${{ matrix.host }}-${{ steps.source.outputs.sha }}
           SOURCE_SHA: ${{ steps.source.outputs.sha }}
-        run: >-
-          python3 "$GITHUB_WORKSPACE/.github/tools/component_artifact.py" seal
-          --root "build/component-artifacts/$ARTIFACT_NAME"
-          --artifact-name "$ARTIFACT_NAME"
-          --source-sha "$SOURCE_SHA"
+        run: |
+          set -euo pipefail
+          artifact="build/component-artifacts/$ARTIFACT_NAME"
+          python3 "$GITHUB_WORKSPACE/.github/tools/audit_packaged_binaries.py" \
+            --component-root "$artifact" --source-root "$GDPP_SOURCE_ROOT"
+          python3 "$GITHUB_WORKSPACE/.github/tools/component_artifact.py" seal \
+            --root "$artifact" \
+            --artifact-name "$ARTIFACT_NAME" \
+            --source-sha "$SOURCE_SHA"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: gdpp-host-${{ matrix.host }}-${{ steps.source.outputs.sha }}

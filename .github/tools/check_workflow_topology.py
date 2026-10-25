@@ -305,6 +305,28 @@ def main() -> int:
         source = (WORKFLOW_ROOT / workflow_name).read_text(encoding="utf-8")
         if "component_artifact.py\" seal" not in source:
             fail(f"{workflow_name} must seal every uploaded component artifact")
+        for job in workflows[workflow_name]["jobs"].values():
+            for step in job.get("steps", []):
+                commands = step.get("run", "").replace("\\\n", " ").splitlines()
+                seals = [shlex.split(line) for line in commands
+                         if 'component_artifact.py" seal' in line]
+                if not seals:
+                    continue
+                audits = [shlex.split(line) for line in commands
+                          if "audit_packaged_binaries.py" in line]
+                if (len(seals) != 1 or len(audits) != 1 or "if" in step
+                        or step.get("continue-on-error")):
+                    fail(f"{workflow_name} must audit each component before sealing")
+                sealed_arguments = dict(zip(seals[0][3::2], seals[0][4::2]))
+                expected_audit = [
+                    "python3", "$GITHUB_WORKSPACE/.github/tools/audit_packaged_binaries.py",
+                    "--component-root", sealed_arguments.get("--root"),
+                    "--source-root", "$GDPP_SOURCE_ROOT",
+                ]
+                run = step.get("run", "")
+                if (audits[0] != expected_audit or
+                        run.index("audit_packaged_binaries.py") > run.index("component_artifact.py")):
+                    fail(f"{workflow_name} must audit the sealed component and exact source root first")
     package_source_text = (WORKFLOW_ROOT / "package-release.yml").read_text(
         encoding="utf-8"
     )
