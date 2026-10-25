@@ -200,6 +200,20 @@ def main() -> int:
         ] or "if" in fast_step or fast_step.get("continue-on-error")
             or fast_step.get("timeout-minutes") != 3):
         fail("The fast GUI gate must use a fresh display and preserve its fixture and budget")
+    for trigger_name in ("workflow_call", "workflow_dispatch"):
+        diagnostics = triggers(compatibility)[trigger_name]["inputs"].get("private_diagnostics", {})
+        if diagnostics.get("type") != "boolean" or diagnostics.get("default") is not False:
+            fail("Private GUI evidence must be explicitly enabled and disabled by default")
+    diagnostic_condition = "${{ failure() && inputs.private_diagnostics && inputs.target == 'editor-input' }}"
+    seal_steps = [step for step in fast_gui["steps"] if step.get("id") == "sealed-evidence"]
+    if len(seal_steps) != 1 or seal_steps[0].get("if") != diagnostic_condition:
+        fail("Private GUI evidence may only be sealed for an explicitly requested failed GUI probe")
+    if shlex.split(seal_steps[0].get("run", "")) != [
+            "python3", "$GITHUB_WORKSPACE/.github/tools/seal_private_gui_evidence.py",
+            "--root", "build/ci/editor-progress-input", "--source-sha", "$SOURCE_SHA",
+            "--pipeline-sha", "$GITHUB_SHA", "--engine-version", "${{ matrix.version }}",
+            "--output", "build/ci/editor-progress-input/sealed-private-gui-evidence.json"]:
+        fail("The private GUI sealer must bind the fixed fixture and immutable CI identity")
 
     engine_steps = compatibility["jobs"]["engine"]["steps"]
     display_install = [
@@ -252,6 +266,7 @@ def main() -> int:
             fail(f"{name} must never execute for pull requests")
 
     permitted_artifact_jobs = {
+        ("godot-compatibility.yml", "editor-input"),
         ("android.yml", "target-sdk"),
         ("host-components.yml", "build"),
         ("ios.yml", "target-sdk"),
@@ -302,7 +317,15 @@ def main() -> int:
                 options = upload.get("with", {})
                 name = str(options.get("name", ""))
                 path = str(options.get("path", ""))
-                if workflow_name == "package-release.yml":
+                if (workflow_name, job_name) == ("godot-compatibility.yml", "editor-input"):
+                    if (name != "gdpp-sealed-gui-${{ matrix.version }}-${{ steps.source.outputs.sha }}-${{ github.run_id }}"
+                            or path != "source/build/ci/editor-progress-input/sealed-private-gui-evidence.json"
+                            or upload.get("if") != "${{ failure() && inputs.private_diagnostics && inputs.target == 'editor-input' && steps.sealed-evidence.outcome == 'success' }}"
+                            or options.get("if-no-files-found") != "error"
+                            or options.get("retention-days") != 1
+                            or options.get("include-hidden-files", False)):
+                        fail("Only the exact fixed-recipient encrypted GUI envelope may be retained")
+                elif workflow_name == "package-release.yml":
                     if name != "gdpp-release-packages-${{ steps.source.outputs.sha }}":
                         fail("release package artifact must bind the private source SHA")
                     package_paths = [

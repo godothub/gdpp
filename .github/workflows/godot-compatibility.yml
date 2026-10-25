@@ -13,6 +13,11 @@ on:
         type: string
         required: false
         default: all
+      private_diagnostics:
+        description: Seal failed standalone GUI evidence for the fixed private recipient
+        type: boolean
+        required: false
+        default: false
     secrets:
       GDPP_TOKEN:
         required: true
@@ -36,6 +41,11 @@ on:
           - 4.5.2
           - 4.6.3
           - 4.7.2
+      private_diagnostics:
+        description: Seal failed standalone GUI evidence for the fixed private recipient
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: read
@@ -67,7 +77,8 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
           persist-credentials: false
-      - uses: ./.github/actions/checkout-source
+      - id: source
+        uses: ./.github/actions/checkout-source
         with:
           ref: ${{ inputs.source_ref }}
           token: ${{ secrets.GDPP_TOKEN }}
@@ -89,6 +100,30 @@ jobs:
           --godot "${{ steps.godot.outputs.executable }}"
           --source-root "$GDPP_SOURCE_ROOT"
           --work-root build/ci/editor-progress-input
+      - name: Install the pinned private diagnostic sealer
+        if: ${{ failure() && inputs.private_diagnostics && inputs.target == 'editor-input' }}
+        run: >-
+          python3 -m pip install --disable-pip-version-check
+          --requirement "$GITHUB_WORKSPACE/.github/tools/requirements.txt"
+      - id: sealed-evidence
+        name: Seal private GUI evidence for the fixed recipient
+        if: ${{ failure() && inputs.private_diagnostics && inputs.target == 'editor-input' }}
+        env:
+          SOURCE_SHA: ${{ steps.source.outputs.sha }}
+        run: >-
+          python3 "$GITHUB_WORKSPACE/.github/tools/seal_private_gui_evidence.py"
+          --root build/ci/editor-progress-input
+          --source-sha "$SOURCE_SHA" --pipeline-sha "$GITHUB_SHA"
+          --engine-version '${{ matrix.version }}'
+          --output build/ci/editor-progress-input/sealed-private-gui-evidence.json
+      - name: Retain only the sealed private GUI evidence
+        if: ${{ failure() && inputs.private_diagnostics && inputs.target == 'editor-input' && steps.sealed-evidence.outcome == 'success' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: gdpp-sealed-gui-${{ matrix.version }}-${{ steps.source.outputs.sha }}-${{ github.run_id }}
+          path: source/build/ci/editor-progress-input/sealed-private-gui-evidence.json
+          if-no-files-found: error
+          retention-days: 1
 
   engine:
     if: ${{ inputs.target != 'project-corpus' && inputs.target != 'editor-input' }}
