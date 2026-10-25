@@ -5,11 +5,26 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import json
 from pathlib import Path
 import re
 
 
 TAIL_LIMIT = 8 * 1024 * 1024
+EDITOR_PROGRESS_MARKER = b"GDPP_EDITOR_PROGRESS_DIAGNOSTIC="
+EDITOR_PROGRESS_PHASES = frozenset((
+    "startup", "complete", "unknown", "without_progress", "initial_idle", "begin",
+    "repeated_begin", "finish", "cancel_positive", "cancel_finish", "failure_finish",
+    "main_resize", "popup_reparent", "popup_resize", "popup_finish", "restore_main",
+    "unload_then_resize", "idle_before_unload", "unload_idle",
+))
+EDITOR_PROGRESS_REASONS = frozenset((
+    "unknown", "missing_receipt", "invalid_receipt", "capability", "script_editor",
+    "code_edit", "begin_capability", "repeat_surface", "finish_surface", "cancel_baseline",
+    "cancel_active", "resize", "reparent", "active_unload", "overlap", "input_delivery",
+    "wheel_scroll", "symbol_position", "symbol_lookup", "idle_surface", "active_surface",
+    "centering", "script_error", "engine_error", "process_exit", "timeout",
+))
 SAFE_IDENTIFIER = re.compile(r"[^A-Za-z0-9_.:+-]+")
 FAILED_TEST = re.compile(
     rb"(?m)^\s*\d+\s+-\s+([A-Za-z0-9_.:+-]{1,160})\s+"
@@ -172,6 +187,51 @@ def safe_package_paths(payload: bytes) -> list[str]:
     return sorted(paths)[:8]
 
 
+def editor_progress_diagnostic(payload: bytes) -> list[str]:
+    """Accept one closed-schema fixture record, never a free-form diagnostic."""
+    records = []
+    for line in payload.splitlines():
+        line = re.sub(rb"^[0-9]{1,8}: ", b"", line, count=1)
+        if line.startswith(EDITOR_PROGRESS_MARKER):
+            records.append(line[len(EDITOR_PROGRESS_MARKER):])
+    if not records:
+        return []
+    if len(records) != 1 or len(records[0]) > 1024:
+        return ["gui=invalid"]
+
+    def unique_object(pairs):
+        value = dict(pairs)
+        if len(value) != len(pairs):
+            raise ValueError("duplicate diagnostic field")
+        return value
+
+    try:
+        value = json.loads(records[0].decode("ascii"), object_pairs_hook=unique_object)
+        expected = {"schema", "phase", "reason", "last_phase", "returncode",
+                    "script_errors", "engine_errors", "records"}
+        if not isinstance(value, dict) or set(value) != expected:
+            raise ValueError("invalid diagnostic fields")
+        if type(value["schema"]) is not int or value["schema"] != 1:
+            raise ValueError("unsupported diagnostic schema")
+        for name, choices in (("phase", EDITOR_PROGRESS_PHASES),
+                              ("last_phase", EDITOR_PROGRESS_PHASES),
+                              ("reason", EDITOR_PROGRESS_REASONS)):
+            if not isinstance(value[name], str) or value[name] not in choices:
+                raise ValueError("invalid diagnostic enum")
+        for name, lower, upper in (("returncode", -(2 ** 31), 2 ** 32 - 1),
+                                   ("script_errors", 0, 65535), ("engine_errors", 0, 65535),
+                                   ("records", 0, 64)):
+            if type(value[name]) is not int or not lower <= value[name] <= upper:
+                raise ValueError("invalid diagnostic count")
+    except (ValueError, TypeError, UnicodeError, RecursionError):
+        return ["gui=invalid"]
+    return [
+        f"gui={value['phase']}:{value['reason']}", f"gui_last={value['last_phase']}",
+        f"gui_rc={value['returncode']}", f"gui_script_errors={value['script_errors']}",
+        f"gui_engine_errors={value['engine_errors']}", f"gui_records={value['records']}",
+    ]
+
+
 def summary(log: Path, status: int, job: str, step: str) -> str:
     safe_job = safe_identifier(job, "unknown-job")
     safe_step = safe_identifier(step, "run")
@@ -201,6 +261,7 @@ def summary(log: Path, status: int, job: str, step: str) -> str:
     cold_phases = list(ADDON_COLD_IMPORT_PHASE.finditer(payload))
     if cold_phases:
         fields.append("cold_import=" + ":".join(part.decode("ascii") for part in cold_phases[-1].groups()))
+    fields.extend(editor_progress_diagnostic(payload))
     codes = build_failure_codes(payload)
     if codes:
         fields.append(f"codes={','.join(codes)}")

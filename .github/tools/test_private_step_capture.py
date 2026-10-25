@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 from pathlib import Path
 import shlex
@@ -332,6 +333,78 @@ class PrivateStepCaptureTest(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0)
         self.assertNotIn(b"cold_import=", result.stdout)
+
+    def editor_progress_record(self, **changes) -> dict:
+        return {"schema": 1, "phase": "cancel_positive", "reason": "cancel_baseline",
+                "last_phase": "finish", "returncode": 1, "script_errors": 0,
+                "engine_errors": 0, "records": 6, **changes}
+
+    def test_editor_progress_failure_exposes_only_closed_schema_fields(self) -> None:
+        marker = "GDPP_EDITOR_PROGRESS_DIAGNOSTIC=" + json.dumps(self.editor_progress_record())
+        for prefix in ("", "127: "):
+            with self.subTest(prefix=prefix):
+                lines = [prefix + marker, "AssertionError: /private/customer/source.gd secret-token",
+                         "The following tests FAILED:", "  7 - gdpp.godot.editor_progress_input (Failed)"]
+                result = self.run_script("printf '%s\\n' " + shlex.join(lines) + "; exit 8")
+                self.assertEqual(result.returncode, 8)
+                self.assertIn(b"tests=gdpp.godot.editor_progress_input", result.stdout)
+                self.assertIn(b"gui=cancel_positive:cancel_baseline gui_last=finish gui_rc=1 "
+                              b"gui_script_errors=0 gui_engine_errors=0 gui_records=6", result.stdout)
+                for private in (b"customer", b"source.gd", b"secret-token", b"DIAGNOSTIC", b"AssertionError"):
+                    self.assertNotIn(private, result.stdout)
+                self.assertTrue(any(b"secret-token" in log.read_bytes()
+                                    for log in self.root.glob("gdpp-private-step.*")))
+
+    def test_editor_progress_success_never_publishes_fixture_metadata(self) -> None:
+        line = "GDPP_EDITOR_PROGRESS_DIAGNOSTIC=" + json.dumps(self.editor_progress_record())
+        result = self.run_script("printf '%s\\n' " + shlex.quote(line))
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(result.stdout, b"private-stage job=compiler-core step=__run_17 status=success\n")
+
+    def test_editor_progress_rejects_unknown_fields_enums_types_and_numeric_overflow(self) -> None:
+        variants = [
+            self.editor_progress_record(path="/private/customer/source.gd secret-token"),
+            self.editor_progress_record(phase="/private/customer/source.gd secret-token"),
+            self.editor_progress_record(reason="customer-secret-reason"),
+            self.editor_progress_record(last_phase="customer-secret-phase"),
+            self.editor_progress_record(schema=True), self.editor_progress_record(schema=2),
+            self.editor_progress_record(returncode=True), self.editor_progress_record(returncode="secret-token"),
+            self.editor_progress_record(returncode=2 ** 32), self.editor_progress_record(returncode=-(2 ** 31) - 1),
+            self.editor_progress_record(script_errors=-1), self.editor_progress_record(engine_errors=65536),
+            self.editor_progress_record(records=65), self.editor_progress_record(records=1.5),
+            self.editor_progress_record(records={"secret-token": 1}), ["secret-token"],
+        ]
+        for value in variants:
+            with self.subTest(value=value):
+                line = "GDPP_EDITOR_PROGRESS_DIAGNOSTIC=" + json.dumps(value)
+                result = self.run_script("printf '%s\\n' " + shlex.quote(line) + "; exit 1")
+                self.assertEqual(result.returncode, 1)
+                self.assertIn(b"gui=invalid", result.stdout)
+                for forbidden in (b"gui_last=", b"gui_rc=", b"customer", b"secret-token", b"source.gd"):
+                    self.assertNotIn(forbidden, result.stdout)
+
+    def test_editor_progress_rejects_duplicate_records_keys_and_unbounded_json(self) -> None:
+        valid = "GDPP_EDITOR_PROGRESS_DIAGNOSTIC=" + json.dumps(self.editor_progress_record())
+        malformed = [
+            [valid, valid],
+            [valid.replace('"schema": 1', '"schema": 1, "schema": 1')],
+            [valid + " secret-token"],
+            ["GDPP_EDITOR_PROGRESS_DIAGNOSTIC=" + "x" * 1025],
+            ["GDPP_EDITOR_PROGRESS_DIAGNOSTIC={\"schema\":NaN,\"secret\":\"secret-token\"}"],
+        ]
+        for lines in malformed:
+            with self.subTest(lines=lines):
+                result = self.run_script("printf '%s\\n' " + shlex.join(lines) + "; exit 1")
+                self.assertIn(b"gui=invalid", result.stdout)
+                self.assertNotIn(b"gui_last=", result.stdout)
+                self.assertNotIn(b"secret-token", result.stdout)
+
+    def test_editor_progress_ignores_markers_embedded_in_private_source_text(self) -> None:
+        valid = "GDPP_EDITOR_PROGRESS_DIAGNOSTIC=" + json.dumps(self.editor_progress_record())
+        result = self.run_script("printf '%s\\n' " + shlex.quote("source.gd: secret-token " + valid) + "; exit 1")
+        self.assertNotIn(b"gui=", result.stdout)
+        self.assertNotIn(b"secret-token", result.stdout)
+        self.assertNotIn(b"source.gd", result.stdout)
 
     def test_runtime_success_never_publishes_phase_or_case_metadata(self) -> None:
         result = self.run_script(
