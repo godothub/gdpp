@@ -12,6 +12,11 @@ import re
 
 TAIL_LIMIT = 8 * 1024 * 1024
 EDITOR_PROGRESS_MARKER = b"GDPP_EDITOR_PROGRESS_DIAGNOSTIC="
+EDITOR_PROGRESS_ENGINE_FILES = frozenset((
+    "os_unix.cpp", "os_linuxbsd.cpp", "display_server_x11.cpp", "viewport.cpp",
+    "window.cpp", "node.cpp", "control.cpp", "resource.cpp", "resource_loader.cpp",
+    "object.cpp", "editor_node.cpp", "code_edit.cpp", "main.cpp", "script_editor_plugin.cpp",
+))
 EDITOR_PROGRESS_PHASES = frozenset((
     "startup", "complete", "unknown", "without_progress", "initial_idle", "begin",
     "repeated_begin", "finish", "cancel_positive", "cancel_finish", "failure_finish",
@@ -208,10 +213,10 @@ def editor_progress_diagnostic(payload: bytes) -> list[str]:
     try:
         value = json.loads(records[0].decode("ascii"), object_pairs_hook=unique_object)
         expected = {"schema", "phase", "reason", "last_phase", "returncode",
-                    "script_errors", "engine_errors", "records"}
+                    "script_errors", "engine_errors", "records", "engine_locations"}
         if not isinstance(value, dict) or set(value) != expected:
             raise ValueError("invalid diagnostic fields")
-        if type(value["schema"]) is not int or value["schema"] != 1:
+        if type(value["schema"]) is not int or value["schema"] != 2:
             raise ValueError("unsupported diagnostic schema")
         for name, choices in (("phase", EDITOR_PROGRESS_PHASES),
                               ("last_phase", EDITOR_PROGRESS_PHASES),
@@ -223,13 +228,31 @@ def editor_progress_diagnostic(payload: bytes) -> list[str]:
                                    ("records", 0, 64)):
             if type(value[name]) is not int or not lower <= value[name] <= upper:
                 raise ValueError("invalid diagnostic count")
+        locations = value["engine_locations"]
+        if not isinstance(locations, list) or len(locations) > 4:
+            raise ValueError("invalid engine location count")
+        identities = set()
+        for location in locations:
+            if not isinstance(location, dict) or set(location) != {"file", "line"}:
+                raise ValueError("invalid engine location fields")
+            if not isinstance(location["file"], str) or location["file"] not in EDITOR_PROGRESS_ENGINE_FILES:
+                raise ValueError("unknown public engine file")
+            if type(location["line"]) is not int or not 1 <= location["line"] <= 1000000:
+                raise ValueError("invalid engine source line")
+            identity = (location["file"], location["line"])
+            if identity in identities:
+                raise ValueError("duplicate engine location")
+            identities.add(identity)
     except (ValueError, TypeError, UnicodeError, RecursionError):
         return ["gui=invalid"]
-    return [
+    fields = [
         f"gui={value['phase']}:{value['reason']}", f"gui_last={value['last_phase']}",
         f"gui_rc={value['returncode']}", f"gui_script_errors={value['script_errors']}",
         f"gui_engine_errors={value['engine_errors']}", f"gui_records={value['records']}",
     ]
+    if locations:
+        fields.append("gui_engine_at=" + ",".join(f"{location['file']}:{location['line']}" for location in locations))
+    return fields
 
 
 def summary(log: Path, status: int, job: str, step: str) -> str:

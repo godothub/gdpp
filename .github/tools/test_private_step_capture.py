@@ -335,9 +335,47 @@ class PrivateStepCaptureTest(unittest.TestCase):
         self.assertNotIn(b"cold_import=", result.stdout)
 
     def editor_progress_record(self, **changes) -> dict:
-        return {"schema": 1, "phase": "cancel_positive", "reason": "cancel_baseline",
+        return {"schema": 2, "phase": "cancel_positive", "reason": "cancel_baseline",
                 "last_phase": "finish", "returncode": 1, "script_errors": 0,
-                "engine_errors": 0, "records": 6, **changes}
+                "engine_errors": 0, "records": 6, "engine_locations": [], **changes}
+
+    def test_editor_progress_locations_expose_only_public_file_ids_and_line_numbers(self) -> None:
+        value = self.editor_progress_record(engine_errors=2, engine_locations=[
+            {"file": "os_unix.cpp", "line": 731}, {"file": "os_linuxbsd.cpp", "line": 1},
+        ])
+        line = "GDPP_EDITOR_PROGRESS_DIAGNOSTIC=" + json.dumps(value)
+        result = self.run_script("printf '%s\\n' " + shlex.quote(line) + "; exit 1")
+        self.assertIn(b"gui_engine_at=os_unix.cpp:731,os_linuxbsd.cpp:1", result.stdout)
+        for forbidden in (b"drivers/", b"platform/", b"function", b"ERROR:", b"DIAGNOSTIC"):
+            self.assertNotIn(forbidden, result.stdout)
+
+    def test_editor_progress_rejects_private_or_malformed_engine_locations(self) -> None:
+        variants = [
+            "private-source", {"file": "os_unix.cpp", "line": 1},
+            [{"file": "os_unix.cpp", "line": index + 1} for index in range(5)],
+            ["private-source"], [{"file": "/private/customer/os_unix.cpp", "line": 1}],
+            [{"file": "gdpp.cpp", "line": 1}], [{"file": "os_unix.cpp", "line": True}],
+            [{"file": "os_unix.cpp", "line": 0}], [{"file": "os_unix.cpp", "line": 1000001}],
+            [{"file": "os_unix.cpp", "line": "private-source"}],
+            [{"file": "os_unix.cpp", "line": 1, "function": "private-function"}],
+            [{"file": "os_unix.cpp", "line": 1}, {"file": "os_unix.cpp", "line": 1}],
+        ]
+        for locations in variants:
+            with self.subTest(locations=locations):
+                value = self.editor_progress_record(engine_locations=locations)
+                line = "GDPP_EDITOR_PROGRESS_DIAGNOSTIC=" + json.dumps(value)
+                result = self.run_script("printf '%s\\n' " + shlex.quote(line) + "; exit 1")
+                self.assertIn(b"gui=invalid", result.stdout)
+                self.assertNotIn(b"gui_engine_at=", result.stdout)
+                self.assertNotIn(b"private", result.stdout.replace(b"private-stage", b""))
+                self.assertNotIn(b"gdpp.cpp", result.stdout)
+
+    def test_editor_progress_rejects_duplicate_location_keys(self) -> None:
+        value = self.editor_progress_record(engine_locations=[{"file": "os_unix.cpp", "line": 1}])
+        line = "GDPP_EDITOR_PROGRESS_DIAGNOSTIC=" + json.dumps(value).replace('"line": 1', '"line": 1, "line": 1')
+        result = self.run_script("printf '%s\\n' " + shlex.quote(line) + "; exit 1")
+        self.assertIn(b"gui=invalid", result.stdout)
+        self.assertNotIn(b"gui_engine_at=", result.stdout)
 
     def test_editor_progress_failure_exposes_only_closed_schema_fields(self) -> None:
         marker = "GDPP_EDITOR_PROGRESS_DIAGNOSTIC=" + json.dumps(self.editor_progress_record())
@@ -367,7 +405,7 @@ class PrivateStepCaptureTest(unittest.TestCase):
             self.editor_progress_record(phase="/private/customer/source.gd secret-token"),
             self.editor_progress_record(reason="customer-secret-reason"),
             self.editor_progress_record(last_phase="customer-secret-phase"),
-            self.editor_progress_record(schema=True), self.editor_progress_record(schema=2),
+            self.editor_progress_record(schema=True), self.editor_progress_record(schema=1),
             self.editor_progress_record(returncode=True), self.editor_progress_record(returncode="secret-token"),
             self.editor_progress_record(returncode=2 ** 32), self.editor_progress_record(returncode=-(2 ** 31) - 1),
             self.editor_progress_record(script_errors=-1), self.editor_progress_record(engine_errors=65536),
@@ -387,7 +425,7 @@ class PrivateStepCaptureTest(unittest.TestCase):
         valid = "GDPP_EDITOR_PROGRESS_DIAGNOSTIC=" + json.dumps(self.editor_progress_record())
         malformed = [
             [valid, valid],
-            [valid.replace('"schema": 1', '"schema": 1, "schema": 1')],
+            [valid.replace('"schema": 2', '"schema": 2, "schema": 2')],
             [valid + " secret-token"],
             ["GDPP_EDITOR_PROGRESS_DIAGNOSTIC=" + "x" * 1025],
             ["GDPP_EDITOR_PROGRESS_DIAGNOSTIC={\"schema\":NaN,\"secret\":\"secret-token\"}"],
