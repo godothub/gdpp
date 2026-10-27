@@ -1,3 +1,8 @@
+## 2.1.2
+
+- Fix Android exports incorrectly rejecting third-party plugin bytecode.
+- Consolidate duplicate tests and fix temporary-file cleanup on long paths.
+
 ## 2.1.1
 
 - Remove unnecessary debug symbols to reduce disk usage for the plugin and command-line tools.

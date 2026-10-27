@@ -30,7 +30,7 @@ GDPP targets compatibility with official GDScript and plans to support additiona
 
 Use the **GDPP Plugins** panel or a YAML configuration to export a GDScript plugin as a compiled GDPP plugin for use in other Godot projects. Using the exported plugin requires neither GDPP nor a C++ compiler. The package retains `.gd` interface files for resource references and public APIs; plugin logic runs in the native library.
 
-When exporting a whole project, GDPP compiles project scripts outside `addons/`. To compile a plugin, export it separately.
+When exporting a whole project, GDPP compiles project scripts outside `addons/`. To compile a plugin, export it separately. Ordinary plugins retain Godot's export behavior and may include `.gd` source or `.gdc` bytecode.
 
 ### Export in the editor
 
