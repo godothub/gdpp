@@ -1,3 +1,8 @@
+## 2.1.3
+
+- Fix diagnostic bridge startup errors on Windows.
+- Apply private access permissions to diagnostic archives on Windows.
+
 ## 2.1.2
 
 - Fix Android exports incorrectly rejecting third-party plugin bytecode.
