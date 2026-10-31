@@ -88,7 +88,8 @@ class ElfProfileTest(unittest.TestCase):
     def receipt(self, library: Path, profile: str, architecture: str = "x86_64", platform: str = "linux") -> Path:
         output = self.root / "receipt.json"
         output.write_text(json.dumps({
-            "schema": "GDPP_NATIVE_BUILD_RECEIPT 1",
+            "schema": "GDPP_NATIVE_BUILD_RECEIPT 2",
+            "project_data_directory": ".godot",
             "build_profile": profile,
             "target_platform": platform,
             "target_architecture": architecture,
@@ -150,6 +151,21 @@ class ElfProfileTest(unittest.TestCase):
         for profile in ("debug", "release", "profile"):
             with self.subTest(profile=profile), self.assertRaises(ValueError):
                 self.verify(self.extra if profile == "debug" else stripped, profile)
+
+    def test_both_receipt_versions_bind_the_exact_artifact(self) -> None:
+        for schema in ("GDPP_NATIVE_BUILD_RECEIPT 1", "GDPP_NATIVE_BUILD_RECEIPT 2"):
+            with self.subTest(schema=schema):
+                path = self.receipt(self.debug, "debug")
+                data = json.loads(path.read_text())
+                data["schema"] = schema
+                if schema.endswith(" 1"):
+                    del data["project_data_directory"]
+                path.write_text(json.dumps(data))
+                self.module.verify(self.debug, path, "debug", "x86_64")
+                data["execution"]["artifact_content_sha256"] = "0" * 64
+                path.write_text(json.dumps(data))
+                with self.assertRaisesRegex(ValueError, "artifact_digest"):
+                    self.module.verify(self.debug, path, "debug", "x86_64")
 
     def test_receipt_rejects_wrong_hash_basename_absolute_path_profile_platform_and_schema(self) -> None:
         changes = [

@@ -47,7 +47,8 @@ def verify(library: Path, receipt: Path, profile: str, architecture: str,
         contract = json.loads(raw_receipt)
     except (OSError, ValueError, UnicodeError):
         reject("receipt_input")
-    if not isinstance(contract, dict) or contract.get("schema") != "GDPP_NATIVE_BUILD_RECEIPT 1":
+    if not isinstance(contract, dict) or contract.get("schema") not in (
+            "GDPP_NATIVE_BUILD_RECEIPT 1", "GDPP_NATIVE_BUILD_RECEIPT 2"):
         reject("receipt_schema")
     if contract.get("build_profile") != profile:
         reject("receipt_profile")
