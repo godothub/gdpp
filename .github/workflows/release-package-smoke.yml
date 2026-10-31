@@ -145,6 +145,30 @@ jobs:
           python3 tools/package_platform_release.py \
             --validate-addon "$project/addons/gdpp" \
             --package standard
+      - name: Verify installed editor exports and cache layouts
+        run: |
+          set -euo pipefail
+          compiler=g++
+          if [[ "$RUNNER_OS" == Windows ]]; then
+            compiler=cl.exe
+            if [[ "${{ matrix.toolchain }}" == mingw ]]; then compiler=g++.exe; fi
+          elif [[ "$RUNNER_OS" == macOS ]]; then
+            compiler=clang++
+          fi
+          python3 test/cold_editor_lifecycle_test.py \
+            --godot "${{ steps.godot.outputs.executable }}" \
+            --addon "$GDPP_SOURCE_ROOT/build/release-package-smoke/客户项目-é/addons/gdpp" \
+            --work-root build/release-package-smoke/disabled-exports \
+            --platform '${{ matrix.payload_platform }}' \
+            --architecture '${{ matrix.payload_architecture }}' \
+            --cpp-compiler "$compiler" --installed-addon --disabled-exports-only
+          python3 test/project_data_layout_test.py \
+            --godot "${{ steps.godot.outputs.executable }}" \
+            --addon "$GDPP_SOURCE_ROOT/build/release-package-smoke/客户项目-é/addons/gdpp" \
+            --work-root build/release-package-smoke/cache-layouts \
+            --platform '${{ matrix.payload_platform }}' \
+            --architecture '${{ matrix.payload_architecture }}' \
+            --cpp-compiler "$compiler" --installed-addon --modes release
       - name: Verify authenticated export transactions from the installed package
         env:
           GODOT: ${{ steps.godot.outputs.executable }}
