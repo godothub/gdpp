@@ -89,7 +89,7 @@ jobs:
               --output-on-failure --no-tests=error
       - name: Run GDExtension and export-build tests
         run: |
-          arguments=(--preset plugin --no-tests=error)
+          arguments=(--preset plugin --label-exclude '^standalone-codegen$' --no-tests=error)
           if [[ "$RUNNER_OS" == Windows ]]; then
             arguments+=(-E '^gdpp\.godot\.direct_export_build$')
           fi

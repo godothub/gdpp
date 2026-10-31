@@ -177,7 +177,9 @@ jobs:
         run: cmake --build --preset plugin --parallel
       - name: Run compiler and Godot integration tests
         # Ordinary EditorInterface Play intentionally remains the engine's own GUI launch.
-        run: xvfb-run -a -s "-screen 0 1280x720x24 -nolisten tcp" ctest --preset plugin
+        run: >-
+          xvfb-run -a -s "-screen 0 1280x720x24 -nolisten tcp"
+          ctest --preset plugin --label-exclude '^standalone-codegen$' --no-tests=error
       - name: Export and run independent GDExtension inheritance project
         shell: bash
         env:

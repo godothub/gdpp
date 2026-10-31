@@ -240,8 +240,10 @@ def main() -> int:
         fail("Godot compatibility must run its full lifecycle suite inside the virtual display")
     if "if" in lifecycle or lifecycle.get("continue-on-error"):
         fail("Godot lifecycle display validation cannot skip or ignore failures")
-    if shlex.split(lifecycle["run"])[-3:] != ["ctest", "--preset", "plugin"]:
-        fail("Godot lifecycle display wrapper must retain the unfiltered plugin test preset")
+    if shlex.split(lifecycle["run"])[-6:] != [
+            "ctest", "--preset", "plugin", "--label-exclude",
+            "^standalone-codegen$", "--no-tests=error"]:
+        fail("Godot lifecycle may exclude only the standalone compiler codegen corpus")
     gui_configurations = [
         (index, step) for index, step in enumerate(engine_steps)
         if step.get("name") == "Configure compiler plugin and SDK"
