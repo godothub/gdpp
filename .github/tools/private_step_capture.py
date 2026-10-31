@@ -72,6 +72,8 @@ COMPILER_ERROR = re.compile(
     re.IGNORECASE,
 )
 BUILD_FAILURE_MARKERS = (
+    (b"filename longer than 260 characters", "windows-path-length"),
+    (b"cannot create temporary file", "compiler-temporary-file"),
     (b"killed: 9", "process-killed"),
     (b"killed signal terminated program", "process-killed"),
     (b"out of memory", "out-of-memory"),
