@@ -161,7 +161,7 @@ jobs:
             --work-root build/release-package-smoke/disabled-exports \
             --platform '${{ matrix.payload_platform }}' \
             --architecture '${{ matrix.payload_architecture }}' \
-            --cpp-compiler "$compiler" --installed-addon --disabled-exports-only
+            --cpp-compiler "$compiler" --installed-addon --phase ordinary
           python3 test/project_data_layout_test.py \
             --godot "${{ steps.godot.outputs.executable }}" \
             --addon "$GDPP_SOURCE_ROOT/build/release-package-smoke/客户项目-é/addons/gdpp" \
