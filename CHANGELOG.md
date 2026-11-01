@@ -1,3 +1,18 @@
+## 2.1.4
+
+- Fix ordinary Godot exports failing even after GDPP is disabled.
+- Exclude GDPP editor scripts and native libraries from ordinary exports.
+- Preserve existing export files when configuration is invalid or an export is interrupted.
+- Prevent existing files from being damaged when another plugin starts an export during an ongoing export.
+- Fix failed exports preventing retries and repeated exports leaking editor memory.
+- Fix export failures caused by non-hidden cache directories and platform-specific cache settings.
+- Skip active and leftover project caches during Debug and Profile runs to avoid redundant copying.
+- Fix inconsistent script paths in imported resources during Debug runs.
+- Report cache restoration failures instead of incorrectly reporting a successful export.
+- Support the different plugin list formats saved by Godot so GDPP's enabled state is recognized correctly.
+- Apply GDPP activation during an export starting with the next export.
+- Fix Windows GCC build failures caused by temporary directory encoding and excessively deep temporary paths.
+
 ## 2.1.3
 
 - Fix diagnostic bridge startup errors on Windows.
