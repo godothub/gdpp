@@ -6,7 +6,7 @@ inputs:
     description: Absolute path to the checked-out private GDPP source.
     required: true
   version:
-    description: Exact stable Godot version, for example 4.5.2.
+    description: Exact Godot version, for example 4.5.2 or 4.8-dev3.
     required: true
   templates:
     description: "Export templates to install: none, host, linux, macos, windows, android, or web."
@@ -40,28 +40,32 @@ runs:
           echo "Unsupported Godot editor edition: $GODOT_EDITION" >&2
           exit 2
         fi
+        release="$GODOT_VERSION"
+        if [[ "$release" != *-* ]]; then
+          release+="-stable"
+        fi
         root="$GDPP_SOURCE_ROOT/build/ci/godot/$GODOT_VERSION/$GODOT_EDITION"
         mkdir -p "$root"
         case "$RUNNER_OS" in
           Linux)
             if [[ "$GODOT_EDITION" == "dotnet" ]]; then
-              editor_archive="Godot_v${GODOT_VERSION}-stable_mono_linux_x86_64.zip"
+              editor_archive="Godot_v${release}_mono_linux_x86_64.zip"
             else
-              editor_archive="Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip"
+              editor_archive="Godot_v${release}_linux.x86_64.zip"
             fi
             ;;
           macOS)
             if [[ "$GODOT_EDITION" == "dotnet" ]]; then
-              editor_archive="Godot_v${GODOT_VERSION}-stable_mono_macos.universal.zip"
+              editor_archive="Godot_v${release}_mono_macos.universal.zip"
             else
-              editor_archive="Godot_v${GODOT_VERSION}-stable_macos.universal.zip"
+              editor_archive="Godot_v${release}_macos.universal.zip"
             fi
             ;;
           Windows)
             if [[ "$GODOT_EDITION" == "dotnet" ]]; then
-              editor_archive="Godot_v${GODOT_VERSION}-stable_mono_win64.zip"
+              editor_archive="Godot_v${release}_mono_win64.zip"
             else
-              editor_archive="Godot_v${GODOT_VERSION}-stable_win64.exe.zip"
+              editor_archive="Godot_v${release}_win64.exe.zip"
             fi
             ;;
           *)
@@ -76,7 +80,7 @@ runs:
         fi
         if [[ ! -f "$editor" ]]; then
           bash "$GDPP_SOURCE_ROOT/tools/download_with_retry.sh" \
-            "https://github.com/godotengine/godot-builds/releases/download/${GODOT_VERSION}-stable/$editor_archive" \
+            "https://github.com/godotengine/godot-builds/releases/download/${release}/$editor_archive" \
             "$root/editor.zip"
           unzip -q "$root/editor.zip" -d "$root"
           case "$RUNNER_OS" in
@@ -124,7 +128,7 @@ runs:
           template_edition="_mono"
         fi
         bash "$GDPP_SOURCE_ROOT/tools/download_with_retry.sh" \
-          "https://github.com/godotengine/godot-builds/releases/download/${GODOT_VERSION}-stable/Godot_v${GODOT_VERSION}-stable${template_edition}_export_templates.tpz" \
+          "https://github.com/godotengine/godot-builds/releases/download/${release}/Godot_v${release}${template_edition}_export_templates.tpz" \
           "$archive"
         extracted="$root/export-templates"
         rm -rf "$extracted"
@@ -172,6 +176,6 @@ runs:
         if [[ "$GODOT_EDITION" == "dotnet" ]]; then
           version_suffix=".mono"
         fi
-        destination="$template_root/export_templates/${GODOT_VERSION}.stable${version_suffix}"
+        destination="$template_root/export_templates/${release/-/.}${version_suffix}"
         mkdir -p "$destination"
         cp "$extracted"/templates/* "$destination/"
