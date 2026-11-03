@@ -41,6 +41,7 @@ on:
           - 4.5.2
           - 4.6.3
           - 4.7.2
+          - 4.8-dev3
       private_diagnostics:
         description: Seal failed standalone GUI evidence for the fixed private recipient
         type: boolean
@@ -71,7 +72,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        version: ${{ fromJSON(inputs.target != 'all' && inputs.target != 'editor-input' && inputs.target != 'project-corpus' && format('["{0}"]', inputs.target) || '["4.4.1","4.5.2","4.6.3","4.7.2"]') }}
+        version: ${{ fromJSON(inputs.target != 'all' && inputs.target != 'editor-input' && inputs.target != 'project-corpus' && format('["{0}"]', inputs.target) || '["4.4.1","4.5.2","4.6.3","4.7.2","4.8-dev3"]') }}
     steps:
       - name: Check out public pipeline
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
@@ -135,7 +136,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        version: ${{ fromJSON(inputs.target != 'all' && inputs.target != 'project-corpus' && format('["{0}"]', inputs.target) || '["4.4.1","4.5.2","4.6.3","4.7.2"]') }}
+        version: ${{ fromJSON(inputs.target != 'all' && inputs.target != 'project-corpus' && format('["{0}"]', inputs.target) || '["4.4.1","4.5.2","4.6.3","4.7.2","4.8-dev3"]') }}
     steps:
       - name: Check out public pipeline
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7

@@ -184,8 +184,11 @@ def main() -> int:
             or fast_gui.get("strategy", {}).get("fail-fast") is not False):
         fail("Godot editor input must have an independent mandatory fast GUI gate")
     fast_matrix = fast_gui.get("strategy", {}).get("matrix", {}).get("version", "")
-    if any(version not in fast_matrix for version in ("4.4.1", "4.5.2", "4.6.3", "4.7.2")):
+    if any(version not in fast_matrix for version in ("4.4.1", "4.5.2", "4.6.3", "4.7.2", "4.8-dev3")):
         fail("The fast GUI gate must cover all supported Godot versions")
+    engine_matrix = compatibility["jobs"]["engine"]["strategy"]["matrix"]["version"]
+    if "4.8-dev3" not in engine_matrix:
+        fail("Godot compatibility must export and run the pinned 4.8 development build")
     fast_steps = [step for step in fast_gui.get("steps", [])
                   if "test/editor_progress_input_test.py" in step.get("run", "")]
     if len(fast_steps) != 1:
