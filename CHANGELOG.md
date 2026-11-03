@@ -1,3 +1,11 @@
+## 2.1.5
+
+- Fix export failures with newer Godot versions.
+- Improve resource format diagnostics and stop repeating the same blocking error for every file.
+- Fix test tools rejecting custom and development Godot builds whose version strings omit a zero patch number.
+- Fix performance tests incorrectly rejecting compatible engine versions and API profiles.
+- Match Godot 4.8's handling of NaN values in absf().
+
 ## 2.1.4
 
 - Fix ordinary Godot exports failing even after GDPP is disabled.
