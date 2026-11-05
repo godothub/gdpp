@@ -1,3 +1,13 @@
+## 2.1.6
+
+- Fix export failures caused by Windows directory permissions.
+- Fix resource reads through restricted directories on Linux and macOS.
+- Keep directory access compatible with macOS 11 and 12.
+- Remove obsolete editor-script remaps so plugin updates use the current source.
+- Report stale plugin cache cleanup failures and block AOT export until they are resolved.
+- Prompt for an editor restart when updated scripts are still using an older native library.
+- Exclude leftover plugin editor bytecode from ordinary exports.
+
 ## 2.1.5
 
 - Fix export failures with newer Godot versions.

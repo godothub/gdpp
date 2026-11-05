@@ -18,7 +18,7 @@
 
 ## Quick Start
 
-1. Extract the plugin to `addons/gdpp`, then enable it.
+1. Extract `gdpp.zip` into the project root to create `addons/gdpp`, then enable the plugin.
 2. Make sure a C++ compiler is installed locally, such as MSVC on Windows.
 3. Export the project and wait for the compilation progress bar to complete.
 
